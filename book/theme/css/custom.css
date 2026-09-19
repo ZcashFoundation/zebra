@@ -1,3 +1,563 @@
+/* Zebra book theme.
+ *
+ * Loaded after mdBook's variables.css, general.css and chrome.css, so plain
+ * declarations at equal specificity win on source order -- no !important.
+ *
+ * mdBook picks a theme from prefers-color-scheme: `light` or `navy`. Those two
+ * are restyled below; `coal`, `ayu` and `rust` are left stock so the theme
+ * picker still offers unmodified alternatives.
+ *
+ * The palette comes from Zebra's own mark (theme/favicon.png): gold #cf8c2a on
+ * black and white. The gold is lifted on dark and darkened on light so both
+ * clear 4.5:1 against their ground.
+ */
+
+/* ---------------------------------------------------------------- globals */
+
+:root {
+    --sans-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono-font: "IBM Plex Mono", ui-monospace, SFMono-Regular, "Cascadia Mono",
+        Menlo, Consolas, monospace;
+
+    /* ~72 characters at 17px Plex Sans. */
+    --content-max-width: 760px;
+    --page-padding: 20px;
+    --sidebar-target-width: 292px;
+    --code-font-size: 0.875em;
+}
+
+/* ------------------------------------------------------------ light theme */
+
+.light {
+    --bg: #FCFBF8;
+    --fg: #16181D;
+
+    /* Zebra additions, referenced by the rules further down. */
+    --zeb-surface: #FFFFFF;
+    --zeb-surface-2: #F1EFE9;
+    --zeb-muted: #62666F;
+    --zeb-rule: #E5E1D8;
+    --zeb-accent-soft: rgba(138, 90, 18, 0.09);
+
+    /* The sidebar shares the page ground and is separated by a hairline, so it
+       doesn't read as a slab competing with the content. */
+    --sidebar-bg: #FCFBF8;
+    --sidebar-fg: #4A4E57;
+    --sidebar-non-existant: #A5A198;
+    --sidebar-active: #8A5A12;
+    --sidebar-spacer: #E5E1D8;
+    --sidebar-header-border-color: #E5E1D8;
+
+    --scrollbar: #C9C4B8;
+
+    --icons: #767B86;
+    --icons-hover: #16181D;
+
+    --links: #8A5A12;
+
+    --inline-code-color: #7A4E10;
+
+    --theme-popup-bg: #FFFFFF;
+    --theme-popup-border: #E5E1D8;
+    --theme-hover: #F1EFE9;
+
+    --quote-bg: #F7F4EC;
+    --quote-border: #E5E1D8;
+
+    --warning-border: #B07515;
+
+    --table-border-color: #E5E1D8;
+    --table-header-bg: transparent;
+    --table-alternate-bg: #F7F5F0;
+
+    --searchbar-border-color: #E5E1D8;
+    --searchbar-bg: #FFFFFF;
+    --searchbar-fg: #16181D;
+    --searchbar-shadow-color: #8A5A12;
+    --searchresults-header-fg: #62666F;
+    --searchresults-border-color: #E5E1D8;
+    --searchresults-li-bg: #FFFFFF;
+    --search-mark-bg: #F0D9A8;
+
+    --color-scheme: light;
+
+    --footnote-highlight: #8A5A12;
+
+    --overlay-bg: rgba(22, 24, 29, 0.35);
+
+    --blockquote-note-color: #1F5FA8;
+    --blockquote-tip-color: #2F7A3F;
+    --blockquote-important-color: #6E4BB8;
+    --blockquote-warning-color: #8A5A12;
+    --blockquote-caution-color: #B03A34;
+
+    --zeb-copy-icon: url("data:image/svg+xml,<svg width='21' height='20' viewBox='0 0 24 25' xmlns='http://www.w3.org/2000/svg' fill='%23767B86' aria-label='Copy to clipboard'><path d='M18 20h2v3c0 1-1 2-2 2H2c-.998 0-2-1-2-2V5c0-.911.755-1.667 1.667-1.667h5A3.323 3.323 0 0110 0a3.323 3.323 0 013.333 3.333h5C19.245 3.333 20 4.09 20 5v8.333h-2V9H2v14h16v-3zM3 7h14c0-.911-.793-1.667-1.75-1.667H13.5c-.957 0-1.75-.755-1.75-1.666C11.75 2.755 10.957 2 10 2s-1.75.755-1.75 1.667c0 .911-.793 1.666-1.75 1.666H4.75C3.793 5.333 3 6.09 3 7z'/><path d='M4 19h6v2H4zM12 11H4v2h8zM4 17h4v-2H4zM15 15v-3l-4.5 4.5L15 21v-3l8.027-.032L23 15z'/></svg>");
+    --zeb-copy-icon-hover: url("data:image/svg+xml,<svg width='21' height='20' viewBox='0 0 24 25' xmlns='http://www.w3.org/2000/svg' fill='%238A5A12' aria-label='Copy to clipboard'><path d='M18 20h2v3c0 1-1 2-2 2H2c-.998 0-2-1-2-2V5c0-.911.755-1.667 1.667-1.667h5A3.323 3.323 0 0110 0a3.323 3.323 0 013.333 3.333h5C19.245 3.333 20 4.09 20 5v8.333h-2V9H2v14h16v-3zM3 7h14c0-.911-.793-1.667-1.75-1.667H13.5c-.957 0-1.75-.755-1.75-1.666C11.75 2.755 10.957 2 10 2s-1.75.755-1.75 1.667c0 .911-.793 1.666-1.75 1.666H4.75C3.793 5.333 3 6.09 3 7z'/><path d='M4 19h6v2H4zM12 11H4v2h8zM4 17h4v-2H4zM15 15v-3l-4.5 4.5L15 21v-3l8.027-.032L23 15z'/></svg>");
+}
+
+/* ------------------------------------------------------------- dark theme */
+
+.navy {
+    --bg: #0E1014;
+    --fg: #E7E3DA;
+
+    --zeb-surface: #171A20;
+    --zeb-surface-2: #1E222A;
+    --zeb-muted: #8B909B;
+    --zeb-rule: #262A33;
+    --zeb-accent-soft: rgba(224, 163, 64, 0.12);
+
+    --sidebar-bg: #0E1014;
+    --sidebar-fg: #A8ADB7;
+    --sidebar-non-existant: #5C606B;
+    --sidebar-active: #E0A340;
+    --sidebar-spacer: #262A33;
+    --sidebar-header-border-color: #262A33;
+
+    --scrollbar: #3A3F4A;
+
+    --icons: #767B86;
+    --icons-hover: #E7E3DA;
+
+    --links: #E0A340;
+
+    --inline-code-color: #E7C48A;
+
+    --theme-popup-bg: #171A20;
+    --theme-popup-border: #2E333D;
+    --theme-hover: #1E222A;
+
+    --quote-bg: #14171C;
+    --quote-border: #262A33;
+
+    --warning-border: #E0A340;
+
+    --table-border-color: #262A33;
+    --table-header-bg: transparent;
+    --table-alternate-bg: #14161B;
+
+    --searchbar-border-color: #2E333D;
+    --searchbar-bg: #171A20;
+    --searchbar-fg: #E7E3DA;
+    --searchbar-shadow-color: #E0A340;
+    --searchresults-header-fg: #8B909B;
+    --searchresults-border-color: #262A33;
+    --searchresults-li-bg: #171A20;
+    --search-mark-bg: #5A4218;
+
+    --color-scheme: dark;
+
+    --footnote-highlight: #E0A340;
+
+    --overlay-bg: rgba(8, 9, 12, 0.6);
+
+    --blockquote-note-color: #6FA8E8;
+    --blockquote-tip-color: #6FBF73;
+    --blockquote-important-color: #B79BEA;
+    --blockquote-warning-color: #E0A340;
+    --blockquote-caution-color: #E97F76;
+
+    --zeb-copy-icon: url("data:image/svg+xml,<svg width='21' height='20' viewBox='0 0 24 25' xmlns='http://www.w3.org/2000/svg' fill='%23767B86' aria-label='Copy to clipboard'><path d='M18 20h2v3c0 1-1 2-2 2H2c-.998 0-2-1-2-2V5c0-.911.755-1.667 1.667-1.667h5A3.323 3.323 0 0110 0a3.323 3.323 0 013.333 3.333h5C19.245 3.333 20 4.09 20 5v8.333h-2V9H2v14h16v-3zM3 7h14c0-.911-.793-1.667-1.75-1.667H13.5c-.957 0-1.75-.755-1.75-1.666C11.75 2.755 10.957 2 10 2s-1.75.755-1.75 1.667c0 .911-.793 1.666-1.75 1.666H4.75C3.793 5.333 3 6.09 3 7z'/><path d='M4 19h6v2H4zM12 11H4v2h8zM4 17h4v-2H4zM15 15v-3l-4.5 4.5L15 21v-3l8.027-.032L23 15z'/></svg>");
+    --zeb-copy-icon-hover: url("data:image/svg+xml,<svg width='21' height='20' viewBox='0 0 24 25' xmlns='http://www.w3.org/2000/svg' fill='%23E0A340' aria-label='Copy to clipboard'><path d='M18 20h2v3c0 1-1 2-2 2H2c-.998 0-2-1-2-2V5c0-.911.755-1.667 1.667-1.667h5A3.323 3.323 0 0110 0a3.323 3.323 0 013.333 3.333h5C19.245 3.333 20 4.09 20 5v8.333h-2V9H2v14h16v-3zM3 7h14c0-.911-.793-1.667-1.75-1.667H13.5c-.957 0-1.75-.755-1.75-1.666C11.75 2.755 10.957 2 10 2s-1.75.755-1.75 1.667c0 .911-.793 1.666-1.75 1.666H4.75C3.793 5.333 3 6.09 3 7z'/><path d='M4 19h6v2H4zM12 11H4v2h8zM4 17h4v-2H4zM15 15v-3l-4.5 4.5L15 21v-3l8.027-.032L23 15z'/></svg>");
+}
+
+/* Same palette for readers without JavaScript, who never get a theme class.
+   mdBook's own variables.css duplicates its dark set the same way; keep the
+   two blocks in sync. */
+@media (prefers-color-scheme: dark) {
+    html:not(.js) {
+        --bg: #0E1014;
+        --fg: #E7E3DA;
+
+        --zeb-surface: #171A20;
+        --zeb-surface-2: #1E222A;
+        --zeb-muted: #8B909B;
+        --zeb-rule: #262A33;
+        --zeb-accent-soft: rgba(224, 163, 64, 0.12);
+    
+        --sidebar-bg: #0E1014;
+        --sidebar-fg: #A8ADB7;
+        --sidebar-non-existant: #5C606B;
+        --sidebar-active: #E0A340;
+        --sidebar-spacer: #262A33;
+        --sidebar-header-border-color: #262A33;
+
+        --scrollbar: #3A3F4A;
+
+        --icons: #767B86;
+        --icons-hover: #E7E3DA;
+
+        --links: #E0A340;
+
+        --inline-code-color: #E7C48A;
+
+        --theme-popup-bg: #171A20;
+        --theme-popup-border: #2E333D;
+        --theme-hover: #1E222A;
+
+        --quote-bg: #14171C;
+        --quote-border: #262A33;
+
+        --warning-border: #E0A340;
+
+        --table-border-color: #262A33;
+        --table-header-bg: transparent;
+        --table-alternate-bg: #14161B;
+
+        --searchbar-border-color: #2E333D;
+        --searchbar-bg: #171A20;
+        --searchbar-fg: #E7E3DA;
+        --searchbar-shadow-color: #E0A340;
+        --searchresults-header-fg: #8B909B;
+        --searchresults-border-color: #262A33;
+        --searchresults-li-bg: #171A20;
+        --search-mark-bg: #5A4218;
+
+        --color-scheme: dark;
+
+        --footnote-highlight: #E0A340;
+
+        --overlay-bg: rgba(8, 9, 12, 0.6);
+
+        --blockquote-note-color: #6FA8E8;
+        --blockquote-tip-color: #6FBF73;
+        --blockquote-important-color: #B79BEA;
+        --blockquote-warning-color: #E0A340;
+        --blockquote-caution-color: #E97F76;
+
+        --zeb-copy-icon: url("data:image/svg+xml,<svg width='21' height='20' viewBox='0 0 24 25' xmlns='http://www.w3.org/2000/svg' fill='%23767B86' aria-label='Copy to clipboard'><path d='M18 20h2v3c0 1-1 2-2 2H2c-.998 0-2-1-2-2V5c0-.911.755-1.667 1.667-1.667h5A3.323 3.323 0 0110 0a3.323 3.323 0 013.333 3.333h5C19.245 3.333 20 4.09 20 5v8.333h-2V9H2v14h16v-3zM3 7h14c0-.911-.793-1.667-1.75-1.667H13.5c-.957 0-1.75-.755-1.75-1.666C11.75 2.755 10.957 2 10 2s-1.75.755-1.75 1.667c0 .911-.793 1.666-1.75 1.666H4.75C3.793 5.333 3 6.09 3 7z'/><path d='M4 19h6v2H4zM12 11H4v2h8zM4 17h4v-2H4zM15 15v-3l-4.5 4.5L15 21v-3l8.027-.032L23 15z'/></svg>");
+        --zeb-copy-icon-hover: url("data:image/svg+xml,<svg width='21' height='20' viewBox='0 0 24 25' xmlns='http://www.w3.org/2000/svg' fill='%23E0A340' aria-label='Copy to clipboard'><path d='M18 20h2v3c0 1-1 2-2 2H2c-.998 0-2-1-2-2V5c0-.911.755-1.667 1.667-1.667h5A3.323 3.323 0 0110 0a3.323 3.323 0 013.333 3.333h5C19.245 3.333 20 4.09 20 5v8.333h-2V9H2v14h16v-3zM3 7h14c0-.911-.793-1.667-1.75-1.667H13.5c-.957 0-1.75-.755-1.75-1.666C11.75 2.755 10.957 2 10 2s-1.75.755-1.75 1.667c0 .911-.793 1.666-1.75 1.666H4.75C3.793 5.333 3 6.09 3 7z'/><path d='M4 19h6v2H4zM12 11H4v2h8zM4 17h4v-2H4zM15 15v-3l-4.5 4.5L15 21v-3l8.027-.032L23 15z'/></svg>");
+    }
+}
+
+/* ------------------------------------------------------------- typography */
+
+body {
+    font-family: var(--sans-font);
+    /* mdBook sets html { font-size: 62.5% }, so 1rem is 10px. */
+    font-size: 1.7rem;
+    -webkit-font-smoothing: antialiased;
+}
+
+.content p,
+.content ul,
+.content ol,
+.content dd {
+    line-height: 1.7;
+}
+
+.content h1,
+.content h2,
+.content h3,
+.content h4,
+.content h5,
+.content h6 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+}
+
+.content h1 {
+    font-size: 2.25em;
+    line-height: 1.15;
+    margin-block: 0 0.6em;
+}
+
+/* A hairline above every h2 marks where one major section ends and the next
+   begins -- the stripe doing structural work rather than decoration. */
+.content h2 {
+    font-size: 1.55em;
+    border-block-start: 1px solid var(--zeb-rule);
+    padding-block-start: 1.4em;
+    margin-block: 2.6em 0.7em;
+}
+
+.content h3 {
+    font-size: 1.25em;
+    margin-block: 2em 0.6em;
+}
+
+.content h4 {
+    font-size: 1.05em;
+    margin-block: 1.8em 0.5em;
+}
+
+.content h5,
+.content h6 {
+    font-size: 1em;
+    color: var(--zeb-muted);
+    margin-block: 1.6em 0.5em;
+}
+
+/* An h2 opening a page shouldn't carry a rule with nothing above it. */
+.content main > .header:first-child h2,
+.content main > h2:first-child {
+    border-block-start: none;
+    padding-block-start: 0;
+    margin-block-start: 0;
+}
+
+.content hr {
+    border: none;
+    border-block-start: 1px solid var(--zeb-rule);
+    margin-block: 2.5em;
+}
+
+/* ------------------------------------------------------------------ links */
+
+.content a:link,
+.content a:visited {
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+}
+
+/* Chrome links (nav, sidebar, headings) carry no underline. */
+.content .header:link,
+.content .header:visited,
+.nav-chapters,
+.menu-title,
+.right-buttons a {
+    text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- sidebar */
+
+.sidebar {
+    border-inline-end: 1px solid var(--zeb-rule);
+}
+
+.chapter {
+    line-height: 1.6em;
+    padding: 0.5em 0 2em;
+}
+
+.chapter li a {
+    display: block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: var(--sidebar-fg);
+}
+
+.chapter li a:hover {
+    color: var(--fg);
+    background-color: var(--zeb-surface-2);
+}
+
+/* The active chapter gets a gold bar rather than a filled pill: the same
+   stripe motif as the h2 rules, at the other end of the page. */
+.chapter li a.active {
+    color: var(--sidebar-active);
+    font-weight: 600;
+    background-color: var(--zeb-accent-soft);
+    box-shadow: inset 2px 0 0 var(--sidebar-active);
+}
+
+.chapter li.part-title {
+    color: var(--zeb-muted);
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+.chapter .spacer {
+    height: 1px;
+    background-color: var(--zeb-rule);
+    margin: 1em 10px;
+    width: auto;
+}
+
+.on-this-page {
+    margin-left: 18px;
+    border-inline-start-width: 1px;
+    border-inline-start-color: var(--zeb-rule);
+    padding-left: 10px;
+}
+
+.on-this-page a {
+    font-size: 0.95em;
+    color: var(--zeb-muted);
+}
+
+/* --------------------------------------------------------------- menu bar */
+
+#mdbook-menu-bar {
+    border-block-end-color: var(--zeb-rule);
+}
+
+#mdbook-menu-bar.sticky,
+html.sidebar-visible #mdbook-menu-bar {
+    background-color: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(8px);
+}
+
+.menu-title {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------------------------- code */
+
+pre {
+    background-color: var(--zeb-surface);
+    border: 1px solid var(--zeb-rule);
+    border-radius: 8px;
+    padding: 14px 16px;
+}
+
+pre > code {
+    line-height: 1.55;
+}
+
+/* mdbook-mermaid emits <pre class="mermaid">, which Mermaid then fills with an
+   SVG. It is a diagram, not a listing, so it gets none of the chrome above. */
+pre.mermaid {
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    text-align: center;
+}
+
+/* Inline code sits on its own tint so it reads as a token, not as a link. */
+:not(pre):not(a) > code {
+    background-color: var(--zeb-surface-2);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+}
+
+/* Headings and sidebar entries keep code inline with their own text: the tint
+   above would break the line up. Both selectors need a class to outweigh the
+   rule above. */
+.sidebar :not(pre) > code,
+.content h1 code, .content h2 code, .content h3 code,
+.content h4 code, .content h5 code, .content h6 code {
+    background-color: transparent;
+    padding: 0;
+}
+
+pre > .buttons button.clip-button::before {
+    content: var(--zeb-copy-icon);
+    filter: none;
+}
+
+pre > .buttons button.clip-button:hover::before {
+    content: var(--zeb-copy-icon-hover);
+    filter: none;
+}
+
+pre > .buttons button {
+    border-radius: 6px;
+}
+
+/* ----------------------------------------------------------------- tables */
+
+table {
+    margin: 1.5em 0;
+    width: 100%;
+}
+
+table td,
+table th {
+    border: none;
+    border-block-end: 1px solid var(--table-border-color);
+    padding: 8px 12px;
+}
+
+/* Weight and a rule carry the header row, instead of a filled band. */
+table thead tr {
+    border: none;
+}
+
+table thead td,
+table thead th {
+    font-weight: 600;
+    border-block-end: 1px solid var(--zeb-muted);
+}
+
+/* --------------------------------------------------- quotes and GFM alerts */
+
+blockquote {
+    border-block: none;
+    border-inline-start: 3px solid var(--quote-border);
+    border-radius: 0 6px 6px 0;
+    padding: 0.8em 1.2em;
+}
+
+.blockquote-tag {
+    border-inline-start-width: 3px;
+    border-radius: 0 6px 6px 0;
+    background-color: var(--quote-bg);
+    padding: 0.8em 1.2em;
+}
+
+/* --------------------------------------------------------------- searching */
+
+#mdbook-searchbar {
+    border-radius: 8px;
+    border: 1px solid var(--searchbar-border-color);
+    padding: 8px 12px;
+}
+
+ul#mdbook-searchresults li {
+    border-radius: 8px;
+}
+
+/* ----------------------------------------------------------------- images */
+
+/* Screenshots need a frame so they don't float as bright rectangles on a dark
+   page. Excluded: SVGs (the README's shields.io badges and the service
+   dependency diagram) and the logotype, both handled separately below. */
+.content img:not([src$=".svg"]):not([src*="zebra-logotype"]) {
+    border: 1px solid var(--zeb-rule);
+    border-radius: 8px;
+}
+
+/* The logotype is a transparent PNG drawn for a white page: black wordmark,
+   white stripes, gold roundel. On a dark page the wordmark disappears, and
+   plating it in white just puts a bright slab at the top of the page.
+   Inverting whitens the wordmark; the hue-rotate keeps the roundel gold rather
+   than sending it to its complement, and the saturate/brightness pair pulls it
+   back to roughly the brand's #cf8c2a after the round trip. */
+html.navy .content img[src*="zebra-logotype"],
+html.coal .content img[src*="zebra-logotype"],
+html.ayu .content img[src*="zebra-logotype"] {
+    filter: invert(1) hue-rotate(180deg) saturate(1.6) brightness(1.15);
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not(.js) .content img[src*="zebra-logotype"] {
+        filter: invert(1) hue-rotate(180deg) saturate(1.6) brightness(1.15);
+    }
+}
+
+/* --------------------------------------------------------- quality floor */
+
+:focus-visible {
+    outline: 2px solid var(--sidebar-active);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html:not(.sidebar-resizing) .sidebar {
+        transition: none;
+    }
+}
+
+/* Print keeps the light palette; the dark surfaces above would waste ink. */
+@media print {
+    pre,
+    .content img:not([src$=".svg"]):not([src*="zebra-logotype"]) {
+        background-color: transparent;
+        border-color: #ccc;
+    }
+
+    :not(pre):not(a) > code {
+        background-color: transparent;
+    }
+}
+
+/* ------------------------------------------- service dependency diagram */
+
 #service-dep-diagram {
     display: block;
     margin: 0px auto;
@@ -8,19 +568,22 @@
     opacity: 0.65;
 }
 
-html.navy #service-dep-diagram, 
-html.ayu #service-dep-diagram, 
+/* The diagram is a Graphviz SVG with baked-in light colours. Inverting alone
+   also rotates every hue to its complement, which turns its palette muddy;
+   the hue-rotate puts the hues back where they started. */
+html.navy #service-dep-diagram,
+html.ayu #service-dep-diagram,
 html.coal #service-dep-diagram {
-    filter: invert(1);
+    filter: invert(1) hue-rotate(180deg);
 }
 
-h2,
-h3,
-h4,
-h5,
-h6 {
-  display: inline-block;
+@media (prefers-color-scheme: dark) {
+    html:not(.js) #service-dep-diagram {
+        filter: invert(1) hue-rotate(180deg);
+    }
 }
+
+/* ----------------------------------------------------- docs assistant */
 
 /* Opt-in button for the docs assistant, rendered by book/lens-init.js. It
    stands in for the vendor's own launcher until a reader asks for it, so that
@@ -30,18 +593,20 @@ h6 {
     right: 1.25rem;
     bottom: 1.25rem;
     z-index: 1000;
-    padding: 0.5rem 0.9rem;
-    border: 1px solid var(--sidebar-non-existant, #ccc);
+    padding: 0.55rem 1rem;
+    border: 1px solid var(--zeb-rule);
     border-radius: 999px;
-    background: var(--sidebar-bg, #fafafa);
-    color: var(--sidebar-fg, #333);
+    background: var(--zeb-surface);
+    color: var(--zeb-muted);
+    font-family: var(--sans-font);
     font-size: 0.85rem;
     cursor: pointer;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 10px var(--overlay-bg);
 }
 
 #lens-opt-in:hover:not(:disabled) {
-    color: var(--sidebar-active, #1f75fe);
+    color: var(--sidebar-active);
+    border-color: var(--sidebar-active);
 }
 
 #lens-opt-in:disabled {
