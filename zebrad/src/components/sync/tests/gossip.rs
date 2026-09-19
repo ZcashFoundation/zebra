@@ -259,6 +259,75 @@ async fn gossip_broadcasts_tip_change_when_peers_become_ready() {
     gossip_task.abort();
 }
 
+/// If a mined block is announced while a chain tip broadcast is waiting for ready peers, and the
+/// mined block is not the best tip (for example, it is on a side chain), both the mined block and
+/// the pending chain tip are broadcast when peers become ready.
+#[tokio::test(start_paused = true)]
+async fn gossip_keeps_pending_tip_change_when_a_side_chain_block_is_mined() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (mut chain_tip_sender, _latest_chain_tip, chain_tip_change) =
+        ChainTipSender::new(None, &network);
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (peer_set, mut requests) = GatedPeerSet::new();
+
+    // Make the sync status close to the tip, so tip changes are gossiped.
+    recent_syncs.push_extend_tips_length(0);
+
+    let channel = SubmitBlockChannel::new();
+    let mined_block_sender = channel.sender();
+
+    let gossip_task = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        chain_tip_change,
+        peer_set.clone(),
+        Some(channel.receiver()),
+    ));
+
+    let (tip_hash, tip_height) = mined_block(1);
+    chain_tip_sender.set_finalized_tip(ChainTipBlock {
+        hash: tip_hash,
+        height: tip_height,
+        time: Utc::now(),
+        transactions: Vec::new(),
+        transaction_hashes: Arc::new([]),
+        previous_block_hash: block::Hash([0xff; 32]),
+    });
+
+    // Wait until the chain tip broadcast is waiting for ready peers.
+    tokio::time::sleep(PEER_GOSSIP_DELAY + TIPS_RESPONSE_TIMEOUT).await;
+
+    // This block doesn't change the best tip.
+    let (side_chain_hash, side_chain_height) = mined_block(2);
+    mined_block_sender
+        .try_send((side_chain_hash, side_chain_height))
+        .expect("channel has capacity");
+
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    assert!(
+        requests.try_recv().is_err(),
+        "no peers were ready, so nothing should have been broadcast"
+    );
+
+    peer_set.set_readiness(Readiness::Ready);
+
+    let mut broadcasts = Vec::new();
+    for _ in 0..2 {
+        let request = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .expect("both blocks are broadcast once peers are ready")
+            .expect("peer set is still alive");
+        broadcasts.push(request);
+    }
+
+    assert!(broadcasts.contains(&zn::Request::AdvertiseBlockToAll(side_chain_hash)));
+    assert!(broadcasts.contains(&zn::Request::AdvertiseBlock(tip_hash, None)));
+    assert!(!gossip_task.is_finished());
+
+    gossip_task.abort();
+}
+
 /// Permanent peer set readiness errors still stop the gossip task.
 #[tokio::test(start_paused = true)]
 async fn gossip_returns_permanent_peer_set_errors() {
