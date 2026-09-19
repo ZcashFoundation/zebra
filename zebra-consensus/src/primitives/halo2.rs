@@ -400,14 +400,21 @@ impl Verifier {
     }
 
     /// Flush the batch using a thread pool, sending the result via the channel.
-    /// This returns immediately, usually before the batch is completed.
+    /// This blocks until the batch is completed.
     fn flush_blocking(&mut self) {
         let (batch, tx) = self.take();
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
-        // We don't care about execution order here, because this method is only called on drop.
-        tokio::task::block_in_place(|| rayon::spawn_fifo(move || Self::verify(batch, tx)));
+        // Use `rayon::scope` rather than `spawn_fifo` so this blocks until verification
+        // finishes: `flush_blocking` is called from `Drop`, which requires the batch to be
+        // flushed (and its result sent) before the verifier is dropped. `spawn_fifo` returned
+        // before the work ran, so pending verification could be abandoned on shutdown. See #10598.
+        tokio::task::block_in_place(|| {
+            rayon::scope(|s| {
+                s.spawn(move |_| Self::verify(batch, tx));
+            });
+        });
     }
 
     /// Flush the batch using a thread pool, returning the result via the channel. This function
@@ -523,7 +530,7 @@ impl Service<BatchControl<Item>> for Verifier {
 impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
-        // This returns immediately, usually before the batch is completed.
+        // This blocks until the batch is completed.
         self.flush_blocking()
     }
 }

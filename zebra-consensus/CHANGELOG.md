@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Consensus rules that apply to a transaction in both block and mempool context
   are now applied by a single shared `check_common_consensus_rules()` function ([#9301](https://github.com/ZcashFoundation/zebra/issues/9301)).
 
+### Fixed
+
+- The batch verifiers (`redjubjub`, `ed25519`, `halo2`, `redpallas`, and `sapling`) now block until
+  verification completes when flushed on drop, using `rayon::scope` instead of `rayon::spawn_fifo`.
+  Previously the flush returned before the spawned work ran, so pending batched verification could
+  be abandoned on shutdown; this was latent because the process exits before the abandonment is
+  observable ([#10598](https://github.com/ZcashFoundation/zebra/issues/10598)).
+
 ## [15.0.0] - 2026-08-10
 
 ### Breaking Changes
