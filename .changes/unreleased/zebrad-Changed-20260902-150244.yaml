@@ -1,0 +1,7 @@
+project: zebrad
+kind: Changed
+body: 'Zebra stores, gossips, and announces a newly verified transaction as soon as its verification
+  finishes, rather than waiting for the mempool queue checker''s five second rate limit. On a node
+  with little peer or RPC traffic, that rate limit was the only thing driving this work
+  ([#5891](https://github.com/ZcashFoundation/zebra/issues/5891)).'
+time: 2026-09-02T15:02:44.000000000Z

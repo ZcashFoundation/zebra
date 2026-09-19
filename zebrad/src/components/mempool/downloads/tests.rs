@@ -1,6 +1,8 @@
 //! Fixed test vectors for the mempool transaction downloader.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
+use tokio::sync::Notify;
 
 use futures::StreamExt as _;
 use tower::{service_fn, util::BoxCloneService};
@@ -44,7 +46,7 @@ async fn per_peer_cap_applies_to_pushed_transactions() {
     let state: MockService<zs::Request, zs::Response, PanicAssertion> =
         MockService::build().for_unit_tests();
 
-    let mut downloads = Downloads::new(peer_set, verifier, state);
+    let mut downloads = Downloads::new(peer_set, verifier, state, Arc::new(Notify::new()));
 
     // The first `MAX_INBOUND_CONCURRENCY_PER_PEER` pushes from this peer are admitted.
     for gossip in pushed.iter().take(MAX_INBOUND_CONCURRENCY_PER_PEER) {
@@ -103,6 +105,7 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
                 request => Err(format!("unexpected state request: {request:?}").into()),
             }
         })),
+        Arc::new(Notify::new()),
     );
 
     downloads
