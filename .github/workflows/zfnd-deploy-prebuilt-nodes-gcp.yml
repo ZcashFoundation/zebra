@@ -56,13 +56,48 @@ on:
         description: Whether to bind the environment's reserved external address
         required: true
         type: boolean
+      confirm_latest_release:
+        description: Recheck GitHub's latest-release marker and skip the fleet update when this release is not latest
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  # Recheck immediately before mutating production. Skips the rest of this
+  # workflow when the caller asked for a latest-channel confirm and this
+  # release is no longer GitHub's latest-release marker.
+  confirm-latest-release:
+    name: Recheck GitHub latest-release marker
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        env:
+          CONFIRM: ${{ inputs.confirm_latest_release }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ "${CONFIRM}" != "true" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [ "${latest_tag}" = "${RELEASE_TAG}" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "This release (${RELEASE_TAG}) is not GitHub's latest (${latest_tag}); skipping production deploy"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   validate:
     name: Validate deployment inputs
+    needs: [confirm-latest-release]
+    if: needs.confirm-latest-release.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Validate deployment contract

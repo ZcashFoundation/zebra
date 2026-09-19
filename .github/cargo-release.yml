@@ -9,4 +9,3 @@ githubRelease:
   nameTemplate: "Zebra {version}"
   notesFile: CHANGELOG.md
   notesHeadingTemplate: "## [Zebra {version}]"
-  makeLatest: auto

@@ -20,7 +20,8 @@ permissions:
   contents: read
 
 jobs:
-  # The image will be named `zebra:<semver>`
+  # Always publish the immutable `zebra:<semver>` image. Docker `latest` is
+  # promoted after the build, with a fresh `releases/latest` recheck.
   build:
     name: Build Release Docker
     if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
@@ -48,6 +49,9 @@ jobs:
       # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
       # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
       publish_to_dockerhub: true
+      # Candidate for Docker `latest`. The called workflow rechecks
+      # `releases/latest` immediately before mutating that tag.
+      publish_latest_tag: true
     # This step needs access to Docker Hub secrets to run successfully
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
