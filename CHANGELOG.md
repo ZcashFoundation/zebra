@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-09-19
+
+### Added
+
+- Add metrics `zcash.pool.value.zatoshis` (labeled by pool name) and `zcash.pool.notes.created` (labeled by pool name) reporting value pool balances in zatoshis and note commitment counts at the non-finalized chain tip ([#11391](https://github.com/ZcashFoundation/zebra/pull/11391))
+- Zebra can now serve Zcash light clients directly: a new experimental gRPC server implements the lightwalletd `CompactTxStreamer` interface, enabled by setting `rpc.lightwalletd_listen_addr` in the config ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
+
+### Changed
+
+- `rpc.max_response_body_size` is now limited to 4,294,967,295 bytes. Configurations with larger values must reduce the limit; they are rejected during configuration loading instead of causing an RPC server startup panic ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).
+- Updated the `nix` dependency to 0.31 ([#11267](https://github.com/ZcashFoundation/zebra/pull/11267)).
+- Block template construction now caps the ZIP-317 fee weight ratio at 10 instead of 4, widening the priority lane for transactions that pay more than their conventional fee ([#11290](https://github.com/ZcashFoundation/zebra/pull/11290)).
+- Zebra no longer includes the unmaintained `ordered-map` crate or its legacy `quickcheck` 0.9 and `rand` 0.7 dependency subtree ([#10516](https://github.com/ZcashFoundation/zebra/issues/10516)).
+- Peer connection limiting is now applied per IPv6 `/64` subnet instead of per individual IPv6 address, so one machine can no longer bypass `network.max_connections_per_ip` by connecting from many addresses in the same `/64` allocation. IPv4 connections are unchanged, and are still limited per address ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+- The `getblocktemplate` RPC uses a precomputed block template for the current chain tip when one is available, rather than assembling one while the miner waits. Zebra precomputes templates when a miner address is configured and either the RPC server or the internal miner is enabled, refreshing them on chain tip changes and every few seconds, so a template can be a few seconds behind the mempool, but each template is checked against the committed tip. Cached work is also refreshed when Testnet difficulty becomes easier. Tip changes do not accumulate unfinished coinbase proofs ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).
+- When two competing chains have equal cumulative work, Zebra now prefers the chain whose tip block it received first, as specified by the Zcash protocol, instead of the chain with the greater tip block hash.
+- The mempool now accepts transactions that pay at least 1000 zatoshis per ZIP-317 logical action instead of 5000 (2000 instead of 10000 for a minimal transaction), block template weights follow the new conventional fee, and `getstandardfee` reports 1000, per [zcash/zips#1352](https://github.com/zcash/zips/pull/1352) ([#11290](https://github.com/ZcashFoundation/zebra/pull/11290)).
+
+### Fixed
+
+- Zebra no longer runs a shielded coinbase proof for each outstanding `getblocktemplate` long poll when the configured miner address has a shielded component ([#10747](https://github.com/ZcashFoundation/zebra/issues/10747)).
+- The syncer no longer restarts when a block's transparent input lookup times out near the tip, or when the short post-checkpoint verify timeout fires. Both are transient UTXO races, and restarting cancelled the in-flight parent commit, causing a sync restart loop ([#11168](https://github.com/ZcashFoundation/zebra/issues/11168), [#11132](https://github.com/ZcashFoundation/zebra/issues/11132)).
+- The `zcashd_source = "embedded"` sidecar is now pinned to `zebra-compat-v1.2.0`, which raises the zcashd reorg limit from 99 to 1000 blocks to match Zebra's `MAX_BLOCK_REORG_HEIGHT`. The previous `zebra-compat-v1.1.0` sidecar shut itself down on any reorg deeper than 99 blocks while Zebra kept following the chain. Wallets holding shielded notes should expect the witness cache and `wallet.dat` to grow roughly 10x, reached gradually over about 900 blocks ([#11403](https://github.com/ZcashFoundation/zebra/issues/11403)).
+- The `docker-split-containers` mode of `scripts/install-zebra.sh` now prints a zcashd container command that can run. It defaulted to a zcashd Docker image that was never published; it now runs the hash-pinned sidecar `zcashd` from the Zebra image, downloading and verifying the binary on the host and bind-mounting it in. Pass `--zcashd-docker-image IMAGE` to use your own image instead.
+- Build `librocksdb-sys` with bindgen's `runtime` feature, so libclang loads correctly when more than one bindgen version is resolved ([#11444](https://github.com/ZcashFoundation/zebra/pull/11444)).
+- `z_gettreestate` no longer returns null commitments for a block it found when a concurrent reorg moves that block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).
+
+### Security
+
+- Score misbehavior for peers that advertise a block containing duplicate transactions, matching the treatment of the other definitive block-validity violations ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
+
 ## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 
 ### Added

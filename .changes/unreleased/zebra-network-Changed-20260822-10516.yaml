@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: '`zebra-network` no longer pulls the unmaintained `ordered-map` crate or its legacy `quickcheck` 0.9 and `rand` 0.7 dependency subtree into downstream builds ([#10516](https://github.com/ZcashFoundation/zebra/issues/10516)).'
-time: 2026-08-22T17:45:43.9633254-04:00
