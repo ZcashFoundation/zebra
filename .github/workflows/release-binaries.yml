@@ -23,7 +23,7 @@ jobs:
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
     permissions:
       contents: read
       id-token: write
@@ -56,7 +56,7 @@ jobs:
   # Resolve the release tag into the version used in binary asset names.
   binary-version:
     name: Resolve release binary version
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 1
     outputs:
@@ -72,6 +72,7 @@ jobs:
   prepare-binaries:
     name: Prepare release binaries
     needs: binary-version
+    if: github.repository == 'ZcashFoundation/zebra'
     permissions:
       contents: read
       id-token: write # authenticate binary provenance and signatures
@@ -83,7 +84,7 @@ jobs:
 
   validate-binaries:
     name: Validate release binary preparation
-    if: github.event_name == 'workflow_dispatch' && github.repository_owner == 'ZcashFoundation'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZcashFoundation/zebra'
     permissions:
       contents: read
       id-token: write # authenticate test provenance and signatures
@@ -103,7 +104,7 @@ jobs:
       release_tag: ${{ github.event.release.tag_name }}
 
   dockerhub-description:
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -129,7 +130,7 @@ jobs:
     if: >-
       ${{
         always() &&
-        github.repository_owner == 'ZcashFoundation' &&
+        github.repository == 'ZcashFoundation/zebra' &&
         startsWith(github.event.release.tag_name, 'v')
       }}
     needs:
