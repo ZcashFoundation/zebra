@@ -280,7 +280,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
+      - uses: jayqi/failed-build-issue-action@940568ce50eeef3f31a920614cefcc6102d2f930 #v1.3.0
         with:
           title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
           # New failures open an issue with this label.
