@@ -1105,6 +1105,8 @@ where
                 templates.has_changed().map_err(|_| {
                     ErrorObject::owned(0, "block template provider has stopped", None::<()>)
                 })?;
+                // A publication during the state read must remain unseen if this snapshot is stale.
+                let template = templates.borrow_and_update().clone();
                 // State commits before updating its tip watch. Never trust just that watch or
                 // a tip captured before waiting for a publication.
                 let ReadResponse::Tip(Some((_, tip_hash))) = self
@@ -1121,7 +1123,6 @@ where
                     ));
                 };
 
-                let template = templates.borrow_and_update().clone();
                 if let Some(template) = template.filter(|template| {
                     template.is_valid_for_tip(tip_hash, &self.network, DateTime32::now())
                 }) {

@@ -2793,6 +2793,190 @@ async fn getblocktemplate_precomputed() {
     );
 }
 
+/// Shielded mining allows a late publication, but both address types bound readiness waits.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_waits_longer_for_shielded_publications() {
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+    let tip_hash = Hash([0xab; 32]);
+
+    for (address_type, timeout_secs) in [
+        (mining::MinerAddressType::Transparent, 1),
+        (mining::MinerAddressType::Sapling, 10),
+    ] {
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+            .with_max_request_delay(Duration::from_secs(30))
+            .for_unit_tests();
+        let (mock_tip, mock_tip_sender) = MockChainTip::new();
+        mock_tip_sender.send_best_tip_height(tip_height);
+        mock_tip_sender.send_best_tip_hash(tip_hash);
+        mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+        let mut sync_status = MockSyncStatus::default();
+        sync_status.set_is_close_to_tip(true);
+        let (_logs, logs) = watch::channel(None);
+        let (rpc, _queue) = RpcImpl::new(
+            net.clone(),
+            mining::Config {
+                miner_address: Some(
+                    mining::default_miner_address(net.kind(), &address_type)
+                        .parse()
+                        .unwrap(),
+                ),
+                ..Default::default()
+            },
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool, 1),
+            state,
+            read_state.clone(),
+            MockService::build().for_unit_tests(),
+            sync_status,
+            mock_tip,
+            MockAddressBookPeers::default(),
+            logs,
+            None,
+        );
+        let (templates, receiver) = watch::channel(None);
+        let (requests, _overrides) = mpsc::channel(1);
+        let rpc = rpc.with_block_templates(receiver, requests);
+
+        let waiting = rpc.get_block_template(None);
+        tokio::pin!(waiting);
+        tokio::select! {
+            biased;
+            _ = &mut waiting => panic!("an open provider must get time to publish work"),
+            request = read_state.expect_request(ReadRequest::Tip) => {
+                request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+            }
+        }
+        assert!(futures::poll!(&mut waiting).is_pending());
+        tokio::time::advance(Duration::from_secs(timeout_secs) - Duration::from_millis(1)).await;
+        assert!(futures::poll!(&mut waiting).is_pending());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        assert!(tokio::time::timeout(Duration::from_millis(1), waiting)
+            .await
+            .expect("unavailable work must fail at the readiness deadline")
+            .is_err(),);
+
+        if address_type == mining::MinerAddressType::Transparent {
+            continue;
+        }
+
+        let waiting = rpc.get_block_template(None);
+        tokio::pin!(waiting);
+        tokio::select! {
+            biased;
+            _ = &mut waiting => panic!("shielded mining must wait for its publication"),
+            request = read_state.expect_request(ReadRequest::Tip) => {
+                request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+            }
+        }
+        assert!(futures::poll!(&mut waiting).is_pending());
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "shielded work can arrive after the transparent readiness deadline",
+        );
+        let template = template_extending(&net, tip_height, tip_hash);
+        let expected_id = template.long_poll_id;
+        templates.send_replace(Some(Arc::new(template)));
+        let (served, ()) = tokio::join!(waiting, async {
+            read_state
+                .expect_request(ReadRequest::Tip)
+                .await
+                .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+        });
+        let served = served
+            .expect("shielded mining must accept work published after two seconds")
+            .try_into_template()
+            .unwrap();
+        assert_eq!(served.previous_block_hash, tip_hash);
+        assert_eq!(served.long_poll_id, expected_id);
+    }
+}
+
+/// A publication after a tip response is captured must survive consuming that older response.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_observes_publication_before_tip_response_is_consumed() {
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+    let tip_hash = Hash([0xaa; 32]);
+    let committed_height = tip_height.next().unwrap();
+    let committed_hash = Hash([0xbb; 32]);
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(Duration::from_secs(30))
+        .for_unit_tests();
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(tip_height);
+    mock_tip_sender.send_best_tip_hash(tip_hash);
+    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+    let (_logs, logs) = watch::channel(None);
+    let (rpc, _queue) = RpcImpl::new(
+        net.clone(),
+        mining::Config {
+            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                NetworkType::Main,
+                [0x7e; 20],
+            )),
+            ..Default::default()
+        },
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        state,
+        read_state.clone(),
+        MockService::build().for_unit_tests(),
+        sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        logs,
+        None,
+    );
+    let (templates, receiver) = watch::channel(None);
+    let (requests, _overrides) = mpsc::channel(1);
+    let rpc = rpc.with_block_templates(receiver, requests);
+    let waiting = rpc.get_block_template(None);
+    tokio::pin!(waiting);
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("no template has been published yet"),
+        request = read_state.expect_request(ReadRequest::Tip) => {
+            request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+        }
+    }
+
+    // Do not poll `waiting`: tip A's response is captured but not consumed yet.
+    mock_tip_sender.send_best_tip_height(committed_height);
+    mock_tip_sender.send_best_tip_hash(committed_hash);
+    let template = template_extending(&net, committed_height, committed_hash);
+    let expected_id = template.long_poll_id;
+    templates.send_replace(Some(Arc::new(template)));
+    tokio::select! {
+        biased;
+        result = &mut waiting => panic!("publication B must trigger a fresh tip read: {result:?}"),
+        request = read_state.expect_request(ReadRequest::Tip) => {
+            request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
+        }
+    }
+    let served = waiting
+        .await
+        .expect("current work must be returned without a third publication")
+        .try_into_template()
+        .unwrap();
+    assert_eq!(served.previous_block_hash, committed_hash);
+    assert_eq!(served.long_poll_id, expected_id);
+}
+
 /// Long polling ignores same-ID refreshes and returns only when published work changes.
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate_long_poll_waits_for_a_new_template() {
