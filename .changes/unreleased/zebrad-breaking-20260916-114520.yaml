@@ -1,8 +1,10 @@
 project: zebrad
 kind: breaking
-body: 'Zebra now admits a transaction to the mempool only after it and all required unmined
-  ancestors pass next-block proposal verification, including block size and signature-operation
-  limits. Failed candidates are not stored, gossiped, made available to dependent transactions, or
-  reported as successfully admitted. This policy applies even without a mining address, RPC server,
-  or internal miner ([#11452](https://github.com/ZcashFoundation/zebra/issues/11452)).'
+body: 'Zebra now admits a transaction to the mempool only after it and its required unmined
+  ancestors pass next-block proposal verification. Each package is limited to 100 transactions,
+  including the candidate, and must fit block byte and signature-operation limits. This is mempool
+  policy, not a change to block consensus rules, and applies even without a mining address, RPC
+  server, or internal miner. Rejected candidates are not exposed or gossiped. Deterministic proposal
+  rejections are reused only for the same transaction, committed tip, and required unmined ancestors
+  ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).'
 time: 2026-09-16T11:45:20.000000000Z

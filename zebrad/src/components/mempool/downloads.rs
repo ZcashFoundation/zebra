@@ -375,7 +375,7 @@ where
             return Err(MempoolError::AlreadyQueued);
         }
 
-        if self.cancel_handles.len().max(self.pending.len()) >= MAX_INBOUND_CONCURRENCY {
+        if self.in_flight() >= MAX_INBOUND_CONCURRENCY {
             debug!(
                 ?txid,
                 queue_len = self.pending.len(),
@@ -662,9 +662,11 @@ where
     }
 
     /// Get the number of transactions awaiting download, verification or proposal admission.
-    #[allow(dead_code)]
+    ///
+    /// Count cancelled handles until they are drained, without giving away a retained admission's
+    /// slot for re-verification when its proposal becomes stale.
     pub fn in_flight(&self) -> usize {
-        self.cancel_handles.len().max(self.pending.len())
+        self.pending.len() + usize::from(self.admission.is_some())
     }
 
     /// Get a list of the currently pending transaction requests.

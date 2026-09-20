@@ -9,11 +9,12 @@ The mempool is a fundamental component of the Zebra node, responsible for managi
 Key responsibilities of the mempool include:
 
 - Accepting new transactions from the network
-- Verifying transactions against a subset of consensus rules
+- Verifying transactions individually and in a block proposal with their required mempool ancestors
 - Storing verified transactions in memory
 - Managing memory usage and transaction eviction
 - Providing transaction queries to other components
 - Gossiping transactions to peers
+- Producing block templates for mining RPCs
 
 ## Architecture
 
@@ -32,6 +33,10 @@ The mempool is comprised of several subcomponents:
 6. **Transaction Gossip** (`gossip`): Broadcasts newly added transactions to peers.
 
 7. **Pending Outputs** (`PendingOutputs`): Tracks requests for transaction outputs that haven't yet been seen.
+
+8. **Admission** (`Admission`): Verifies each candidate and its required ancestors in a block proposal before exposing the candidate to other components.
+
+9. **Block Templates** (`BlockTemplates`): Builds and publishes default mining work and handles caller-specific template requests.
 
 For a visual representation of the architecture and transaction flow, see the [Mempool Architecture Diagram](diagrams/mempool-architecture.md).
 
@@ -88,12 +93,20 @@ The mempool responds to chain tip changes:
    - Verifies transaction against the current chain state
    - Manages dependencies between transactions
 
-4. **Transaction Storage**:
+4. **Proposal Admission**:
+   - Includes the candidate and its required mempool ancestors in dependency order
+   - Checks package byte and signature-operation limits before proposal verification
+   - Limits the package to 100 transactions, including the candidate; this is mempool policy, not a new consensus rule
+   - Rechecks the committed tip and exact ancestor context before accepting the result; stale work is retried without releasing the original response
+   - Runs without a configured miner address
+
+5. **Transaction Storage**:
    - Stores verified transactions in memory
    - Tracks transaction dependencies
    - Enforces size limits and eviction policies
+   - Only after successful admission and storage does the candidate become available through transaction queries, pending-output requests, gossip, and the original submission response
 
-5. **Transaction Gossip**:
+6. **Transaction Gossip**:
    - Broadcasts newly verified transactions to peers
 
 ## Transaction Rejection
@@ -103,6 +116,8 @@ Transactions can be rejected for multiple reasons, categorized into:
 1. **Exact Tip Rejections** (`ExactTipRejectionError`):
    - Failures in consensus validation
    - Only applies to exactly matching transactions at the current tip
+   - Deterministic proposal failures are cached only while their exact required ancestors remain present
+   - Service failures and timeouts are not cached
 
 2. **Same Effects Tip Rejections** (`SameEffectsTipRejectionError`):
    - Spending conflicts with other mempool transactions
@@ -117,6 +132,20 @@ Transactions can be rejected for multiple reasons, categorized into:
    - Applies until a rollback or network upgrade
 
 Rejection reasons are stored alongside rejected transaction IDs to prevent repeated verification of invalid transactions.
+
+## Block Templates
+
+With a configured miner address, the mempool builds and publishes the shared default template.
+A new committed tip gets coinbase-only work first, followed by a fill with verified transactions.
+Same-tip storage changes are coalesced until the five-second refresh deadline without postponing it.
+An eligible default refresh or recovery takes priority over queued caller-specific work.
+
+Caller-specific templates are returned privately and never replace the shared default template.
+Proof work already started is retained until completion, even if its caller disconnects.
+Expired Testnet work is rebuilt from fresh chain information before publication or response;
+a cancelled caller does not start another proof.
+RPC consumers check published work against the committed state tip and retain notifications
+that arrive while that tip is being read.
 
 ## Memory Management
 

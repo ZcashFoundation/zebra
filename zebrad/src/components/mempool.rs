@@ -840,10 +840,12 @@ impl Service<Request> for Mempool {
                             );
                         } else {
                             let source = tx_downloads.finish_admission(tx.transaction.id);
-                            let _result = tx_downloads.download_if_needed_and_verify(
+                            tx_downloads.download_if_needed_and_verify(
                                 tx.transaction.into(),
                                 source,
                                 rsp_tx,
+                            ).expect(
+                                "finishing admission reserves global and peer capacity for its immediate retry",
                             );
                         }
                     }
@@ -895,29 +897,27 @@ impl Service<Request> for Mempool {
                 let source = tx_downloads.finish_admission(tx_id);
                 if matches!(result, Ok(false)) {
                     // A changed committed parent/ancestor set is not an invalid transaction.
-                    let _result = tx_downloads.download_if_needed_and_verify(
+                    tx_downloads.download_if_needed_and_verify(
                         pending.tx.transaction.into(),
                         source,
                         pending.response,
+                    ).expect(
+                        "finishing admission reserves global and peer capacity for its immediate retry",
                     );
                 } else {
                     let result = result.and_then(|_| {
-                        storage
+                        let previous_count = storage.transaction_count();
+                        let result = storage
                             .insert(pending.tx, pending.spent, best_tip_height)
                             .map(|_| ())
-                            .map_err(BoxError::from)
+                            .map_err(BoxError::from);
+                        // On error, insertion never adds a retained entry, so any
+                        // eviction of existing entries decreases the count. No-op errors do not
+                        // invalidate an otherwise current template.
+                        verified_set_changed |=
+                            result.is_ok() || storage.transaction_count() != previous_count;
+                        result
                     });
-
-                    // An insertion changes the verified set even when it reports an error:
-                    // `Storage::insert()` evicts transactions to stay under the cost limit, and
-                    // returns `RandomlyEvicted` when the incoming transaction or one of its
-                    // ancestors was among them, having already removed the others. The result
-                    // doesn't say what was evicted, so assume the set moved.
-                    //
-                    // Unlike a failed verification, reaching this costs a peer a transaction that
-                    // passed verification and proposal admission, so being conservative here
-                    // isn't a rebuild a peer can cheaply provoke.
-                    verified_set_changed = true;
 
                     if result.is_ok() {
                         send_to_peers_ids.insert(tx_id);

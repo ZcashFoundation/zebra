@@ -2593,3 +2593,91 @@ async fn mined_transaction_is_dropped_rather_than_admitted() {
         "the mined transaction's accounting should stay released"
     );
 }
+
+/// Cancelling another download must not give away the retained admission's retry capacity.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn cancelled_download_preserves_stale_admission_retry() {
+    use std::collections::HashSet;
+
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+
+    use crate::components::mempool::downloads::{
+        Downloads, MAX_INBOUND_CONCURRENCY, TRANSACTION_DOWNLOAD_TIMEOUT,
+        TRANSACTION_VERIFY_TIMEOUT,
+    };
+
+    let peer_set =
+        tower::service_fn(|_| futures::future::pending::<Result<zn::Response, BoxError>>());
+    let state = tower::service_fn(|request| async move {
+        Ok::<_, BoxError>(match request {
+            zs::Request::Transaction(_) => zs::Response::Transaction(None),
+            zs::Request::Tip => zs::Response::Tip(None),
+            other => panic!("unexpected state request: {other:?}"),
+        })
+    });
+    let mut tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    ));
+    let verified = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("a vector transaction");
+    let source = Some("127.0.0.1:8233".parse().unwrap());
+    let (response, received) = oneshot::channel();
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(
+            Gossip::Tx(verified.transaction.clone()),
+            source,
+            Some(response),
+        )
+        .unwrap();
+    tx_verifier
+        .expect_request_that(|_| true)
+        .await
+        .respond(transaction::MempoolResponse::from(verified));
+    let (verified, _, _, response) = downloads.as_mut().next().await.unwrap().unwrap().unwrap();
+
+    let gossip = |index: usize| {
+        let mut bytes = [0xaa; 32];
+        bytes[..8].copy_from_slice(&u64::try_from(index).unwrap().to_le_bytes());
+        Gossip::Id(zebra_chain::transaction::UnminedTxId::Legacy(
+            zebra_chain::transaction::Hash(bytes),
+        ))
+    };
+    for index in 0..MAX_INBOUND_CONCURRENCY - 1 {
+        downloads
+            .as_mut()
+            .download_if_needed_and_verify(gossip(index), None, None)
+            .unwrap();
+    }
+    // The cancelled task's handle is not drained while proposal admission is retained.
+    downloads.cancel(&HashSet::from([gossip(0).id().mined_id()]));
+    assert!(matches!(
+        downloads.as_mut().download_if_needed_and_verify(
+            gossip(MAX_INBOUND_CONCURRENCY),
+            None,
+            None,
+        ),
+        Err(MempoolError::FullQueue)
+    ));
+
+    let source = downloads.finish_admission(verified.transaction.id);
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(verified.transaction), source, response)
+        .expect("the retained admission reserves capacity for its stale retry");
+    tx_verifier
+        .expect_request_that(|_| true)
+        .await
+        .respond(Err(TransactionError::WrongVersion));
+    assert!(timeout(Duration::from_secs(1), received)
+        .await
+        .expect("verification answers the original caller")
+        .expect("the retry preserves the response channel")
+        .is_err());
+}

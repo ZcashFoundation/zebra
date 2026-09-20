@@ -21,8 +21,9 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::{
     super::{
-        admission::{required_package, Admission},
-        Mempool, Storage,
+        admission::{required_package, Admission, MAX_PACKAGE_COUNT},
+        storage::{ExactTipRejectionError, SameEffectsChainRejectionError},
+        Mempool, MempoolError, Storage,
     },
     vector::setup,
 };
@@ -138,6 +139,337 @@ pub(super) fn candidate() -> VerifiedUnminedTx {
         .expect("the historical block fixture contains a transparent spend")
 }
 
+async fn queue_candidate(
+    mempool: &mut Mempool,
+    tx: &VerifiedUnminedTx,
+) -> Result<oneshot::Receiver<Result<(), BoxError>>, BoxError> {
+    let Response::Queued(mut queued) = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
+        .await
+        .unwrap()
+    else {
+        panic!("Queue response expected")
+    };
+    queued.remove(0)
+}
+
+#[tokio::test]
+async fn rejected_proposal_does_not_trigger_an_empty_template_fill() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let (mut templates, mut published, _requests) = mock_templates(&mut mempool);
+    let mut proposals = mock_proposals(&mut mempool);
+    let coinbase = drive(&mut mempool, templates.expect_request_that(|_| true)).await;
+    let tx = candidate();
+    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx));
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(Err::<block::Hash, BoxError>(
+            zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
+                zebra_consensus::error::TransactionError::BadBalance,
+            ))
+            .into(),
+        ));
+    assert!(drive(&mut mempool, result).await.unwrap().is_err());
+    coinbase.respond(block::Hash([0; 32]));
+    drive(&mut mempool, published.changed()).await.unwrap();
+    assert!(published
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .transactions()
+        .is_empty());
+    assert!(
+        drive(
+            &mut mempool,
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                templates.expect_request_that(|_| true)
+            ),
+        )
+        .await
+        .is_err(),
+        "a rejected proposal must not request an immediate empty mempool fill"
+    );
+}
+
+#[tokio::test]
+async fn self_eviction_does_not_trigger_an_empty_template_fill() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, 0, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let (mut templates, mut published, _requests) = mock_templates(&mut mempool);
+    let coinbase = drive(&mut mempool, templates.expect_request_that(|_| true)).await;
+    let tx = candidate();
+    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx));
+    let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<MempoolError>(),
+        Some(&MempoolError::StorageEffectsChain(
+            SameEffectsChainRejectionError::RandomlyEvicted
+        )),
+    );
+    assert!(mempool.storage().transactions().is_empty());
+    coinbase.respond(block::Hash([0; 32]));
+    drive(&mut mempool, published.changed()).await.unwrap();
+    assert!(published
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .transactions()
+        .is_empty());
+    assert!(
+        drive(
+            &mut mempool,
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                templates.expect_request_that(|_| true)
+            ),
+        )
+        .await
+        .is_err(),
+        "self-eviction leaves no transaction requiring an initial fill"
+    );
+}
+
+#[tokio::test]
+async fn deterministic_proposal_rejection_is_cached_until_the_tip_changes() {
+    use zebra_state::DuplicateNullifierError;
+
+    let (mut mempool, _, mut state, mut tip_change, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let tx = candidate();
+    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx.clone()));
+    // Follow the actual CheckProposal -> ValidateProposal -> ValidateContextError path.
+    let context = zebra_chain::sapling::Nullifier::from([1; 32]).duplicate_nullifier_error(false);
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(Err::<block::Hash, BoxError>(
+            zebra_consensus::RouterError::from(
+                zebra_consensus::VerifyBlockError::ValidateProposal(context.into()),
+            )
+            .into(),
+        ));
+    let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<zebra_consensus::RouterError>()
+            .is_some(),
+        "the first caller keeps the original consensus error"
+    );
+    let replay = queue_candidate(&mut mempool, &tx).await.unwrap_err();
+    assert!(matches!(
+        replay.downcast_ref::<MempoolError>(),
+        Some(MempoolError::StorageExactTip(
+            ExactTipRejectionError::FailedProposal { .. }
+        )),
+    ));
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            block.into(),
+        ))
+        .await
+        .unwrap();
+    tip_change.wait_for_tip_change().await.unwrap();
+    mempool.dummy_call().await;
+    let retry = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx.clone()));
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(block::Hash([0; 32]));
+    drive(&mut mempool, retry).await.unwrap().unwrap();
+    assert!(mempool
+        .storage()
+        .contains_transaction_exact(&tx.transaction.id.mined_id()));
+}
+
+#[tokio::test]
+async fn proposal_service_failures_are_retryable() {
+    use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
+
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let tx = candidate();
+    let errors: Vec<BoxError> = vec![
+        "transient verifier failure".into(),
+        RouterError::from(VerifyBlockError::ValidateProposal("state not ready".into())).into(),
+        RouterError::from(VerifyBlockError::ValidateProposal(
+            zebra_state::CommitSemanticallyVerifiedError::from(
+                zebra_state::CommitBlockError::Duplicate {
+                    hash_or_height: None,
+                    location: zebra_state::KnownBlock::BestChain,
+                },
+            )
+            .into(),
+        ))
+        .into(),
+        RouterError::from(VerifyBlockError::Transaction(
+            TransactionError::InternalDowncastError("lost transaction service".into()),
+        ))
+        .into(),
+    ];
+    for error in errors {
+        let result = queue_candidate(&mut mempool, &tx).await.unwrap();
+        drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+            .await
+            .respond(transaction::MempoolResponse::from(tx.clone()));
+        drive(&mut mempool, proposals.expect_request_that(|_| true))
+            .await
+            .respond(Err::<block::Hash, BoxError>(error));
+        assert!(drive(&mut mempool, result).await.unwrap().is_err());
+    }
+    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx.clone()));
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(block::Hash([0; 32]));
+    drive(&mut mempool, result).await.unwrap().unwrap();
+    assert!(mempool
+        .storage()
+        .contains_transaction_exact(&tx.transaction.id.mined_id()));
+}
+
+#[tokio::test]
+async fn timed_out_proposal_drains_without_caching_its_late_rejection() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let tx = candidate();
+    let mut result = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx.clone()));
+    let held = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    tokio::time::pause();
+    tokio::time::advance(
+        super::super::downloads::TRANSACTION_VERIFY_TIMEOUT + Duration::from_secs(1),
+    )
+    .await;
+    mempool.dummy_call().await;
+    assert!(matches!(
+        result.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+    held.respond(Err::<block::Hash, BoxError>(
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::BadBalance,
+        ))
+        .into(),
+    ));
+    tokio::time::resume();
+    let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
+    assert!(error
+        .downcast_ref::<tokio::time::error::Elapsed>()
+        .is_some());
+    let retry = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx.clone()));
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(block::Hash([0; 32]));
+    drive(&mut mempool, retry).await.unwrap().unwrap();
+    assert!(mempool
+        .storage()
+        .contains_transaction_exact(&tx.transaction.id.mined_id()));
+}
+
+#[tokio::test]
+async fn oversized_package_rejection_is_cached() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let tx = candidate();
+    let mut oversized = tx.clone();
+    oversized.transaction.size = usize::try_from(block::MAX_BLOCK_BYTES).unwrap() + 1;
+    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(oversized));
+    assert!(drive(&mut mempool, result).await.unwrap().is_err());
+    assert!(matches!(
+        queue_candidate(&mut mempool, &tx)
+            .await
+            .unwrap_err()
+            .downcast_ref::<MempoolError>(),
+        Some(MempoolError::StorageExactTip(
+            ExactTipRejectionError::FailedProposal { .. }
+        )),
+    ));
+}
+
+#[tokio::test]
+async fn stale_package_limit_failure_is_not_cached() {
+    let (mut mempool, _, mut state, mut tip_change, _tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let _proposals = mock_proposals(&mut mempool);
+    let genesis: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let old_parent = genesis.hash();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            block.into(),
+        ))
+        .await
+        .unwrap();
+    tip_change.wait_for_tip_change().await.unwrap();
+
+    // Model a committed state tip advancing before its notification is reconciled by the mempool.
+    let mut storage = Storage::new(&super::super::Config::default());
+    let mut tx = candidate();
+    let id = tx.transaction.id;
+    tx.transaction.size = usize::try_from(block::MAX_BLOCK_BYTES).unwrap() + 1;
+    mempool
+        .admission
+        .start(&storage, old_parent, tx, Vec::new(), None);
+    let (_, result) = tokio::time::timeout(
+        Duration::from_secs(10),
+        futures::future::poll_fn(|cx| mempool.admission.poll(cx, &mut storage, old_parent)),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(result, Ok(false)));
+    assert!(storage.should_download_or_verify(id).is_ok());
+}
+
 #[tokio::test]
 async fn rejected_proposal_never_releases_outputs_or_gossip() {
     let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, mut changes) =
@@ -219,10 +551,9 @@ async fn a_failed_verification_does_not_rebuild_the_template() {
     let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
         setup(&Network::Mainnet, u64::MAX, true).await;
     mempool.enable(&mut recent_syncs).await;
-    let (mut proposals, _published, _requests) = mock_templates(&mut mempool);
+    let (mut proposals, mut published, _requests) = mock_templates(&mut mempool);
 
-    // The scheduler builds and validates a template for the current tip. Answering it leaves the
-    // template clean, so any later validation can only come from a rebuild.
+    // Hold the first coinbase build: only a real mutation should request an immediate fill.
     let first_build = drive(
         &mut mempool,
         proposals.expect_request_that(|request| {
@@ -230,7 +561,6 @@ async fn a_failed_verification_does_not_rebuild_the_template() {
         }),
     )
     .await;
-    first_build.respond(block::Hash([0; 32]));
 
     let tx = candidate();
     let Response::Queued(mut queued) = mempool
@@ -251,11 +581,11 @@ async fn a_failed_verification_does_not_rebuild_the_template() {
 
     // The queued transaction's caller learns it failed.
     assert!(drive(&mut mempool, &mut result).await.unwrap().is_err());
+    first_build.respond(block::Hash([0; 32]));
+    drive(&mut mempool, published.changed()).await.unwrap();
 
-    // The verified set never changed, so the rejection must not trigger a rebuild. A dirty
-    // template is rebuilt as soon as the mempool is polled, so a window well under the
-    // scheduler's own refresh interval separates the two. The mempool has to keep being polled
-    // while we wait, or the scheduler never runs at all.
+    // The verified set never changed, so there must be no immediate empty fill before the
+    // bounded same-tip refresh. Keep polling the service while observing this window.
     let rebuilt = drive(
         &mut mempool,
         tokio::time::timeout(
@@ -283,22 +613,35 @@ async fn a_failed_verification_does_not_rebuild_the_template() {
 /// mempool no longer holds.
 #[tokio::test]
 async fn an_evicting_insertion_rebuilds_the_template() {
-    // A zero cost limit makes every insertion evict.
     let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
-        setup(&Network::Mainnet, 0, true).await;
+        setup(&Network::Mainnet, u64::MAX, true).await;
     mempool.enable(&mut recent_syncs).await;
-    let (mut proposals, _published, _requests) = mock_templates(&mut mempool);
+    let stored = candidate();
+    let stored_id = stored.transaction.id;
+    mempool.storage().insert(stored, Vec::new(), None).unwrap();
+    let (mut proposals, mut published, _requests) = mock_templates(&mut mempool);
 
-    let first_build = drive(
-        &mut mempool,
-        proposals.expect_request_that(|request| {
-            matches!(request, zebra_consensus::Request::CheckProposal(_))
-        }),
-    )
-    .await;
-    first_build.respond(block::Hash([0; 32]));
+    // New-tip coinbase work is followed by a fill containing the real stored transaction.
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(block::Hash([0; 32]));
+    drive(&mut mempool, published.changed()).await.unwrap();
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(block::Hash([0; 32]));
+    drive(&mut mempool, published.changed()).await.unwrap();
+    let old_template = published.borrow_and_update().clone().unwrap();
+    let old_block =
+        zebra_rpc::proposal_block_from_template(&old_template, None, &Network::Mainnet).unwrap();
+    assert_eq!(old_block.transactions[1].unmined_id(), stored_id);
 
-    let tx = candidate();
+    // Lower the fixture's cost budget only after publication, making eviction deterministic
+    // regardless of ZIP-401's random victim order. This is real-to-empty, not empty-to-empty.
+    super::super::storage::tests::set_tx_cost_limit(mempool.storage(), 0);
+    let tx = Network::Mainnet
+        .unmined_transactions_in_blocks(982_681..=982_681)
+        .find(|tx| !tx.transaction.transaction.is_coinbase() && tx.transaction.id != stored_id)
+        .expect("the block contains another non-conflicting transaction");
     let Response::Queued(mut queued) = mempool
         .ready()
         .await
@@ -309,37 +652,32 @@ async fn an_evicting_insertion_rebuilds_the_template() {
     else {
         panic!("Queue response expected")
     };
-    let mut result = queued.remove(0).unwrap();
-
+    let result = queued.remove(0).unwrap();
     drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
         .await
         .respond(transaction::MempoolResponse::from(tx));
-
-    // Admission validates the transaction against `setup()`'s auto-approving verifier, not the
-    // scheduler's, so the next request this mock sees can only be a rebuild.
-
-    // The transaction passed admission, then the cost limit evicted it on the way in.
-    assert!(
-        drive(&mut mempool, &mut result).await.unwrap().is_err(),
-        "the zero cost limit should evict the transaction during insertion"
+    let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<MempoolError>(),
+        Some(&MempoolError::StorageEffectsChain(
+            SameEffectsChainRejectionError::RandomlyEvicted
+        )),
     );
+    assert!(mempool.storage().transactions().is_empty());
 
-    // Eviction moved the verified set, so the template has to be rebuilt. The window stays well
-    // under the scheduler's refresh interval, which would otherwise rebuild on its own and hide
-    // whether the eviction was noticed at all.
-    let rebuild = drive(
-        &mut mempool,
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            proposals.expect_request_that(|request| {
-                matches!(request, zebra_consensus::Request::CheckProposal(_))
-            }),
-        ),
-    )
-    .await
-    .expect("an eviction should rebuild the template, without waiting for the refresh");
-
-    rebuild.respond(block::Hash([0; 32]));
+    // Same-tip changes are coalesced until the bounded refresh; inspect the replacement,
+    // rather than merely observing that some proposal was checked.
+    drive(&mut mempool, proposals.expect_request_that(|_| true))
+        .await
+        .respond(block::Hash([0; 32]));
+    drive(&mut mempool, published.changed()).await.unwrap();
+    assert!(published
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .transactions()
+        .is_empty());
+    assert_eq!(old_template.transactions().len(), 1);
 }
 
 #[tokio::test]
@@ -421,7 +759,10 @@ async fn stale_proposal_reverifies_without_releasing_its_response() {
             .is_none());
         // Even a failure for the old parent is stale work, not a rejection of the transaction.
         held.respond(Err::<block::Hash, BoxError>(
-            "old parent is no longer valid".into(),
+            zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
+                zebra_consensus::error::TransactionError::BadBalance,
+            ))
+            .into(),
         ));
         let retry = drive(&mut mempool, tx_verifier.expect_request_that(|_| true)).await;
         assert_eq!(retry.request().transaction.id, id);
@@ -453,7 +794,7 @@ fn required_package_is_complete_topological_and_bounded() {
     }
     // Repeated direct dependencies must not duplicate shared ancestors.
     spent.push(spent[0]);
-    let package = required_package(&storage, &transactions[3], &spent).unwrap();
+    let package = required_package(&storage, &transactions[3], &spent, &mut Vec::new()).unwrap();
     assert_eq!(
         package
             .iter()
@@ -467,11 +808,120 @@ fn required_package_is_complete_topological_and_bounded() {
 
     let mut oversized = transactions[3].clone();
     oversized.transaction.size = usize::try_from(block::MAX_BLOCK_BYTES).unwrap();
-    assert!(required_package(&storage, &oversized, &spent).is_err());
+    assert!(required_package(&storage, &oversized, &spent, &mut Vec::new()).is_err());
     let mut too_many_sigops = transactions[3].clone();
     too_many_sigops.legacy_sigop_count = zebra_consensus::MAX_BLOCK_SIGOPS + 1;
-    assert!(required_package(&storage, &too_many_sigops, &spent).is_err());
+    assert!(required_package(&storage, &too_many_sigops, &spent, &mut Vec::new()).is_err());
 
     storage.remove_exact(&[transactions[0].transaction.id].into_iter().collect());
-    assert!(required_package(&storage, &transactions[3], &spent).is_err());
+    assert!(required_package(&storage, &transactions[3], &spent, &mut Vec::new()).is_err());
+}
+
+#[test]
+fn required_package_count_limit_counts_unique_ancestors() {
+    let mut storage = Storage::new(&super::super::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    });
+    // A transparent-only chain with actual parent outpoints; proof verification is not mocked
+    // by required_package, which only assembles the closure for the subsequent CheckProposal.
+    let base = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .unwrap();
+    let input = candidate().transaction.transaction.inputs()[0].clone();
+    let mut outpoint = OutPoint::from_usize(zebra_chain::transaction::Hash([0; 32]), 0);
+    let mut transactions = Vec::new();
+    for _ in 0..=MAX_PACKAGE_COUNT {
+        let mut input = input.clone();
+        let zebra_chain::transparent::Input::PrevOut {
+            outpoint: spent, ..
+        } = &mut input
+        else {
+            panic!("candidate input must be a transparent spend")
+        };
+        *spent = outpoint;
+        let mut tx = base.clone();
+        tx.transaction = Arc::new(
+            (*base.transaction.transaction)
+                .clone()
+                .with_transparent_inputs(vec![input]),
+        )
+        .into();
+        outpoint = OutPoint::from_usize(tx.transaction.id.mined_id(), 0);
+        transactions.push(tx);
+    }
+    let mut spent = Vec::new();
+    for tx in &transactions[..MAX_PACKAGE_COUNT - 1] {
+        storage.insert(tx.clone(), spent, None).unwrap();
+        spent = vec![OutPoint::from_usize(tx.transaction.id.mined_id(), 0)];
+    }
+    // Redundant direct references and a shared transitive ancestor still count only once.
+    spent.push(spent[0]);
+    spent.push(OutPoint::from_usize(
+        transactions[0].transaction.id.mined_id(),
+        0,
+    ));
+    let package = required_package(
+        &storage,
+        &transactions[MAX_PACKAGE_COUNT - 1],
+        &spent,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        package
+            .iter()
+            .map(|tx| tx.transaction.id)
+            .collect::<Vec<_>>(),
+        transactions[..MAX_PACKAGE_COUNT]
+            .iter()
+            .map(|tx| tx.transaction.id)
+            .collect::<Vec<_>>(),
+    );
+    storage
+        .insert(transactions[MAX_PACKAGE_COUNT - 1].clone(), spent, None)
+        .unwrap();
+    let spent = [OutPoint::from_usize(
+        transactions[MAX_PACKAGE_COUNT - 1]
+            .transaction
+            .id
+            .mined_id(),
+        0,
+    )];
+    assert!(required_package(
+        &storage,
+        &transactions[MAX_PACKAGE_COUNT],
+        &spent,
+        &mut Vec::new(),
+    )
+    .is_err());
+}
+
+#[test]
+fn proposal_rejection_expires_with_its_ancestor_context() {
+    let mut storage = Storage::new(&super::super::Config {
+        tx_cost_limit: u64::MAX,
+        ..Default::default()
+    });
+    let ancestor = candidate();
+    let id = ancestor.transaction.id;
+    storage.insert(ancestor, Vec::new(), None).unwrap();
+    let rejected = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .unwrap()
+        .transaction
+        .id;
+    storage.reject(
+        rejected,
+        ExactTipRejectionError::FailedProposal {
+            reason: "invalid ancestor package".into(),
+            ancestors: vec![id].into(),
+        }
+        .into(),
+    );
+    assert!(storage.should_download_or_verify(rejected).is_err());
+    storage.remove_exact(&[id].into_iter().collect());
+    assert!(storage.should_download_or_verify(rejected).is_ok());
 }
