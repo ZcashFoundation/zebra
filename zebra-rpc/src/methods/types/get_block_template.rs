@@ -390,7 +390,12 @@ impl BlockTemplateResponse {
     }
 
     /// Whether this template still extends the committed tip with usable time-dependent difficulty.
-    pub(crate) fn is_valid_for_tip(
+    ///
+    /// Checks the parent hash and whether `now` has crossed a Testnet difficulty transition.
+    /// Historical Regtest timestamps and the median-time cap do not expire the template.
+    /// This checks publication freshness, not proposal validity; the producer must verify the
+    /// proposal before publishing it.
+    pub fn is_valid_for_tip(
         &self,
         tip_hash: block::Hash,
         network: &Network,

@@ -60,7 +60,7 @@ struct Build {
         ),
     >,
     request: Option<BlockTemplateRequest>,
-    fill_after_coinbase: bool,
+    coinbase_only: bool,
 }
 
 /// The only owner of template publication and its bounded proof work.
@@ -123,6 +123,7 @@ impl BlockTemplates {
         storage: Option<(&Storage, block::Hash)>,
         tip: Option<block::Hash>,
     ) -> Poll<Result<(), BoxError>> {
+        let mut retry_request = None;
         if let Some(build) = &mut self.build {
             let Poll::Ready((result, next_coinbase)) = build.future.poll_unpin(cx) else {
                 return Poll::Ready(Ok(()));
@@ -133,7 +134,25 @@ impl BlockTemplates {
                 .expect("the completed build is still owned");
             self.next_coinbase = next_coinbase;
 
-            if let Some(request) = build.request {
+            if result
+                .as_ref()
+                .ok()
+                .and_then(Option::as_ref)
+                .is_some_and(|template| {
+                    !template.is_valid_for_tip(
+                        template.previous_block_hash(),
+                        &self.network,
+                        DateTime32::now(),
+                    )
+                })
+            {
+                // Testnet's abbreviated standard-difficulty range expired during verification.
+                // Retain proof ownership and refetch chain info before publishing any work.
+                retry_request = build.request;
+                if retry_request.is_none() {
+                    self.refresh.as_mut().reset(Instant::now());
+                }
+            } else if let Some(request) = build.request {
                 let result = result.and_then(|template| {
                     template.ok_or_else(|| "chain tip changed while building the template".into())
                 });
@@ -156,8 +175,10 @@ impl BlockTemplates {
                         };
                         self.published.send_replace(Some(Arc::new(template)));
                         self.refresh.as_mut().reset(Instant::now() + refresh_after);
-                        if build.fill_after_coinbase {
-                            self.dirty = true;
+                        if build.coinbase_only && self.dirty {
+                            // Publish new-tip coinbase work first, then fill it once. Subsequent
+                            // same-tip changes wait for the fixed refresh deadline.
+                            self.refresh.as_mut().reset(Instant::now());
                         }
                         if let (Some(height), Some(miner_params)) =
                             (next_height, &self.miner_params)
@@ -193,40 +214,35 @@ impl BlockTemplates {
             self.published.borrow().as_ref().is_none_or(|template| {
                 tip.is_some_and(|tip| template.previous_block_hash() != tip)
             });
-        self.dirty |= needs_tip;
-        // A stream of override requests must not starve default miners after a new tip.
-        let prioritize_default = needs_tip
-            && self.miner_params.is_some()
-            && !self.was_failing
-            && (storage.is_some() || self.network.is_regtest());
+        let default_available =
+            self.miner_params.is_some() && (storage.is_some() || self.network.is_regtest());
+        // Poll even under override load: due refreshes and error recovery must make progress.
+        let elapsed = self.refresh.as_mut().poll(cx).is_ready();
+        let prioritize_default = default_available && (elapsed || (needs_tip && !self.was_failing));
 
         // Bound override backlog independently of the transaction download queue. A cancelled
         // caller must not cause a new proof, but still let the next queued request make progress.
-        let request = if prioritize_default {
+        let request = if retry_request.is_some() {
+            retry_request
+        } else if prioritize_default {
             None
         } else {
             match self.requests.poll_recv(cx) {
-                Poll::Ready(Some(request)) => {
-                    if request.response.is_closed() {
-                        cx.waker().wake_by_ref();
-                        return Poll::Ready(Ok(()));
-                    }
-                    Some(request)
-                }
+                Poll::Ready(Some(request)) => Some(request),
                 Poll::Ready(None) | Poll::Pending => None,
             }
         };
+        if request
+            .as_ref()
+            .is_some_and(|request| request.response.is_closed())
+        {
+            cx.waker().wake_by_ref();
+            return Poll::Ready(Ok(()));
+        }
         let is_override = request.is_some();
-        if !is_override {
-            // Before initial sync the disabled mempool cannot contribute transactions. Regtest
-            // still needs coinbase-only templates to bootstrap its chain with generate.
-            if self.miner_params.is_none() || (storage.is_none() && !self.network.is_regtest()) {
-                return Poll::Ready(Ok(()));
-            }
-            let elapsed = self.refresh.as_mut().poll(cx).is_ready();
-            if !elapsed && (!self.dirty || self.was_failing) {
-                return Poll::Ready(Ok(()));
-            }
+        // Ordinary same-tip changes cannot bypass or postpone the refresh/backstop deadline.
+        if !is_override && !prioritize_default {
+            return Poll::Ready(Ok(()));
         }
 
         let coinbase_only = !is_override && needs_tip;
@@ -269,10 +285,10 @@ impl BlockTemplates {
             )
             .boxed(),
             request,
-            fill_after_coinbase,
+            coinbase_only,
         });
         if !is_override {
-            self.dirty = false;
+            self.dirty = fill_after_coinbase;
         }
         // A newly stored future has not registered any wakeups yet.
         cx.waker().wake_by_ref();
