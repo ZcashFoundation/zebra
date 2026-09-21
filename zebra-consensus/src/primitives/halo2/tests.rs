@@ -16,7 +16,10 @@
 
 use std::sync::Arc;
 
-use orchard::bundle::{Authorized, Bundle};
+use orchard::{
+    bundle::{Authorized, Bundle},
+    primitives::redpallas::{Binding, Signature},
+};
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::{
     block::Block,
@@ -88,6 +91,25 @@ fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
         "a pre-NU6.2 Orchard proof must be REJECTED by the post-NU6.2 (fixed) key; \
          verifying it would mean the era selection is fail-open"
     );
+}
+
+/// Binding authorization is required even when the proof and spend signatures are valid.
+#[test]
+fn orchard_binding_signature_is_verified() {
+    let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+    assert!(Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2));
+
+    let invalid = bundle.map_authorization(
+        &mut (),
+        |_, _, signature| signature,
+        |_, authorization| {
+            Authorized::from_parts(
+                authorization.proof().clone(),
+                Signature::<Binding>::from([0xff; 64]),
+            )
+        },
+    );
+    assert!(!Item::new(invalid, sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2));
 }
 
 /// The Orchard verifier routing selects the correct key by block era (network upgrade).
