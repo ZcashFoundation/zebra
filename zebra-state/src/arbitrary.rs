@@ -86,6 +86,7 @@ impl ContextuallyVerifiedBlock {
             block,
             zero_spent_utxos,
             DeferredPoolBalanceChange::zero(),
+            &zebra_chain::parameters::Network::Mainnet,
         )
         .expect("all UTXOs are provided with zero values")
     }

@@ -258,6 +258,7 @@ impl DiskWriteBatch {
             .chain_value_pool_change(
                 &utxos_spent_by_block,
                 finalized.deferred_pool_balance_change,
+                &db.network(),
             )
             .map_err(|value_balance_error| {
                 ValidateContextError::CalculateBlockChainValueChange {

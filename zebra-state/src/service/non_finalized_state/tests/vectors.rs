@@ -1132,6 +1132,7 @@ fn with_block_and_spent_utxos_preserves_deferred_pool_balance_change() -> Result
         prepared,
         spent_utxos,
         DeferredPoolBalanceChange::new(expected_deferred),
+        &Network::Mainnet,
     )?;
 
     assert_eq!(

@@ -25,7 +25,8 @@ use crate::{
 
 use constants::{
     regtest, testnet, BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
-    FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY,
+    FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY, NSM_FEE_DENOMINATOR,
+    NSM_FEE_NUMERATOR, NSM_SUBSIDY_DENOMINATOR, NSM_SUBSIDY_NUMERATOR,
     NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL, POST_NU7_HALVING_INTERVAL,
     PRE_BLOSSOM_HALVING_INTERVAL,
 };
@@ -613,4 +614,102 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     } else {
         Amount::zero()
     }
+}
+
+/// The contribution that a block's transaction fees make to the NSM reserve.
+///
+/// # Consensus
+///
+/// > $\mathsf{NSMFeeContribution}(\mathsf{height}) :=
+/// > \mathsf{floor}(6 \cdot \mathsf{TransactionFees}(\mathsf{height}) / 10)$
+///
+/// This calculation is performed on the aggregate fees for the block, so rounding favours the
+/// miner. It is zero before NU7 activates.
+///
+/// The rule is specified in the NU7 deployment ZIP (`zcash/zips#1363`), which takes precedence
+/// over [ZIP 235] for NU7: NU7 does not deploy the [ZIP 233] voluntary-removal bundle, so the fee
+/// contribution is a block-level calculation and needs no new coinbase field.
+///
+/// [ZIP 233]: https://zips.z.cash/zip-0233
+/// [ZIP 235]: https://zips.z.cash/zip-0235
+pub fn nsm_fee_contribution(
+    height: Height,
+    network: &Network,
+    transaction_fees: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, amount::Error> {
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
+        return Ok(Amount::zero());
+    }
+
+    // A `NonNegative` amount is never negative, and `transaction_fees` is at most `MAX_MONEY`,
+    // which is under 2^53, so multiplying it by 6 can not overflow a `u64`. The `floor()` in the
+    // spec is implicit in Rust's integer division.
+    let fees =
+        u64::try_from(transaction_fees.zatoshis()).map_err(|source| amount::Error::Convert {
+            value: i128::from(transaction_fees.zatoshis()),
+            source,
+        })?;
+
+    Amount::try_from(fees * NSM_FEE_NUMERATOR / NSM_FEE_DENOMINATOR)
+}
+
+/// The part of a block's transaction fees that its miner may claim.
+///
+/// # Consensus
+///
+/// > $\mathsf{MinerFees}(\mathsf{height}) := \mathsf{TransactionFees}(\mathsf{height}) -
+/// > \mathsf{NSMFeeContribution}(\mathsf{height})$
+///
+/// This is the whole of the transaction fees before NU7 activates.
+///
+/// See [`nsm_fee_contribution`] for the specification this comes from.
+pub fn miner_fees(
+    height: Height,
+    network: &Network,
+    transaction_fees: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, amount::Error> {
+    transaction_fees - nsm_fee_contribution(height, network, transaction_fees)?
+}
+
+/// The part of the NSM reserve that is reissued in the block at `height`.
+///
+/// # Consensus
+///
+/// > $\mathsf{NSMSubsidy}(\mathsf{height}) := 0$, if
+/// > $\mathsf{height} < \mathsf{NSMReissuanceHeight}$, otherwise
+/// > $\mathsf{ceiling}(\mathsf{NSM\_SUBSIDY\_FRACTION} \cdot
+/// > \mathsf{NSMReserveAfter}(\mathsf{height} - 1))$
+///
+/// `reserve_before` is the NSM reserve balance after the previous block was applied.
+///
+/// Rounding upward ensures that any positive reserve balance is eventually reissued.
+///
+/// `reissuance_height` is `NSMReissuanceHeight` for the network, or `None` if it has not been
+/// assigned yet, in which case no reserve is ever reissued.
+///
+/// The NU7 deployment ZIP leaves the reissuance height unassigned ("TBD, corresponding to
+/// February 2031") on both Mainnet and Testnet, so [`Network::nsm_reissuance_height`] currently
+/// returns `None` on every network.
+pub fn nsm_subsidy(
+    height: Height,
+    reissuance_height: Option<Height>,
+    reserve_before: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, amount::Error> {
+    let Some(reissuance_height) = reissuance_height else {
+        return Ok(Amount::zero());
+    };
+
+    if height < reissuance_height {
+        return Ok(Amount::zero());
+    }
+
+    // A `NonNegative` amount is never negative, and the reserve is at most `MAX_MONEY`, which is
+    // under 2^53, so multiplying it by 1375 can not overflow a `u64`.
+    let reserve =
+        u64::try_from(reserve_before.zatoshis()).map_err(|source| amount::Error::Convert {
+            value: i128::from(reserve_before.zatoshis()),
+            source,
+        })?;
+
+    Amount::try_from((reserve * NSM_SUBSIDY_NUMERATOR).div_ceil(NSM_SUBSIDY_DENOMINATOR))
 }

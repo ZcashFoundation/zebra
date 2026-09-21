@@ -1135,3 +1135,93 @@ fn zip_218_global_shielded_budget() {
         "a block within the global shielded budget must be accepted at NU7",
     );
 }
+
+/// From NU7, a coinbase transaction may only claim `MinerFees`, not the whole of the block's
+/// transaction fees: the rest is removed from circulation into the NSM reserve.
+#[test]
+fn nsm_fee_contribution_is_withheld_from_the_coinbase() -> Result<(), Report> {
+    use zebra_chain::{parameters::subsidy, transparent};
+
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000_000);
+    let height = Height(1_000_000);
+    let expected_block_subsidy = block_subsidy(height, &network)?;
+
+    // Fees that are not a multiple of 10, so the flooring in `NSMFeeContribution` is exercised.
+    let transaction_fees = Amount::try_from(100_003)?;
+    let expected_miner_fees = subsidy::miner_fees(height, &network, transaction_fees)?;
+    assert!(expected_miner_fees < transaction_fees);
+
+    // A coinbase transaction whose single transparent output claims the subsidy plus the miner's
+    // share of the fees, which is what NU7 requires.
+    let coinbase = |claimed: Amount<zebra_chain::amount::NonNegative>| {
+        Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![transparent::Input::Coinbase {
+                height,
+                data: Vec::new(),
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: claimed,
+                lock_script: transparent::Script::new(&[0]),
+            }],
+            LockTime::Height(Height(0)),
+            height,
+        )
+    };
+
+    let valid = coinbase((expected_block_subsidy + expected_miner_fees)?);
+
+    assert!(
+        check::miner_fees_are_valid(
+            &valid,
+            height,
+            transaction_fees,
+            expected_block_subsidy,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+        )
+        .is_ok(),
+        "a coinbase claiming only the miner's share of the fees must be valid from NU7",
+    );
+
+    // Claiming the whole of the fees, which was valid before NU7, is now too much.
+    let over = coinbase((expected_block_subsidy + transaction_fees)?);
+
+    assert_eq!(
+        check::miner_fees_are_valid(
+            &over,
+            height,
+            transaction_fees,
+            expected_block_subsidy,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+        ),
+        Err(BlockError::Transaction(TransactionError::Subsidy(
+            SubsidyError::InvalidMinerFees,
+        ))),
+        "a coinbase claiming the whole of the fees must be rejected from NU7",
+    );
+
+    // Below NU7 the same coinbase is the valid one, because no fees are withheld.
+    let pre_nu7_height = Height(999_999);
+    let pre_nu7_subsidy = block_subsidy(pre_nu7_height, &network)?;
+    let pre_nu7_coinbase = coinbase((pre_nu7_subsidy + transaction_fees)?);
+
+    assert!(
+        check::miner_fees_are_valid(
+            &pre_nu7_coinbase,
+            pre_nu7_height,
+            transaction_fees,
+            pre_nu7_subsidy,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+        )
+        .is_ok(),
+        "a coinbase claiming the whole of the fees must be valid before NU7",
+    );
+
+    Ok(())
+}

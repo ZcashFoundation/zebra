@@ -5,11 +5,11 @@ use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     ironwood, orchard,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy, Network, NetworkUpgrade},
     sapling,
     serialization::TrustedPreallocate,
     sprout,
@@ -257,8 +257,8 @@ impl Block {
     /// Returns the overall chain value pool change in this block---the negative sum of the
     /// transaction value balances in this block.
     ///
-    /// These are the changes in the transparent, Sprout, Sapling, Orchard, and
-    /// Deferred chain value pools, as a result of this block.
+    /// These are the changes in the transparent, Sprout, Sapling, Orchard, Ironwood and
+    /// Deferred chain value pools, and in the NSM reserve, as a result of this block.
     ///
     /// Positive values are added to the corresponding chain value pool and negative values are
     /// removed from the corresponding pool.
@@ -274,6 +274,7 @@ impl Block {
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
@@ -285,9 +286,57 @@ impl Block {
                 acc + tx.value_balance(utxos)?
             })?;
 
-        Ok(*tx_pool_sum
-            .neg()
-            .set_deferred_amount(deferred_pool_balance_change.value()))
+        let nsm_reserve_change = self.nsm_reserve_change(utxos, network)?;
+
+        let mut chain_value_pool_change = tx_pool_sum.neg();
+        chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
+        chain_value_pool_change.set_nsm_reserve_amount(nsm_reserve_change);
+
+        Ok(chain_value_pool_change)
+    }
+
+    /// Returns the amount this block adds to the NSM reserve.
+    ///
+    /// From NU7 activation, 60% of a block's transaction fees are removed from circulation into
+    /// the Network Sustainability Mechanism reserve instead of being claimed by the miner, so the
+    /// coinbase transaction claims that much less and the same amount accrues to the reserve. This
+    /// is zero before NU7 activates.
+    ///
+    /// See [`subsidy::nsm_fee_contribution`] for the specification.
+    ///
+    /// The given `utxos` must contain the [`transparent::Utxo`]s of every input in this block, as
+    /// for [`Self::chain_value_pool_change`].
+    pub fn nsm_reserve_change(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        network: &Network,
+    ) -> Result<Amount<NegativeAllowed>, ValueBalanceError> {
+        let Some(height) = self.coinbase_height() else {
+            return Ok(Amount::zero());
+        };
+
+        if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
+            return Ok(Amount::zero());
+        }
+
+        // The coinbase transaction consumes the fees rather than paying them, so it is excluded
+        // from the total, exactly as in the block verifier's miner fee sum.
+        let transaction_fees = self
+            .transactions
+            .iter()
+            .filter(|tx| !tx.is_coinbase())
+            .try_fold(Amount::<NonNegative>::zero(), |acc, tx| {
+                let fee = tx
+                    .value_balance(utxos)?
+                    .remaining_transaction_value()
+                    .map_err(ValueBalanceError::Total)?;
+
+                (acc + fee).map_err(ValueBalanceError::Total)
+            })?;
+
+        subsidy::nsm_fee_contribution(height, network, transaction_fees)
+            .and_then(|contribution| contribution.constrain())
+            .map_err(ValueBalanceError::NsmReserve)
     }
 
     /// Compute the root of the authorizing data Merkle tree,

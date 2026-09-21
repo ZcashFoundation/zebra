@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'The NU7 Network Sustainability Mechanism reserve: from NU7 activation, 60% of a block''s transaction fees are removed from circulation instead of being claimed by the miner. `ValueBalance` gains an `nsm_reserve` balance, which is not a spendable chain value pool and is not part of the Issued Supply. Adds `subsidy::nsm_fee_contribution()`, `subsidy::miner_fees()` and `subsidy::nsm_subsidy()`. `Block::chain_value_pool_change()` now takes the network, so it can calculate the reserve contribution.'
+time: 2026-09-21T14:00:00.000000000Z

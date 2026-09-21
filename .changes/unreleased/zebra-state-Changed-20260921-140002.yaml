@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Database format 28.1.0: the chain value pool `ValueBalance` can widen from 48 to 56 bytes for the NU7 NSM reserve balance, and `BlockInfo` records from 52 to 60 bytes with it, the reserve appended after the other fields rather than contiguous with them. Read code accepts 32, 40, 48 and 56-byte records, and writes keep the v28.0 widths while the reserve is zero, so a database stays byte-compatible with v28.0 until NU7 activation; no resync or data migration is needed.'
+time: 2026-09-21T14:00:02.000000000Z

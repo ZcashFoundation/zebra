@@ -604,6 +604,7 @@ impl NonFinalizedState {
             prepared.clone(),
             spent_utxos.clone(),
             calculate_deferred_pool_balance_change(prepared.height, &self.network),
+            &self.network,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

@@ -450,3 +450,107 @@ fn zip_218_halving_interval() {
         );
     }
 }
+
+/// The NU7 deployment ZIP removes 60% of a block's transaction fees from circulation into the NSM
+/// reserve, rounding in the miner's favour, and leaves the fees untouched before NU7.
+#[test]
+fn nsm_fee_contribution_and_miner_fees() -> Result<(), Report> {
+    use crate::parameters::subsidy::{miner_fees, nsm_fee_contribution};
+
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    let pre_nu7 = Height(999);
+    let nu7 = Height(1_000);
+
+    // Before NU7, the miner keeps the whole of the fees.
+    let fees = Amount::<NonNegative>::try_from(100_003)?;
+    assert_eq!(
+        nsm_fee_contribution(pre_nu7, &network, fees)?,
+        Amount::<NonNegative>::zero(),
+    );
+    assert_eq!(miner_fees(pre_nu7, &network, fees)?, fees);
+
+    // From NU7, 60% is removed, rounded down, so the miner keeps the rounding.
+    assert_eq!(
+        nsm_fee_contribution(nu7, &network, fees)?,
+        Amount::<NonNegative>::try_from(60_001)?,
+    );
+    assert_eq!(
+        miner_fees(nu7, &network, fees)?,
+        Amount::<NonNegative>::try_from(40_002)?,
+    );
+
+    // The contribution and the miner's fees always add back up to the whole of the fees.
+    for fees in [0, 1, 9, 10, 11, 999, 1_000_000_007] {
+        let fees = Amount::<NonNegative>::try_from(fees)?;
+        assert_eq!(
+            (nsm_fee_contribution(nu7, &network, fees)? + miner_fees(nu7, &network, fees)?)?,
+            fees,
+            "the NSM contribution and the miner's fees must partition the fees",
+        );
+    }
+
+    // A block with no fees contributes nothing.
+    assert_eq!(
+        nsm_fee_contribution(nu7, &network, Amount::<NonNegative>::zero())?,
+        Amount::<NonNegative>::zero(),
+    );
+
+    Ok(())
+}
+
+/// The NSM reissuance height is unassigned, so no reserve is reissued yet; when it is assigned,
+/// the per-block subsidy is the reserve balance times the NSM fraction, rounded up.
+#[test]
+fn nsm_subsidy_reissuance() -> Result<(), Report> {
+    use crate::parameters::subsidy::nsm_subsidy;
+
+    let _init_guard = zebra_test::init();
+
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000_i64)?;
+
+    // No network has an assigned reissuance height, so nothing is reissued anywhere.
+    for network in Network::iter() {
+        assert_eq!(network.nsm_reissuance_height(), None);
+        assert_eq!(
+            nsm_subsidy(Height(2_000_000), network.nsm_reissuance_height(), reserve)?,
+            Amount::<NonNegative>::zero(),
+        );
+    }
+
+    let reissuance_height = Some(Height(1_000_000));
+
+    // Nothing is reissued below the reissuance height.
+    assert_eq!(
+        nsm_subsidy(Height(999_999), reissuance_height, reserve)?,
+        Amount::<NonNegative>::zero(),
+    );
+
+    // At and above it, the subsidy is `NSM_SUBSIDY_FRACTION` of the reserve: a reserve of
+    // 10^10 zatoshi reissues exactly 1375 zatoshi per block.
+    assert_eq!(
+        nsm_subsidy(Height(1_000_000), reissuance_height, reserve)?,
+        Amount::<NonNegative>::try_from(1375)?,
+    );
+
+    // Rounding is upward, so any positive reserve is eventually reissued, however small.
+    assert_eq!(
+        nsm_subsidy(
+            Height(1_000_000),
+            reissuance_height,
+            Amount::<NonNegative>::try_from(1)?
+        )?,
+        Amount::<NonNegative>::try_from(1)?,
+    );
+    assert_eq!(
+        nsm_subsidy(
+            Height(1_000_000),
+            reissuance_height,
+            Amount::<NonNegative>::zero()
+        )?,
+        Amount::<NonNegative>::zero(),
+    );
+
+    Ok(())
+}
