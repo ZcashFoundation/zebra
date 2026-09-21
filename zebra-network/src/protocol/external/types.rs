@@ -122,6 +122,9 @@ impl Version {
             (Mainnet, Nu6_2) => 170_150,
             // TODO: these NU6.3 (Ironwood) and Nu7 protocol versions are provisional, bumped above
             // Nu6_2's 170_150. Update them when the real values are specified.
+            //
+            // The NU7 deployment ZIP (`zcash/zips#1363`) lists MIN_NETWORK_PROTOCOL_VERSION as
+            // TBD on both Mainnet and Testnet, so there is nothing to adopt yet.
             (Testnet(params), Nu6_3) if params.is_default_testnet() || params.is_regtest() => {
                 170_160
             }
