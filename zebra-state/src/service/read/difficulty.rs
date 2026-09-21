@@ -18,7 +18,7 @@ use crate::{
         block_iter::any_chain_ancestor_iter,
         check::{
             difficulty::{
-                BLOCK_MAX_TIME_SINCE_MEDIAN, MAX_POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
+                pow_adjustment_block_span, BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN,
             },
             AdjustedDifficulty,
         },
@@ -43,7 +43,7 @@ pub fn get_block_template_chain_info(
     network: &Network,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let mut best_relevant_chain_and_history_tree_result =
-        best_relevant_chain_and_history_tree(non_finalized_state, db);
+        best_relevant_chain_and_history_tree(non_finalized_state, db, network);
 
     // Retry the finalized state query if it was interrupted by a finalizing block.
     //
@@ -54,7 +54,7 @@ pub fn get_block_template_chain_info(
         }
 
         best_relevant_chain_and_history_tree_result =
-            best_relevant_chain_and_history_tree(non_finalized_state, db);
+            best_relevant_chain_and_history_tree(non_finalized_state, db, network);
     }
 
     let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
@@ -148,19 +148,20 @@ pub fn solution_rate(
 fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
+    network: &Network,
 ) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
+    // The candidate block is the one after the tip, and ZIP 218 makes the span depend on its
+    // height, so only fetch as many blocks as that height actually needs.
+    let candidate_height = (state_tip_before_queries.0 + 1).unwrap_or(state_tip_before_queries.0);
+    let block_span = pow_adjustment_block_span(network, candidate_height);
+
     let best_relevant_chain =
         any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
-    // Fetch the largest span any height could need: `AdjustedDifficulty` truncates the context
-    // to the span that applies to the candidate block's own height.
-    let best_relevant_chain: Vec<_> = best_relevant_chain
-        .into_iter()
-        .take(MAX_POW_ADJUSTMENT_BLOCK_SPAN)
-        .collect();
+    let best_relevant_chain: Vec<_> = best_relevant_chain.into_iter().take(block_span).collect();
 
     if best_relevant_chain.is_empty() {
         return Err("missing genesis block, wait until it is committed".into());
@@ -395,6 +396,7 @@ mod tests {
     //! clock (the `DateTime32::now()` call lives only in its caller).
 
     use super::*;
+    use crate::service::check::difficulty::MAX_POW_ADJUSTMENT_BLOCK_SPAN;
     use zebra_chain::work::difficulty::ParameterDifficulty as _;
 
     // A Testnet height at which the minimum-difficulty rule is active (>= 299188) and the
@@ -408,6 +410,8 @@ mod tests {
     /// to the minimum-difficulty rule under test.
     fn recent_block_data(network: &Network) -> Vec<(CompactDifficulty, DateTime<Utc>)> {
         let threshold = network.target_difficulty_limit().to_compact();
+        // Enough blocks for the largest span any height could need, so the test data is never
+        // the limiting factor.
         (0..MAX_POW_ADJUSTMENT_BLOCK_SPAN)
             .map(|i| (threshold, DateTime32::from(PREV - i as u32).into()))
             .collect()
