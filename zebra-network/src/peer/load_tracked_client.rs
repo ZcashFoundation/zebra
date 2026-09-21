@@ -63,6 +63,11 @@ impl LoadTrackedClient {
         self.connection_info.remote.services
     }
 
+    /// Returns the shared metadata allocation identifying this connection.
+    pub(crate) fn connection_info(&self) -> &Arc<ConnectionInfo> {
+        &self.connection_info
+    }
+
     /// Returns true if this peer connected directly to us from `ip`.
     pub fn is_inbound_direct_from_ip(&self, ip: &IpAddr) -> bool {
         let expected_ip = canonical_socket_addr(SocketAddr::new(*ip, 0)).ip();

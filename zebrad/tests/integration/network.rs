@@ -371,21 +371,16 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 }
 
 /// Regression test for #10715: a node that has synced to the shared chain tip must not
-/// disconnect its upstream peer due to empty `FindBlocks` responses.
+/// disconnect its upstream peer merely because discovery finds no new blocks.
 ///
-/// Before the fix, the stall tracker ran unconditionally and disconnected peers after 3
-/// consecutive empty-response `FindBlocks` cycles, even when both nodes were already at
-/// the same tip. The fix gates stall tracking on `is_at_or_near_network_tip`, so the
-/// peer is only tracked during genuine catch-up, not once the node is fully synced.
+/// Successful empty replies and caller-cancelled discovery requests are not peer failures.
 ///
 /// Sets up two regtest nodes:
 /// - Node A (upstream): mines a small chain and listens for P2P connections
 /// - Node B (internal): connects exclusively to Node A and syncs to its tip
 ///
 /// After both nodes share the same tip, the test polls `getpeerinfo` on Node B for
-/// 30 seconds and asserts that Node A is always connected. If the stall tracker fires
-/// incorrectly, Node A is dropped within ~6 seconds (3 cycles × 2-second regtest restart
-/// delay) and the assertion fails.
+/// 30 seconds and asserts that Node A remains connected across repeated discovery timeouts.
 #[tokio::test]
 async fn synced_node_keeps_upstream_peer_connected() -> Result<()> {
     tokio::time::timeout(
@@ -472,9 +467,7 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     tracing::info!("Node B has synced to Node A's tip; verifying Node A stays connected");
 
-    // The regtest sync loop restarts every 2 seconds. With the bug, 3 consecutive
-    // empty-response cycles (~6 seconds) would disconnect Node A. Poll for 30 seconds
-    // to give the stall tracker ample time to fire if the fix is not in effect.
+    // Cover several discovery timeouts and sync restarts after both nodes reach the shared tip.
     for i in 0..30_u32 {
         let peer_info: Vec<PeerInfo> = internal_client
             .json_result_from_call("getpeerinfo", "[]")
@@ -484,7 +477,7 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
         assert!(
             !peer_info.is_empty(),
             "upstream peer was disconnected {i} seconds after reaching the shared tip; \
-             the stall tracker must not fire when the node is at or near the network tip"
+             empty or caller-cancelled discovery requests must not cause disconnection"
         );
 
         tokio::time::sleep(Duration::from_secs(1)).await;
