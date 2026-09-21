@@ -20,7 +20,7 @@ use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, nsm_fee_contribution},
         Network, NetworkUpgrade,
     },
     primitives::ed25519,
@@ -154,7 +154,9 @@ impl TransactionTemplate<NegativeOrZero> {
             }
             _ => block_subsidy(height, net)?,
         };
-        let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
+        // From NU7 activation, the coinbase can't claim the fees ZIP 235 removes from circulation.
+        let miner_fees = (txs_fee - nsm_fee_contribution(height, net, txs_fee))?;
+        let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fees;
         let miner_reward = Zatoshis::try_from(miner_reward?)?;
 
         let mut builder = Builder::new(
@@ -168,9 +170,9 @@ impl TransactionTemplate<NegativeOrZero> {
         let default_memo = MemoBytes::empty();
         let memo = miner_params.memo().unwrap_or(&default_memo);
 
-        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. If the
-        // Network Sustainability Mechanism re-introduces a burn, it will be plumbed back through
-        // explicitly at that point.
+        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. The
+        // fees ZIP 235 removes from circulation are left out of the miner reward above, and need
+        // no transaction field.
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {
@@ -282,7 +284,7 @@ impl TransactionTemplate<NegativeOrZero> {
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),
-            fee: (-txs_fee).constrain()?,
+            fee: (-miner_fees).constrain()?,
             sigops: tx.sigops()?,
             required: true,
         })

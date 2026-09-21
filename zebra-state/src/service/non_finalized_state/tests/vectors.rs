@@ -1260,9 +1260,9 @@ fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
 /// reissues from the balance after its parent. A block paying the scheduled subsidy instead is
 /// rejected from the deployment height.
 ///
-/// Without ZIP 233 there is nothing to remove from circulation, so the NSM value balance at a height
-/// is the same on every chain that reaches it. The block subsidy still comes from the parent block
-/// on the committing block's own chain.
+/// The blocks after activation contain transactions that pay fees. With the `zip235` cfg each block
+/// credits the balance with the fees it removes from circulation, and from the deployment height a
+/// block whose coinbase claims those fees is rejected.
 #[cfg(zcash_unstable = "zip234")]
 #[test]
 fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
@@ -1274,12 +1274,12 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         },
         parameters::{
             subsidy::{
-                additional_block_subsidy, block_subsidy_with_parent_pools, scheduled_block_subsidy,
-                CoinbaseTransactionError, SubsidyError,
+                additional_block_subsidy, block_subsidy_with_parent_pools, nsm_fee_contribution,
+                scheduled_block_subsidy, CoinbaseTransactionError, SubsidyError,
             },
             testnet::{ConfiguredActivationHeights, RegtestParameters},
         },
-        transaction::{LockTime, Transaction},
+        transaction::{self, LockTime, Transaction},
     };
 
     use crate::ValidateContextError;
@@ -1291,6 +1291,11 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
     const ACTIVATION_HEIGHT: u32 = 11;
     const DEPLOYMENT_HEIGHT: u32 = ACTIVATION_HEIGHT + 2;
     const INITIAL_NSM_VALUE_BALANCE: i64 = 1_000_000_000;
+    // Each block after activation spends two outputs of `FUNDING_VALUE`, paying these fees. ZIP 235
+    // rounds the fees it removes once per block: `floor(1_002 * 6 / 10)` is 601, but rounding each
+    // transaction's fee would remove 600.
+    const FUNDING_VALUE: i64 = 10_000;
+    const FEES: [i64; 2] = [1_001, 1];
 
     let zats = |zats: i64| Amount::<NonNegative>::try_from(zats).expect("valid amount");
 
@@ -1312,9 +1317,61 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         ..Default::default()
     });
 
-    // A block at `height` whose coinbase pays `coinbase_value`. Block times increase with height,
-    // so each block's time is after the median time of the blocks before it.
-    let block = |height: Height, previous_block_hash, coinbase_value| -> Arc<Block> {
+    // The outputs that the transactions in the block at `height` spend. They aren't created by any
+    // transaction, so the test adds them to the outputs of the block that spends them.
+    let funding_outpoints = |height: Height| {
+        (0..FEES.len() as u32).map(move |index| transparent::OutPoint {
+            hash: transaction::Hash([height.0 as u8; 32]),
+            index,
+        })
+    };
+    let funding_output = || transparent::Output {
+        value: zats(FUNDING_VALUE),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let prepare_with_funding = |block: Arc<Block>, height: Height| {
+        let mut prepared = block.prepare();
+        prepared
+            .new_outputs
+            .extend(funding_outpoints(height).map(|outpoint| {
+                let utxo = transparent::Utxo::new(funding_output(), height, false);
+                (outpoint, transparent::OrderedUtxo::from_utxo(utxo, 0))
+            }));
+        prepared
+    };
+
+    // The transactions in the block at `height`, which spend that block's funding outputs and pay
+    // `FEES`.
+    let spends = |height: Height| -> Vec<Arc<Transaction>> {
+        funding_outpoints(height)
+            .zip(FEES)
+            .map(|(outpoint, fee)| {
+                Arc::new(Transaction::test_v4(
+                    vec![transparent::Input::PrevOut {
+                        outpoint,
+                        unlock_script: transparent::Script::new(&[]),
+                        sequence: u32::MAX,
+                    }],
+                    vec![transparent::Output {
+                        value: zats(FUNDING_VALUE - fee),
+                        lock_script: transparent::Script::new(&[]),
+                    }],
+                    LockTime::unlocked(),
+                    height,
+                ))
+            })
+            .collect()
+    };
+    let fees = zats(FEES.iter().sum());
+
+    // A block at `height` whose coinbase pays `coinbase_value`, followed by `transactions`. Block
+    // times increase with height, so each block's time is after the median time of the blocks
+    // before it.
+    let block = |height: Height,
+                 previous_block_hash,
+                 coinbase_value,
+                 transactions: Vec<Arc<Transaction>>|
+     -> Arc<Block> {
         let mut block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
             .zcash_deserialize_into::<Block>()
             .expect("block should deserialize");
@@ -1335,17 +1392,20 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
             LockTime::unlocked(),
             height,
         ))];
+        block.transactions.extend(transactions);
         Arc::make_mut(&mut block.header).previous_block_hash = previous_block_hash;
 
         Arc::new(block)
     };
 
-    // A block at `height` whose coinbase pays `coinbase_value`, committing to `history_root`.
+    // A block at `height` whose coinbase pays `coinbase_value`, followed by `transactions`,
+    // committing to `history_root`.
     let committed_block = |height: Height,
                            previous_block_hash,
                            coinbase_value,
+                           transactions,
                            history_root: &ChainHistoryMmrRootHash| {
-        let child = block(height, previous_block_hash, coinbase_value);
+        let child = block(height, previous_block_hash, coinbase_value, transactions);
         let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
             history_root,
             &child.auth_data_root(),
@@ -1354,12 +1414,26 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         child.set_block_commitment(commitment.into())
     };
 
-    // A block at `height` paying the ZIP's subsidy for `parent_pools`, committing to `history_root`.
-    let subsidy_block = |height: Height, previous_block_hash, parent_pools, history_root: &_| {
+    // A block at `height` paying the ZIP's subsidy for `parent_pools`, and the part of `fees` that
+    // ZIP 235 leaves to the miner, committing to `history_root`.
+    let subsidy_block = |height: Height,
+                         previous_block_hash,
+                         parent_pools,
+                         fees: Amount<NonNegative>,
+                         transactions,
+                         history_root: &_| {
         let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)
             .expect("the block subsidy is valid");
+        let miner_fees = (fees - nsm_fee_contribution(height, &network, fees))
+            .expect("the contribution is at most the fees");
 
-        committed_block(height, previous_block_hash, subsidy, history_root)
+        committed_block(
+            height,
+            previous_block_hash,
+            (subsidy + miner_fees).expect("valid amount"),
+            transactions,
+            history_root,
+        )
     };
 
     let finalized_state = FinalizedState::new(
@@ -1377,6 +1451,7 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         parent_height,
         block::Hash([1; 32]),
         scheduled_block_subsidy(parent_height, &network)?,
+        Vec::new(),
     );
 
     let mut state = NonFinalizedState::new(&network);
@@ -1394,6 +1469,8 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         activation,
         parent.hash(),
         pools_before_activation,
+        zats(0),
+        Vec::new(),
         &CHAIN_HISTORY_ACTIVATION_RESERVED.into(),
     );
     assert_eq!(
@@ -1426,6 +1503,10 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
             .expect("the chain has blocks")
             .chain_value_pools;
         let reissued = additional_block_subsidy(height, &network, parent_pools.nsm_amount());
+        let contributed = nsm_fee_contribution(height, &network, fees);
+        let miner_fees = (fees - contributed)?;
+        #[cfg(zcash_unstable = "zip235")]
+        assert_eq!(contributed, zats(601));
 
         if height < Height(DEPLOYMENT_HEIGHT) {
             assert_eq!(
@@ -1436,32 +1517,54 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         } else {
             assert!(reissued > zats(0), "reissuance from the deployment height");
 
-            // A block paying only the scheduled subsidy is rejected from the deployment height.
-            let scheduled_only = committed_block(
-                height,
-                previous.1,
-                scheduled_block_subsidy(height, &network)?,
-                &tree.hash(),
-            );
-            assert!(matches!(
-                state.commit_block(scheduled_only.prepare(), &finalized_state),
-                Err(ValidateContextError::InvalidSubsidy {
-                    subsidy_error: CoinbaseTransactionError::Subsidy(
-                        SubsidyError::InvalidMinerFees
-                    ),
-                    ..
-                })
-            ));
+            // From the deployment height, a block paying only the scheduled subsidy is rejected,
+            // and so is one claiming the fees that ZIP 235 removes from circulation.
+            let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)?;
+            let mut invalid_coinbase_values =
+                vec![(scheduled_block_subsidy(height, &network)? + miner_fees)?];
+            if !contributed.is_zero() {
+                invalid_coinbase_values.push((subsidy + fees)?);
+            }
+
+            for coinbase_value in invalid_coinbase_values {
+                let invalid = committed_block(
+                    height,
+                    previous.1,
+                    coinbase_value,
+                    spends(height),
+                    &tree.hash(),
+                );
+                assert!(matches!(
+                    state.commit_block(prepare_with_funding(invalid, height), &finalized_state),
+                    Err(ValidateContextError::InvalidSubsidy {
+                        subsidy_error: CoinbaseTransactionError::Subsidy(
+                            SubsidyError::InvalidMinerFees
+                        ),
+                        ..
+                    })
+                ));
+            }
         }
 
-        let next_block = subsidy_block(height, previous.1, parent_pools, &tree.hash());
-        state.commit_block(next_block.clone().prepare(), &finalized_state)?;
+        let next_block = subsidy_block(
+            height,
+            previous.1,
+            parent_pools,
+            fees,
+            spends(height),
+            &tree.hash(),
+        );
+        state.commit_block(
+            prepare_with_funding(next_block.clone(), height),
+            &finalized_state,
+        )?;
 
-        // The block debits exactly what it reissued.
+        // The block debits exactly what it reissued, and credits the fees it removed from
+        // circulation.
         let chain = state.best_chain().expect("the block was committed");
         assert_eq!(
             chain.chain_value_pools.nsm_amount(),
-            (parent_pools.nsm_amount() - reissued)?,
+            ((parent_pools.nsm_amount() - reissued)? + contributed)?,
         );
 
         tree.push(next_block, roots())?;

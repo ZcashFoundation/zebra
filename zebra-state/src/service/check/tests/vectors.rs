@@ -60,8 +60,8 @@ mod zip234 {
         block::Height,
         parameters::{
             subsidy::{
-                additional_block_subsidy, nsm_value_balance_change, scheduled_block_subsidy,
-                CoinbaseTransactionError, SubsidyError,
+                additional_block_subsidy, nsm_fee_contribution, nsm_value_balance_change,
+                scheduled_block_subsidy, CoinbaseTransactionError, SubsidyError,
             },
             testnet::{ConfiguredActivationHeights, RegtestParameters},
         },
@@ -82,6 +82,12 @@ mod zip234 {
 
     fn amount(zatoshis: i64) -> Amount<NonNegative> {
         zatoshis.try_into().expect("valid amount")
+    }
+
+    /// Returns the part of `FEE` the coinbase transaction at `height` can claim: all of it, or what
+    /// ZIP 235 leaves in builds with the `zip235` cfg.
+    fn miner_fees(height: Height, network: &Network) -> Amount<NonNegative> {
+        (amount(FEE) - nsm_fee_contribution(height, network, amount(FEE))).unwrap()
     }
 
     fn network() -> Network {
@@ -166,9 +172,10 @@ mod zip234 {
             DeferredPoolBalanceChange::zero(),
         )
         .expect("valid value balances");
-        contextual
-            .chain_value_pool_change
-            .set_nsm_amount(nsm_value_balance_change(height, network, parent_pools));
+        contextual.chain_value_pool_change.set_nsm_amount(
+            nsm_value_balance_change(height, network, parent_pools, amount(FEE))
+                .expect("valid NSM value balance change"),
+        );
 
         contextual
     }
@@ -203,11 +210,11 @@ mod zip234 {
 
         let valid = block(
             height,
-            (subsidy + amount(FEE)).unwrap(),
+            (subsidy + miner_fees(height, &network)).unwrap(),
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools)
+        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the coinbase pays the subsidy and the fees");
 
         // The same block is invalid after a parent with an empty NSM value balance.
@@ -216,6 +223,7 @@ mod zip234 {
                 &valid,
                 &network,
                 ValueBalance::zero(),
+                amount(FEE),
             )),
             SubsidyError::InvalidMinerFees,
         );
@@ -223,7 +231,7 @@ mod zip234 {
         // A coinbase paying only the scheduled subsidy is invalid.
         let invalid = block(
             height,
-            (scheduled + amount(FEE)).unwrap(),
+            (scheduled + miner_fees(height, &network)).unwrap(),
             parent_pools,
             &network,
         );
@@ -232,6 +240,7 @@ mod zip234 {
                 &invalid,
                 &network,
                 parent_pools,
+                amount(FEE),
             )),
             SubsidyError::InvalidMinerFees,
         );
@@ -243,6 +252,7 @@ mod zip234 {
                 &invalid,
                 &network,
                 parent_pools,
+                amount(FEE),
             )),
             SubsidyError::InvalidMinerFees,
         );
@@ -266,19 +276,80 @@ mod zip234 {
         let parent_pools = ValueBalance::<NonNegative>::zero();
         let valid = block(
             height,
-            (subsidy + amount(FEE)).unwrap(),
+            (subsidy + miner_fees(height, &network)).unwrap(),
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools)
+        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the activation block reissues from INITIAL_NSM_VALUE_BALANCE");
 
-        // The block credits the balance with the seed, and debits what it reissued.
+        // The block credits the balance with the seed and the fees removed from circulation, and
+        // debits what it reissued.
+        let contributed = nsm_fee_contribution(height, &network, amount(FEE));
         assert_eq!(
             valid.chain_value_pool_change.nsm_amount(),
-            (initial.constrain::<NegativeAllowed>().unwrap()
+            ((initial.constrain::<NegativeAllowed>().unwrap()
                 - reissued.constrain::<NegativeAllowed>().unwrap())
+            .unwrap()
+                + contributed.constrain::<NegativeAllowed>().unwrap())
             .unwrap(),
+        );
+    }
+
+    /// From NU7 activation the coinbase can only claim the fees ZIP 235 leaves to the miner, and the
+    /// rest is credited to the NSM value balance.
+    #[cfg(zcash_unstable = "zip235")]
+    #[test]
+    fn fee_contribution_is_removed_from_the_coinbase() {
+        let _init_guard = zebra_test::init();
+
+        let network = network();
+        let height = Height(NU7_HEIGHT + 1);
+        let parent_pools = pools(INITIAL_NSM_VALUE_BALANCE);
+
+        let subsidy = (scheduled_block_subsidy(height, &network).unwrap()
+            + additional_block_subsidy(height, &network, amount(INITIAL_NSM_VALUE_BALANCE)))
+        .unwrap();
+
+        assert_eq!(miner_fees(height, &network), amount(FEE * 4 / 10));
+
+        // A coinbase claiming all the fees, or one zatoshi more or less than its share, is invalid.
+        for claimed in [FEE, FEE * 4 / 10 + 1, FEE * 4 / 10 - 1] {
+            let invalid = block(
+                height,
+                (subsidy + amount(claimed)).unwrap(),
+                parent_pools,
+                &network,
+            );
+            assert_eq!(
+                subsidy_error(check::zip234_subsidy_is_valid(
+                    &invalid,
+                    &network,
+                    parent_pools,
+                    amount(FEE),
+                )),
+                SubsidyError::InvalidMinerFees,
+            );
+        }
+
+        let valid = block(
+            height,
+            (subsidy + miner_fees(height, &network)).unwrap(),
+            parent_pools,
+            &network,
+        );
+        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+            .expect("the coinbase claims the miner's share of the fees");
+
+        // The issued supply and the NSM value balance together grow by the scheduled subsidy.
+        assert_eq!(
+            (valid.chain_value_pool_change.total().unwrap()
+                + valid.chain_value_pool_change.nsm_amount())
+            .unwrap(),
+            scheduled_block_subsidy(height, &network)
+                .unwrap()
+                .constrain::<NegativeAllowed>()
+                .unwrap(),
         );
     }
 }

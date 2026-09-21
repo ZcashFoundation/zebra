@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     founders_reward, founders_reward_address, funding_stream_address, funding_stream_values,
-    FundingStreamReceiver, ParameterSubsidy, SubsidyError,
+    nsm_fee_contribution, FundingStreamReceiver, ParameterSubsidy, SubsidyError,
 };
 
 /// An error from the block subsidy or miner fee checks on a block's coinbase transaction.
@@ -242,8 +242,20 @@ pub fn miner_fees_are_valid(
         + expected_deferred_pool_balance_change.value())
     .map_err(|_| SubsidyError::Overflow)?;
 
+    // # Consensus
+    //
+    // > For every block from NU7 activation onward, the coinbase transaction MUST be balanced using
+    // > MinerFees in place of TransactionFees
+    //
+    // where `MinerFees(height) := TransactionFees(height) - NSMFeeContribution(height)`.
+    //
+    // https://github.com/zcash/zips/pull/1363
+    let claimable_miner_fees = (block_miner_fees
+        - nsm_fee_contribution(height, network, block_miner_fees))
+    .map_err(|_| SubsidyError::Overflow)?;
+
     let total_input_value =
-        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
+        (expected_block_subsidy + claimable_miner_fees).map_err(|_| SubsidyError::Overflow)?;
 
     // # Consensus
     //

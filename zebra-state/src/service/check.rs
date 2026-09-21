@@ -23,7 +23,6 @@ use crate::{
 use zebra_chain::{
     amount::{Amount, NonNegative},
     parameters::subsidy::{self, CoinbaseTransactionError, SubsidyError},
-    transparent::utxos_from_ordered_utxos,
     value_balance::ValueBalance,
 };
 
@@ -441,6 +440,7 @@ pub(crate) fn zip234_subsidy_is_valid(
     contextual: &ContextuallyVerifiedBlock,
     network: &Network,
     parent_chain_value_pools: ValueBalance<NonNegative>,
+    block_miner_fees: Amount<NonNegative>,
 ) -> Result<(), ValidateContextError> {
     let invalid_subsidy =
         |subsidy_error: CoinbaseTransactionError| ValidateContextError::InvalidSubsidy {
@@ -465,22 +465,6 @@ pub(crate) fn zip234_subsidy_is_valid(
         .transactions
         .first()
         .ok_or_else(|| invalid_subsidy(SubsidyError::NoCoinbase.into()))?;
-
-    let spent_utxos = utxos_from_ordered_utxos(contextual.spent_outputs.clone());
-    let block_miner_fees = contextual
-        .block
-        .transactions
-        .iter()
-        .filter(|transaction| !transaction.is_coinbase())
-        .try_fold(Amount::<NonNegative>::zero(), |fees, transaction| {
-            let miner_fee = transaction
-                .value_balance(&spent_utxos)
-                .map_err(|_| SubsidyError::InvalidMinerFees)?
-                .remaining_transaction_value()?;
-
-            Ok::<_, SubsidyError>((fees + miner_fee)?)
-        })
-        .map_err(|error| invalid_subsidy(error.into()))?;
 
     subsidy::miner_fees_are_valid(
         coinbase_tx,

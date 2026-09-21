@@ -599,11 +599,46 @@ pub fn block_subsidy_fraction_numerator(height: Height, network: &Network) -> u6
     LN2_SCALED / halving_interval
 }
 
+#[cfg(all(zcash_unstable = "zip235", not(zcash_unstable = "zip234")))]
+compile_error!(
+    "`--cfg zcash_unstable=\"zip235\"` requires `--cfg zcash_unstable=\"zip234\"`: the fees ZIP 235 \
+     removes from circulation are credited to the NSM value balance"
+);
+
+/// `NSMFeeContribution(height)`: the transaction fees the block at `height` removes from
+/// circulation, `floor(block_miner_fees * 6 / 10)` from NU7 activation, and zero before it. This
+/// is the fraction from [ZIP 235], applied the way the [NU7 deployment ZIP][nu7] specifies.
+///
+/// The fraction applies to the total fees in the block, so rounding favors the miner. The
+/// coinbase transaction can only claim the remaining fees, and the contribution needs no
+/// transaction field.
+///
+/// Always zero without `--cfg zcash_unstable="zip235"`, which requires the `zip234` cfg, because
+/// the contribution is credited to the NSM value balance.
+///
+/// [ZIP 235]: https://zips.z.cash/zip-0235
+/// [nu7]: https://github.com/zcash/zips/pull/1363
+pub fn nsm_fee_contribution(
+    height: Height,
+    network: &Network,
+    block_miner_fees: Amount<NonNegative>,
+) -> Amount<NonNegative> {
+    if !cfg!(zcash_unstable = "zip235") || !nsm_value_balance_is_tracked(height, network) {
+        return Amount::zero();
+    }
+
+    let fees = u64::from(block_miner_fees);
+
+    // Splitting at the divisor keeps the exact floor without overflowing `fees * 6`.
+    (fees / 10 * 6 + fees % 10 * 6 / 10)
+        .try_into()
+        .expect("the contribution is at most the fees, which are a valid amount")
+}
+
 /// Returns `true` if the NSM value balance is tracked at `height`: from NU7 activation, per the
 /// [halving-preserving issuance ZIP][zip].
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub fn nsm_value_balance_is_tracked(height: Height, network: &Network) -> bool {
     NetworkUpgrade::Nu7
         .activation_height(network)
@@ -657,32 +692,31 @@ pub fn nsm_value_balance_before(
 /// debited by the additional block subsidy, which is zero before `DEPLOYMENT_BLOCK_HEIGHT`. Before
 /// NU7 activation the change is zero.
 ///
-/// Value removed from circulation by a deployed mechanism such as ZIP 233 or ZIP 235 credits the
-/// balance. None is implemented yet, so the credit is zero.
+/// It is also credited with [`nsm_fee_contribution`], the part of `block_miner_fees` that ZIP 235
+/// removes from circulation.
 #[cfg(zcash_unstable = "zip234")]
 pub fn nsm_value_balance_change(
     height: Height,
     network: &Network,
     parent_chain_value_pools: ValueBalance<NonNegative>,
-) -> Amount<NegativeAllowed> {
+    block_miner_fees: Amount<NonNegative>,
+) -> Result<Amount<NegativeAllowed>, amount::Error> {
     if !nsm_value_balance_is_tracked(height, network) {
-        return Amount::zero();
+        return Ok(Amount::zero());
     }
 
-    let seed = nsm_seed(height, network);
+    let seed = nsm_seed(height, network).constrain::<NegativeAllowed>()?;
+    let contributed =
+        nsm_fee_contribution(height, network, block_miner_fees).constrain::<NegativeAllowed>()?;
     let reissued = additional_block_subsidy(
         height,
         network,
         nsm_value_balance_before(height, network, parent_chain_value_pools.nsm_amount()),
-    );
+    )
+    .constrain::<NegativeAllowed>()?;
 
-    (seed
-        .constrain::<NegativeAllowed>()
-        .expect("non-negative amounts are valid negative-allowed")
-        - reissued
-            .constrain::<NegativeAllowed>()
-            .expect("non-negative amounts are valid negative-allowed"))
-    .expect("the seed and the reissued amount are each at most MAX_MONEY, so their difference fits")
+    // The seed and the contribution can each be up to `MAX_MONEY`, so subtract first.
+    (seed - reissued)? + contributed
 }
 
 /// `AdditionalBlockSubsidy(height)`: the block subsidy added to the scheduled block subsidy by the

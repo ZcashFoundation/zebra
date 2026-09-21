@@ -145,10 +145,18 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             prop_assert_eq!(failure_count, 4);
 
             // The finalized state tracked the NSM value balance from NU7 activation: seeded, then
-            // debited by each block's additional subsidy.
+            // debited by each block's additional subsidy and credited with its ZIP 235 fee
+            // contribution.
             #[cfg(zcash_unstable = "zip234")]
             {
-                use zebra_chain::parameters::subsidy::additional_block_subsidy;
+                use zebra_chain::{
+                    parameters::subsidy::{additional_block_subsidy, nsm_fee_contribution},
+                    transparent::utxos_from_ordered_utxos,
+                };
+
+                let utxos = utxos_from_ordered_utxos(
+                    chain.iter().flat_map(|block| block.new_outputs.clone()).collect(),
+                );
 
                 let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();
                 let tip_height = state.finalized_tip_height().unwrap();
@@ -156,12 +164,17 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
 
                 let mut expected = initial_nsm_value_balance;
                 for height in (nu7_height.0..=tip_height.0).map(Height) {
+                    let fees = chain[height.0 as usize].block.transaction_fees(&utxos).expect("valid fees");
+
                     expected = (expected - additional_block_subsidy(height, &network, expected))
                         .expect("the balance never goes negative");
+                    expected = (expected + nsm_fee_contribution(height, &network, fees))
+                        .expect("the balance stays a valid amount");
                 }
 
                 prop_assert_eq!(state.finalized_value_pool().nsm_amount(), expected);
                 prop_assert!(expected > zebra_chain::amount::Amount::<zebra_chain::amount::NonNegative>::zero());
+                #[cfg(not(zcash_unstable = "zip235"))]
                 prop_assert!(expected < initial_nsm_value_balance);
             }
     });

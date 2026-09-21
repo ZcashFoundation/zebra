@@ -574,6 +574,86 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     Ok(())
 }
 
+/// From NU7 activation, the coinbase transaction must claim exactly the fees ZIP 235 leaves in
+/// circulation, which are 40% of the block's fees, rounded up. Before it, it must claim them all.
+#[cfg(zcash_unstable = "zip235")]
+#[test]
+fn zip235_coinbase_cant_claim_the_nsm_fee_contribution() -> Result<(), Report> {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        parameters::testnet::{self, ConfiguredActivationHeights},
+        transparent,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    const NU7_HEIGHT: u32 = 10;
+
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(NU7_HEIGHT),
+            ..Default::default()
+        })?
+        .clear_funding_streams()
+        .to_network()?;
+
+    let fees = Amount::<NonNegative>::try_from(1_001)?;
+
+    let miner_fees_are_valid = |height: Height, claimed_fees: i64| {
+        // The rule doesn't depend on the block subsidy.
+        let block_subsidy = Amount::<NonNegative>::try_from(625_000_000).expect("valid amount");
+        let claimed_fees = Amount::<NonNegative>::try_from(claimed_fees).expect("valid amount");
+
+        let coinbase = Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: (block_subsidy + claimed_fees).expect("valid amount"),
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        );
+
+        check::miner_fees_are_valid(
+            &coinbase,
+            height,
+            fees,
+            block_subsidy,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+        )
+    };
+
+    let invalid_miner_fees = Err(BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::InvalidMinerFees,
+    )));
+
+    let before_nu7 = Height(NU7_HEIGHT - 1);
+    assert_eq!(miner_fees_are_valid(before_nu7, 1_001), Ok(()));
+    assert_eq!(miner_fees_are_valid(before_nu7, 401), invalid_miner_fees);
+
+    for height in [Height(NU7_HEIGHT), Height(NU7_HEIGHT + 1)] {
+        assert_eq!(miner_fees_are_valid(height, 401), Ok(()));
+
+        for claimed_fees in [400, 402, 1_001] {
+            assert_eq!(
+                miner_fees_are_valid(height, claimed_fees),
+                invalid_miner_fees
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[test]
 fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
