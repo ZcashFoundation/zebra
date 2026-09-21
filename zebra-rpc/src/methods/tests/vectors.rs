@@ -2450,6 +2450,94 @@ async fn rpc_getnetworksolps() {
     }
 }
 
+/// `get_network_sol_ps` with a zero or negative block count falls back to the PoW averaging
+/// window, which ZIP 218 makes height-dependent from NU7: the state request must ask for the
+/// window at the requested height, or at the tip height when no height is requested.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getnetworksolps_uses_the_height_dependent_averaging_window() {
+    let _init_guard = zebra_test::init();
+
+    // NU7 activates at height 1,000 on this network: the averaging window is 17 blocks below
+    // that height, and 102 blocks at and above it.
+    let network = Network::new_regtest(
+        testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(Height(1_500));
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        network,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        state,
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        mock_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // (num_blocks, height, expected `num_blocks` in the SolutionRate request to the state)
+    let get_network_sol_ps_inputs: [(Option<i32>, Option<i32>, usize); 5] = [
+        // No requested height: the window at the tip height (1,500, post-NU7) is 102.
+        (Some(0), None, 102),
+        (Some(-1), None, 102),
+        // A requested height picks the window at that height, even in a different era than the
+        // tip's.
+        (Some(0), Some(999), 17),
+        (Some(0), Some(1_000), 102),
+        // An explicit positive block count is passed through unchanged.
+        (Some(120), None, 120),
+    ];
+
+    for (num_blocks_input, height_input, expected_num_blocks) in get_network_sol_ps_inputs {
+        let mut read_state = read_state.clone();
+
+        let request_handler = async move {
+            read_state
+                .expect_request_that(|request| {
+                    matches!(
+                        request,
+                        ReadRequest::SolutionRate { num_blocks, .. }
+                            if *num_blocks == expected_num_blocks
+                    )
+                })
+                .await
+                .respond(ReadResponse::SolutionRate(Some(0)));
+        };
+
+        let (result, ()) = tokio::join!(
+            rpc.get_network_sol_ps(num_blocks_input, height_input),
+            request_handler,
+        );
+
+        assert!(
+            result.is_ok(),
+            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) failed: {result:?}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate() {
     let _init_guard = zebra_test::init();

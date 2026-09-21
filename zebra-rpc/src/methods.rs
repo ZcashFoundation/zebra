@@ -3021,16 +3021,25 @@ where
     ) -> Result<u64> {
         // Default number of blocks is 120 if not supplied.
         let mut num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
-        // But if it is 0 or negative, it uses the proof of work averaging window.
-        if num_blocks < 1 {
-            num_blocks = i32::try_from(POW_AVERAGING_WINDOW).expect("fits in i32");
-        }
-        let num_blocks =
-            usize::try_from(num_blocks).expect("just checked for negatives, i32 fits in usize");
 
         // Default height is the tip height if not supplied. Negative values also mean the tip
         // height. Since negative values aren't valid heights, we can just use the conversion.
         let height = height.and_then(|height| height.try_into_height().ok());
+
+        // But if it is 0 or negative, it uses the proof of work averaging window. ZIP 218 widens
+        // the window from 17 to 102 blocks at NU7, so use the window at the requested height, or
+        // at the tip height when none is requested, like the rate calculation itself.
+        if num_blocks < 1 {
+            let averaging_window = height
+                .or_else(|| self.latest_chain_tip.best_tip_height())
+                .map_or(POW_AVERAGING_WINDOW, |height| {
+                    NetworkUpgrade::averaging_window_for_height(&self.network, height)
+                });
+
+            num_blocks = i32::try_from(averaging_window).expect("fits in i32");
+        }
+        let num_blocks =
+            usize::try_from(num_blocks).expect("just checked for negatives, i32 fits in usize");
 
         let mut read_state = self.read_state.clone();
 
