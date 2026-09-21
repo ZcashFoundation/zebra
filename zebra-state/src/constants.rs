@@ -45,6 +45,17 @@ const DATABASE_FORMAT_VERSION: u64 = 28;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 28.1.0: the NU7 Network Sustainability Mechanism reserve. The chain value pool
+///   `ValueBalance` can widen from 48 to 56 bytes for the `nsm_reserve` balance, and `BlockInfo`
+///   records from 52 to 60 bytes with it. The reserve is appended at the end of each record —
+///   after the other pool balances in the value balance, and after the block size in
+///   `BlockInfo` — so v28.0 code still reads the size from its v28.0 offset in a wide
+///   `BlockInfo` record, and treats the reserve as zero. Read code accepts 32/40/48/56-byte
+///   value pools, and picks the `BlockInfo` layout by length. Writes keep the v28.0 widths
+///   while the reserve is zero, which is always the case before NU7 activation, so a database
+///   stays byte-compatible with v28.0 until then, and no resync or data migration is needed.
+///   Once the reserve is non-zero, v28.0 code can no longer parse the wide tip value pool
+///   records, but it can not validate NU7 blocks anyway.
 /// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
 ///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
 ///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree
@@ -53,7 +64,7 @@ const DATABASE_FORMAT_VERSION: u64 = 28;
 ///   the current width). New CFs are created and the wider records are read in place when the
 ///   database is opened, so this is a major bump that is restorable from the previous major
 ///   database format version (no resync, no data migration).
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

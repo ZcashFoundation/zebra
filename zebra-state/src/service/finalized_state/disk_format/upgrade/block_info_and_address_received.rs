@@ -183,6 +183,7 @@ impl DiskFormatUpgrade for Upgrade {
                         .chain_value_pool_change(
                             &utxos,
                             calculate_deferred_pool_balance_change(height, &network),
+                            &network,
                         )
                         .unwrap_or_default(),
                 )

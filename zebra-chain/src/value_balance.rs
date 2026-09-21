@@ -27,6 +27,7 @@ pub struct ValueBalance<C> {
     orchard: Amount<C>,
     deferred: Amount<C>,
     ironwood: Amount<C>,
+    nsm_reserve: Amount<C>,
 }
 
 impl<C> ValueBalance<C>
@@ -140,6 +141,21 @@ where
         self.ironwood
     }
 
+    /// Returns the NSM reserve amount.
+    ///
+    /// The Network Sustainability Mechanism reserve holds the transaction fees removed from
+    /// circulation from NU7 activation. It is not a spendable chain value pool, and it is not
+    /// part of the Issued Supply.
+    pub fn nsm_reserve_amount(&self) -> Amount<C> {
+        self.nsm_reserve
+    }
+
+    /// Sets the NSM reserve amount without affecting other amounts.
+    pub fn set_nsm_reserve_amount(&mut self, nsm_reserve_amount: Amount<C>) -> &Self {
+        self.nsm_reserve = nsm_reserve_amount;
+        self
+    }
+
     /// Insert an ironwood value balance into a given [`ValueBalance`]
     /// leaving the other values untouched.
     pub fn set_ironwood_value_balance(&mut self, ironwood_value_balance: ValueBalance<C>) -> &Self {
@@ -157,6 +173,7 @@ where
             orchard: zero,
             deferred: zero,
             ironwood: zero,
+            nsm_reserve: zero,
         }
     }
 
@@ -169,6 +186,7 @@ where
             self.orchard,
             self.deferred,
             self.ironwood,
+            self.nsm_reserve,
         ]
         .into_iter()
         .map(|amount| i128::from(amount.zatoshis()))
@@ -190,6 +208,7 @@ where
             orchard: self.orchard.constrain().map_err(Orchard)?,
             deferred: self.deferred.constrain().map_err(Deferred)?,
             ironwood: self.ironwood.constrain().map_err(Ironwood)?,
+            nsm_reserve: self.nsm_reserve.constrain().map_err(NsmReserve)?,
         })
     }
 }
@@ -379,10 +398,11 @@ impl ValueBalance<NonNegative> {
 
     /// To byte array
     ///
-    /// The `ironwood` pool (NU6.3 onward) is appended after `deferred`, so that records written by
-    /// earlier Zebra versions (32 bytes without `deferred`, or 40 bytes with it) remain parsable by
+    /// The `nsm_reserve` balance (NU7 onward) is appended after `ironwood`, which is itself
+    /// appended after `deferred`, so that records written by earlier Zebra versions (32 bytes
+    /// without `deferred`, 40 bytes with it, or 48 bytes with `ironwood`) remain parsable by
     /// [`Self::from_bytes`].
-    pub fn to_bytes(self) -> [u8; 48] {
+    pub fn to_bytes(self) -> [u8; 56] {
         match [
             self.transparent.to_bytes(),
             self.sprout.to_bytes(),
@@ -390,28 +410,29 @@ impl ValueBalance<NonNegative> {
             self.orchard.to_bytes(),
             self.deferred.to_bytes(),
             self.ironwood.to_bytes(),
+            self.nsm_reserve.to_bytes(),
         ]
         .concat()
         .try_into()
         {
             Ok(bytes) => bytes,
             _ => unreachable!(
-                "six [u8; 8] should always concat with no error into a single [u8; 48]"
+                "seven [u8; 8] should always concat with no error into a single [u8; 56]"
             ),
         }
     }
 
     /// From byte array
     ///
-    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), and 48-byte records; missing
-    /// trailing pools default to zero.
+    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), 48-byte (pre-`nsm_reserve`),
+    /// and 56-byte records; missing trailing balances default to zero.
     #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let bytes_length = bytes.len();
 
         // Return an error early if bytes don't have the right length instead of panicking later.
         match bytes_length {
-            32 | 40 | 48 => {}
+            32 | 40 | 48 | 56 => {}
             _ => return Err(Unparsable),
         };
 
@@ -445,7 +466,7 @@ impl ValueBalance<NonNegative> {
 
         let deferred = match bytes_length {
             32 => Amount::zero(),
-            40 | 48 => Amount::from_bytes(
+            40 | 48 | 56 => Amount::from_bytes(
                 bytes[32..40]
                     .try_into()
                     .expect("deferred amount should be parsable"),
@@ -456,12 +477,23 @@ impl ValueBalance<NonNegative> {
 
         let ironwood = match bytes_length {
             32 | 40 => Amount::zero(),
-            48 => Amount::from_bytes(
+            48 | 56 => Amount::from_bytes(
                 bytes[40..48]
                     .try_into()
                     .expect("ironwood amount should be parsable"),
             )
             .map_err(Ironwood)?,
+            _ => return Err(Unparsable),
+        };
+
+        let nsm_reserve = match bytes_length {
+            32 | 40 | 48 => Amount::zero(),
+            56 => Amount::from_bytes(
+                bytes[48..56]
+                    .try_into()
+                    .expect("NSM reserve amount should be parsable"),
+            )
+            .map_err(NsmReserve)?,
             _ => return Err(Unparsable),
         };
 
@@ -472,6 +504,7 @@ impl ValueBalance<NonNegative> {
             orchard,
             deferred,
             ironwood,
+            nsm_reserve,
         })
     }
 }
@@ -497,6 +530,9 @@ pub enum ValueBalanceError {
     /// ironwood amount error {0}
     Ironwood(amount::Error),
 
+    /// NSM reserve amount error {0}
+    NsmReserve(amount::Error),
+
     /// total amount error {0}
     Total(amount::Error),
 
@@ -513,6 +549,7 @@ impl fmt::Display for ValueBalanceError {
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
             Ironwood(e) => format!("ironwood amount err: {e}"),
+            NsmReserve(e) => format!("NSM reserve amount err: {e}"),
             Total(e) => format!("total amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })
@@ -532,6 +569,7 @@ where
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
             ironwood: (self.ironwood + rhs.ironwood).map_err(Ironwood)?,
+            nsm_reserve: (self.nsm_reserve + rhs.nsm_reserve).map_err(NsmReserve)?,
         })
     }
 }
@@ -582,6 +620,7 @@ where
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
             ironwood: (self.ironwood - rhs.ironwood).map_err(Ironwood)?,
+            nsm_reserve: (self.nsm_reserve - rhs.nsm_reserve).map_err(NsmReserve)?,
         })
     }
 }
@@ -652,6 +691,7 @@ where
             orchard: self.orchard.neg(),
             deferred: self.deferred.neg(),
             ironwood: self.ironwood.neg(),
+            nsm_reserve: self.nsm_reserve.neg(),
         }
     }
 }

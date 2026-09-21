@@ -15,6 +15,7 @@ use zebra_chain::{
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
+    parameters::Network,
     serialization::SerializationError,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
@@ -522,6 +523,7 @@ impl ContextuallyVerifiedBlock {
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -548,6 +550,7 @@ impl ContextuallyVerifiedBlock {
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_pool_balance_change,
+                network,
             )?,
             received_time,
         })

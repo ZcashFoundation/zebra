@@ -1241,6 +1241,17 @@ impl Network {
         }
     }
 
+    /// Returns the height at which NSM reissuance starts on this network, if it is assigned.
+    ///
+    /// `NSMReissuanceHeight` in the NU7 deployment ZIP (`zcash/zips#1363`). The ZIP leaves it
+    /// unassigned on both Mainnet and Testnet, recording only that it corresponds to a date in
+    /// February 2031, so no reserve is reissued on any network yet.
+    //
+    // TODO: return the assigned heights once the NU7 deployment ZIP sets them.
+    pub fn nsm_reissuance_height(&self) -> Option<Height> {
+        None
+    }
+
     /// Returns post-Canopy funding streams for this network at the provided height
     pub fn funding_streams(&self, height: Height) -> Option<&FundingStreams> {
         self.all_funding_streams()

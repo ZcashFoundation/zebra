@@ -12,8 +12,8 @@ use zebra_chain::{
     block::{Block, Hash, Header, Height},
     parameters::{
         subsidy::{
-            founders_reward, founders_reward_address, funding_stream_values, FundingStreamReceiver,
-            ParameterSubsidy, SubsidyError,
+            self, founders_reward, founders_reward_address, funding_stream_values,
+            FundingStreamReceiver, ParameterSubsidy, SubsidyError,
         },
         Network, NetworkUpgrade,
     },
@@ -317,6 +317,9 @@ pub fn subsidy_is_valid(
 
 /// Returns `Ok(())` if the miner fees consensus rule is valid.
 ///
+/// From NU7, only part of the block's transaction fees may be claimed by the miner: the rest is
+/// removed from circulation into the NSM reserve. See [`subsidy::nsm_fee_contribution`].
+///
 /// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub fn miner_fees_are_valid(
     coinbase_tx: &Transaction,
@@ -358,6 +361,21 @@ pub fn miner_fees_are_valid(
         - ironwood_value_balance
         + expected_deferred_pool_balance_change.value())
     .map_err(|_| SubsidyError::Overflow)?;
+
+    // # Consensus
+    //
+    // > For every block from NU7 activation onward, the coinbase transaction MUST be balanced
+    // > using MinerFees in place of TransactionFees, and the NSM reserve balance MUST increase by
+    // > NSMFeeContribution.
+    //
+    // > In particular, the total input value of the coinbase transaction defined in
+    // > § 7.1.2 'Transaction Consensus Rules' MUST be calculated as:
+    // > BlockSubsidy(height) + MinerFees(height) + totalDeferredInput(height).
+    //
+    // This is the NU7 deployment ZIP (`zcash/zips#1363`), which takes precedence over ZIP 235 for
+    // NU7. `miner_fees()` returns the whole of the fees before NU7, so this is a no-op until then.
+    let block_miner_fees = subsidy::miner_fees(height, network, block_miner_fees)
+        .map_err(|_| SubsidyError::Overflow)?;
 
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
