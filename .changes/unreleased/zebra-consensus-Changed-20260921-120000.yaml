@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'ZFuture now rejects v4 transactions, matching NU7 (ZIP 2003). ZFuture follows NU7, so it inherits the v4 rejection instead of accepting v4 like the pre-NU7 upgrades.'
+time: 2026-09-21T12:00:00.000000000Z

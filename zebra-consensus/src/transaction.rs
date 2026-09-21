@@ -1021,14 +1021,29 @@ fn verify_v4_transaction_network_upgrade(
         | NetworkUpgrade::Nu6_2
         | NetworkUpgrade::Nu6_3 => Ok(()),
 
-        #[cfg(zcash_unstable = "zfuture")]
-        NetworkUpgrade::ZFuture => Ok(()),
-
         // Does not support V4 transactions
+        //
+        // # Consensus
+        //
+        // > [NU7 onward] The transaction version number MUST be 5 or 6.
+        //
+        // <https://zips.z.cash/zip-2003>
+        //
+        // `ZFuture` follows NU7, so it inherits the V4 rejection.
+        //
+        // This rule is deliberately not gated behind `zcash_unstable = "nu7"`: it is a no-op
+        // until NU7 has an activation height on a network, so gating it would only make the
+        // gated and ungated builds diverge without changing behaviour on any live network.
         NetworkUpgrade::Genesis
         | NetworkUpgrade::BeforeOverwinter
         | NetworkUpgrade::Overwinter
         | NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            transaction.version(),
+            network_upgrade,
+        )),
+
+        #[cfg(zcash_unstable = "zfuture")]
+        NetworkUpgrade::ZFuture => Err(TransactionError::UnsupportedByNetworkUpgrade(
             transaction.version(),
             network_upgrade,
         )),
