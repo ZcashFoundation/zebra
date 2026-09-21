@@ -14,6 +14,7 @@ use crate::{
             block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving, halving_divisor,
             height_for_halving, ParameterSubsidy as _,
         },
+        testnet::ConfiguredActivationHeights,
         NetworkUpgrade,
     },
 };
@@ -641,5 +642,75 @@ fn funding_stream_address_period_floors_negative_heights() {
         ),
         -2,
         "the height below period -1 is in period -2",
+    );
+}
+
+/// `height_for_first_halving()` returns a hard-coded constant on Mainnet, the default Testnet
+/// and Regtest, while every other network derives it from `height_for_halving(1)`. The two must
+/// agree on those networks: NU7 always activates after the first halving on them, so ZIP 218
+/// never stretches the derived height. See the TODO in `height_for_first_halving()`.
+#[test]
+fn first_halving_constant_agrees_with_derived_height() {
+    let _init_guard = zebra_test::init();
+
+    for network in [
+        Network::Mainnet,
+        Network::new_default_testnet(),
+        Network::new_regtest(Default::default()),
+    ] {
+        assert_eq!(
+            height_for_halving(1, &network),
+            Some(network.height_for_first_halving()),
+            "the hard-coded first halving height must match the derived height on {network}",
+        );
+    }
+}
+
+/// On a configured network with NU7 before the first halving, ZIP 218 stretches the derived
+/// first halving height past the hard-coded constant, and `height_for_first_halving()` disagrees
+/// with `halving()`: the constant is only correct while NU7 activates after the first halving.
+///
+/// This pins the current, documented behavior so that resolving the TODO in
+/// `height_for_first_halving()` — stretching the constants too, or rejecting a configured NU7
+/// height below the first halving — updates this test.
+#[test]
+fn first_halving_constant_diverges_when_nu7_activates_first() {
+    let _init_guard = zebra_test::init();
+
+    // NU7 activates at height 1, so every block of the first halving is stretched by ZIP 218.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let constant = network.height_for_first_halving();
+    let derived = height_for_halving(1, &network).expect("the first halving is representable");
+
+    // The derived height follows the stretched schedule...
+    assert!(
+        derived > constant,
+        "ZIP 218 should stretch the derived first halving height {derived:?} past the \
+         hard-coded constant {constant:?}",
+    );
+    assert_eq!(halving(derived, &network), 1);
+    assert_eq!(
+        halving(
+            derived.previous().expect("derived is above genesis"),
+            &network
+        ),
+        0,
+    );
+
+    // ...but `height_for_first_halving()` still returns the unstretched constant, which no
+    // longer marks the halving under that schedule. This is the divergence recorded in its TODO.
+    assert_eq!(
+        halving(constant, &network),
+        0,
+        "the hard-coded constant no longer marks the first halving; if \
+         `height_for_first_halving()` now stretches the constant or rejects this configuration, \
+         update this test",
     );
 }
