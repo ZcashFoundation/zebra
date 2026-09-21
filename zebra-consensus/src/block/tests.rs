@@ -1187,3 +1187,96 @@ fn nsm_fee_contribution_is_withheld_from_the_coinbase() -> Result<(), Report> {
 
     Ok(())
 }
+
+/// The shared ZIP 218 cost definition is what keeps block verification and `getblocktemplate`
+/// selection in agreement, so pin each limit's boundary and the global budget's weighting.
+#[test]
+fn shielded_action_counts_limits() {
+    let _init_guard = zebra_test::init();
+
+    let at_orchard_limit = ShieldedActionCounts {
+        orchard_actions: ORCHARD_BLOCK_ACTION_LIMIT,
+        ..Default::default()
+    };
+    assert_eq!(at_orchard_limit.exceeded_limit(), None);
+    assert_eq!(
+        ShieldedActionCounts {
+            orchard_actions: ORCHARD_BLOCK_ACTION_LIMIT + 1,
+            ..Default::default()
+        }
+        .exceeded_limit()
+        .map(|(pool, _, _)| pool),
+        Some("Orchard actions"),
+    );
+
+    assert_eq!(
+        ShieldedActionCounts {
+            sapling_io: SAPLING_BLOCK_IO_LIMIT,
+            ..Default::default()
+        }
+        .exceeded_limit(),
+        None,
+    );
+    assert_eq!(
+        ShieldedActionCounts {
+            sapling_io: SAPLING_BLOCK_IO_LIMIT + 1,
+            ..Default::default()
+        }
+        .exceeded_limit()
+        .map(|(pool, _, _)| pool),
+        Some("Sapling inputs and outputs"),
+    );
+
+    assert_eq!(
+        ShieldedActionCounts {
+            joinsplits: SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+            ..Default::default()
+        }
+        .exceeded_limit(),
+        None,
+    );
+    assert_eq!(
+        ShieldedActionCounts {
+            joinsplits: SPROUT_BLOCK_JOIN_SPLIT_LIMIT + 1,
+            ..Default::default()
+        }
+        .exceeded_limit()
+        .map(|(pool, _, _)| pool),
+        Some("Sprout JoinSplits"),
+    );
+
+    // Each JoinSplit costs two, because it produces two shielded outputs.
+    assert_eq!(
+        ShieldedActionCounts {
+            joinsplits: SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+            ..Default::default()
+        }
+        .shielded_cost(),
+        2 * SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+    );
+
+    // Neither pool is over its own limit, but together they are over the global budget.
+    let mixed = ShieldedActionCounts {
+        orchard_actions: ORCHARD_BLOCK_ACTION_LIMIT * 3 / 5,
+        sapling_io: SAPLING_BLOCK_IO_LIMIT * 3 / 5,
+        joinsplits: 0,
+    };
+    assert!(mixed.orchard_actions <= ORCHARD_BLOCK_ACTION_LIMIT);
+    assert!(mixed.sapling_io <= SAPLING_BLOCK_IO_LIMIT);
+    assert_eq!(
+        mixed.exceeded_limit().map(|(pool, _, _)| pool),
+        Some("shielded actions across all pools"),
+    );
+
+    assert_eq!(
+        at_orchard_limit
+            .saturating_add(ShieldedActionCounts {
+                sapling_io: 1,
+                ..Default::default()
+            })
+            .exceeded_limit()
+            .map(|(pool, _, _)| pool),
+        Some("shielded actions across all pools"),
+        "a block at the Orchard limit has no budget left for any other pool",
+    );
+}
