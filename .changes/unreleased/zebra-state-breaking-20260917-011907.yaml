@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ReadRequest`, which is not `#[non_exhaustive]`, gains the `AnyChainSaplingTree`, `AnyChainOrchardTree` and `AnyChainIronwoodTree` variants. Consumers that match on `ReadRequest` exhaustively must handle them ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).'
+time: 2026-09-17T01:19:07.000000000Z

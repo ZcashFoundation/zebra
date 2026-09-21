@@ -52,9 +52,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list
-          sudo apt-get -o Acquire::Retries=3 -qq update
-          sudo apt-get -o Acquire::Retries=3 -qq install -y --no-install-recommends \
-            clang libclang-dev cmake protobuf-compiler
+          .github/scripts/apt-install.sh clang libclang-dev cmake protobuf-compiler
 
       # Toolchain version comes from rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
