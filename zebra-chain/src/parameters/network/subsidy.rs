@@ -249,6 +249,18 @@ impl ParameterSubsidy for Network {
         // First halving on Mainnet is at Canopy
         // while in Testnet is at block constant height of `1_116_000`
         // <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+        //
+        // The default Testnet and Regtest use hard-coded constants here, while every other
+        // configured Testnet derives the height from `height_for_halving(1)`, which ZIP 218
+        // stretches once NU7 activates. The constants are only correct because NU7 activates
+        // after the first halving on both: on Mainnet and the default Testnet the first halving
+        // was at Canopy, long before NU7 can be scheduled, and Regtest's `FIRST_HALVING` is
+        // below any height a Regtest chain reaches in practice. Configuring NU7 before the first
+        // halving on Regtest would make `halving()` follow the stretched schedule while this
+        // returns the unstretched constant, and the two would disagree.
+        //
+        // TODO: stretch the constants too, or reject a configured NU7 height below the first
+        // halving, once NU7 has real activation heights.
         match self {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
@@ -316,12 +328,15 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(
     //
     // In Rust, "integer division rounds towards zero":
     // <https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators>
-    // This is the same as `floor()`, because these numbers are all positive.
+    // which is not `floor()` for a negative numerator, so `div_euclid` is used instead. The
+    // divisor is positive, so `div_euclid` is exactly the spec's `floor()`. Truncating would
+    // merge the two spec periods either side of zero, and both callers subtract one period from
+    // another, so that would shift every later period down by one.
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
     (height_after_first_halving + network.post_blossom_halving_interval())
-        / network.funding_stream_address_change_interval()
+        .div_euclid(network.funding_stream_address_change_interval())
 }
 
 /// The first block height of the halving at the provided halving index for a network.

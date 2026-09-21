@@ -554,3 +554,92 @@ fn nsm_subsidy_reissuance() -> Result<(), Report> {
 
     Ok(())
 }
+
+/// The funding stream address period is a `floor`, not a truncation: the two spec periods either
+/// side of zero must not be merged, because both callers use the period only as a difference.
+///
+/// The period is never negative on Mainnet, the default Testnet or Regtest. It can be on a
+/// configured Testnet where ZIP 218 stretches the first halving above the post-Blossom halving
+/// interval, which is the case this pins.
+#[test]
+fn funding_stream_address_period_floors_negative_heights() {
+    use crate::parameters::{
+        subsidy::funding_stream_address_period,
+        testnet::{ConfiguredActivationHeights, Parameters},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    // A Testnet with NU7 well before the first halving, so ZIP 218 triples the remaining blocks
+    // of that halving and pushes `height_for_first_halving()` far above the post-Blossom halving
+    // interval. Funding streams are left empty, so no address period is ever used in anger here.
+    let network = Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(30),
+            nu5: Some(35),
+            nu6: Some(40),
+            nu6_1: Some(45),
+            nu6_2: Some(47),
+            nu6_3: Some(48),
+            nu7: Some(50),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("failed to build configured network");
+
+    let interval = network.funding_stream_address_change_interval();
+    let first_halving = network.height_for_first_halving();
+    let post_blossom = network.post_blossom_halving_interval();
+
+    // The height whose numerator is exactly zero, and so the first height of period 0.
+    let period_zero_start =
+        (first_halving - post_blossom).expect("the zero point is a valid height");
+
+    assert_eq!(
+        funding_stream_address_period(period_zero_start, &network),
+        0,
+        "the height with a zero numerator is in period 0",
+    );
+    assert_eq!(
+        funding_stream_address_period(
+            ((period_zero_start + interval).expect("valid height") - 1).expect("valid height"),
+            &network
+        ),
+        0,
+        "the last height of period 0 is still in period 0",
+    );
+    assert_eq!(
+        funding_stream_address_period(
+            (period_zero_start + interval).expect("valid height"),
+            &network
+        ),
+        1,
+        "the next height starts period 1",
+    );
+
+    // Truncating division would put these heights in period 0 as well, merging them with the
+    // period above and shifting every later difference down by one.
+    assert_eq!(
+        funding_stream_address_period((period_zero_start - 1).expect("valid height"), &network),
+        -1,
+        "the height just below the zero point is in period -1, not period 0",
+    );
+    assert_eq!(
+        funding_stream_address_period(
+            (period_zero_start - interval).expect("valid height"),
+            &network
+        ),
+        -1,
+        "the first height of period -1 is in period -1",
+    );
+    assert_eq!(
+        funding_stream_address_period(
+            ((period_zero_start - interval).expect("valid height") - 1).expect("valid height"),
+            &network
+        ),
+        -2,
+        "the height below period -1 is in period -2",
+    );
+}

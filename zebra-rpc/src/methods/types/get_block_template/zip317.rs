@@ -16,13 +16,14 @@ use rand::{
 use zebra_chain::{
     amount::Amount,
     block::{Header, Height, MAX_BLOCK_BYTES},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     serialization::{CompactSizeMessage, ZcashSerialize},
     transaction::{
-        self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx, MIN_TRANSPARENT_TX_SIZE,
+        self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx,
+        MIN_TRANSPARENT_TX_SIZE,
     },
 };
-use zebra_consensus::MAX_BLOCK_SIGOPS;
+use zebra_consensus::{ShieldedActionCounts, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::TransactionDependencies;
 
 use super::CoinbaseCache;
@@ -98,6 +99,7 @@ pub fn select_mempool_transactions(
     let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
     let mut remaining_block_unpaid_actions: u32 = BLOCK_UNPAID_ACTION_LIMIT;
+    let mut remaining_shielded = ShieldedBudget::new(net, height);
 
     // `MAX_BLOCK_BYTES` limits the whole serialized block, so reserve space for the block header
     // and the transaction count before budgeting transactions, or the assembled block could
@@ -125,6 +127,7 @@ pub fn select_mempool_transactions(
             // The number of unpaid actions is always zero for transactions that pay the
             // conventional fee, so this check and limit is effectively ignored.
             &mut remaining_block_unpaid_actions,
+            &mut remaining_shielded,
         );
     }
 
@@ -141,6 +144,7 @@ pub fn select_mempool_transactions(
             &mut remaining_block_bytes,
             &mut remaining_block_sigops,
             &mut remaining_block_unpaid_actions,
+            &mut remaining_shielded,
         );
     }
 
@@ -254,6 +258,7 @@ fn checked_add_transaction_weighted_random(
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u32,
     remaining_block_unpaid_actions: &mut u32,
+    remaining_shielded: &mut ShieldedBudget,
 ) -> Option<WeightedIndex<f32>> {
     // > Pick one of those transactions at random with probability in direct proportion
     // > to its weight_ratio, and remove it from the set of candidate transactions
@@ -264,6 +269,7 @@ fn checked_add_transaction_weighted_random(
         remaining_block_bytes,
         remaining_block_sigops,
         remaining_block_unpaid_actions,
+        remaining_shielded,
     ) {
         return new_tx_weights;
     }
@@ -309,6 +315,7 @@ fn checked_add_transaction_weighted_random(
                     remaining_block_bytes,
                     remaining_block_sigops,
                     remaining_block_unpaid_actions,
+                    remaining_shielded,
                 ) {
                     continue;
                 }
@@ -332,6 +339,52 @@ fn checked_add_transaction_weighted_random(
     new_tx_weights
 }
 
+/// Tracks a block template's [ZIP 218] shielded action budget.
+///
+/// The limits only apply from NU7, so before then `applies` is false and every transaction fits.
+///
+/// Template selection has to apply the same limits as the block verifier: without this, a mempool
+/// holding more than a block's worth of shielded actions would produce a template that
+/// `check::shielded_action_limits_are_valid()` rejects, so a Zebra-backed miner would mine invalid
+/// blocks and a `getblocktemplate` proposal round-trip would fail.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+struct ShieldedBudget {
+    /// Whether the ZIP 218 limits apply at this block's height.
+    applies: bool,
+    /// The shielded actions already committed to the template.
+    used: ShieldedActionCounts,
+}
+
+impl ShieldedBudget {
+    /// Returns the budget for a block at `height` on `net`.
+    fn new(net: &Network, height: Height) -> Self {
+        Self {
+            applies: NetworkUpgrade::current(net, height) >= NetworkUpgrade::Nu7,
+            used: ShieldedActionCounts::default(),
+        }
+    }
+
+    /// Adds `transaction` to the budget and returns `true`, or returns `false` and leaves the
+    /// budget unchanged if it would exceed a limit.
+    fn try_add(&mut self, transaction: &Transaction) -> bool {
+        if !self.applies {
+            return true;
+        }
+
+        let used = self
+            .used
+            .saturating_add(ShieldedActionCounts::from_transaction(transaction));
+
+        if used.exceeded_limit().is_some() {
+            return false;
+        }
+
+        self.used = used;
+        true
+    }
+}
+
 trait TryUpdateBlockLimits {
     /// Checks if a transaction fits within the provided remaining block bytes,
     /// sigops, and unpaid actions limits.
@@ -343,6 +396,7 @@ trait TryUpdateBlockLimits {
         remaining_block_bytes: &mut usize,
         remaining_block_sigops: &mut u32,
         remaining_block_unpaid_actions: &mut u32,
+        remaining_shielded: &mut ShieldedBudget,
     ) -> bool;
 }
 
@@ -352,6 +406,7 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         remaining_block_bytes: &mut usize,
         remaining_block_sigops: &mut u32,
         remaining_block_unpaid_actions: &mut u32,
+        remaining_shielded: &mut ShieldedBudget,
     ) -> bool {
         // > If the block template with this transaction included
         // > would be within the block size limit and block sigop limit,
@@ -366,6 +421,9 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         if self.transaction.size <= *remaining_block_bytes
             && tx_block_sigops <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
+            // Checked last, and only committed once the other limits pass, so the shielded
+            // budget is not consumed by a transaction that is then rejected for its size.
+            && remaining_shielded.try_add(&self.transaction.transaction)
         {
             *remaining_block_bytes -= self.transaction.size;
             *remaining_block_sigops -= tx_block_sigops;

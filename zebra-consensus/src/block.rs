@@ -216,6 +216,90 @@ pub const SAPLING_BLOCK_IO_LIMIT: usize = 300;
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 pub const SPROUT_BLOCK_JOIN_SPLIT_LIMIT: usize = 25;
 
+/// The shielded components that the [ZIP 218] action limits count.
+///
+/// Shared by the block verifier's limit check and by `getblocktemplate` transaction selection, so
+/// that a template can not be built from transactions the verifier would then reject.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShieldedActionCounts {
+    /// The number of Orchard actions.
+    pub orchard_actions: usize,
+    /// The number of Sapling inputs plus outputs.
+    pub sapling_io: usize,
+    /// The number of Sprout JoinSplits.
+    pub joinsplits: usize,
+}
+
+impl ShieldedActionCounts {
+    /// Returns the shielded components of `transaction` that the ZIP 218 limits count.
+    ///
+    /// Ironwood actions are deliberately not counted: see
+    /// [`check::shielded_action_limits_are_valid`].
+    pub fn from_transaction(transaction: &zebra_chain::transaction::Transaction) -> Self {
+        Self {
+            orchard_actions: transaction.orchard_actions().count(),
+            sapling_io: transaction.sapling_spends_count() + transaction.sapling_outputs().count(),
+            joinsplits: transaction.joinsplit_count(),
+        }
+    }
+
+    /// Returns these counts plus `other`.
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self {
+            orchard_actions: self.orchard_actions.saturating_add(other.orchard_actions),
+            sapling_io: self.sapling_io.saturating_add(other.sapling_io),
+            joinsplits: self.joinsplits.saturating_add(other.joinsplits),
+        }
+    }
+
+    /// Returns the total shielded cost, which each Sprout JoinSplit contributes twice to, because
+    /// a JoinSplit produces two shielded outputs.
+    ///
+    /// `GlobalShieldedBudget` bounds this sum.
+    pub fn shielded_cost(&self) -> usize {
+        // Each field is bounded by the block size limit, so this can not overflow in practice,
+        // and saturating keeps a malformed count from wrapping below a limit.
+        self.orchard_actions
+            .saturating_add(self.sapling_io)
+            .saturating_add(self.joinsplits.saturating_mul(2))
+    }
+
+    /// Returns the first ZIP 218 limit these counts exceed, as a `(pool, count, limit)` triple.
+    ///
+    /// Returns `None` if they are within every limit.
+    pub fn exceeded_limit(&self) -> Option<(&'static str, usize, usize)> {
+        if self.orchard_actions > ORCHARD_BLOCK_ACTION_LIMIT {
+            Some((
+                "Orchard actions",
+                self.orchard_actions,
+                ORCHARD_BLOCK_ACTION_LIMIT,
+            ))
+        } else if self.sapling_io > SAPLING_BLOCK_IO_LIMIT {
+            Some((
+                "Sapling inputs and outputs",
+                self.sapling_io,
+                SAPLING_BLOCK_IO_LIMIT,
+            ))
+        } else if self.joinsplits > SPROUT_BLOCK_JOIN_SPLIT_LIMIT {
+            Some((
+                "Sprout JoinSplits",
+                self.joinsplits,
+                SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+            ))
+        } else if self.shielded_cost() > GLOBAL_SHIELDED_BUDGET {
+            Some((
+                "shielded actions across all pools",
+                self.shielded_cost(),
+                GLOBAL_SHIELDED_BUDGET,
+            ))
+        } else {
+            None
+        }
+    }
+}
+
 impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,

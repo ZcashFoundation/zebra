@@ -25,14 +25,7 @@ use zebra_chain::{
     },
 };
 
-use crate::{
-    block::{
-        GLOBAL_SHIELDED_BUDGET, ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT,
-        SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
-    },
-    error::*,
-    funding_stream_address,
-};
+use crate::{block::ShieldedActionCounts, error::*, funding_stream_address};
 
 /// Checks if there is exactly one coinbase transaction in `Block`,
 /// and if that coinbase transaction is the first transaction in the block.
@@ -533,59 +526,22 @@ pub fn shielded_action_limits_are_valid(
         return Ok(());
     }
 
-    let mut orchard_actions = 0;
-    let mut sapling_io = 0;
-    let mut joinsplits = 0;
+    let counts = block
+        .transactions
+        .iter()
+        .map(|transaction| ShieldedActionCounts::from_transaction(transaction))
+        .fold(ShieldedActionCounts::default(), |acc, counts| {
+            acc.saturating_add(counts)
+        });
 
-    for transaction in block.transactions.iter() {
-        orchard_actions += transaction.orchard_actions().count();
-        sapling_io += transaction.sapling_spends_count() + transaction.sapling_outputs().count();
-        joinsplits += transaction.joinsplit_count();
-    }
-
-    let too_many =
-        |pool: &'static str, count: usize, limit: usize| BlockError::TooManyShieldedActions {
+    if let Some((pool, count, limit)) = counts.exceeded_limit() {
+        Err(BlockError::TooManyShieldedActions {
             height,
             hash,
             pool,
             count,
             limit,
-        };
-
-    if orchard_actions > ORCHARD_BLOCK_ACTION_LIMIT {
-        Err(too_many(
-            "Orchard actions",
-            orchard_actions,
-            ORCHARD_BLOCK_ACTION_LIMIT,
-        ))?;
-    }
-
-    if sapling_io > SAPLING_BLOCK_IO_LIMIT {
-        Err(too_many(
-            "Sapling inputs and outputs",
-            sapling_io,
-            SAPLING_BLOCK_IO_LIMIT,
-        ))?;
-    }
-
-    if joinsplits > SPROUT_BLOCK_JOIN_SPLIT_LIMIT {
-        Err(too_many(
-            "Sprout JoinSplits",
-            joinsplits,
-            SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
-        ))?;
-    }
-
-    // Each of the three totals is already bounded by its own limit, and each limit is far below
-    // `usize::MAX`, so this sum can not overflow.
-    let shielded_cost = orchard_actions + sapling_io + 2 * joinsplits;
-
-    if shielded_cost > GLOBAL_SHIELDED_BUDGET {
-        Err(too_many(
-            "shielded actions across all pools",
-            shielded_cost,
-            GLOBAL_SHIELDED_BUDGET,
-        ))?;
+        })?;
     }
 
     Ok(())
