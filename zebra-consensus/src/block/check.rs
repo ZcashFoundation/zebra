@@ -413,6 +413,76 @@ pub fn miner_fees_are_valid(
 /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
 ///
 /// If the header time is invalid, returns an error containing `height` and `hash`.
+pub fn time_is_valid_at(
+    header: &Header,
+    now: DateTime<Utc>,
+    height: &Height,
+    hash: &Hash,
+) -> Result<(), zebra_chain::block::BlockTimeError> {
+    header.time_is_valid_at(now, height, hash)
+}
+
+/// Check Merkle root validity.
+///
+/// `transaction_hashes` is a precomputed list of transaction hashes.
+///
+/// # Consensus rules:
+///
+/// - A SHA-256d hash in internal byte order. The merkle root is derived from the
+///   hashes of all transactions included in this block, ensuring that none of
+///   those transactions can be modified without modifying the header. [7.6]
+///
+/// # Panics
+///
+/// - If block does not have a coinbase transaction.
+///
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+/// [7.6]: https://zips.z.cash/protocol/nu5.pdf#blockheader
+pub fn merkle_root_validity(
+    network: &Network,
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> Result<(), BlockError> {
+    // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
+    block
+        .check_transaction_network_upgrade_consistency(network)
+        .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
+
+    let merkle_root = transaction_hashes.iter().cloned().collect();
+
+    if block.header.merkle_root != merkle_root {
+        return Err(BlockError::BadMerkleRoot {
+            actual: merkle_root,
+            expected: block.header.merkle_root,
+        });
+    }
+
+    // Bitcoin's transaction Merkle trees are malleable, allowing blocks with
+    // duplicate transactions to have the same Merkle root as blocks without
+    // duplicate transactions.
+    //
+    // Collecting into a HashSet deduplicates, so this checks that there are no
+    // duplicate transaction hashes, preventing Merkle root malleability.
+    //
+    // ## Full Block Validation
+    //
+    // Duplicate transactions should cause a block to be
+    // rejected, as duplicate transactions imply that the block contains a
+    // double-spend. As a defense-in-depth, however, we also check that there
+    // are no duplicate transaction hashes.
+    //
+    // ## Checkpoint Validation
+    //
+    // To prevent malleability (CVE-2012-2459), we also need to check
+    // whether the transaction hashes are unique.
+    if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
+        return Err(BlockError::DuplicateTransaction);
+    }
+
+    Ok(())
+}
+
 /// Checks the [ZIP 218] per-pool and global shielded action limits for `block`.
 ///
 /// # Consensus
@@ -432,6 +502,21 @@ pub fn miner_fees_are_valid(
 ///
 /// The global shielded cost counts each Sprout JoinSplit twice, because each JoinSplit produces
 /// two shielded outputs.
+///
+/// # Ironwood is not counted
+///
+/// ZIP 218 defines the shielded cost as Orchard actions, plus Sapling inputs and outputs, plus
+/// twice the Sprout JoinSplits. It says nothing about Ironwood, which NU6.3 introduced after the
+/// ZIP was written, even though its prose describes the budget as covering "all pools". So a
+/// post-NU7 block can carry any number of Ironwood actions and still pass every limit here, which
+/// leaves the worst-case verification time and compact sync bandwidth unbounded for that pool.
+///
+/// Zebra implements the rule exactly as specified anyway: adding an unspecified limit would make
+/// Zebra reject blocks that other implementations accept, which is a chain split. This needs to
+/// be resolved in the ZIP, not here.
+//
+// TODO: count Ironwood actions once ZIP 218 says how (zcash/zips), and add a per-pool limit for
+// them if the ZIP adds one.
 ///
 /// These limits bound the worst-case block verification time and the worst-case compact sync
 /// bandwidth that lightweight wallets must download, so they are checked before the block's
@@ -501,76 +586,6 @@ pub fn shielded_action_limits_are_valid(
             shielded_cost,
             GLOBAL_SHIELDED_BUDGET,
         ))?;
-    }
-
-    Ok(())
-}
-
-pub fn time_is_valid_at(
-    header: &Header,
-    now: DateTime<Utc>,
-    height: &Height,
-    hash: &Hash,
-) -> Result<(), zebra_chain::block::BlockTimeError> {
-    header.time_is_valid_at(now, height, hash)
-}
-
-/// Check Merkle root validity.
-///
-/// `transaction_hashes` is a precomputed list of transaction hashes.
-///
-/// # Consensus rules:
-///
-/// - A SHA-256d hash in internal byte order. The merkle root is derived from the
-///   hashes of all transactions included in this block, ensuring that none of
-///   those transactions can be modified without modifying the header. [7.6]
-///
-/// # Panics
-///
-/// - If block does not have a coinbase transaction.
-///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
-/// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-/// [7.6]: https://zips.z.cash/protocol/nu5.pdf#blockheader
-pub fn merkle_root_validity(
-    network: &Network,
-    block: &Block,
-    transaction_hashes: &[transaction::Hash],
-) -> Result<(), BlockError> {
-    // TODO: deduplicate zebra-chain and zebra-consensus errors (#2908)
-    block
-        .check_transaction_network_upgrade_consistency(network)
-        .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
-
-    let merkle_root = transaction_hashes.iter().cloned().collect();
-
-    if block.header.merkle_root != merkle_root {
-        return Err(BlockError::BadMerkleRoot {
-            actual: merkle_root,
-            expected: block.header.merkle_root,
-        });
-    }
-
-    // Bitcoin's transaction Merkle trees are malleable, allowing blocks with
-    // duplicate transactions to have the same Merkle root as blocks without
-    // duplicate transactions.
-    //
-    // Collecting into a HashSet deduplicates, so this checks that there are no
-    // duplicate transaction hashes, preventing Merkle root malleability.
-    //
-    // ## Full Block Validation
-    //
-    // Duplicate transactions should cause a block to be
-    // rejected, as duplicate transactions imply that the block contains a
-    // double-spend. As a defense-in-depth, however, we also check that there
-    // are no duplicate transaction hashes.
-    //
-    // ## Checkpoint Validation
-    //
-    // To prevent malleability (CVE-2012-2459), we also need to check
-    // whether the transaction hashes are unique.
-    if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
-        return Err(BlockError::DuplicateTransaction);
     }
 
     Ok(())

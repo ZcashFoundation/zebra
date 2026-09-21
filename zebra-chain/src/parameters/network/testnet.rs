@@ -295,16 +295,19 @@ fn num_funding_stream_addresses_required_for_height_range(
     height_range: &std::ops::Range<Height>,
     network: &Network,
 ) -> usize {
-    1u32.checked_add(funding_stream_address_period(
+    // The two periods are only meaningful relative to each other, so the subtraction is done in
+    // signed arithmetic: see `funding_stream_address_period()`.
+    let last_period = funding_stream_address_period(
         height_range
             .end
             .previous()
             .expect("end height must be above start height and genesis height"),
         network,
-    ))
-    .expect("no overflow should happen in this sum")
-    .checked_sub(funding_stream_address_period(height_range.start, network))
-    .expect("no overflow should happen in this sub") as usize
+    );
+    let first_period = funding_stream_address_period(height_range.start, network);
+
+    usize::try_from(1 + last_period - first_period)
+        .expect("a height range's last address period is at or after its first")
 }
 
 /// Checks that the provided [`FundingStreams`] has sufficient recipient addresses for the
@@ -1247,7 +1250,12 @@ impl Network {
     /// unassigned on both Mainnet and Testnet, recording only that it corresponds to a date in
     /// February 2031, so no reserve is reissued on any network yet.
     //
-    // TODO: return the assigned heights once the NU7 deployment ZIP sets them.
+    // TODO: return the assigned heights once the NU7 deployment ZIP sets them. Returning a height
+    // here is NOT enough to enable reissuance on its own: `subsidy::nsm_subsidy()` must also be
+    // added to `subsidy::block_subsidy()`, and the same amount subtracted from the block's
+    // `nsm_reserve` pool change in `Block::chain_value_pool_change()`. Both need the reserve
+    // balance from contextual state, which neither function has today. All three must change
+    // together, or the reserve will grow without ever being paid out.
     pub fn nsm_reissuance_height(&self) -> Option<Height> {
         None
     }

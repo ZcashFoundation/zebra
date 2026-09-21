@@ -297,8 +297,18 @@ impl ParameterSubsidy for Network {
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]
 ///
+/// The result is signed, and callers only ever use the *difference* between two periods. It can
+/// be negative below the first funding stream: on a configured Testnet whose upgrades are packed
+/// into a few hundred blocks, ZIP 218 pushes the first halving above every height the network
+/// reaches once NU7 activates before it. Clamping a negative period to zero would silently
+/// collapse those differences, so the sign is preserved here and the conversion is left to the
+/// callers, which know the range they are counting over.
+///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, network: &N) -> u32 {
+pub fn funding_stream_address_period<N: ParameterSubsidy>(
+    height: Height,
+    network: &N,
+) -> HeightDiff {
     // Spec equation: `address_period = floor((height - (height_for_halving(1) - post_blossom_halving_interval))/funding_stream_address_change_interval)`,
     // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     //
@@ -310,19 +320,8 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
-    let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
-        / network.funding_stream_address_change_interval();
-
-    // The address period is only used while a funding stream is active, which never happens
-    // before the first halving minus one post-Blossom halving interval, so it is positive for
-    // every height a caller can reach on a network with funding streams. It can still go
-    // negative on a configured Testnet whose upgrades are packed into a few hundred blocks: ZIP
-    // 218 pushes the first halving later when NU7 activates before it, which can move the first
-    // halving above the heights such a network ever reaches.
-    address_period
-        .max(0)
-        .try_into()
-        .expect("negative address periods are clamped above")
+    (height_after_first_halving + network.post_blossom_halving_interval())
+        / network.funding_stream_address_change_interval()
 }
 
 /// The first block height of the halving at the provided halving index for a network.

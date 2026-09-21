@@ -287,9 +287,10 @@ pub const POW_AVERAGING_WINDOW: usize = 17;
 
 /// The averaging window for difficulty threshold arithmetic mean calculations, from NU7 onward.
 ///
-/// `PostNU7PoWAveragingWindow` in [ZIP 218]. It is three times the pre-NU7 window (rounded up
-/// from 51) so the wall-clock smoothing window stays at about 2,550 seconds once the target
-/// spacing drops to 25 seconds.
+/// `PostNU7PoWAveragingWindow` in [ZIP 218]. It is six times the pre-NU7 window of 17, so with
+/// the target spacing cut to a third, the wall-clock smoothing window doubles from 1,275 to
+/// 2,550 seconds. ZIP 218 widens it deliberately: keeping the window at 17 blocks would have
+/// left a third of the wall-clock smoothing and tripled the difficulty noise.
 ///
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 pub const POST_NU7_POW_AVERAGING_WINDOW: usize = 102;

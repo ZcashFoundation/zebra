@@ -1159,6 +1159,14 @@ fn nsm_fee_contribution_is_withheld_from_the_coinbase() -> Result<(), Report> {
         "a coinbase claiming the whole of the fees must be rejected from NU7",
     );
 
+    // A block template must claim exactly `MinerFees`, or the node cannot mine its own template.
+    // This mirrors what `get_block_template` passes to `TransactionTemplate::new_coinbase`.
+    let template_fee = subsidy::miner_fees(height, &network, transaction_fees)?;
+    assert_eq!(
+        template_fee, expected_miner_fees,
+        "a block template's coinbase must claim the same fees the verifier accepts",
+    );
+
     // Below NU7 the same coinbase is the valid one, because no fees are withheld.
     let pre_nu7_height = Height(999_999);
     let pre_nu7_subsidy = block_subsidy(pre_nu7_height, &network)?;

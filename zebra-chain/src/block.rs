@@ -279,14 +279,45 @@ impl Block {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
         // to propagate the first error instead.
-        let tx_pool_sum = self
-            .transactions
-            .iter()
-            .try_fold(ValueBalance::<NegativeAllowed>::zero(), |acc, tx| {
-                acc + tx.value_balance(utxos)?
-            })?;
+        //
+        // The transaction fees are accumulated in the same pass, because the NSM reserve
+        // contribution is calculated from them: `value_balance()` walks every input's UTXO, so a
+        // second pass would double the work on the state's block commit path.
+        //
+        // The fees are only accumulated once NU7 is active, so that this stays byte-for-byte the
+        // same calculation as before NU7 everywhere else. A transaction's fee is its remaining
+        // value, which is only guaranteed to be non-negative for semantically verified
+        // transactions, and this method is also called on blocks that have not been through the
+        // transaction verifier.
+        let needs_fees = self
+            .coinbase_height()
+            .is_some_and(|height| NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu7);
 
-        let nsm_reserve_change = self.nsm_reserve_change(utxos, network)?;
+        let (tx_pool_sum, transaction_fees) = self.transactions.iter().try_fold(
+            (
+                ValueBalance::<NegativeAllowed>::zero(),
+                Amount::<NonNegative>::zero(),
+            ),
+            |(pool_sum, fees), tx| {
+                let value_balance = tx.value_balance(utxos)?;
+
+                // The coinbase transaction consumes the fees rather than paying them, so it is
+                // excluded from the total, exactly as in the block verifier's miner fee sum.
+                let fees = if needs_fees && !tx.is_coinbase() {
+                    let fee = value_balance
+                        .remaining_transaction_value()
+                        .map_err(ValueBalanceError::Total)?;
+
+                    (fees + fee).map_err(ValueBalanceError::Total)?
+                } else {
+                    fees
+                };
+
+                Ok::<_, ValueBalanceError>(((pool_sum + value_balance)?, fees))
+            },
+        )?;
+
+        let nsm_reserve_change = self.nsm_reserve_change_from_fees(network, transaction_fees)?;
 
         let mut chain_value_pool_change = tx_pool_sum.neg();
         chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
@@ -311,14 +342,6 @@ impl Block {
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
         network: &Network,
     ) -> Result<Amount<NegativeAllowed>, ValueBalanceError> {
-        let Some(height) = self.coinbase_height() else {
-            return Ok(Amount::zero());
-        };
-
-        if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
-            return Ok(Amount::zero());
-        }
-
         // The coinbase transaction consumes the fees rather than paying them, so it is excluded
         // from the total, exactly as in the block verifier's miner fee sum.
         let transaction_fees = self
@@ -333,6 +356,23 @@ impl Block {
 
                 (acc + fee).map_err(ValueBalanceError::Total)
             })?;
+
+        self.nsm_reserve_change_from_fees(network, transaction_fees)
+    }
+
+    /// Returns the amount this block adds to the NSM reserve, given its total transaction fees.
+    ///
+    /// See [`Self::nsm_reserve_change`], which calculates the fees from `utxos` before calling
+    /// this. [`Self::chain_value_pool_change`] already has the fee total, so it calls this
+    /// directly rather than walking every transaction's UTXOs a second time.
+    fn nsm_reserve_change_from_fees(
+        &self,
+        network: &Network,
+        transaction_fees: Amount<NonNegative>,
+    ) -> Result<Amount<NegativeAllowed>, ValueBalanceError> {
+        let Some(height) = self.coinbase_height() else {
+            return Ok(Amount::zero());
+        };
 
         subsidy::nsm_fee_contribution(height, network, transaction_fees)
             .and_then(|contribution| contribution.constrain())
