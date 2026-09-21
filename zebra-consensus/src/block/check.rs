@@ -25,7 +25,14 @@ use zebra_chain::{
     },
 };
 
-use crate::{error::*, funding_stream_address};
+use crate::{
+    block::{
+        GLOBAL_SHIELDED_BUDGET, ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT,
+        SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+    },
+    error::*,
+    funding_stream_address,
+};
 
 /// Checks if there is exactly one coinbase transaction in `Block`,
 /// and if that coinbase transaction is the first transaction in the block.
@@ -388,6 +395,99 @@ pub fn miner_fees_are_valid(
 /// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
 ///
 /// If the header time is invalid, returns an error containing `height` and `hash`.
+/// Checks the [ZIP 218] per-pool and global shielded action limits for `block`.
+///
+/// # Consensus
+///
+/// > For each block at height `height` where `IsNU7Activated(height)`, the following limits MUST
+/// > be satisfied:
+/// >
+/// > - The total number of Orchard actions across all transactions in the block MUST NOT exceed
+/// >   `OrchardBlockActionLimit`.
+/// > - The total number of Sapling inputs and outputs across all transactions in the block MUST
+/// >   NOT exceed `SaplingBlockIOLimit`.
+/// > - The total number of Sprout JoinSplits across all transactions in the block MUST NOT exceed
+/// >   `SproutBlockJoinSplitLimit`.
+/// >
+/// > In addition to the per-pool limits, the total shielded cost across all pools in a block MUST
+/// > NOT exceed `GlobalShieldedBudget`.
+///
+/// The global shielded cost counts each Sprout JoinSplit twice, because each JoinSplit produces
+/// two shielded outputs.
+///
+/// These limits bound the worst-case block verification time and the worst-case compact sync
+/// bandwidth that lightweight wallets must download, so they are checked before the block's
+/// proofs are queued for verification.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub fn shielded_action_limits_are_valid(
+    block: &Block,
+    network: &Network,
+    height: Height,
+    hash: Hash,
+) -> Result<(), BlockError> {
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
+        return Ok(());
+    }
+
+    let mut orchard_actions = 0;
+    let mut sapling_io = 0;
+    let mut joinsplits = 0;
+
+    for transaction in block.transactions.iter() {
+        orchard_actions += transaction.orchard_actions().count();
+        sapling_io += transaction.sapling_spends_count() + transaction.sapling_outputs().count();
+        joinsplits += transaction.joinsplit_count();
+    }
+
+    let too_many =
+        |pool: &'static str, count: usize, limit: usize| BlockError::TooManyShieldedActions {
+            height,
+            hash,
+            pool,
+            count,
+            limit,
+        };
+
+    if orchard_actions > ORCHARD_BLOCK_ACTION_LIMIT {
+        Err(too_many(
+            "Orchard actions",
+            orchard_actions,
+            ORCHARD_BLOCK_ACTION_LIMIT,
+        ))?;
+    }
+
+    if sapling_io > SAPLING_BLOCK_IO_LIMIT {
+        Err(too_many(
+            "Sapling inputs and outputs",
+            sapling_io,
+            SAPLING_BLOCK_IO_LIMIT,
+        ))?;
+    }
+
+    if joinsplits > SPROUT_BLOCK_JOIN_SPLIT_LIMIT {
+        Err(too_many(
+            "Sprout JoinSplits",
+            joinsplits,
+            SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+        ))?;
+    }
+
+    // Each of the three totals is already bounded by its own limit, and each limit is far below
+    // `usize::MAX`, so this sum can not overflow.
+    let shielded_cost = orchard_actions + sapling_io + 2 * joinsplits;
+
+    if shielded_cost > GLOBAL_SHIELDED_BUDGET {
+        Err(too_many(
+            "shielded actions across all pools",
+            shielded_cost,
+            GLOBAL_SHIELDED_BUDGET,
+        ))?;
+    }
+
+    Ok(())
+}
+
 pub fn time_is_valid_at(
     header: &Header,
     now: DateTime<Utc>,

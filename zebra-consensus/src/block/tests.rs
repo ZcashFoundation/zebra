@@ -964,3 +964,174 @@ fn state_auth_commitment_errors_score_the_serving_peer() {
         "the score must reach the syncer through RouterError"
     );
 }
+
+/// Returns a Regtest network with NU7 activating at `nu7_height`.
+///
+/// NU7 is unscheduled on Mainnet and the default Testnet, so the ZIP 218 action limits are
+/// unreachable there.
+fn nu7_network(nu7_height: u32) -> Network {
+    Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(nu7_height),
+            ..Default::default()
+        }
+        .into(),
+    )
+}
+
+/// Returns `block`, with its transaction list replaced by `count` copies of `transaction`.
+///
+/// The block's merkle root no longer matches its transactions, which is irrelevant to the ZIP 218
+/// action limits: they only count the shielded components of the block's transactions.
+fn with_repeated_transaction(
+    mut block: Block,
+    transaction: Arc<Transaction>,
+    count: usize,
+) -> Block {
+    block.transactions = std::iter::repeat_n(transaction, count).collect();
+    block
+}
+
+/// ZIP 218: a block whose Orchard actions exceed `OrchardBlockActionLimit` is rejected from NU7,
+/// and the same block is accepted below the activation height.
+#[test]
+fn zip_218_orchard_action_limit() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+        .expect("block test vector is valid");
+
+    // A transaction whose only shielded data is Orchard actions, so the Orchard limit is the
+    // only one the repeated block can exceed.
+    let transaction =
+        zebra_chain::transaction::arbitrary::v5_transactions(Network::Mainnet.block_iter())
+            .find(|transaction| {
+                transaction.orchard_actions().count() > 0
+                    && transaction.joinsplit_count() == 0
+                    && transaction.sapling_spends_count() == 0
+                    && transaction.sapling_outputs().next().is_none()
+            })
+            .map(Arc::new)
+            .expect("a V5 transaction whose only shielded data is Orchard actions");
+
+    let actions_per_transaction = transaction.orchard_actions().count();
+
+    // Just over the limit, and just under it.
+    let over = ORCHARD_BLOCK_ACTION_LIMIT / actions_per_transaction + 1;
+    let under = ORCHARD_BLOCK_ACTION_LIMIT / actions_per_transaction;
+
+    let over_block = with_repeated_transaction(block.clone(), transaction.clone(), over);
+    let under_block = with_repeated_transaction(block, transaction, under);
+
+    let hash = over_block.hash();
+
+    assert!(
+        matches!(
+            check::shielded_action_limits_are_valid(&over_block, &network, Height(1_000), hash),
+            Err(BlockError::TooManyShieldedActions { .. })
+        ),
+        "a block over the Orchard action limit must be rejected from NU7",
+    );
+
+    assert!(
+        check::shielded_action_limits_are_valid(&under_block, &network, Height(1_000), hash)
+            .is_ok(),
+        "a block under the Orchard action limit must be accepted at NU7",
+    );
+
+    // The limit does not apply before NU7 activates.
+    assert!(
+        check::shielded_action_limits_are_valid(&over_block, &network, Height(999), hash).is_ok(),
+        "the ZIP 218 action limits must not apply before NU7",
+    );
+}
+
+/// ZIP 218: the global shielded budget applies even when no single pool is over its own limit.
+#[test]
+fn zip_218_global_shielded_budget() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+        .expect("block test vector is valid");
+
+    // A transaction whose only shielded data is Orchard actions.
+    let orchard_tx =
+        zebra_chain::transaction::arbitrary::v5_transactions(Network::Mainnet.block_iter())
+            .find(|transaction| {
+                transaction.orchard_actions().count() > 0
+                    && transaction.joinsplit_count() == 0
+                    && transaction.sapling_spends_count() == 0
+                    && transaction.sapling_outputs().next().is_none()
+            })
+            .map(Arc::new)
+            .expect("a V5 transaction whose only shielded data is Orchard actions");
+
+    // A transaction whose only shielded data is Sapling spends and outputs.
+    let sapling_tx = zebra_chain::transaction::arbitrary::transactions_from_blocks(
+        Network::Mainnet.block_iter(),
+    )
+    .map(|(_, transaction)| transaction)
+    .find(|transaction| {
+        transaction.orchard_actions().count() == 0
+            && transaction.joinsplit_count() == 0
+            && transaction.sapling_spends_count() + transaction.sapling_outputs().count() > 0
+    })
+    .expect("a transaction whose only shielded data is Sapling");
+
+    let orchard_actions = orchard_tx.orchard_actions().count();
+    let sapling_io = sapling_tx.sapling_spends_count() + sapling_tx.sapling_outputs().count();
+
+    // Fill a little over half of each per-pool limit, so neither is exceeded on its own but their
+    // sum is over the global budget of 330.
+    let orchard_count = (ORCHARD_BLOCK_ACTION_LIMIT * 3 / 5).div_ceil(orchard_actions);
+    let sapling_count = (SAPLING_BLOCK_IO_LIMIT * 3 / 5).div_ceil(sapling_io);
+
+    let orchard_total = orchard_count * orchard_actions;
+    let sapling_total = sapling_count * sapling_io;
+
+    assert!(orchard_total <= ORCHARD_BLOCK_ACTION_LIMIT);
+    assert!(sapling_total <= SAPLING_BLOCK_IO_LIMIT);
+    assert!(
+        orchard_total + sapling_total > GLOBAL_SHIELDED_BUDGET,
+        "the test block must exceed the global budget while staying under both pool limits",
+    );
+
+    let mut over_block = block.clone();
+    over_block.transactions = std::iter::repeat_n(orchard_tx.clone(), orchard_count)
+        .chain(std::iter::repeat_n(sapling_tx.clone(), sapling_count))
+        .collect();
+    let hash = over_block.hash();
+
+    assert!(
+        matches!(
+            check::shielded_action_limits_are_valid(&over_block, &network, Height(1_000), hash),
+            Err(BlockError::TooManyShieldedActions { .. })
+        ),
+        "a block over the global shielded budget must be rejected from NU7, \
+         even though neither pool is over its own limit",
+    );
+
+    // The same block is valid before NU7 activates.
+    assert!(
+        check::shielded_action_limits_are_valid(&over_block, &network, Height(999), hash).is_ok(),
+        "the global shielded budget must not apply before NU7",
+    );
+
+    // Dropping the Sapling transactions brings the block back under the budget.
+    let mut under_block = block;
+    under_block.transactions = std::iter::repeat_n(orchard_tx, orchard_count).collect();
+
+    assert!(
+        check::shielded_action_limits_are_valid(&under_block, &network, Height(1_000), hash)
+            .is_ok(),
+        "a block within the global shielded budget must be accepted at NU7",
+    );
+}

@@ -28,6 +28,24 @@ pub(crate) const PRE_BLOSSOM_HALVING_INTERVAL: HeightDiff = 840_000;
 pub(crate) const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
     PRE_BLOSSOM_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
 
+/// Used as a multiplier to get the new halving interval after NU7.
+///
+/// `NU7PoWTargetSpacingRatio` in [ZIP 218], calculated as
+/// `POST_BLOSSOM_POW_TARGET_SPACING / POST_NU7_POW_TARGET_SPACING`.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub(crate) const NU7_POW_TARGET_SPACING_RATIO: u32 =
+    crate::parameters::NU7_POW_TARGET_SPACING_RATIO;
+
+/// After NU7 the block time is reduced to 25 seconds, so the halving interval is tripled again
+/// to keep the halving period at around 4 years.
+///
+/// `PostNU7HalvingInterval` in [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub(crate) const POST_NU7_HALVING_INTERVAL: HeightDiff =
+    POST_BLOSSOM_HALVING_INTERVAL * (NU7_POW_TARGET_SPACING_RATIO as HeightDiff);
+
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams

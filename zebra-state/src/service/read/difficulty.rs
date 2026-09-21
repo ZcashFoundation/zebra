@@ -18,7 +18,7 @@ use crate::{
         block_iter::any_chain_ancestor_iter,
         check::{
             difficulty::{
-                BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
+                BLOCK_MAX_TIME_SINCE_MEDIAN, MAX_POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
             },
             AdjustedDifficulty,
         },
@@ -155,9 +155,11 @@ fn best_relevant_chain_and_history_tree(
 
     let best_relevant_chain =
         any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
+    // Fetch the largest span any height could need: `AdjustedDifficulty` truncates the context
+    // to the span that applies to the candidate block's own height.
     let best_relevant_chain: Vec<_> = best_relevant_chain
         .into_iter()
-        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+        .take(MAX_POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
 
     if best_relevant_chain.is_empty() {
@@ -406,7 +408,7 @@ mod tests {
     /// to the minimum-difficulty rule under test.
     fn recent_block_data(network: &Network) -> Vec<(CompactDifficulty, DateTime<Utc>)> {
         let threshold = network.target_difficulty_limit().to_compact();
-        (0..POW_ADJUSTMENT_BLOCK_SPAN)
+        (0..MAX_POW_ADJUSTMENT_BLOCK_SPAN)
             .map(|i| (threshold, DateTime32::from(PREV - i as u32).into()))
             .collect()
     }

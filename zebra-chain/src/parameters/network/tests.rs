@@ -318,3 +318,135 @@ fn check_height_for_num_halvings() {
         }
     }
 }
+
+/// Builds a Regtest network with NU7 activating at `nu7_height`, so [ZIP 218]'s post-NU7 era can
+/// be exercised while NU7 is unscheduled on Mainnet and the default Testnet.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+fn nu7_network(nu7_height: u32) -> Network {
+    Network::new_regtest(
+        crate::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(nu7_height),
+            ..Default::default()
+        }
+        .into(),
+    )
+}
+
+/// ZIP 218 drops the target block spacing to 25 seconds and widens the difficulty averaging
+/// window to 102 blocks from NU7 onward.
+#[test]
+fn zip_218_target_spacing_and_averaging_window() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(
+        NetworkUpgrade::Nu6_3.target_spacing(),
+        chrono::Duration::seconds(75)
+    );
+    assert_eq!(
+        NetworkUpgrade::Nu7.target_spacing(),
+        chrono::Duration::seconds(25)
+    );
+
+    assert_eq!(NetworkUpgrade::Nu6_3.averaging_window(), 17);
+    assert_eq!(NetworkUpgrade::Nu7.averaging_window(), 102);
+
+    // The wall-clock smoothing window is preserved across the transition: 17 * 75 == 1275 and
+    // 102 * 25 == 2550. ZIP 218 deliberately doubles it, to halve the difficulty noise that the
+    // 3x faster blocks would otherwise add.
+    assert_eq!(
+        NetworkUpgrade::Nu6_3.averaging_window_timespan(),
+        chrono::Duration::seconds(1275)
+    );
+    assert_eq!(
+        NetworkUpgrade::Nu7.averaging_window_timespan(),
+        chrono::Duration::seconds(2550)
+    );
+
+    // The spacing change is visible through the height-dependent accessors too.
+    let network = nu7_network(1_000);
+    assert_eq!(
+        NetworkUpgrade::target_spacing_for_height(&network, Height(999)),
+        chrono::Duration::seconds(75)
+    );
+    assert_eq!(
+        NetworkUpgrade::target_spacing_for_height(&network, Height(1_000)),
+        chrono::Duration::seconds(25)
+    );
+    assert_eq!(
+        NetworkUpgrade::averaging_window_for_height(&network, Height(999)),
+        17
+    );
+    assert_eq!(
+        NetworkUpgrade::averaging_window_for_height(&network, Height(1_000)),
+        102
+    );
+}
+
+/// ZIP 218 divides the block subsidy by a further factor of 3 from NU7, so that issuance per unit
+/// of wall clock time is unchanged by the faster block spacing.
+#[test]
+fn zip_218_block_subsidy() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    let pre_nu7 = Height(999);
+    let nu7 = Height(1_000);
+
+    let pre_nu7_subsidy = block_subsidy(pre_nu7, &network)?;
+    let nu7_subsidy = block_subsidy(nu7, &network)?;
+
+    // NU7 activates well before the first halving on this network, so both heights are in the
+    // same halving and the only difference is the ZIP 218 divisor.
+    assert_eq!(halving(pre_nu7, &network), halving(nu7, &network));
+    assert_eq!(nu7_subsidy, (pre_nu7_subsidy / 3)?);
+
+    // Three post-NU7 blocks issue at most as much as one pre-NU7 block, so the issuance rate per
+    // unit of wall clock time does not increase.
+    assert!((nu7_subsidy * 3)? <= pre_nu7_subsidy);
+
+    Ok(())
+}
+
+/// ZIP 218 triples the halving interval at NU7, so the wall-clock time between halvings is
+/// unchanged, and `halving()` and `height_for_halving()` stay consistent across the boundary.
+#[test]
+fn zip_218_halving_interval() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+
+    assert_eq!(
+        network.post_nu7_halving_interval(),
+        network.post_blossom_halving_interval() * 3,
+    );
+
+    // The halving index does not jump at the activation height.
+    assert_eq!(
+        halving(Height(999), &network),
+        halving(Height(1_000), &network),
+    );
+
+    for h in 1..20 {
+        let height = height_for_halving(h, &network).expect("halving height is representable");
+        let previous = height.previous().expect("there is a previous height");
+
+        assert_eq!(
+            halving(height, &network),
+            h,
+            "the halving index at height_for_halving({h}) should be {h}",
+        );
+        assert_eq!(
+            halving(previous, &network),
+            h - 1,
+            "the halving index just below height_for_halving({h}) should be {}",
+            h - 1,
+        );
+    }
+}

@@ -11,7 +11,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use zebra_chain::{
     block::{self, Block},
-    parameters::{Network, NetworkUpgrade, POW_AVERAGING_WINDOW},
+    parameters::{Network, NetworkUpgrade, MAX_POW_AVERAGING_WINDOW},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
     BoundedVec,
 };
@@ -21,11 +21,25 @@ use zebra_chain::{
 /// `PoWMedianBlockSpan` in the Zcash specification.
 pub const POW_MEDIAN_BLOCK_SPAN: usize = 11;
 
-/// The overall block span used for adjusting Zcash block difficulty.
+/// The largest overall block span used for adjusting Zcash block difficulty.
 ///
-/// `PoWAveragingWindow + PoWMedianBlockSpan` in the Zcash specification based on
+/// `PoWAveragingWindow(height) + PoWMedianBlockSpan` in the Zcash specification, for the height
+/// with the largest averaging window, based on
 /// > ActualTimespan(height : N) := MedianTime(height) − MedianTime(height − PoWAveragingWindow)
-pub const POW_ADJUSTMENT_BLOCK_SPAN: usize = POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN;
+///
+/// Used to size the buffers that hold difficulty adjustment context. Use
+/// [`pow_adjustment_block_span`] for the span that actually applies to a block, because [ZIP 218]
+/// makes the averaging window height-dependent.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const MAX_POW_ADJUSTMENT_BLOCK_SPAN: usize = MAX_POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN;
+
+/// The overall block span used for adjusting the difficulty of the block at `height` on `network`.
+///
+/// `PoWAveragingWindow(height) + PoWMedianBlockSpan` in the Zcash specification.
+pub fn pow_adjustment_block_span(network: &Network, height: block::Height) -> usize {
+    NetworkUpgrade::averaging_window_for_height(network, height) + POW_MEDIAN_BLOCK_SPAN
+}
 
 /// The damping factor for median timespan variance.
 ///
@@ -60,16 +74,16 @@ pub(crate) struct AdjustedDifficulty {
     /// The configured network
     network: Network,
     /// The `header.difficulty_threshold`s from the previous
-    /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
+    /// `PoWAveragingWindow(height) + PoWMedianBlockSpan` blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds: BoundedVec<CompactDifficulty, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
+    relevant_difficulty_thresholds: BoundedVec<CompactDifficulty, 1, MAX_POW_ADJUSTMENT_BLOCK_SPAN>,
     /// The `header.time`s from the previous
-    /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
+    /// `PoWAveragingWindow(height) + PoWMedianBlockSpan` blocks, in reverse height
     /// order.
     ///
-    /// Only the first and last `PoWMedianBlockSpan` times are used. Times
-    /// `11..=16` are ignored.
-    relevant_times: BoundedVec<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
+    /// Only the first and last `PoWMedianBlockSpan` times are used. The times in
+    /// between the two medians are ignored.
+    relevant_times: BoundedVec<DateTime<Utc>, 1, MAX_POW_ADJUSTMENT_BLOCK_SPAN>,
 }
 
 impl AdjustedDifficulty {
@@ -140,17 +154,17 @@ impl AdjustedDifficulty {
 
         let (thresholds, times) = context
             .into_iter()
-            .take(POW_ADJUSTMENT_BLOCK_SPAN)
+            .take(pow_adjustment_block_span(network, candidate_height))
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
         let relevant_difficulty_thresholds: BoundedVec<
             CompactDifficulty,
             1,
-            POW_ADJUSTMENT_BLOCK_SPAN,
+            MAX_POW_ADJUSTMENT_BLOCK_SPAN,
         > = thresholds
             .try_into()
             .expect("context must provide a bounded number of difficulty thresholds");
-        let relevant_times: BoundedVec<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN> = times
+        let relevant_times: BoundedVec<DateTime<Utc>, 1, MAX_POW_ADJUSTMENT_BLOCK_SPAN> = times
             .try_into()
             .expect("context must provide a bounded number of block times");
 
@@ -171,6 +185,15 @@ impl AdjustedDifficulty {
     /// Returns the candidate block's time field.
     pub fn candidate_time(&self) -> DateTime<Utc> {
         self.candidate_time
+    }
+
+    /// Returns the difficulty averaging window that applies to the candidate block.
+    ///
+    /// `PoWAveragingWindow(height)` in the Zcash specification, as redefined by [ZIP 218].
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    fn averaging_window(&self) -> usize {
+        NetworkUpgrade::averaging_window_for_height(&self.network, self.candidate_height)
     }
 
     /// Returns the configured network.
@@ -242,9 +265,11 @@ impl AdjustedDifficulty {
         // Therefore, the `PoWLimit` case of `MeanTarget()` from the Zcash
         // specification is unreachable.
 
+        let averaging_window = self.averaging_window();
+
         let averaging_window_thresholds =
-            if self.relevant_difficulty_thresholds.len() >= POW_AVERAGING_WINDOW {
-                &self.relevant_difficulty_thresholds.as_slice()[0..POW_AVERAGING_WINDOW]
+            if self.relevant_difficulty_thresholds.len() >= averaging_window {
+                &self.relevant_difficulty_thresholds.as_slice()[0..averaging_window]
             } else {
                 return self.network.target_difficulty_limit();
             };
@@ -262,7 +287,7 @@ impl AdjustedDifficulty {
             })
             .sum();
 
-        let divisor: U256 = POW_AVERAGING_WINDOW.into();
+        let divisor: U256 = averaging_window.into();
         total / divisor
     }
 
@@ -319,11 +344,13 @@ impl AdjustedDifficulty {
         let newer_median = self.median_time_past();
 
         // MedianTime(height : N) := median([ nTime(𝑖) for 𝑖 from max(0, height − PoWMedianBlockSpan) up to max(0, height − 1) ])
-        let older_median = if self.relevant_times.len() > POW_AVERAGING_WINDOW {
+        let averaging_window = self.averaging_window();
+
+        let older_median = if self.relevant_times.len() > averaging_window {
             let older_times: Vec<_> = self
                 .relevant_times
                 .iter()
-                .skip(POW_AVERAGING_WINDOW)
+                .skip(averaging_window)
                 .cloned()
                 .take(POW_MEDIAN_BLOCK_SPAN)
                 .collect();
