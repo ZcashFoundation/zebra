@@ -158,6 +158,40 @@ fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
 /// [§7.6]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
+/// The maximum shielded cost of a block, across all shielded pools, from NU7 activation.
+///
+/// `GlobalShieldedBudget` in [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const GLOBAL_SHIELDED_BUDGET: usize = 330;
+
+/// The maximum number of Orchard actions in a block, from NU7 activation.
+///
+/// `OrchardBlockActionLimit` in [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const ORCHARD_BLOCK_ACTION_LIMIT: usize = 330;
+
+/// The maximum number of Sapling spends plus outputs in a block, from NU7 activation.
+///
+/// `SaplingBlockIOLimit` in [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const SAPLING_BLOCK_IO_LIMIT: usize = 300;
+
+/// The maximum number of Sprout JoinSplits in a block, from NU7 activation.
+///
+/// `SproutBlockJoinSplitLimit` in [ZIP 218].
+///
+/// NU7 also disallows v4 transactions, and JoinSplits can only appear in v4 transactions, so
+/// this limit — and the JoinSplit term in [`GLOBAL_SHIELDED_BUDGET`] — can never be reached in
+/// practice. It is implemented exactly as written: ZIP 218's limits predate NU7's v4
+/// deprecation, and the limit would matter again if Sprout transfers were ever reintroduced in
+/// a later transaction version.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const SPROUT_BLOCK_JOIN_SPLIT_LIMIT: usize = 25;
+
 impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -285,6 +319,9 @@ where
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
+
+            // Bound the shielded work in the block before queuing its proofs for verification.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();

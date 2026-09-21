@@ -26,7 +26,8 @@ use crate::{
 use constants::{
     regtest, testnet, BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
     FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY,
-    POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
+    NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL, POST_NU7_HALVING_INTERVAL,
+    PRE_BLOSSOM_HALVING_INTERVAL,
 };
 
 /// The funding stream receiver categories.
@@ -225,6 +226,13 @@ pub trait ParameterSubsidy {
     /// Returns the halving interval before Blossom
     fn pre_blossom_halving_interval(&self) -> HeightDiff;
 
+    /// Returns the halving interval after NU7.
+    ///
+    /// `PostNU7HalvingInterval` in [ZIP 218].
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    fn post_nu7_halving_interval(&self) -> HeightDiff;
+
     /// Returns the address change interval for funding streams
     /// as described in [protocol specification §7.10][7.10].
     ///
@@ -270,6 +278,16 @@ impl ParameterSubsidy for Network {
         }
     }
 
+    fn post_nu7_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => POST_NU7_HALVING_INTERVAL,
+            Network::Testnet(params) => {
+                params.post_blossom_halving_interval()
+                    * HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO)
+            }
+        }
+    }
+
     fn funding_stream_address_change_interval(&self) -> HeightDiff {
         self.post_blossom_halving_interval() / 48
     }
@@ -294,9 +312,16 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
     let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
         / network.funding_stream_address_change_interval();
 
+    // The address period is only used while a funding stream is active, which never happens
+    // before the first halving minus one post-Blossom halving interval, so it is positive for
+    // every height a caller can reach on a network with funding streams. It can still go
+    // negative on a configured Testnet whose upgrades are packed into a few hundred blocks: ZIP
+    // 218 pushes the first halving later when NU7 activates before it, which can move the first
+    // halving above the heights such a network ever reaches.
     address_period
+        .max(0)
         .try_into()
-        .expect("all values are positive and smaller than the input height")
+        .expect("negative address periods are clamped above")
 }
 
 /// The first block height of the halving at the provided halving index for a network.
@@ -326,6 +351,19 @@ pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
         .checked_add(slow_start_shift)?;
 
     let height = pre_blossom_height.checked_add(post_blossom_height)?;
+
+    // ZIP 218: once NU7 is active, the blocks after its activation height are three times as
+    // frequent, so the remaining blocks of this halving are stretched by the same ratio.
+    let height = match NetworkUpgrade::Nu7.activation_height(network) {
+        Some(nu7_height) if height > i64::from(nu7_height.0) => {
+            let nu7_height = i64::from(nu7_height.0);
+
+            (height - nu7_height)
+                .checked_mul(i64::from(NU7_POW_TARGET_SPACING_RATIO))?
+                .checked_add(nu7_height)?
+        }
+        _ => height,
+    };
 
     let height = u32::try_from(height).ok()?;
     height.try_into().ok()
@@ -421,12 +459,16 @@ pub fn halving(height: Height, network: &Network) -> u32 {
         .activation_height(network)
         .expect("blossom activation height should be available");
 
+    // `NetworkUpgrade::activation_height()` falls back to the next upgrade's height, so this is
+    // `None` exactly when no upgrade from NU7 onward is scheduled on `network`.
+    let nu7_height = NetworkUpgrade::Nu7.activation_height(network);
+
     let halving_index = if height < slow_start_shift {
         0
     } else if height < blossom_height {
         let pre_blossom_height = height - slow_start_shift;
         pre_blossom_height / network.pre_blossom_halving_interval()
-    } else {
+    } else if nu7_height.is_none_or(|nu7_height| height < nu7_height) {
         let pre_blossom_height = blossom_height - slow_start_shift;
         let scaled_pre_blossom_height =
             pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
@@ -434,6 +476,23 @@ pub fn halving(height: Height, network: &Network) -> u32 {
         let post_blossom_height = height - blossom_height;
 
         (scaled_pre_blossom_height + post_blossom_height) / network.post_blossom_halving_interval()
+    } else {
+        // ZIP 218 adds a third era to `Halving()`. Each era is scaled into post-NU7 blocks: a
+        // pre-Blossom block is worth `BlossomPoWTargetSpacingRatio * NU7PoWTargetSpacingRatio`
+        // of them, and a post-Blossom pre-NU7 block is worth `NU7PoWTargetSpacingRatio`.
+        let nu7_height = nu7_height.expect("checked by the branch condition above");
+
+        let scaled_pre_blossom_height = (blossom_height - slow_start_shift)
+            * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+            * HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
+
+        let scaled_post_blossom_height =
+            (nu7_height - blossom_height) * HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
+
+        let post_nu7_height = height - nu7_height;
+
+        (scaled_pre_blossom_height + scaled_post_blossom_height + post_nu7_height)
+            / network.post_nu7_halving_interval()
     };
 
     halving_index
@@ -462,10 +521,19 @@ pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative
             slow_start_rate * (u64::from(height) + 1)
         }
     } else {
-        let base_subsidy = if NetworkUpgrade::current(net, height) < NetworkUpgrade::Blossom {
+        // Nested integer divisions by `base_subsidy` then `halving_div` give the same result as
+        // the spec's single `floor()` over their product, because both divisors are positive.
+        let nu = NetworkUpgrade::current(net, height);
+        let base_subsidy = if nu < NetworkUpgrade::Blossom {
             MAX_BLOCK_SUBSIDY
-        } else {
+        } else if nu < NetworkUpgrade::Nu7 {
             MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+        } else {
+            // ZIP 218 divides the subsidy by a further `NU7PoWTargetSpacingRatio`, so that the
+            // issuance per unit of wall clock time is unchanged by the faster block spacing.
+            MAX_BLOCK_SUBSIDY
+                / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+                / u64::from(NU7_POW_TARGET_SPACING_RATIO)
         };
 
         base_subsidy / halving_div

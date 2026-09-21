@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'The difficulty adjustment block span is now height-dependent, because ZIP 218 widens the averaging window from 17 to 102 blocks at NU7. `POW_ADJUSTMENT_BLOCK_SPAN` is replaced by `MAX_POW_ADJUSTMENT_BLOCK_SPAN`, for sizing buffers, and `pow_adjustment_block_span()`, for the span that applies to a block.'
+time: 2026-09-21T13:00:02.000000000Z

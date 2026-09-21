@@ -494,6 +494,15 @@ pub enum BlockError {
     #[error("transaction has wrong consensus branch id for block network upgrade")]
     WrongTransactionConsensusBranchId,
 
+    #[error("block {height:?} {hash:?} has {count} {pool}, but the limit is {limit}")]
+    TooManyShieldedActions {
+        height: zebra_chain::block::Height,
+        hash: zebra_chain::block::Hash,
+        pool: &'static str,
+        count: usize,
+        limit: usize,
+    },
+
     #[error(
         "block {height:?} {hash:?} has {sigops} legacy transparent signature operations, \
          but the limit is {MAX_BLOCK_SIGOPS}"
@@ -548,6 +557,9 @@ impl BlockError {
             | BadMerkleRoot { .. }
             | WrongTransactionConsensusBranchId
             | TooManyTransparentSignatureOperations { .. }
+            // A block over a ZIP 218 shielded action limit is unambiguously invalid from its own
+            // contents, so an honest peer never relays one.
+            | TooManyShieldedActions { .. }
             // A block with duplicate transaction hashes is unambiguously invalid, and honest
             // nodes never produce one: it is the CVE-2012-2459 Merkle-malleability case,
             // checked in `block::check::merkle_root_validity()`.
