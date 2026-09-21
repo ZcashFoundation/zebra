@@ -1,15 +1,15 @@
 //! Orchard notes
 
-use group::{ff::PrimeField, GroupEncoding};
+use group::ff::PrimeField;
 use halo2::pasta::pallas;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
     amount::{Amount, NonNegative},
-    error::{NoteError, RandError},
+    error::RandError,
 };
 
-use super::{address::Address, sinsemilla::extract_p};
+use super::address::Address;
 
 mod ciphertexts;
 mod nullifiers;
@@ -63,26 +63,6 @@ impl From<Rho> for [u8; 32] {
 impl From<Nullifier> for Rho {
     fn from(nf: Nullifier) -> Self {
         Self(nf.0)
-    }
-}
-
-impl Rho {
-    pub fn new<T>(csprng: &mut T) -> Result<Self, NoteError>
-    where
-        T: RngCore + CryptoRng,
-    {
-        let mut bytes = [0u8; 32];
-        csprng
-            .try_fill_bytes(&mut bytes)
-            .map_err(|_| NoteError::from(RandError::FillBytes))?;
-
-        let possible_point = pallas::Point::from_bytes(&bytes);
-
-        if possible_point.is_some().into() {
-            Ok(Self(extract_p(possible_point.unwrap())))
-        } else {
-            Err(NoteError::InvalidRho)
-        }
     }
 }
 

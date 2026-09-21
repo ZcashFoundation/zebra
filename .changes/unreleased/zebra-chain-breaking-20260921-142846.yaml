@@ -1,0 +1,9 @@
+project: zebra-chain
+kind: breaking
+body: >-
+  Removed unused Orchard construction APIs: `orchard::NoteCommitment`, `error::NoteError`,
+  `orchard::ValueCommitment::{new, randomized}`,
+  `orchard::ShieldedData::binding_verification_key`, and conversions from
+  `orchard::Diversifier` to Pallas points
+  ([#9510](https://github.com/ZcashFoundation/zebra/issues/9510)).
+time: 2026-09-21T14:28:46Z
