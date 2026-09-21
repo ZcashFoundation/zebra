@@ -3818,6 +3818,260 @@ async fn v5_consensus_branch_ids() {
 
 // Utility functions
 
+// ZIP 2003: v4 transactions are disallowed from NU7 activation.
+//
+// <https://zips.z.cash/zip-2003>
+
+/// Builds a Regtest network with NU7 configured, so the NU7 boundary can be exercised.
+///
+/// NU7 is unscheduled on Mainnet and the default Testnet, so the rule is unreachable there.
+fn nu7_network() -> Network {
+    Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000_000),
+            ..Default::default()
+        }
+        .into(),
+    )
+}
+
+/// ZIP 2003: the V4 version rule must accept V4 for every network upgrade from Sapling to NU6.3,
+/// and reject it from NU7 onward.
+///
+/// This exercises the rule directly rather than through the verifier, so it does not depend on
+/// NU7 having a consensus branch ID that `zcash_protocol` recognises.
+#[test]
+fn v4_transactions_are_rejected_from_nu7_onward() {
+    let tx = Transaction::test_v4(
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+
+    for nu in NetworkUpgrade::iter() {
+        let result = super::verify_v4_transaction_network_upgrade(&tx, nu);
+
+        match nu {
+            NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3 => {
+                assert_eq!(result, Ok(()), "V4 must be supported by {nu:?}");
+            }
+            _ => assert_eq!(
+                result,
+                Err(TransactionError::UnsupportedByNetworkUpgrade(4, nu)),
+                "V4 must be rejected by {nu:?}",
+            ),
+        }
+    }
+}
+
+/// ZIP 2003 only removes V4; V5 and V6 must still be supported at NU7.
+#[test]
+fn v5_and_v6_transactions_are_supported_at_nu7() {
+    let v5 = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+    let v6 = Transaction::test_v6(
+        NetworkUpgrade::Nu6_3,
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+
+    assert_eq!(
+        super::verify_v5_transaction_network_upgrade(&v5, NetworkUpgrade::Nu7),
+        Ok(())
+    );
+    assert_eq!(
+        super::verify_v6_transaction_network_upgrade(&v6, NetworkUpgrade::Nu7),
+        Ok(())
+    );
+}
+
+/// ZIP 2003: a V4 transaction that is valid in the block before NU7 activates must be rejected
+/// once NU7 is active, in both block and mempool verification.
+#[tokio::test]
+async fn v4_transaction_is_rejected_at_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network();
+    let nu7_height = NetworkUpgrade::Nu7
+        .activation_height(&network)
+        .expect("NU7 activation height is configured");
+    let pre_nu7_height = (nu7_height - 1).expect("NU7 does not activate at the genesis height");
+
+    // Accepted in the last block before NU7 activates.
+    // The input is large enough to pay a ZIP 317 conventional fee, so mempool admission reaches
+    // the transaction version check instead of failing the fee check first.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        (pre_nu7_height - 1).expect("block height is too small"),
+        true,
+        0,
+        Amount::try_from(10_001).expect("invalid value"),
+    );
+    let tx = Transaction::test_v4(
+        vec![input.clone()],
+        vec![output.clone()],
+        LockTime::Height(Height(0)),
+        (nu7_height + 1).expect("expiry height is too large"),
+    );
+    let expected_id = tx.unmined_id();
+
+    let verifier = || {
+        BlockTxVerifier::new(
+            &network,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        )
+    };
+
+    let result = verifier()
+        .oneshot(BlockRequest {
+            transaction_hash: tx.hash(),
+            transaction: Arc::new(tx.clone()),
+            known_utxos: Arc::new(known_utxos.clone()),
+            height: pre_nu7_height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id,
+        expected_id
+    );
+
+    // Rejected at the NU7 activation height.
+    assert_eq!(
+        verifier()
+            .oneshot(BlockRequest {
+                transaction_hash: tx.hash(),
+                transaction: Arc::new(tx.clone()),
+                known_utxos: Arc::new(known_utxos.clone()),
+                height: nu7_height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await,
+        Err(TransactionError::UnsupportedByNetworkUpgrade(
+            4,
+            NetworkUpgrade::Nu7
+        ))
+    );
+
+    // And rejected at mempool admission once the next block height is at or past NU7, so V4
+    // transactions cannot be relayed into blocks that would reject them.
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mempool_verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    // The mempool verifier loads the spent UTXO before dispatching on the transaction version,
+    // so the mock state has to answer that request for the version check to be reached.
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+    });
+
+    assert_eq!(
+        mempool_verifier
+            .oneshot(MempoolRequest {
+                transaction: Arc::new(tx).into(),
+                height: nu7_height,
+            })
+            .await
+            .map(|_| ()),
+        Err(TransactionError::UnsupportedByNetworkUpgrade(
+            4,
+            NetworkUpgrade::Nu7
+        ))
+    );
+}
+
+/// ZIP 2003 applies to coinbase transactions too: a V4 coinbase is rejected at NU7.
+#[tokio::test]
+async fn v4_coinbase_transaction_is_rejected_at_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network();
+    let nu7_height = NetworkUpgrade::Nu7
+        .activation_height(&network)
+        .expect("NU7 activation height is configured");
+
+    let (input, output) = mock_coinbase_transparent_output(nu7_height);
+    let coinbase = Transaction::test_v4(
+        vec![input],
+        vec![output],
+        LockTime::Height(Height(0)),
+        nu7_height,
+    );
+
+    let verifier = BlockTxVerifier::new(
+        &network,
+        service_fn(|_| async { unreachable!("State service should not be called") }),
+    );
+
+    assert_eq!(
+        verifier
+            .oneshot(BlockRequest {
+                transaction_hash: coinbase.hash(),
+                transaction: Arc::new(coinbase),
+                known_utxos: Arc::new(HashMap::new()),
+                height: nu7_height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await,
+        Err(TransactionError::UnsupportedByNetworkUpgrade(
+            4,
+            NetworkUpgrade::Nu7
+        ))
+    );
+}
+
+/// V4 transactions carry no consensus branch ID, so the block-level branch ID consistency check
+/// cannot reject them: ZIP 2003 is enforced by the transaction verifier's version rule instead.
+///
+/// This test pins that division of responsibility so a future change to
+/// `check_transaction_network_upgrade_consistency` does not silently become the only place the
+/// rule is enforced.
+#[test]
+fn v4_transactions_have_no_consensus_branch_id() {
+    let tx = Transaction::test_v4(
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+
+    assert_eq!(tx.network_upgrade(), None);
+}
+
 /// Create a mock transparent transfer to be included in a transaction.
 ///
 /// First, this creates a fake unspent transaction output from a fake transaction included in the
