@@ -27,12 +27,13 @@ fn funding_stream_address_index(
     let funding_streams = network.funding_streams(height)?;
     let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
 
-    let index = 1u32
-        .checked_add(funding_stream_address_period(height, network))?
-        .checked_sub(funding_stream_address_period(
-            funding_streams.height_range().start,
-            network,
-        ))? as usize;
+    // The two periods are only meaningful relative to each other, so the subtraction is done in
+    // signed arithmetic: see `funding_stream_address_period()`.
+    let index = usize::try_from(
+        1 + funding_stream_address_period(height, network)
+            - funding_stream_address_period(funding_streams.height_range().start, network),
+    )
+    .ok()?;
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but

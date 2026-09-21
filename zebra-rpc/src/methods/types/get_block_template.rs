@@ -329,18 +329,27 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
+        // From NU7, the coinbase may only claim `MinerFees`: the rest of the block's transaction
+        // fees are removed from circulation into the NSM reserve. A template built from the whole
+        // of the fees would be rejected by `miner_fees_are_valid()`. This is the whole of the fees
+        // before NU7, so it is a no-op until then.
+        let claimable_fee = zebra_chain::parameters::subsidy::miner_fees(height, net, txs_fee)
+            .expect("miner fees are a subset of non-negative transaction fees");
+
         // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
         // shielded address) as a last resort — caching the result so subsequent requests for the
         // same height and fees reuse it.
-        let coinbase_txn = coinbase_cache.get(height, txs_fee).unwrap_or_else(|| {
-            let coinbase_txn =
-                TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee)
-                    .expect("valid coinbase tx");
+        let coinbase_txn = coinbase_cache
+            .get(height, claimable_fee)
+            .unwrap_or_else(|| {
+                let coinbase_txn =
+                    TransactionTemplate::new_coinbase(net, height, miner_params, claimable_fee)
+                        .expect("valid coinbase tx");
 
-            coinbase_cache.store(height, txs_fee, coinbase_txn.clone());
+                coinbase_cache.store(height, claimable_fee, coinbase_txn.clone());
 
-            coinbase_txn
-        });
+                coinbase_txn
+            });
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
