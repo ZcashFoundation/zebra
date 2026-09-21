@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Opening a finalized database whose stored history tree was written for a network upgrade that has no consensus branch ID in this build now fails with `StateInitError::UnreadableHistoryTree` instead of panicking on first access ([#11482](https://github.com/ZcashFoundation/zebra/issues/11482)).'
+time: 2026-09-21T16:00:00.000000000Z
