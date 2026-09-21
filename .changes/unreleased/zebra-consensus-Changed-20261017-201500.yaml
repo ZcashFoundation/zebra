@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'Tests only: the Orchard binding-signature regression builds its fixture without the Orchard helpers removed from `zebra-chain` ([#11488](https://github.com/ZcashFoundation/zebra/pull/11488)).'
+time: 2026-10-17T20:15:00.000000000+00:00
