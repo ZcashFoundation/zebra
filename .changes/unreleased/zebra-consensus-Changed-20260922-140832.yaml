@@ -1,0 +1,7 @@
+project: zebra-consensus
+kind: Changed
+body: >-
+  Block transaction verification looks up transparent inputs concurrently, so a missing input no
+  longer blocks later lookups or delays their errors. Output order and lookup timeouts are unchanged
+  ([#11186](https://github.com/ZcashFoundation/zebra/pull/11186)).
+time: 2026-09-22T14:08:32Z
