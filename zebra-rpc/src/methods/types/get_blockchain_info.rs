@@ -126,19 +126,8 @@ impl GetBlockchainInfoBalance {
         ]
     }
 
-    // The NU7 NSM reserve is deliberately not one of the pools above. The NU7 deployment ZIP
-    // (`zcash/zips#1363`) says the reserve "MUST NOT be treated as a spendable chain value pool
-    // and MUST NOT be included in the Issued Supply calculation", and `chain_supply()` below
-    // reduces over exactly these pools. So from NU7 the reported chain supply falls as fees are
-    // burned, which is the intended meaning: those fees have left circulation.
-    //
-    // This is deliberately asymmetric with `ValueBalance::total()`, which does include the
-    // reserve. That sum enforces the `MAX_MONEY` cap on the whole monetary base, where the
-    // reserve still has to be accounted for, because value moved into it must not be created or
-    // destroyed. Issued Supply and the monetary base are different quantities here.
-    //
-    // TODO: decide whether to report the reserve as its own `getblockchaininfo` field, separate
-    // from `valuePools`, once the NU7 deployment ZIP is final and zcashd's behaviour is known.
+    // The NU7 NSM reserve is deliberately not a pool here: it is not part of the Issued Supply,
+    // so `chain_supply()` correctly falls as fees are burned.
 
     /// Converts a [`ValueBalance`] to a [`GetBlockchainInfoBalance`] representing the total chain supply.
     pub fn chain_supply(value_balance: ValueBalance<NonNegative>) -> Self {

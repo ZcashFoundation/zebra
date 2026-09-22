@@ -317,7 +317,7 @@ impl Block {
             },
         )?;
 
-        let nsm_reserve_change = self.nsm_reserve_change_from_fees(network, transaction_fees)?;
+        let nsm_reserve_change = self.nsm_reserve_change(network, transaction_fees)?;
 
         let mut chain_value_pool_change = tx_pool_sum.neg();
         chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
@@ -326,46 +326,15 @@ impl Block {
         Ok(chain_value_pool_change)
     }
 
-    /// Returns the amount this block adds to the NSM reserve.
+    /// Returns the amount this block's `transaction_fees` add to the NSM reserve.
     ///
     /// From NU7 activation, 60% of a block's transaction fees are removed from circulation into
     /// the Network Sustainability Mechanism reserve instead of being claimed by the miner, so the
-    /// coinbase transaction claims that much less and the same amount accrues to the reserve. This
-    /// is zero before NU7 activates.
+    /// coinbase transaction claims that much less and the same amount accrues to the reserve.
+    /// This is zero before NU7 activates.
     ///
     /// See [`subsidy::nsm_fee_contribution`] for the specification.
-    ///
-    /// The given `utxos` must contain the [`transparent::Utxo`]s of every input in this block, as
-    /// for [`Self::chain_value_pool_change`].
-    pub fn nsm_reserve_change(
-        &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        network: &Network,
-    ) -> Result<Amount<NegativeAllowed>, ValueBalanceError> {
-        // The coinbase transaction consumes the fees rather than paying them, so it is excluded
-        // from the total, exactly as in the block verifier's miner fee sum.
-        let transaction_fees = self
-            .transactions
-            .iter()
-            .filter(|tx| !tx.is_coinbase())
-            .try_fold(Amount::<NonNegative>::zero(), |acc, tx| {
-                let fee = tx
-                    .value_balance(utxos)?
-                    .remaining_transaction_value()
-                    .map_err(ValueBalanceError::Total)?;
-
-                (acc + fee).map_err(ValueBalanceError::Total)
-            })?;
-
-        self.nsm_reserve_change_from_fees(network, transaction_fees)
-    }
-
-    /// Returns the amount this block adds to the NSM reserve, given its total transaction fees.
-    ///
-    /// See [`Self::nsm_reserve_change`], which calculates the fees from `utxos` before calling
-    /// this. [`Self::chain_value_pool_change`] already has the fee total, so it calls this
-    /// directly rather than walking every transaction's UTXOs a second time.
-    fn nsm_reserve_change_from_fees(
+    fn nsm_reserve_change(
         &self,
         network: &Network,
         transaction_fees: Amount<NonNegative>,
