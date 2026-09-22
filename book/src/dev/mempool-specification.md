@@ -76,6 +76,12 @@ The mempool responds to chain tip changes:
 - On new blocks: Updates verification context, removes mined transactions
 - On reorgs: Clears tip-specific rejections, retries all transactions
 
+Mempool queries and notifications describe the last reconciled chain-tip snapshot,
+not an atomic view of chain state. A concurrent commit can mine or invalidate a
+transaction before its `Added` notification is delivered. Consumers needing current
+validity must check against the chain state they use; another tip read alone cannot
+make admission and state commits atomic.
+
 ## Transaction Processing Flow
 
 1. **Transaction Arrival**:
@@ -87,6 +93,7 @@ The mempool responds to chain tip changes:
    - Checks if transaction exists in mempool or rejection lists
    - Queues transaction for download if needed
    - Downloads transaction data from peers
+   - Applies global and per-peer limits to downloads and pushed transactions; reset retries retain their original peer attribution
 
 3. **Transaction Verification**:
    - Checks transaction against consensus rules
@@ -99,6 +106,10 @@ The mempool responds to chain tip changes:
    - Limits the package to 100 transactions, including the candidate; this is mempool policy, not a new consensus rule
    - Rechecks the committed tip and exact ancestor context before accepting the result; stale work is retried without releasing the original response
    - Runs without a configured miner address
+
+   Packages are still verified from scratch. The count limit bounds repeated work;
+   reusing semantic results requires a consensus API tied to the exact witnessed
+   transactions and verification context.
 
 5. **Transaction Storage**:
    - Stores verified transactions in memory
@@ -128,7 +139,7 @@ Transactions can be rejected for multiple reasons, categorized into:
    - Expired transactions
    - Duplicate spends already in the blockchain
    - Transactions already mined
-   - Transactions evicted due to memory limits
+   - Transactions evicted due to memory limits, including removed descendants
    - Applies until a rollback or network upgrade
 
 Rejection reasons are stored alongside rejected transaction IDs to prevent repeated verification of invalid transactions.
@@ -139,8 +150,13 @@ With a configured miner address, the mempool builds and publishes the shared def
 A new committed tip gets coinbase-only work first, followed by a fill with verified transactions.
 Same-tip storage changes are coalesced until the five-second refresh deadline without postponing it.
 An eligible default refresh or recovery takes priority over queued caller-specific work.
+Each template still receives a full proposal check: coalescing bounds refresh
+frequency, not the cost of verifying an individual template.
+Transactions stay in dependency order; each `depends` array lists unique, one-based
+direct parent indexes within the template.
 
 Caller-specific templates are returned privately and never replace the shared default template.
+A build superseded by a chain-tip change is retried with the same caller parameters.
 Proof work already started is retained until completion, even if its caller disconnects.
 Expired Testnet work is rebuilt from fresh chain information before publication or response;
 a cancelled caller does not start another proof.
