@@ -57,10 +57,8 @@ where
     #[getter(copy)]
     pub(crate) auth_digest: transaction::AuthDigest,
 
-    /// The transactions in this block template that this transaction depends upon.
-    /// These are 1-based indexes in the `transactions` list.
-    ///
-    /// Zebra's mempool does not support transaction dependencies, so this list is always empty.
+    /// The direct predecessors in this block template that this transaction depends upon.
+    /// These are unique 1-based indexes in the `transactions` list, excluding confirmed inputs.
     ///
     /// We use `u16` because 2 MB blocks are limited to around 39,000 transactions.
     pub(crate) depends: Vec<u16>,
@@ -99,7 +97,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
                 .auth_digest()
                 .unwrap_or(AUTH_DIGEST_PLACEHOLDER),
 
-            // Always empty, not supported by Zebra's mempool.
+            // Filled by BlockTemplateResponse::from_transactions once template indexes are known.
             depends: Vec::new(),
 
             fee: tx.miner_fee,

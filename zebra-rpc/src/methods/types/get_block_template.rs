@@ -37,7 +37,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32, ZcashDeserializeInto},
-    transaction::VerifiedUnminedTx,
+    transaction::{self, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
@@ -300,8 +300,34 @@ impl BlockTemplateResponse {
             .next()
             .expect("chain tip must be below Height::MAX");
 
-        // Convert transactions into TransactionTemplates.
-        let mempool_tx_templates = mempool_txs.iter().map(Into::into).collect();
+        // Index only preceding transactions: selection already puts parents before spenders.
+        let mut transaction_indexes = HashMap::with_capacity(mempool_txs.len());
+        let mempool_tx_templates = mempool_txs
+            .iter()
+            .enumerate()
+            .map(|(index, tx)| {
+                let mut template = TransactionTemplate::from(tx);
+                template.depends = tx
+                    .transaction
+                    .transaction
+                    .transparent_bundle()
+                    .into_iter()
+                    .flat_map(|bundle| &bundle.vin)
+                    .filter_map(|input| {
+                        transaction_indexes
+                            .get(&transaction::Hash::from(input.prevout().hash()))
+                            .copied()
+                    })
+                    .collect();
+                template.depends.sort_unstable();
+                template.depends.dedup();
+                transaction_indexes.insert(
+                    template.hash,
+                    u16::try_from(index + 1).expect("block transaction indexes fit in u16"),
+                );
+                template
+            })
+            .collect();
 
         let txs_fee = mempool_txs
             .iter()
@@ -411,7 +437,7 @@ impl BlockTemplateResponse {
             && !network.is_regtest()
             && NetworkUpgrade::minimum_difficulty_spacing_for_height(
                 network,
-                block::Height(self.height.saturating_sub(1)),
+                block::Height(self.height),
             )
             .is_some()
             && self.bits != network.target_difficulty_limit().to_compact()

@@ -308,8 +308,11 @@ fn adjust_difficulty_and_time_for_testnet(
         .try_into()
         .expect("valid blocks have in-range times");
 
+    let candidate_height = previous_block_height
+        .next()
+        .expect("chain tip must be below Height::MAX");
     let Some(minimum_difficulty_spacing) =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, candidate_height)
     else {
         // Returns early if the testnet minimum difficulty consensus rule is not active
         return;
@@ -527,8 +530,39 @@ mod tests {
         );
     }
 
-    /// Below `TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT` (299188) the rule is inactive, so the
-    /// adjustment is a no-op even on Testnet.
+    /// The first applicable candidate gets the pre-Blossom 15-minute standard-difficulty range.
+    #[test]
+    fn minimum_difficulty_activation_uses_candidate_height() {
+        let network = Network::new_default_testnet();
+        let gap = 6 * 150;
+        let mut result = chain_info(PREV + gap);
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            Height(299_187),
+            recent_block_data(&network),
+        );
+
+        assert_eq!(result.max_time, DateTime32::from(PREV + gap));
+        assert_eq!(result.cur_time, DateTime32::from(PREV + gap));
+        assert_eq!(result.expected_difficulty, CompactDifficulty::default());
+
+        let mut past_threshold = chain_info(PREV + gap + 1);
+        adjust_difficulty_and_time_for_testnet(
+            &mut past_threshold,
+            &network,
+            Height(299_187),
+            recent_block_data(&network),
+        );
+        assert_eq!(past_threshold.min_time, DateTime32::from(PREV + gap + 1));
+        assert_eq!(
+            past_threshold.expected_difficulty,
+            network.target_difficulty_limit().to_compact()
+        );
+    }
+
+    /// The candidate immediately before activation must retain the full timestamp range.
     #[test]
     fn below_start_height_is_a_no_op() {
         let network = Network::new_default_testnet();
@@ -538,7 +572,7 @@ mod tests {
         adjust_difficulty_and_time_for_testnet(
             &mut result,
             &network,
-            Height(100_000),
+            Height(299_186),
             recent_block_data(&network),
         );
 

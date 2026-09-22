@@ -444,6 +444,23 @@ fn only_current_work_is_served() {
     assert!(!current.is_valid_for_tip(block::Hash([0xff; 32]), &network, max_time));
     assert!(!current.is_valid_for_tip(tip_hash, &network, after_max_time));
 
+    // The first applicable candidate is 299188, not the child of block 299188.
+    // Its pre-Blossom spacing is 150 seconds, so standard difficulty lasts 15 minutes.
+    let mut activation_template = current.clone();
+    activation_template.max_time = activation_template
+        .cur_time
+        .checked_add(Duration32::from_seconds(6 * 150))
+        .unwrap();
+    let expired = activation_template
+        .max_time
+        .checked_add(Duration32::from_seconds(1))
+        .unwrap();
+    activation_template.height = 299_187;
+    assert!(activation_template.is_valid_for_tip(tip_hash, &network, expired));
+    activation_template.height = 299_188;
+    assert!(activation_template.is_valid_for_tip(tip_hash, &network, activation_template.max_time,));
+    assert!(!activation_template.is_valid_for_tip(tip_hash, &network, expired));
+
     let mut median_capped = current.clone();
     median_capped.min_time = max_time
         .saturating_sub(Duration32::from_minutes(90))
@@ -464,5 +481,109 @@ fn only_current_work_is_served() {
     );
     for network in [Network::Mainnet, regtest] {
         assert!(make_template(&network).is_valid_for_tip(tip_hash, &network, after_max_time));
+    }
+}
+
+/// Serialized dependencies identify direct in-template parents once, preserving selection order.
+#[test]
+fn template_serializes_direct_transaction_dependencies() {
+    use std::sync::Arc;
+
+    use super::{BlockTemplateResponse, CoinbaseCache};
+    use crate::methods::{tests::utils::fake_history_tree, types::long_poll::LongPollInput};
+    use zebra_chain::{
+        block,
+        serialization::DateTime32,
+        transaction::{self, LockTime, VerifiedUnminedTx},
+        transparent::{Input, OutPoint, Output, Script},
+        work::difficulty::ParameterDifficulty,
+    };
+    use zebra_state::GetBlockTemplateChainInfo;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let make_tx = |outpoints: Vec<OutPoint>| {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            outpoints
+                .into_iter()
+                .map(|outpoint| Input::PrevOut {
+                    outpoint,
+                    unlock_script: Script::new(&[]),
+                    sequence: u32::MAX,
+                })
+                .collect(),
+            vec![Output::new(Amount::zero(), Script::new(&[0x51])); 3],
+            LockTime::unlocked(),
+            Height(0),
+        );
+        VerifiedUnminedTx::new(
+            Arc::new(tx).into(),
+            Amount::try_from(100_000).unwrap(),
+            0,
+            0,
+            Arc::new(Vec::new()),
+        )
+        .unwrap()
+    };
+    let confirmed = transaction::Hash([0x42; 32]);
+    let parent = make_tx(vec![OutPoint::from_usize(confirmed, 0)]);
+    let parent_id = parent.transaction.id.mined_id();
+    let child = make_tx(vec![
+        OutPoint::from_usize(parent_id, 0),
+        OutPoint::from_usize(confirmed, 1),
+        OutPoint::from_usize(parent_id, 1),
+    ]);
+    let child_id = child.transaction.id.mined_id();
+    let grandchild = make_tx(vec![OutPoint::from_usize(child_id, 0)]);
+    let two_parents = make_tx(vec![
+        OutPoint::from_usize(child_id, 1),
+        OutPoint::from_usize(parent_id, 2),
+        OutPoint::from_usize(child_id, 2),
+    ]);
+    let txs = vec![parent, child, grandchild, two_parents];
+    let expected_hashes: Vec<_> = txs
+        .iter()
+        .map(|tx| tx.transaction.id.mined_id().to_string())
+        .collect();
+    let tip_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let tip_hash = block::Hash([0xab; 32]);
+    let time = DateTime32::from(1_654_008_617);
+    let chain_info = GetBlockTemplateChainInfo {
+        tip_height,
+        tip_hash,
+        expected_difficulty: network.target_difficulty_limit().to_compact(),
+        cur_time: time,
+        min_time: time,
+        max_time: time,
+        chain_history_root: fake_history_tree(&network).hash(),
+    };
+    let params = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+    let template = BlockTemplateResponse::from_transactions(
+        &network,
+        &CoinbaseCache::default(),
+        &params,
+        &chain_info,
+        LongPollInput::new(tip_height, tip_hash, time, []).generate_id(),
+        txs,
+        None,
+    );
+    let response = serde_json::to_value(template).unwrap();
+    assert_eq!(response["transactions"].as_array().unwrap().len(), 4);
+    for ((tx, expected_hash), dependencies) in response["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(expected_hashes)
+        .zip([vec![], vec![1], vec![2], vec![1, 2]])
+    {
+        assert_eq!(tx["hash"], expected_hash);
+        assert_eq!(tx["depends"], serde_json::json!(dependencies));
     }
 }
