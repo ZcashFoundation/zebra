@@ -380,11 +380,12 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Looks up UTXOs spent by `tx` from the best chain state, also checking
+    /// Looks up UTXOs spent by `tx` concurrently from any chain state, also checking
     /// `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
     /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
     /// order as the matching inputs in `tx`.
+    /// Returns on the first lookup error, dropping the remaining lookup futures.
     async fn block_spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
@@ -400,39 +401,50 @@ where
         let mut spent_utxos = HashMap::new();
         // Pre-allocate with None so we can fill each slot by input index, preserving input order.
         let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        let mut lookups = FuturesUnordered::new();
 
         for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
-                tracing::trace!("awaiting outpoint lookup");
-
-                let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                    tracing::trace!("UTXO in known_utxos, discarding query");
-                    output.utxo.clone()
+                if let Some(output) = known_utxos.get(outpoint) {
+                    spent_outputs[input_idx] = Some(output.utxo.output.clone());
+                    spent_utxos.insert(*outpoint, output.utxo.clone());
                 } else {
-                    let response = state
-                        .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
-                        .await
-                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
-                            Ok(_) => TransactionError::TransparentInputNotFound,
-                            Err(boxed_error) => TransactionError::from(boxed_error),
-                        })?;
-
-                    if let zebra_state::Response::Utxo(utxo) = response {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
-                    }
-                };
-                tracing::trace!(?utxo, "got UTXO");
-                spent_outputs[input_idx] = Some(utxo.output.clone());
-                spent_utxos.insert(*outpoint, utxo);
+                    lookups.push(Self::lookup_utxo(state.clone(), *outpoint, input_idx));
+                }
             }
+        }
+
+        while let Some(result) = lookups.next().await {
+            let (input_idx, outpoint, utxo) = result?;
+            spent_outputs[input_idx] = Some(utxo.output.clone());
+            spent_utxos.insert(outpoint, utxo);
         }
 
         let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();
 
         Ok((spent_utxos, spent_outputs))
+    }
+
+    /// Looks up one state UTXO, retaining its input index for out-of-order completion.
+    async fn lookup_utxo(
+        state: Timeout<ZS>,
+        outpoint: transparent::OutPoint,
+        input_idx: usize,
+    ) -> Result<(usize, transparent::OutPoint, transparent::Utxo), TransactionError> {
+        tracing::trace!(?outpoint, "awaiting outpoint lookup");
+        let response = state
+            .oneshot(zebra_state::Request::AwaitUtxo(outpoint))
+            .await
+            .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+                Ok(_) => TransactionError::TransparentInputNotFound,
+                Err(boxed_error) => TransactionError::from(boxed_error),
+            })?;
+
+        let zebra_state::Response::Utxo(utxo) = response else {
+            unreachable!("AwaitUtxo always responds with Utxo")
+        };
+        tracing::trace!(?utxo, "got UTXO");
+        Ok((input_idx, outpoint, utxo))
     }
 }
 
