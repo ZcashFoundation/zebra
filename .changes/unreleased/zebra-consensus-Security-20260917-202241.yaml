@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Security
+body: '`VerifyCheckpointError::misbehavior_score()` now unwraps the boxed `CommitCheckpointVerifiedError`, mirroring `is_duplicate_request()`, so misbehaviour scores from contextual validation reach the syncer during checkpoint sync. Checkpoint verification only checks the block hash, so a block body forged to keep that hash reaches contextual validation on the checkpoint path too, and its score was previously lost.'
+time: 2026-09-17T20:22:41.000000000Z
