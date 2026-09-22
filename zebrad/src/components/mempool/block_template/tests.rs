@@ -418,6 +418,38 @@ async fn default_recovery_wins_over_continuous_overrides_after_backoff() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn stale_overrides_rebuild_for_the_current_tip() {
+    let _init_guard = zebra_test::init();
+    for proposal_started in [false, true] {
+        let mut scheduler = Scheduler::new(Network::Mainnet);
+        let response = scheduler.override_request();
+        scheduler.templates.miner_params = None;
+
+        // Cover both a stale storage snapshot and a tip change during proposal verification.
+        let proposal = if proposal_started {
+            Some(scheduler.proposal().await)
+        } else {
+            scheduler.poll();
+            None
+        };
+        scheduler.chain_info.send_modify(|info| {
+            info.tip_height = info.tip_height.next().unwrap();
+            info.tip_hash = block::Hash([0xcd; 32]);
+        });
+        if let Some(proposal) = proposal {
+            proposal.respond(block::Hash([0; 32]));
+        }
+        scheduler.idle().await;
+
+        let template = response.await.unwrap().unwrap();
+        let info = scheduler.chain_info.borrow();
+        assert_eq!(template.previous_block_hash(), info.tip_hash);
+        assert_eq!(template.height(), info.tip_height.next().unwrap().0);
+        assert!(scheduler.published.borrow().is_none());
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn expired_testnet_completion_refetches_immediately_and_retains_proof() {
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();

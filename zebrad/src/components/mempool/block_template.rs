@@ -153,10 +153,16 @@ impl BlockTemplates {
                     self.refresh.as_mut().reset(Instant::now());
                 }
             } else if let Some(request) = build.request {
-                let result = result.and_then(|template| {
-                    template.ok_or_else(|| "chain tip changed while building the template".into())
-                });
-                let _ = request.response.send(result);
+                match result {
+                    Ok(Some(template)) => {
+                        let _ = request.response.send(Ok(template));
+                    }
+                    // A superseded snapshot is retryable work, not an RPC failure.
+                    Ok(None) => retry_request = Some(request),
+                    Err(error) => {
+                        let _ = request.response.send(Err(error));
+                    }
+                }
             } else {
                 match result {
                     Ok(Some(template)) => {
