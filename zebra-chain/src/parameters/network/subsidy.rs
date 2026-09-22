@@ -24,7 +24,7 @@ use crate::{
 };
 
 use constants::{
-    regtest, testnet, BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
+    BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
     FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY, NSM_FEE_DENOMINATOR,
     NSM_FEE_NUMERATOR, NSM_SUBSIDY_DENOMINATOR, NSM_SUBSIDY_NUMERATOR,
     NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL, POST_NU7_HALVING_INTERVAL,
@@ -246,35 +246,11 @@ pub trait ParameterSubsidy {
 /// Network methods related to Block Subsidy and Funding Streams
 impl ParameterSubsidy for Network {
     fn height_for_first_halving(&self) -> Height {
-        // First halving on Mainnet is at Canopy
-        // while in Testnet is at block constant height of `1_116_000`
+        // Derived rather than hard-coded, so that ZIP 218's stretched halving schedule applies
+        // here too and this can not disagree with `halving()`.
+        //
         // <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
-        //
-        // The default Testnet and Regtest use hard-coded constants here, while every other
-        // configured Testnet derives the height from `height_for_halving(1)`, which ZIP 218
-        // stretches once NU7 activates. The constants are only correct because NU7 activates
-        // after the first halving on both: on Mainnet and the default Testnet the first halving
-        // was at Canopy, long before NU7 can be scheduled, and Regtest's `FIRST_HALVING` is
-        // below any height a Regtest chain reaches in practice. Configuring NU7 before the first
-        // halving on Regtest would make `halving()` follow the stretched schedule while this
-        // returns the unstretched constant, and the two would disagree.
-        //
-        // TODO: stretch the constants too, or reject a configured NU7 height below the first
-        // halving, once NU7 has real activation heights.
-        match self {
-            Network::Mainnet => NetworkUpgrade::Canopy
-                .activation_height(self)
-                .expect("canopy activation height should be available"),
-            Network::Testnet(params) => {
-                if params.is_regtest() {
-                    regtest::FIRST_HALVING
-                } else if params.is_default_testnet() {
-                    testnet::FIRST_HALVING
-                } else {
-                    height_for_halving(1, self).expect("first halving height should be available")
-                }
-            }
-        }
+        height_for_halving(1, self).expect("the first halving height is representable")
     }
 
     fn post_blossom_halving_interval(&self) -> HeightDiff {

@@ -496,17 +496,9 @@ pub fn merkle_root_validity(
 /// The global shielded cost counts each Sprout JoinSplit twice, because each JoinSplit produces
 /// two shielded outputs.
 ///
-/// # Ironwood is not counted
-///
-/// ZIP 218 defines the shielded cost as Orchard actions, plus Sapling inputs and outputs, plus
-/// twice the Sprout JoinSplits. It says nothing about Ironwood, which NU6.3 introduced after the
-/// ZIP was written, even though its prose describes the budget as covering "all pools". So a
-/// post-NU7 block can carry any number of Ironwood actions and still pass every limit here, which
-/// leaves the worst-case verification time and compact sync bandwidth unbounded for that pool.
-///
-/// Zebra implements the rule exactly as specified anyway: adding an unspecified limit would make
-/// Zebra reject blocks that other implementations accept, which is a chain split. This needs to
-/// be resolved in the ZIP, not here.
+/// ZIP 218's cost counts Orchard, Sapling and Sprout, but not Ironwood, which NU6.3 added after
+/// the ZIP was written. Zebra implements the rule as specified: adding an unspecified limit would
+/// reject blocks other implementations accept, which is a chain split.
 //
 // TODO: count Ironwood actions once ZIP 218 says how (zcash/zips), and add a per-pool limit for
 // them if the ZIP adds one.

@@ -1,7 +1,6 @@
 //! Constants for block subsidies.
 
 pub(crate) mod mainnet;
-pub(crate) mod regtest;
 pub(crate) mod testnet;
 
 use crate::amount::COIN;

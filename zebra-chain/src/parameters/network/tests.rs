@@ -645,36 +645,40 @@ fn funding_stream_address_period_floors_negative_heights() {
     );
 }
 
-/// `height_for_first_halving()` returns a hard-coded constant on Mainnet, the default Testnet
-/// and Regtest, while every other network derives it from `height_for_halving(1)`. The two must
-/// agree on those networks: NU7 always activates after the first halving on them, so ZIP 218
-/// never stretches the derived height. See the TODO in `height_for_first_halving()`.
+/// `height_for_first_halving()` derives the height from `height_for_halving(1)` rather than
+/// hard-coding it. These are the heights the spec gives, so deriving them must not move any of
+/// them.
 #[test]
-fn first_halving_constant_agrees_with_derived_height() {
+fn first_halving_heights_are_unchanged() {
     let _init_guard = zebra_test::init();
 
-    for network in [
-        Network::Mainnet,
-        Network::new_default_testnet(),
-        Network::new_regtest(Default::default()),
+    // Mainnet's first halving is at Canopy; the Testnet height is from protocol specification
+    // §7.10.1 <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>.
+    for (network, expected) in [
+        (Network::Mainnet, Height(1_046_400)),
+        (Network::new_default_testnet(), Height(1_116_000)),
+        (Network::new_regtest(Default::default()), Height(287)),
     ] {
         assert_eq!(
-            height_for_halving(1, &network),
-            Some(network.height_for_first_halving()),
-            "the hard-coded first halving height must match the derived height on {network}",
+            network.height_for_first_halving(),
+            expected,
+            "the first halving height must not move on {network}",
         );
     }
+
+    assert_eq!(
+        Network::Mainnet.height_for_first_halving(),
+        NetworkUpgrade::Canopy
+            .activation_height(&Network::Mainnet)
+            .expect("Canopy is activated on Mainnet"),
+    );
 }
 
-/// On a configured network with NU7 before the first halving, ZIP 218 stretches the derived
-/// first halving height past the hard-coded constant, and `height_for_first_halving()` disagrees
-/// with `halving()`: the constant is only correct while NU7 activates after the first halving.
-///
-/// This pins the current, documented behavior so that resolving the TODO in
-/// `height_for_first_halving()` — stretching the constants too, or rejecting a configured NU7
-/// height below the first halving — updates this test.
+/// `height_for_first_halving()` must agree with `halving()` even when ZIP 218 stretches the
+/// schedule, which a hard-coded height could not: NU7 activating before the first halving pushes
+/// it later, and both have to follow.
 #[test]
-fn first_halving_constant_diverges_when_nu7_activates_first() {
+fn first_halving_follows_the_zip_218_schedule() {
     let _init_guard = zebra_test::init();
 
     // NU7 activates at height 1, so every block of the first halving is stretched by ZIP 218.
@@ -686,31 +690,24 @@ fn first_halving_constant_diverges_when_nu7_activates_first() {
         .into(),
     );
 
-    let constant = network.height_for_first_halving();
-    let derived = height_for_halving(1, &network).expect("the first halving is representable");
+    let first_halving = network.height_for_first_halving();
+    let unstretched = Network::new_regtest(Default::default()).height_for_first_halving();
 
-    // The derived height follows the stretched schedule...
     assert!(
-        derived > constant,
-        "ZIP 218 should stretch the derived first halving height {derived:?} past the \
-         hard-coded constant {constant:?}",
+        first_halving > unstretched,
+        "ZIP 218 should push the first halving {first_halving:?} past its unstretched height \
+         {unstretched:?}",
     );
-    assert_eq!(halving(derived, &network), 1);
+
+    // The height it reports is the one `halving()` actually treats as the first halving.
+    assert_eq!(halving(first_halving, &network), 1);
     assert_eq!(
         halving(
-            derived.previous().expect("derived is above genesis"),
+            first_halving
+                .previous()
+                .expect("the first halving is above genesis"),
             &network
         ),
         0,
-    );
-
-    // ...but `height_for_first_halving()` still returns the unstretched constant, which no
-    // longer marks the halving under that schedule. This is the divergence recorded in its TODO.
-    assert_eq!(
-        halving(constant, &network),
-        0,
-        "the hard-coded constant no longer marks the first halving; if \
-         `height_for_first_halving()` now stretches the constant or rejects this configuration, \
-         update this test",
     );
 }

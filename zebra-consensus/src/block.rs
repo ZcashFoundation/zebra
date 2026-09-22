@@ -158,38 +158,24 @@ fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
 /// [§7.6]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
-/// The maximum shielded cost of a block, across all shielded pools, from NU7 activation.
+/// The [ZIP 218] per-pool and global shielded action limits, which apply from NU7 activation.
 ///
-/// `GlobalShieldedBudget` in [ZIP 218].
+/// `GlobalShieldedBudget`, `OrchardBlockActionLimit`, `SaplingBlockIOLimit` and
+/// `SproutBlockJoinSplitLimit` in the ZIP.
+///
+/// NU7 also disallows v4 transactions, and JoinSplits can only appear in v4 transactions, so the
+/// Sprout limit and the JoinSplit term of the global budget can never be reached in practice.
+/// They are implemented exactly as written: ZIP 218's limits predate NU7's v4 deprecation, and
+/// they would matter again if Sprout transfers were ever reintroduced in a later transaction
+/// version.
 ///
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 pub const GLOBAL_SHIELDED_BUDGET: usize = 330;
-
-/// The maximum number of Orchard actions in a block, from NU7 activation.
-///
-/// `OrchardBlockActionLimit` in [ZIP 218].
-///
-/// [ZIP 218]: https://zips.z.cash/zip-0218
+/// See [`GLOBAL_SHIELDED_BUDGET`].
 pub const ORCHARD_BLOCK_ACTION_LIMIT: usize = 330;
-
-/// The maximum number of Sapling spends plus outputs in a block, from NU7 activation.
-///
-/// `SaplingBlockIOLimit` in [ZIP 218].
-///
-/// [ZIP 218]: https://zips.z.cash/zip-0218
+/// See [`GLOBAL_SHIELDED_BUDGET`].
 pub const SAPLING_BLOCK_IO_LIMIT: usize = 300;
-
-/// The maximum number of Sprout JoinSplits in a block, from NU7 activation.
-///
-/// `SproutBlockJoinSplitLimit` in [ZIP 218].
-///
-/// NU7 also disallows v4 transactions, and JoinSplits can only appear in v4 transactions, so
-/// this limit — and the JoinSplit term in [`GLOBAL_SHIELDED_BUDGET`] — can never be reached in
-/// practice. It is implemented exactly as written: ZIP 218's limits predate NU7's v4
-/// deprecation, and the limit would matter again if Sprout transfers were ever reintroduced in
-/// a later transaction version.
-///
-/// [ZIP 218]: https://zips.z.cash/zip-0218
+/// See [`GLOBAL_SHIELDED_BUDGET`].
 pub const SPROUT_BLOCK_JOIN_SPLIT_LIMIT: usize = 25;
 
 /// The shielded components that the [ZIP 218] action limits count.
@@ -209,10 +195,9 @@ pub struct ShieldedActionCounts {
 }
 
 impl ShieldedActionCounts {
-    /// Returns the shielded components of `transaction` that the ZIP 218 limits count.
+    /// Returns the counts for `transaction`.
     ///
-    /// Ironwood actions are deliberately not counted: see
-    /// [`check::shielded_action_limits_are_valid`].
+    /// Ironwood actions are not counted: see [`check::shielded_action_limits_are_valid`].
     pub fn from_transaction(transaction: &zebra_chain::transaction::Transaction) -> Self {
         Self {
             orchard_actions: transaction.orchard_actions().count(),
@@ -222,6 +207,8 @@ impl ShieldedActionCounts {
     }
 
     /// Returns these counts plus `other`.
+    ///
+    /// Saturating, so that a malformed count can not wrap back below a limit.
     pub fn saturating_add(self, other: Self) -> Self {
         Self {
             orchard_actions: self.orchard_actions.saturating_add(other.orchard_actions),
@@ -230,49 +217,40 @@ impl ShieldedActionCounts {
         }
     }
 
-    /// Returns the total shielded cost, which each Sprout JoinSplit contributes twice to, because
-    /// a JoinSplit produces two shielded outputs.
-    ///
-    /// `GlobalShieldedBudget` bounds this sum.
+    /// Returns the total shielded cost, which each JoinSplit contributes twice to, because it
+    /// produces two shielded outputs.
     pub fn shielded_cost(&self) -> usize {
-        // Each field is bounded by the block size limit, so this can not overflow in practice,
-        // and saturating keeps a malformed count from wrapping below a limit.
         self.orchard_actions
             .saturating_add(self.sapling_io)
             .saturating_add(self.joinsplits.saturating_mul(2))
     }
 
-    /// Returns the first ZIP 218 limit these counts exceed, as a `(pool, count, limit)` triple.
-    ///
-    /// Returns `None` if they are within every limit.
+    /// Returns the first limit these counts exceed, as `(pool, count, limit)`.
     pub fn exceeded_limit(&self) -> Option<(&'static str, usize, usize)> {
-        if self.orchard_actions > ORCHARD_BLOCK_ACTION_LIMIT {
-            Some((
+        [
+            (
                 "Orchard actions",
                 self.orchard_actions,
                 ORCHARD_BLOCK_ACTION_LIMIT,
-            ))
-        } else if self.sapling_io > SAPLING_BLOCK_IO_LIMIT {
-            Some((
+            ),
+            (
                 "Sapling inputs and outputs",
                 self.sapling_io,
                 SAPLING_BLOCK_IO_LIMIT,
-            ))
-        } else if self.joinsplits > SPROUT_BLOCK_JOIN_SPLIT_LIMIT {
-            Some((
+            ),
+            (
                 "Sprout JoinSplits",
                 self.joinsplits,
                 SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
-            ))
-        } else if self.shielded_cost() > GLOBAL_SHIELDED_BUDGET {
-            Some((
+            ),
+            (
                 "shielded actions across all pools",
                 self.shielded_cost(),
                 GLOBAL_SHIELDED_BUDGET,
-            ))
-        } else {
-            None
-        }
+            ),
+        ]
+        .into_iter()
+        .find(|&(_, count, limit)| count > limit)
     }
 }
 

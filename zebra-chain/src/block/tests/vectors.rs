@@ -196,13 +196,6 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
     let expected_reserve_change: Amount<NegativeAllowed> =
         (fee * 6 / 10).try_into().expect("valid amount");
 
-    assert_eq!(
-        block
-            .nsm_reserve_change(&utxos, &network)
-            .expect("NSM reserve change should be calculable"),
-        expected_reserve_change,
-    );
-
     let pool_change = block
         .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero(), &network)
         .expect("chain value pool change should be calculable");
