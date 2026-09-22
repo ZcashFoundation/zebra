@@ -402,6 +402,83 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     Ok(())
 }
 
+/// Every descendant removed by a single eviction must be rejected on immediate requeue,
+/// including the incoming transaction that triggered the eviction.
+#[test]
+fn cascade_eviction_rejects_descendant_replays() {
+    let _init_guard = zebra_test::init();
+
+    let mut template = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .find(|tx| !tx.transaction.transaction.outputs().is_empty())
+        .expect("a test transaction has transparent outputs")
+        .transaction
+        .transaction
+        .as_ref()
+        .clone();
+    crate::components::mempool::tests::standardize_transaction(&mut template);
+
+    let spending_transaction =
+        |outpoint| {
+            let tx = Arc::new(template.clone().with_transparent_inputs(vec![
+                transparent::Input::PrevOut {
+                    outpoint,
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: u32::MAX,
+                },
+            ]));
+            let tx = UnminedTx::from(tx);
+            let fee = tx.conventional_fee;
+            VerifiedUnminedTx::new(tx, fee, 0, 0, Arc::new(vec![]))
+                .expect("standard transaction passes ZIP-317 checks")
+        };
+
+    let parent = spending_transaction(OutPoint::from_usize(transaction::Hash([1; 32]), 0));
+    let parent_output = OutPoint::from_usize(parent.transaction.id.mined_id(), 0);
+    let child = spending_transaction(parent_output);
+    let child_output = OutPoint::from_usize(child.transaction.id.mined_id(), 0);
+    let candidate = spending_transaction(child_output);
+    let mut storage = Storage::new(&config::Config {
+        tx_cost_limit: parent.cost() + child.cost(),
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+    assert_eq!(
+        storage.insert(parent.clone(), Vec::new(), None),
+        Ok(parent.transaction.id)
+    );
+    assert_eq!(
+        storage.insert(child.clone(), vec![parent_output], None),
+        Ok(child.transaction.id)
+    );
+
+    // Force a single ancestor eviction, not independent random evictions of all three.
+    storage.verified.eviction_victim = Some(parent.transaction.id.mined_id());
+    assert_eq!(
+        storage.insert(candidate.clone(), vec![child_output], None),
+        Err(SameEffectsChainRejectionError::RandomlyEvicted.into())
+    );
+    assert_eq!(storage.transaction_count(), 0);
+    assert_eq!(storage.total_cost(), 0);
+
+    // Restore ample capacity so a new eviction cannot mask a missing cached rejection.
+    storage.tx_cost_limit = u64::MAX;
+    for (tx, spent_mempool_outpoints) in [
+        (parent, Vec::new()),
+        (child, vec![parent_output]),
+        (candidate, vec![child_output]),
+    ] {
+        assert_eq!(
+            storage.rejection_error(&tx.transaction.id),
+            Some(SameEffectsChainRejectionError::RandomlyEvicted.into())
+        );
+        assert_eq!(
+            storage.insert(tx, spent_mempool_outpoints, None),
+            Err(SameEffectsChainRejectionError::RandomlyEvicted.into())
+        );
+    }
+}
+
 // ---- Policy function unit tests ----
 
 use super::super::policy::{p2pk_lock_script, p2pkh_lock_script, p2sh_lock_script};

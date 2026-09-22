@@ -669,12 +669,12 @@ where
         self.pending.len() + usize::from(self.admission.is_some())
     }
 
-    /// Get a list of the currently pending transaction requests.
-    pub fn transaction_requests(&self) -> impl Iterator<Item = &Gossip> {
+    /// Get pending requests and their announcing peers, excluding the retained admission.
+    pub fn transaction_requests(&self) -> impl Iterator<Item = (&Gossip, Option<SocketAddr>)> {
         self.cancel_handles
             .iter()
             .filter(|(tx_id, _)| Some(**tx_id) != self.admission)
-            .map(|(_tx_id, (_handle, tx, _source))| tx)
+            .map(|(_tx_id, (_handle, tx, source))| (tx, *source))
     }
 
     /// Check if transaction is already in the best chain.

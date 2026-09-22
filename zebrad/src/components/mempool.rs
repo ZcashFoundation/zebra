@@ -24,6 +24,7 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
+    net::SocketAddr,
     pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
@@ -168,8 +169,8 @@ impl ActiveState {
         std::mem::take(self)
     }
 
-    /// Returns a list of requests that will retry every stored and pending transaction.
-    fn transaction_retry_requests(&self) -> Vec<Gossip> {
+    /// Returns stored and pending retry requests, preserving pending requests' peer attribution.
+    fn transaction_retry_requests(&self) -> Vec<(Gossip, Option<SocketAddr>)> {
         match self {
             ActiveState::Disabled => Vec::new(),
             ActiveState::Enabled {
@@ -182,10 +183,12 @@ impl ActiveState {
                 let storage = storage
                     .transactions()
                     .values()
-                    .map(|tx| tx.transaction.clone().into());
+                    .map(|tx| (tx.transaction.clone().into(), None));
                 transactions.extend(storage);
 
-                let pending = tx_downloads.transaction_requests().cloned();
+                let pending = tx_downloads
+                    .transaction_requests()
+                    .map(|(tx, source)| (tx.clone(), source));
                 transactions.extend(pending);
 
                 transactions
@@ -743,10 +746,10 @@ impl Service<Request> for Mempool {
                     "re-verifying mempool transactions after a chain fork"
                 );
 
-                for tx in tx_retries {
+                for (tx, source) in tx_retries {
                     // This is just an efficiency optimisation, so we don't care if queueing
                     // transaction requests fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx, None, None);
+                    let _result = tx_downloads.download_if_needed_and_verify(tx, source, None);
                 }
             }
 

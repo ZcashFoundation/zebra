@@ -712,8 +712,11 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     Ok(())
 }
 
+/// A reset retries downloads and verification without freeing their announcing peer's slots.
 #[tokio::test(flavor = "multi_thread")]
-async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> {
+async fn mempool_reset_preserves_pending_peer_slots() -> Result<(), Report> {
+    use crate::components::mempool::downloads::MAX_INBOUND_CONCURRENCY_PER_PEER;
+
     // Use a configured Testnet where a network upgrade activates at height 2.
     //
     // The mempool resets (and cancels pending downloads) when the chain tip reaches the block
@@ -751,9 +754,6 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_1_BYTES
         .zcash_deserialize_into()
         .unwrap();
-    let block2: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_2_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
 
     // Don't commit the genesis block during setup: we commit it below so we control when the
     // mempool first sees a chain tip (it can only be enabled once there is a tip).
@@ -762,7 +762,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         mut peer_set,
         mut state_service,
         mut chain_tip_change,
-        _tx_verifier,
+        mut tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
     ) = setup(&network, u64::MAX, false).await;
@@ -786,27 +786,44 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
-    // Queue transaction from block 2 for download. Block 2 is never committed, so the
-    // transaction is never mined and the download can be retried after the reset.
-    let txid = block2.transactions[0].unmined_id();
-    let response = mempool
+    // Keep one pushed transaction in verification and the remaining peer slots in download.
+    // None are in the block that triggers the reset.
+    let source = "127.0.0.1:8233".parse().unwrap();
+    let mut transactions = network.unmined_transactions_in_blocks(2..=10);
+    let pushed = transactions
+        .next()
+        .expect("a vector transaction")
+        .transaction;
+    let txids: HashSet<_> = transactions
+        .by_ref()
+        .take(MAX_INBOUND_CONCURRENCY_PER_PEER - 1)
+        .map(|tx| tx.transaction.id)
+        .collect();
+    let extra = transactions
+        .next()
+        .expect("a further vector transaction")
+        .transaction
+        .id;
+    assert_eq!(txids.len(), MAX_INBOUND_CONCURRENCY_PER_PEER - 1);
+    mempool
         .ready()
         .await
         .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
+        .call(Request::QueueFromPeer {
+            candidates: iter::once(Gossip::Tx(pushed.clone()))
+                .chain(txids.iter().copied().map(Gossip::Id))
+                .collect(),
+            source,
+        })
         .await
         .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-    assert_eq!(mempool.tx_downloads().in_flight(), 1);
-
-    // Query the mempool to make it poll chain_tip_change
-    mempool.dummy_call().await;
-
+    let verification = tx_verifier
+        .expect_request_that(|request| request.transaction.id == pushed.id)
+        .await;
+    assert_eq!(
+        mempool.tx_downloads().in_flight(),
+        MAX_INBOUND_CONCURRENCY_PER_PEER
+    );
     // Push block 1 to the state. Its next height (2) is the Overwinter activation height, so this
     // triggers a network-upgrade reset, which must cancel all pending transaction downloads.
     state_service
@@ -836,21 +853,68 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 
     // Ignore all the previous network requests.
     while let Some(_request) = peer_set.try_next_request().await {}
+    drop(verification);
 
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
 
-    // Check if download was cancelled and transaction was retried.
-    let request = peer_set
-        .try_next_request()
-        .await
-        .expect("unexpected missing mempool retry");
-
+    // Each download and the pushed verification must be retried. Hold their responses
+    // so no peer slot can be released while testing the cap.
+    let mut retried_downloads = Vec::new();
+    let mut remaining = txids;
+    for _ in 0..MAX_INBOUND_CONCURRENCY_PER_PEER - 1 {
+        let request = peer_set
+            .try_next_request()
+            .await
+            .expect("each pending download must be retried");
+        let zn::Request::TransactionsById(ids) = request.request() else {
+            panic!("unexpected network request");
+        };
+        assert_eq!(ids.len(), 1);
+        assert!(remaining.remove(ids.iter().next().unwrap()));
+        retried_downloads.push(request);
+    }
+    let _retried_verification = tx_verifier
+        .expect_request_that(|request| request.transaction.id == pushed.id)
+        .await;
     assert_eq!(
-        request.request(),
-        &zebra_network::Request::TransactionsById(iter::once(txid).collect()),
+        mempool.tx_downloads().in_flight(),
+        MAX_INBOUND_CONCURRENCY_PER_PEER
     );
-    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![extra.into()],
+            source,
+        })
+        .await
+        .unwrap();
+    assert!(
+        !mempool
+            .tx_downloads()
+            .transaction_requests()
+            .any(|(tx, _)| tx.id() == extra),
+        "a reset must not let the original peer exceed its occupied slots"
+    );
+
+    // Spare global capacity remains available to a different peer.
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![extra.into()],
+            source: "127.0.0.2:8233".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert!(mempool
+        .tx_downloads()
+        .transaction_requests()
+        .any(|(tx, _)| tx.id() == extra));
 
     Ok(())
 }
@@ -2594,7 +2658,7 @@ async fn mined_transaction_is_dropped_rather_than_admitted() {
     );
 }
 
-/// Cancelling another download must not give away the retained admission's retry capacity.
+/// Cancellation and a reset must preserve the retained admission's global and peer retry slots.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn cancelled_download_preserves_stale_admission_retry() {
     use std::collections::HashSet;
@@ -2603,8 +2667,8 @@ async fn cancelled_download_preserves_stale_admission_retry() {
     use tower::timeout::Timeout;
 
     use crate::components::mempool::downloads::{
-        Downloads, MAX_INBOUND_CONCURRENCY, TRANSACTION_DOWNLOAD_TIMEOUT,
-        TRANSACTION_VERIFY_TIMEOUT,
+        Downloads, MAX_INBOUND_CONCURRENCY, MAX_INBOUND_CONCURRENCY_PER_PEER,
+        TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
     };
 
     let peer_set =
@@ -2650,9 +2714,10 @@ async fn cancelled_download_preserves_stale_admission_retry() {
         ))
     };
     for index in 0..MAX_INBOUND_CONCURRENCY - 1 {
+        let source = source.filter(|_| index < MAX_INBOUND_CONCURRENCY_PER_PEER - 1);
         downloads
             .as_mut()
-            .download_if_needed_and_verify(gossip(index), None, None)
+            .download_if_needed_and_verify(gossip(index), source, None)
             .unwrap();
     }
     // The cancelled task's handle is not drained while proposal admission is retained.
@@ -2663,6 +2728,34 @@ async fn cancelled_download_preserves_stale_admission_retry() {
             None,
             None,
         ),
+        Err(MempoolError::FullQueue)
+    ));
+
+    // Reset with one admission and the other four peer slots occupied before cancellation.
+    // Only pending downloads are retried; the retained admission transfers exactly once.
+    let retries: Vec<_> = downloads
+        .transaction_requests()
+        .map(|(tx, source)| (tx.clone(), source))
+        .collect();
+    let mut replacement = Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    );
+    downloads.transfer_admission(&mut replacement);
+    downloads.cancel_all();
+    for (tx, source) in retries {
+        replacement
+            .download_if_needed_and_verify(tx, source, None)
+            .expect("reset retries exclude the transferred admission");
+    }
+    downloads = Box::pin(replacement);
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
+    downloads
+        .download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY), source, None)
+        .expect("cancellation frees exactly one global and peer slot across reset");
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 1), None, None),
         Err(MempoolError::FullQueue)
     ));
 

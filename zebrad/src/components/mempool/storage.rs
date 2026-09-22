@@ -488,27 +488,19 @@ impl Storage {
             // > EvictTransaction MUST do the following:
             // > Select a random transaction to evict, with probability in direct proportion to
             // > eviction weight. (...) Remove it from the mempool.
-            let victim_tx = self
-                .verified
-                .evict_one()
-                .expect("mempool is empty, but was expected to be full");
+            for victim_tx in self.verified.evict_one() {
+                // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
+                // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
+                self.reject(
+                    victim_tx.transaction.id,
+                    SameEffectsChainRejectionError::RandomlyEvicted.into(),
+                );
 
-            // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
-            // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
-            self.reject(
-                victim_tx.transaction.id,
-                SameEffectsChainRejectionError::RandomlyEvicted.into(),
-            );
-
-            // If this transaction gets evicted, set its result to the same error
-            if victim_tx.transaction.id == unmined_tx_id {
-                result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+                // An incoming transaction can be evicted directly or through an ancestor.
+                if victim_tx.transaction.id == unmined_tx_id {
+                    result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+                }
             }
-        }
-
-        // Evicting an ancestor also evicts this transaction. Do not report or gossip it as admitted.
-        if result.is_ok() && !self.verified.contains(&tx_id) {
-            result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
         }
 
         result

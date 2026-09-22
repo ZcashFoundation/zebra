@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Preserve eviction rejections for all removed descendants and per-peer limits across mempool reset retries ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).
+time: 2026-09-22T16:11:47.210088042+02:00
