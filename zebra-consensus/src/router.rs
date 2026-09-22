@@ -154,6 +154,19 @@ impl RouterError {
         }
     }
 
+    /// Returns `true` if the block was rejected only because an ancestor's authorizing
+    /// data didn't match the commitment in its header.
+    ///
+    /// See [`zebra_state::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
+    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            // The finalized state drops the descendants of a failed block instead of
+            // rejecting them with an error.
+            RouterError::Checkpoint { .. } => false,
+            RouterError::Block { source, .. } => source.is_descendant_of_auth_commitment_mismatch(),
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).

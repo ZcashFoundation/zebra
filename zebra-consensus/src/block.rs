@@ -116,6 +116,19 @@ impl VerifyBlockError {
         }
     }
 
+    /// Returns `true` if the block was rejected only because an ancestor's authorizing
+    /// data didn't match the commitment in its header.
+    ///
+    /// See [`zs::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
+    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            VerifyBlockError::Commit(commit_err) => {
+                commit_err.is_descendant_of_auth_commitment_mismatch()
+            }
+            _ => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         use VerifyBlockError::*;

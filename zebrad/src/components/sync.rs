@@ -1272,6 +1272,9 @@ where
         //   reports are flushed to the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so the first
         //   re-request can briefly land on the same peer again; `MAX_BLOCK_REOBTAIN_RETRIES` bounds
         //   that.
+        // - `Invalid` because an ancestor had a mismatched authorizing data commitment: the state
+        //   rejects queued descendants along with the forged ancestor, but their hashes are still
+        //   wanted, and the peers that served them are not scored.
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
@@ -1287,7 +1290,8 @@ where
                 Some(*hash)
             }
             Err(BlockDownloadVerifyError::Invalid { error, hash, .. })
-                if error.is_auth_commitment_mismatch() =>
+                if error.is_auth_commitment_mismatch()
+                    || error.is_descendant_of_auth_commitment_mismatch() =>
             {
                 Some(*hash)
             }
@@ -1439,6 +1443,16 @@ where
                     "served block body did not match the authorizing data commitment in its \
                      header: the block hash is still valid and is re-requested, and the serving \
                      peer is scored, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if error.is_descendant_of_auth_commitment_mismatch() =>
+            {
+                debug!(
+                    error = ?e,
+                    "an ancestor's served body did not match the authorizing data commitment in \
+                     its header: this block hash is still valid and is re-requested, continuing"
                 );
                 false
             }

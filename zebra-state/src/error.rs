@@ -140,6 +140,19 @@ impl CommitBlockError {
         }
     }
 
+    /// Returns `true` if the block was rejected only because an ancestor's authorizing
+    /// data didn't match the commitment in its header.
+    ///
+    /// See [`ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
+    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            CommitBlockError::ValidateContextError(err) => {
+                err.is_descendant_of_auth_commitment_mismatch()
+            }
+            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
@@ -526,6 +539,19 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    /// The block was not validated because an ancestor in the same queued chain
+    /// failed contextual validation.
+    ///
+    /// This is a distinct variant, rather than a copy of the ancestor's error, so the
+    /// peer that served this block isn't scored or classified for the ancestor's
+    /// failure.
+    #[error("ancestor block {ancestor_hash} failed contextual validation")]
+    #[non_exhaustive]
+    AncestorRejected {
+        ancestor_hash: block::Hash,
+        source: Box<ValidateContextError>,
+    },
 }
 
 impl ValidateContextError {
@@ -544,6 +570,34 @@ impl ValidateContextError {
                 block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
             )
         )
+    }
+
+    /// Returns `true` if the block was rejected only because an ancestor's authorizing
+    /// data didn't match the commitment in its header.
+    ///
+    /// The ancestor's served body was forged, but its hash is still wanted, so this
+    /// block's hash is still wanted too. The peer that served this block isn't the one
+    /// that forged the ancestor, so it must not be scored.
+    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
+        matches!(
+            self,
+            ValidateContextError::AncestorRejected { source, .. }
+                if source.is_auth_commitment_mismatch()
+        )
+    }
+
+    /// Wraps `self`, the error of a rejected ancestor block, into the error for one of
+    /// its descendants, so the descendant carries neither the ancestor's misbehaviour
+    /// score nor its classification.
+    pub fn for_descendant(&self, ancestor_hash: block::Hash) -> Self {
+        match self {
+            // Keep the original failing ancestor, so deep descendants don't nest errors.
+            ValidateContextError::AncestorRejected { .. } => self.clone(),
+            _ => ValidateContextError::AncestorRejected {
+                ancestor_hash,
+                source: Box::new(self.clone()),
+            },
+        }
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
@@ -639,5 +693,42 @@ mod tests {
             ),
         ));
         assert_eq!(auth_commitment_err.misbehavior_score(), 100);
+    }
+
+    /// The state rejects queued descendants along with a failed block, but the peers that
+    /// served them didn't serve the failed block, so they must not inherit its score or
+    /// classification.
+    #[test]
+    fn descendant_errors_are_not_scored() {
+        let auth_commitment_err = ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        );
+        let forged_hash = block::Hash([1; 32]);
+
+        let child_err = auth_commitment_err.for_descendant(forged_hash);
+        assert_eq!(child_err.misbehavior_score(), 0);
+        assert!(!child_err.is_auth_commitment_mismatch());
+        assert!(child_err.is_descendant_of_auth_commitment_mismatch());
+
+        // Deeper descendants keep pointing at the block that actually failed.
+        let grandchild_err = child_err.for_descendant(block::Hash([2; 32]));
+        assert_eq!(grandchild_err, child_err);
+
+        let commit_err = CommitBlockError::ValidateContextError(Box::new(child_err));
+        assert_eq!(commit_err.misbehavior_score(), 0);
+        assert!(!commit_err.is_auth_commitment_mismatch());
+        assert!(commit_err.is_descendant_of_auth_commitment_mismatch());
+
+        // Descendants of other contextual failures aren't re-requested.
+        let other_child_err = ValidateContextError::NonSequentialBlock {
+            candidate_height: Height(5),
+            parent_height: Height(3),
+        }
+        .for_descendant(forged_hash);
+        assert_eq!(other_child_err.misbehavior_score(), 0);
+        assert!(!other_child_err.is_descendant_of_auth_commitment_mismatch());
     }
 }

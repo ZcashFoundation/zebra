@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: Added
-body: '`is_auth_commitment_mismatch()` on `VerifyBlockError`, `VerifyCheckpointError` and `RouterError`, forwarding to `zebra_state::ValidateContextError::is_auth_commitment_mismatch()`.'
+body: '`is_auth_commitment_mismatch()` on `VerifyBlockError`, `VerifyCheckpointError` and `RouterError`, forwarding to `zebra_state::ValidateContextError::is_auth_commitment_mismatch()`, and `is_descendant_of_auth_commitment_mismatch()` on `VerifyBlockError` and `RouterError`.'
 time: 2026-09-17T20:22:41.000000000Z

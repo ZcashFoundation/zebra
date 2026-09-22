@@ -1697,6 +1697,54 @@ async fn auth_commitment_mismatch_scores_peer_and_requeues_hash_without_restart(
     );
 }
 
+/// The state rejects an honest block queued behind a forged parent along with it. The peer
+/// that served the child didn't forge anything, so it must not be scored, but the child's
+/// hash is still wanted, so it is re-requested without cancelling the sync round.
+///
+/// Otherwise one forged body would get every peer that served one of its queued
+/// descendants banned too.
+#[tokio::test]
+async fn descendant_of_auth_commitment_mismatch_is_requeued_without_scoring() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x6F; 32]);
+
+    let commit_error = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        )
+        .for_descendant(block::Hash::from([0x1A; 32])),
+    ));
+    let error = BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Commit(commit_error)),
+        },
+        height: block::Height(43),
+        hash,
+        advertiser_addr: Some(advertiser),
+    };
+
+    chain_sync
+        .handle_block_response(Err(error))
+        .expect("a child of a forged body is non-fatal and must not restart the syncer");
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "the peer that served an honest child of a forged body must not be scored"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "the child's hash is still wanted, so it must be re-requested"
+    );
+}
+
 /// The forged-body re-request is bounded, so a peer cannot turn it into an unbounded
 /// download loop.
 ///

@@ -373,7 +373,9 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
 /// - the rejection is classified as an authorizing data commitment mismatch, so the syncer
 ///   re-requests the hash instead of cancelling the sync round,
 /// - it carries the ban-threshold misbehaviour score, so the serving peer is banned,
-/// - it is not classified as a duplicate request, which would make it benign, and
+/// - it is not classified as a duplicate request, which would make it benign,
+/// - an honest child queued before the forged parent arrived is rejected with it, but isn't
+///   scored or classified as a forgery, and
 /// - the honest body for the same hash still commits afterwards, along with its child.
 ///
 /// The last assertion is also the guard that this classification has no consensus-side
@@ -453,6 +455,31 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
     let valid_block = blocks[2].clone();
     let forged_block = Arc::new(forge_authorizing_data(&valid_block));
 
+    // During sync, the lookahead means a child often arrives, from another peer, before its
+    // parent does. Queue the honest child in the state first, so the state sends it to the
+    // write task along with the forged parent.
+    let child = blocks[3].clone();
+    let queued_child_commit = tokio::spawn(commit(child.clone()));
+    let child_queued_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let known_block = state
+            .clone()
+            .oneshot(zebra_state::Request::KnownBlock(child.hash()))
+            .await
+            .map_err(|err| eyre!(err))?;
+        if matches!(
+            known_block,
+            zebra_state::Response::KnownBlock(Some(zebra_state::KnownBlock::Queue))
+        ) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < child_queued_deadline,
+            "the child must be queued in the state while it waits for its parent"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
     let error = commit(forged_block)
         .await
         .expect_err("a body that doesn't match its header commitment must be rejected");
@@ -478,6 +505,32 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
         "a real forged body is not a duplicate request, so it must not be treated as benign"
     );
 
+    // The state rejects the queued child along with its forged parent, but the peer that
+    // served the child didn't forge anything, so it must not be scored or classified as the
+    // forger. Otherwise one forged body would get every peer that served a queued descendant
+    // banned too.
+    let child_error = queued_child_commit
+        .await?
+        .expect_err("a child queued behind a rejected parent must be rejected with it")
+        .downcast::<zebra_consensus::RouterError>()
+        .expect("the block verifier router's errors must stay downcastable to `RouterError`");
+
+    assert_eq!(
+        child_error.misbehavior_score(),
+        0,
+        "the peer that served an honest child of a forged body must not be scored: \
+         got {child_error:?}"
+    );
+    assert!(
+        !child_error.is_auth_commitment_mismatch(),
+        "an honest child of a forged body is not itself a forged body: got {child_error:?}"
+    );
+    assert!(
+        child_error.is_descendant_of_auth_commitment_mismatch(),
+        "an honest child of a forged body must be classified as such, so the syncer \
+         re-requests it instead of cancelling the sync round: got {child_error:?}"
+    );
+
     // The block hash was never invalid, only the body served under it, so the honest body and
     // its child must still commit.
     let valid_hash = commit(valid_block.clone())
@@ -488,7 +541,7 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
         valid_block.hash(),
         "the honest body must commit under the hash the forgery was rejected under"
     );
-    commit(blocks[3].clone())
+    commit(child)
         .await
         .expect("the honest body's child must not inherit the forgery's rejection");
 
