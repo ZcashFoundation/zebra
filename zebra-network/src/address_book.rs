@@ -21,7 +21,7 @@ use crate::{
     meta_addr::MetaAddrChange,
     protocol::external::{canonical_peer_addr, canonical_socket_addr, connection_limit_key},
     types::MetaAddr,
-    AddressBookPeers, PeerAddrState, PeerSocketAddr,
+    AddressBookPeers, BanList, PeerAddrState, PeerSocketAddr,
 };
 
 #[cfg(test)]
@@ -76,8 +76,13 @@ pub struct AddressBook {
     // TODO: Replace with `by_ip: HashMap<IpAddr, BTreeMap<DateTime32, MetaAddr>>` to support configured `max_connections_per_ip` greater than 1
     most_recent_by_ip: Option<HashMap<IpAddr, MetaAddr>>,
 
-    /// A list of banned addresses, with the time they were banned.
-    bans_by_ip: Arc<IndexMap<IpAddr, Instant>>,
+    /// The peer groups banned for misbehaviour.
+    ///
+    /// [`BanList`] applies the peer group mapping and ban expiry, so banning an
+    /// IPv6 peer bans its whole `/64`: otherwise a peer holding a `/64` evades
+    /// its ban by reconnecting from any of the 2⁶⁴ other addresses it already
+    /// controls.
+    bans: BanList,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -161,7 +166,7 @@ impl AddressBook {
             address_metrics_tx,
             last_address_log: None,
             most_recent_by_ip: should_limit_outbound_conns_per_ip.then(HashMap::new),
-            bans_by_ip: Default::default(),
+            bans: Default::default(),
         };
 
         new_book.update_metrics(instant_now, chrono_now);
@@ -433,7 +438,7 @@ impl AddressBook {
     /// mutex, so refreshing per change makes a batch quadratic.
     #[allow(clippy::unwrap_in_result)]
     fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
-        if self.bans_by_ip.contains_key(&change.addr().ip()) {
+        if self.bans.is_banned(change.addr().ip()) {
             // Remote peers control how often this fires, so keep it below `warn` (#11134).
             tracing::debug!(
                 ?change,
@@ -462,29 +467,48 @@ impl AddressBook {
         );
 
         if let Some(ref updated) = updated {
-            if updated.misbehavior() >= constants::MAX_PEER_MISBEHAVIOR_SCORE {
-                // Ban and skip outbound connections with excessively misbehaving peers.
-                let banned_ip = updated.addr.ip();
-                let bans_by_ip = Arc::make_mut(&mut self.bans_by_ip);
+            let score = change.misbehavior_score();
+            // Currently, scores are always either `0` or
+            // `MAX_PEER_MISBEHAVIOR_SCORE` (ban), so there is no need to
+            // accumulate scores. Do that here if we ever support partial
+            // scores.
 
-                bans_by_ip.insert(banned_ip, Instant::now());
-                if bans_by_ip.len() > constants::MAX_BANNED_IPS {
-                    // Remove the oldest banned IP from the address book.
-                    bans_by_ip.shift_remove_index(0);
-                }
+            if score != 0 && score != constants::MAX_PEER_MISBEHAVIOR_SCORE {
+                warn!(
+                    ?change,
+                    score,
+                    expected = constants::MAX_PEER_MISBEHAVIOR_SCORE,
+                    "programming error: misbehavior score is not 0 or \
+                     MAX_PEER_MISBEHAVIOR_SCORE, scores are not accumulated, \
+                     so a score below the threshold is dropped",
+                );
+            }
+
+            if score >= constants::MAX_PEER_MISBEHAVIOR_SCORE {
+                // # Security
+                //
+                // Ban the peer's whole group, not the individual address. A peer
+                // that rotates through the addresses of its `/64` — or just
+                // reconnects from a new source port, which is a different
+                // address book entry — would otherwise evade the ban.
+                let group = connection_limit_key(updated.addr.ip());
+                self.bans.ban(group);
 
                 // `most_recent_by_ip` is only populated when
                 // `max_connections_per_ip == 1`. The ban path runs for any
                 // configured value, so we must guard the optional cache rather
                 // than unwrap it.
                 if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
-                    most_recent_by_ip.remove(&connection_limit_key(banned_ip));
+                    most_recent_by_ip.remove(&group);
                 }
 
+                // Remove every address in the banned group, not just the one
+                // that crossed the threshold: the rest of an IPv6 `/64` belongs
+                // to the same peer.
                 let banned_addrs: Vec<_> = self
                     .by_addr
                     .keys()
-                    .filter(|addr| addr.ip() == banned_ip)
+                    .filter(|addr| connection_limit_key(addr.ip()) == group)
                     .cloned()
                     .collect();
 
@@ -672,7 +696,7 @@ impl AddressBook {
         self.by_addr
             .values()
             .filter(move |peer| {
-                !self.bans_by_ip.contains_key(&peer.addr.ip())
+                !self.bans.is_banned(peer.addr.ip())
                     && peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
                     && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
             })
@@ -710,9 +734,25 @@ impl AddressBook {
             .cloned()
     }
 
-    /// Returns banned IP addresses.
-    pub fn bans(&self) -> Arc<IndexMap<IpAddr, Instant>> {
-        self.bans_by_ip.clone()
+    /// Returns a snapshot of the banned peer groups.
+    pub fn bans(&self) -> BanList {
+        self.bans.clone()
+    }
+
+    /// Returns the misbehavior score for the peer group containing `addr`:
+    /// [`MAX_PEER_MISBEHAVIOR_SCORE`](constants::MAX_PEER_MISBEHAVIOR_SCORE) if
+    /// the group is banned, and `0` otherwise.
+    ///
+    /// Scores are not accumulated, so a group is either banned or unscored.
+    /// Bans apply per peer group — one IPv4 address, or one IPv6 `/64` subnet
+    /// — so every address in a group reports the same score. See
+    /// [`connection_limit_key`].
+    pub fn misbehavior_score(&self, addr: PeerSocketAddr) -> u32 {
+        if self.bans.is_banned(addr.ip()) {
+            constants::MAX_PEER_MISBEHAVIOR_SCORE
+        } else {
+            0
+        }
     }
 
     /// Returns the number of entries in this address book.
@@ -857,6 +897,10 @@ impl AddressBookPeers for AddressBook {
         }
         self.update(MetaAddr::new_initial_peer(peer)).is_some()
     }
+
+    fn misbehavior_score(&self, addr: PeerSocketAddr) -> u32 {
+        AddressBook::misbehavior_score(self, addr)
+    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -870,6 +914,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .add_peer(peer)
+    }
+
+    fn misbehavior_score(&self, addr: PeerSocketAddr) -> u32 {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .misbehavior_score(addr)
     }
 }
 
@@ -911,7 +961,7 @@ impl Clone for AddressBook {
             address_metrics_tx,
             last_address_log: None,
             most_recent_by_ip: self.most_recent_by_ip.clone(),
-            bans_by_ip: self.bans_by_ip.clone(),
+            bans: self.bans.clone(),
         }
     }
 }

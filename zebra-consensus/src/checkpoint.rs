@@ -1035,6 +1035,24 @@ impl VerifyCheckpointError {
         }
     }
 
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// See [`zs::ValidateContextError::is_auth_commitment_mismatch()`].
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            VerifyCheckpointError::VerifyBlock(block_error) => {
+                block_error.is_auth_commitment_mismatch()
+            }
+            // Like `is_duplicate_request()`, the boxed `zs::CommitCheckpointVerifiedError`
+            // newtype must be unwrapped to reach the state's classification.
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .is_some_and(|commit_err| commit_err.inner().is_auth_commitment_mismatch()),
+            _ => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).
@@ -1046,6 +1064,14 @@ impl VerifyCheckpointError {
             | VerifyCheckpointError::CoinbaseHeight { .. }
             | VerifyCheckpointError::DuplicateTransaction
             | VerifyCheckpointError::AmountError(_) => 100,
+            // Checkpoint verification only checks the block hash, which doesn't
+            // commit to the authorizing data, so a forged body reaches contextual
+            // validation in the finalized state. Like `is_duplicate_request()`, the
+            // boxed `zs::CommitCheckpointVerifiedError` newtype must be unwrapped
+            // for the state's suggested score to reach the peer that served it.
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .map_or(0, |commit_err| commit_err.inner().misbehavior_score()),
             _other => 0,
         }
     }

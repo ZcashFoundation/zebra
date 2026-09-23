@@ -1,0 +1,13 @@
+project: zebra-network
+kind: breaking
+body: 'Removed the `misbehavior_score` field and `MetaAddr::misbehavior` method.
+  Misbehavior is now tracked per peer group by the `AddressBook`, and read with
+  the new `AddressBook::misbehavior_score` method, also available on the
+  `AddressBookPeers` trait: currently it returns `MAX_PEER_MISBEHAVIOR_SCORE`
+  for a banned group and `0` otherwise, because scores are not currently
+  accumulated since those are the only two scores being used.
+  `AddressBook::bans` now returns the new `BanList` type instead of an
+  `Arc<IndexMap<IpAddr, Instant>>`; query it with `BanList::is_banned`, which
+  applies both the peer group mapping and ban expiry
+  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
+time: 2026-09-01T12:00:02.000000000Z
