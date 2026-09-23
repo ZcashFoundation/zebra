@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Chain-tip height estimates use the new block spacing at upgrade activation and correctly round timestamps earlier than the known tip.
+time: 2026-09-24T01:49:35.567338912+02:00

@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`chain_tip::NetworkChainTipHeightEstimator` applies new block spacing to the activation interval and floors negative fractional timestamps without shifting exact past intervals.'
+time: 2026-09-24T01:49:34.513193989+02:00

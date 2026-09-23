@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Block templates honor network-specific median-time rules and the local two-hour future limit, returning an error when no valid timestamp range exists.
+time: 2026-09-24T01:49:37.67734367+02:00

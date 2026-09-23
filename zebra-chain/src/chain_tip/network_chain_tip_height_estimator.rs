@@ -38,21 +38,23 @@ impl NetworkChainTipHeightEstimator {
     ///
     /// # Implementation details
     ///
-    /// The `network` is used to obtain a list of target spacings used in different sections of the
-    /// block chain. The first section is used as a starting point.
+    /// The current height determines the initial target spacing; only future spacing changes
+    /// are retained.
     pub fn new(
         current_block_time: DateTime<Utc>,
         current_height: block::Height,
         network: &Network,
     ) -> Self {
-        let mut target_spacings = NetworkUpgrade::target_spacings(network);
-        let (_genesis_height, initial_target_spacing) =
-            target_spacings.next().expect("No target spacings were set");
+        let target_spacings =
+            NetworkUpgrade::target_spacings(network).filter(|(height, _)| *height > current_height);
 
         NetworkChainTipHeightEstimator {
             current_block_time,
             current_height,
-            current_target_spacing: initial_target_spacing,
+            current_target_spacing: NetworkUpgrade::target_spacing_for_height(
+                network,
+                current_height,
+            ),
             // TODO: Remove the `Vec` allocation once existential `impl Trait`s are available.
             next_target_spacings: target_spacings.collect::<Vec<_>>().into_iter(),
         }
@@ -68,7 +70,10 @@ impl NetworkChainTipHeightEstimator {
     /// estimation.
     pub fn estimate_height_at(mut self, target_time: DateTime<Utc>) -> block::Height {
         while let Some((change_height, next_target_spacing)) = self.next_target_spacings.next() {
-            self.estimate_up_to(change_height);
+            // The interval ending at the activation block uses the new spacing.
+            self.estimate_up_to(
+                (change_height - 1).expect("future spacing changes are after genesis"),
+            );
 
             if self.current_block_time >= target_time {
                 break;
@@ -110,11 +115,9 @@ impl NetworkChainTipHeightEstimator {
         let time_difference = target_time - self.current_block_time;
         let mut time_difference_seconds = time_difference.num_seconds();
 
-        if time_difference_seconds < 0 {
-            // Undo the rounding towards negative infinity done by `chrono::Duration`, which yields
-            // an incorrect value for the dividend of the division.
-            //
-            // (See https://docs.rs/time/0.1.44/src/time/duration.rs.html#166-173)
+        if time_difference.subsec_nanos() < 0 {
+            // Chrono truncates whole seconds towards zero. Floor negative fractions before
+            // dividing by the spacing, without changing exact negative seconds.
             time_difference_seconds -= 1;
         }
 
