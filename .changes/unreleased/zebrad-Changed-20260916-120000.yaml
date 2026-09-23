@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: 'When two competing chains have equal cumulative work, Zebra now prefers the chain whose tip block it received first, as specified by the Zcash protocol, instead of the chain with the greater tip block hash.'
+body: 'When two competing chains have equal cumulative work, Zebra now prefers the chain whose tip block it received first, as specified by the Zcash protocol, instead of the chain with the greater tip block hash ([#11341](https://github.com/ZcashFoundation/zebra/pull/11341)).'
 time: 2026-09-16T12:00:00.000000000Z
