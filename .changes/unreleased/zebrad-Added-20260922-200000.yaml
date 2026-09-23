@@ -1,0 +1,6 @@
+project: zebrad
+kind: Added
+body: 'The `mempool.admission_split_width` config option sets how many concurrently checked pieces
+  a failed mempool admission proposal is split into, defaulting to 4
+  ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).'
+time: 2026-09-22T20:00:00.000000000Z
