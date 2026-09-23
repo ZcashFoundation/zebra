@@ -120,17 +120,13 @@ impl Version {
                 170_150
             }
             (Mainnet, Nu6_2) => 170_150,
-            // TODO: these NU6.3 (Ironwood) and Nu7 protocol versions are provisional, bumped above
-            // Nu6_2's 170_150. Update them when the real values are specified.
-            //
-            // The NU7 deployment ZIP (`zcash/zips#1363`) lists MIN_NETWORK_PROTOCOL_VERSION as
-            // TBD on both Mainnet and Testnet, so there is nothing to adopt yet.
             (Testnet(params), Nu6_3) if params.is_default_testnet() || params.is_regtest() => {
                 170_160
             }
             (Mainnet, Nu6_3) => 170_160,
-            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_170,
-            (Mainnet, Nu7) => 170_180,
+            // ZIP 204 assigns distinct Testnet and Mainnet versions from NU7 onward.
+            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_180,
+            (Mainnet, Nu7) => 170_190,
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
             (Testnet(_), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,
@@ -188,80 +184,4 @@ impl Default for Tweak {
 pub struct Filter(pub Vec<u8>);
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn version_extremes_mainnet() {
-        version_extremes(&Mainnet)
-    }
-
-    #[test]
-    fn version_extremes_testnet() {
-        version_extremes(&Network::new_default_testnet())
-    }
-
-    /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
-    /// extreme values.
-    fn version_extremes(network: &Network) {
-        let _init_guard = zebra_test::init();
-
-        assert_eq!(
-            Version::min_specified_for_height(network, block::Height(0)),
-            Version::min_specified_for_upgrade(network, BeforeOverwinter),
-        );
-
-        // We assume that the last version we know about continues forever
-        // (even if we suspect that won't be true)
-        assert_ne!(
-            Version::min_specified_for_height(network, block::Height::MAX),
-            Version::min_specified_for_upgrade(network, BeforeOverwinter),
-        );
-    }
-
-    #[test]
-    fn version_consistent_mainnet() {
-        version_consistent(&Mainnet)
-    }
-
-    #[test]
-    fn version_consistent_testnet() {
-        version_consistent(&Network::new_default_testnet())
-    }
-
-    /// Check that the min_specified_for_upgrade and min_specified_for_height functions
-    /// are consistent for `network`.
-    fn version_consistent(network: &Network) {
-        let _init_guard = zebra_test::init();
-
-        let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
-        assert!(
-            matches!(highest_network_upgrade, Nu6 | Nu6_1 | Nu6_2 | Nu6_3 | Nu7),
-            "expected coverage of all network upgrades: \
-            add the new network upgrade to the list in this test"
-        );
-
-        for &network_upgrade in &[
-            BeforeOverwinter,
-            Overwinter,
-            Sapling,
-            Blossom,
-            Heartwood,
-            Canopy,
-            Nu5,
-            Nu6,
-            Nu6_1,
-            Nu6_2,
-            Nu6_3,
-            Nu7,
-        ] {
-            let height = network_upgrade.activation_height(network);
-            if let Some(height) = height {
-                assert_eq!(
-                    Version::min_specified_for_upgrade(network, network_upgrade),
-                    Version::min_specified_for_height(network, height)
-                );
-            }
-        }
-    }
-}
+mod test;

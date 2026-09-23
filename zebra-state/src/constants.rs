@@ -52,10 +52,10 @@ const DATABASE_FORMAT_VERSION: u64 = 28;
 ///   `BlockInfo` — so v28.0 code still reads the size from its v28.0 offset in a wide
 ///   `BlockInfo` record, and treats the reserve as zero. Read code accepts 32/40/48/56-byte
 ///   value pools, and picks the `BlockInfo` layout by length. Writes keep the v28.0 widths
-///   while the reserve is zero, which is always the case before NU7 activation, so a database
-///   stays byte-compatible with v28.0 until then, and no resync or data migration is needed.
-///   Once the reserve is non-zero, v28.0 code can no longer parse the wide tip value pool
-///   records, but it can not validate NU7 blocks anyway.
+///   before NU7: the historical reserve seed at activation minus one is reconstructed on read
+///   from the stored issued pools rather than persisted. No resync or data migration is needed.
+///   At NU7, a non-zero reserve widens records. v28.0 cannot parse wide tip value pools, but it
+///   cannot validate NU7 blocks either.
 /// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
 ///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
 ///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree

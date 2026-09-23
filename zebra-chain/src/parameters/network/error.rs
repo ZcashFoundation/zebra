@@ -47,6 +47,14 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidHeightZero,
 
+    #[error("NSM reissuance requires a nonzero height at or after NU7 activation")]
+    #[non_exhaustive]
+    InvalidNsmReissuanceHeight,
+
+    #[error("halving interval must be positive and fit after the Blossom and NU7 scaling")]
+    #[non_exhaustive]
+    InvalidHalvingInterval,
+
     #[error("network upgrades must be activated in order specified by the protocol")]
     #[non_exhaustive]
     OutOfOrderUpgrades,

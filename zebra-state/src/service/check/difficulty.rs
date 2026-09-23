@@ -16,6 +16,9 @@ use zebra_chain::{
     BoundedVec,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// The median block span for time median calculations.
 ///
 /// `PoWMedianBlockSpan` in the Zcash specification.
@@ -254,41 +257,39 @@ impl AdjustedDifficulty {
         threshold.to_compact()
     }
 
-    /// Calculate the arithmetic mean of the averaging window thresholds: the
-    /// expanded `difficulty_threshold`s from the previous `PoWAveragingWindow` (17)
-    /// blocks in the relevant chain.
+    /// Calculate the arithmetic mean of the expanded `difficulty_threshold`s from
+    /// the previous `PoWAveragingWindow(height)` blocks in the relevant chain.
     ///
     /// Implements `MeanTarget` from the Zcash specification.
     fn mean_target_difficulty(&self) -> ExpandedDifficulty {
-        // In Zebra, contextual validation starts after Canopy activation, so we
-        // can assume that the relevant chain contains at least 17 blocks.
-        // Therefore, the `PoWLimit` case of `MeanTarget()` from the Zcash
-        // specification is unreachable.
-
         let averaging_window = self.averaging_window();
+        let averaging_window_height = u32::try_from(averaging_window)
+            .expect("the averaging window is at most MAX_POW_AVERAGING_WINDOW");
+        if self.candidate_height.0 <= averaging_window_height
+            || self.relevant_difficulty_thresholds.len() < averaging_window
+        {
+            return self.network.target_difficulty_limit();
+        }
 
         let averaging_window_thresholds =
-            if self.relevant_difficulty_thresholds.len() >= averaging_window {
-                &self.relevant_difficulty_thresholds.as_slice()[0..averaging_window]
-            } else {
-                return self.network.target_difficulty_limit();
-            };
+            &self.relevant_difficulty_thresholds.as_slice()[..averaging_window];
 
-        // Since the PoWLimits are `2^251 − 1` for Testnet, and `2^243 − 1` for
-        // Mainnet, the sum of 17 `ExpandedDifficulty` will be less than or equal
-        // to: `(2^251 − 1) * 17 = 2^255 + 2^251 - 17`. Therefore, the sum can
-        // not overflow a u256 value.
-        let total: ExpandedDifficulty = averaging_window_thresholds
-            .iter()
-            .map(|compact| {
-                compact
-                    .to_expanded()
-                    .expect("difficulty thresholds in previously verified blocks are valid")
-            })
-            .sum();
-
+        // A sum of 102 Testnet targets can overflow U256. Sum the quotients and
+        // remainders separately to preserve floor(sum(targets) / window) exactly:
+        // the quotient sum is at most U256::MAX, and the remainder sum is < window^2.
         let divisor: U256 = averaging_window.into();
-        total / divisor
+        let (quotients, remainders) = averaging_window_thresholds.iter().fold(
+            (U256::zero(), U256::zero()),
+            |(quotients, remainders), compact| {
+                let target = compact
+                    .to_expanded()
+                    .expect("difficulty thresholds in previously verified blocks are valid");
+                let (quotient, remainder) = U256::from(target).div_mod(divisor);
+                (quotients + quotient, remainders + remainder)
+            },
+        );
+
+        (quotients + remainders / divisor).into()
     }
 
     /// Calculate the bounded median timespan. The median timespan is the

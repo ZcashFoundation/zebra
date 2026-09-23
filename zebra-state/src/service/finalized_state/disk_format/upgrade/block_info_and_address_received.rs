@@ -165,7 +165,9 @@ impl DiskFormatUpgrade for Upgrade {
                 LoadResult::HasInfo(prev_value_pool) => {
                     // BlockInfo already stored; we just need the its value pool
                     // then skip the block
-                    value_pool = prev_value_pool;
+                    value_pool = prev_value_pool
+                        .with_nsm_reserve_seed(height, &network)
+                        .expect("stored issued supply cannot exceed scheduled issuance");
                     continue;
                 }
                 LoadResult::LoadedInfo {
@@ -182,17 +184,24 @@ impl DiskFormatUpgrade for Upgrade {
                     block
                         .chain_value_pool_change(
                             &utxos,
-                            calculate_deferred_pool_balance_change(height, &network),
+                            calculate_deferred_pool_balance_change(
+                                height,
+                                &network,
+                                value_pool.nsm_reserve_amount(),
+                            )
+                            .expect("finalized subsidy is valid"),
                             &network,
+                            value_pool,
                         )
-                        .unwrap_or_default(),
+                        .expect("finalized block value pool change is valid"),
                 )
                 .expect("value pool change should not overflow");
 
             let mut batch = DiskWriteBatch::new();
 
             // Create and store the BlockInfo for this block.
-            let block_info = BlockInfo::new(value_pool, size as u32);
+            let block_info =
+                BlockInfo::new(db.value_pool_for_disk(height, value_pool), size as u32);
             let _ = db
                 .block_info_cf()
                 .with_batch_for_writing(&mut batch)

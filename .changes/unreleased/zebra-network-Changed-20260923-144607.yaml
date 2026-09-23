@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: NU7 peer-version checks require 170180 on Testnet and Regtest and 170190 on Mainnet. Zebra advertises protocol version 170190.
+time: 2026-09-23T14:46:07.662229966+02:00

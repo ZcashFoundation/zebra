@@ -61,8 +61,8 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
     let network = ParametersBuilder::default()
         .with_activation_heights(ConfiguredActivationHeights {
             // These are dummy values. The particular values don't matter much,
-            // as long as the nu5 one is smaller than the chains being generated
-            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure that upgrade is exercised
+            // as long as the nu7 one is smaller than the chains being generated
+            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure all upgrades are exercised
             // in the test below. (The test will fail if that does not happen.)
             before_overwinter: Some(1),
             overwinter: Some(10),
@@ -78,7 +78,9 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
-        .extend_funding_streams()
+        // These short chains have no historical funding-stream deposits to disburse.
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![])
         .to_network()
         .expect("failed to build configured network");
     let ledger_strategy =
@@ -97,6 +99,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             let heartwood_height_plus1 = (heartwood_height + 1).unwrap();
             let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
             let nu5_height_plus1 = (nu5_height + 1).unwrap();
+            let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();
 
             let mut failure_count = 0;
             for block in chain.iter() {
@@ -132,6 +135,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             }
             // Make sure the failure path was triggered
             prop_assert_eq!(failure_count, 4);
+            prop_assert!(state.finalized_tip_height().unwrap() >= nu7_height);
     });
 
     Ok(())

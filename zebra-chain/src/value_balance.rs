@@ -143,9 +143,9 @@ where
 
     /// Returns the NSM reserve amount.
     ///
-    /// The Network Sustainability Mechanism reserve holds the transaction fees removed from
-    /// circulation from NU7 activation. It is not a spendable chain value pool, and it is not
-    /// part of the Issued Supply.
+    /// The reserve starts with historical unissued supply at NU7 activation minus one,
+    /// then accrues diverted transaction fees and pays additional block subsidies.
+    /// It is not a spendable chain value pool or part of the Issued Supply.
     pub fn nsm_reserve_amount(&self) -> Amount<C> {
         self.nsm_reserve
     }
@@ -241,6 +241,29 @@ impl ValueBalance<NegativeAllowed> {
 }
 
 impl ValueBalance<NonNegative> {
+    /// Derives the historical NSM seed at NU7 activation minus one.
+    ///
+    /// This is idempotent, including for legacy records without a reserve field. All issued
+    /// pools, including deferred issuance, count toward supply; only the reserve is excluded.
+    pub fn with_nsm_reserve_seed(
+        mut self,
+        height: crate::block::Height,
+        network: &crate::parameters::Network,
+    ) -> Result<Self, ValueBalanceError> {
+        if crate::parameters::NetworkUpgrade::Nu7
+            .activation_height(network)
+            .is_none_or(|activation| height + 1 != Some(activation))
+        {
+            return Ok(self);
+        }
+        self.nsm_reserve = Amount::zero();
+        let issued = self.total().map_err(Total)?;
+        let scheduled = crate::parameters::subsidy::cumulative_scheduled_issuance(height, network)
+            .map_err(Subsidy)?;
+        self.nsm_reserve = (scheduled - issued).map_err(NsmReserve)?;
+        Ok(self)
+    }
+
     /// Returns the sum of this value balance, and the chain value pool changes in `transaction`.
     ///
     /// `outputs` must contain the [`transparent::Output`]s of every input in this transaction,
@@ -398,7 +421,7 @@ impl ValueBalance<NonNegative> {
 
     /// To byte array
     ///
-    /// The `nsm_reserve` balance (NU7 onward) is appended after `ironwood`, which is itself
+    /// The `nsm_reserve` balance (seeded at NU7 activation minus one) follows `ironwood`, itself
     /// appended after `deferred`, so that records written by earlier Zebra versions (32 bytes
     /// without `deferred`, 40 bytes with it, or 48 bytes with `ironwood`) remain parsable by
     /// [`Self::from_bytes`].
@@ -533,6 +556,9 @@ pub enum ValueBalanceError {
     /// NSM reserve amount error {0}
     NsmReserve(amount::Error),
 
+    /// Contextual subsidy validation error.
+    Subsidy(crate::parameters::subsidy::SubsidyError),
+
     /// total amount error {0}
     Total(amount::Error),
 
@@ -550,6 +576,7 @@ impl fmt::Display for ValueBalanceError {
             Deferred(e) => format!("deferred amount err: {e}"),
             Ironwood(e) => format!("ironwood amount err: {e}"),
             NsmReserve(e) => format!("NSM reserve amount err: {e}"),
+            Subsidy(e) => format!("subsidy error: {e}"),
             Total(e) => format!("total amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })

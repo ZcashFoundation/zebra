@@ -110,10 +110,10 @@ fn format_upgrades(
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
         // major-version upgrade that is restorable from the previous major database format version.
         Box::new(add_ironwood_tree::Upgrade),
-        // The NU7 NSM reserve can widen chain value pool and `BlockInfo` records, but only once
-        // the reserve is non-zero, which can not happen before NU7 activation; until then the
-        // records are byte-identical to v28.0. No data migration is needed, but the database is
-        // still marked with the new version when it is opened.
+        // The NU7 NSM reserve can widen chain value pool and `BlockInfo` records at activation.
+        // The historical seed at activation minus one is derived on read, not persisted, so
+        // pre-NU7 records remain byte-identical to v28.0. No migration is needed, but the database
+        // is still marked with the new version when it is opened.
         Box::new(no_migration::NoMigration::new(
             "add NU7 NSM reserve balance",
             Version::new(28, 1, 0),

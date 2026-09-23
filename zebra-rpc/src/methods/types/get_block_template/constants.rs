@@ -24,13 +24,11 @@ pub const NONCE_RANGE_FIELD: &str = "00000000ffffffff";
 
 /// A hardcoded list of fields that the miner can change from the block template.
 ///
+/// The required coinbase commits to the selected transaction fees and contextual subsidy.
+/// Changing transactions or the parent requires a new template, not a mutation of this one.
+///
 /// <https://en.bitcoin.it/wiki/BIP_0023#Mutations>
-pub const MUTABLE_FIELD: &[&str] = &[
-    // Standard mutations, copied from zcashd
-    "time",
-    "transactions",
-    "prevblock",
-];
+pub const MUTABLE_FIELD: &[&str] = &["time"];
 
 /// A hardcoded list of Zebra's getblocktemplate RPC capabilities.
 ///

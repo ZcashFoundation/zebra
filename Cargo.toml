@@ -38,10 +38,10 @@ zcash_address = "0.13.0"
 zcash_encoding = "0.4"
 zcash_history = "0.5.0"
 zcash_keys = "0.16"
-zcash_primitives = "0.30"
+zcash_primitives = "=0.30.1"
 zcash_proofs = "0.30"
 zcash_transparent = "0.10.0"
-zcash_protocol = "0.10.0"
+zcash_protocol = "=0.10.6"
 zip32 = "0.2"
 abscissa_core = "0.7"
 base64 = "0.22.1"
@@ -179,6 +179,18 @@ zcash_note_encryption = "0.4.1"
 zcash_script = "0.4.5"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
+
+# Local NU7 integration of https://github.com/zcash/librustzcash/pull/3047.
+# Replace these patches with reviewed releases before publishing.
+# Keep unrelated address revisions out of this change by retaining released
+# transparent and Equihash dependencies of the two patched crates.
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", rev = "517047de130ed81059903458c933aab6684b353a" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", rev = "517047de130ed81059903458c933aab6684b353a" }
+
+[patch."https://github.com/zcash/librustzcash"]
+equihash = { version = "=0.3.0" }
+zcash_transparent = { version = "=0.10.0" }
 
 [workspace.metadata.release]
 
@@ -333,7 +345,7 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1"))' # Used in Zebra and librustzcash
 ] }
 
 # High-risk code

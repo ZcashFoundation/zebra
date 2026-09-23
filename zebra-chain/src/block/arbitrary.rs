@@ -7,7 +7,9 @@ use crate::{
     block,
     fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
-    parameters::{NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{
+        subsidy::scheduled_block_subsidy, NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH,
+    },
     primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::{self, BytesInDisplayOrder},
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
@@ -392,6 +394,8 @@ impl Block {
     /// Returns a strategy for creating vectors of blocks with increasing height.
     ///
     /// Each vector is `count` blocks long.
+    /// Coinbase outputs are bounded by the scheduled subsidy; fees and NSM reissuance
+    /// are left unclaimed.
     ///
     /// `check_transparent_coinbase_spend` is used to check if
     /// transparent coinbase UTXOs are valid, before using them in blocks.
@@ -451,8 +455,21 @@ impl Block {
 
                 let mut new_transactions = Vec::new();
                 for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
+                    let mut transaction = (*transaction).clone();
+                    if transaction.is_coinbase() {
+                        // Arbitrary output values must not mint more than scheduled issuance.
+                        // Generated shielded bundles have zero value balance; leave fees unclaimed.
+                        let mut remaining_subsidy =
+                            scheduled_block_subsidy(*height, &current.network)
+                                .expect("generated heights have a valid scheduled subsidy");
+                        transaction.for_each_value_mut(|value| {
+                            *value = (*value).min(remaining_subsidy);
+                            remaining_subsidy = (remaining_subsidy - *value)
+                                .expect("output is bounded by the remaining subsidy");
+                        });
+                    }
                     if let Some(transaction) = fix_generated_transaction(
-                        (*transaction).clone(),
+                        transaction,
                         tx_index_in_block,
                         *height,
                         &mut chain_value_pools,

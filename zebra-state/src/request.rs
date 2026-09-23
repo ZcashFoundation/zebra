@@ -10,7 +10,7 @@ use std::{
 
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::{self, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
@@ -524,6 +524,7 @@ impl ContextuallyVerifiedBlock {
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -551,6 +552,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_pool_balance_change,
                 network,
+                previous_value_pools,
             )?,
             received_time,
         })
@@ -1549,8 +1551,9 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::SolutionRate`]
     SolutionRate {
-        /// The number of blocks to calculate the average difficulty for.
-        num_blocks: usize,
+        /// The number of blocks to calculate the average difficulty for, or `None`
+        /// to use the averaging window at the effective (tip-clamped) height.
+        num_blocks: Option<usize>,
         /// Optionally estimate the network solution rate at the time when this height was mined.
         /// Otherwise, estimate at the current tip height.
         height: Option<block::Height>,

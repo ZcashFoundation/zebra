@@ -5,9 +5,10 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy::block_subsidy, Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
@@ -57,8 +58,13 @@ pub fn get_block_template_chain_info(
             best_relevant_chain_and_history_tree(non_finalized_state, db, network);
     }
 
-    let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
-        best_relevant_chain_and_history_tree_result?;
+    let (
+        best_tip_height,
+        best_tip_hash,
+        best_relevant_chain,
+        best_tip_history_tree,
+        expected_block_subsidy,
+    ) = best_relevant_chain_and_history_tree_result?;
 
     Ok(difficulty_time_and_history_tree(
         best_relevant_chain,
@@ -66,6 +72,7 @@ pub fn get_block_template_chain_info(
         best_tip_hash,
         network,
         best_tip_history_tree,
+        expected_block_subsidy,
     ))
 }
 
@@ -149,14 +156,23 @@ fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     network: &Network,
-) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
+) -> Result<
+    (
+        Height,
+        block::Hash,
+        Vec<Arc<Block>>,
+        Arc<HistoryTree>,
+        Amount<NonNegative>,
+    ),
+    BoxError,
+> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
     // The candidate block is the one after the tip, and ZIP 218 makes the span depend on its
     // height, so only fetch as many blocks as that height actually needs.
-    let candidate_height = (state_tip_before_queries.0 + 1).unwrap_or(state_tip_before_queries.0);
+    let candidate_height = state_tip_before_queries.0.next()?;
     let block_span = pow_adjustment_block_span(network, candidate_height);
 
     let best_relevant_chain =
@@ -174,6 +190,23 @@ fn best_relevant_chain_and_history_tree(
     )
     .expect("tip hash should exist in the chain");
 
+    let previous_nsm_reserve = if network
+        .nsm_reissuance_height()
+        .is_some_and(|height| candidate_height >= height)
+    {
+        read::block_info(
+            non_finalized_state.best_chain(),
+            db,
+            state_tip_before_queries.into(),
+        )
+        .ok_or("missing parent value pools for the next block subsidy")?
+        .value_pools()
+        .nsm_reserve_amount()
+    } else {
+        Amount::zero()
+    };
+    let expected_block_subsidy = block_subsidy(candidate_height, network, previous_nsm_reserve)?;
+
     let state_tip_after_queries =
         read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
 
@@ -188,6 +221,7 @@ fn best_relevant_chain_and_history_tree(
         state_tip_before_queries.1,
         best_relevant_chain,
         history_tree,
+        expected_block_subsidy,
     ))
 }
 
@@ -203,6 +237,7 @@ fn difficulty_time_and_history_tree(
     tip_hash: block::Hash,
     network: &Network,
     history_tree: Arc<HistoryTree>,
+    expected_block_subsidy: Amount<NonNegative>,
 ) -> GetBlockTemplateChainInfo {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
         .iter()
@@ -261,6 +296,7 @@ fn difficulty_time_and_history_tree(
         tip_height,
         chain_history_root: history_tree.hash(),
         expected_difficulty,
+        expected_block_subsidy,
         cur_time,
         min_time,
         max_time,
@@ -290,11 +326,8 @@ fn adjust_difficulty_and_time_for_testnet(
     // > is greater than 6 * PoWTargetSpacing(height) seconds after that of the preceding block,
     // > then the block is a minimum-difficulty block.
     //
-    // The max time is always a minimum difficulty block, because the minimum difficulty
-    // gap is 7.5 minutes, but the maximum gap is 90 minutes. This means that testnet blocks
-    // have two valid time ranges with different difficulties:
-    // * 1s - 7m30s: standard difficulty
-    // * 7m31s - 90m: minimum difficulty
+    // The spacing depends on the candidate height: after NU7 these ranges switch
+    // at 150/151 seconds rather than Blossom's 450/451 seconds.
     //
     // In rare cases, this could make some testnet miners produce invalid blocks,
     // if they use the full 90 minute time gap in the consensus rules.
@@ -311,8 +344,9 @@ fn adjust_difficulty_and_time_for_testnet(
         .try_into()
         .expect("valid blocks have in-range times");
 
+    let candidate_height = (previous_block_height + 1).expect("next block height is valid");
     let Some(minimum_difficulty_spacing) =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, candidate_height)
     else {
         // Returns early if the testnet minimum difficulty consensus rule is not active
         return;
@@ -395,6 +429,8 @@ mod tests {
     //! `adjust_difficulty_and_time_for_testnet` deterministically without reading the real
     //! clock (the `DateTime32::now()` call lives only in its caller).
 
+    mod vectors;
+
     use super::*;
     use crate::service::check::difficulty::MAX_POW_ADJUSTMENT_BLOCK_SPAN;
     use zebra_chain::work::difficulty::ParameterDifficulty as _;
@@ -426,6 +462,7 @@ mod tests {
             tip_height: Height(0),
             chain_history_root: None,
             expected_difficulty: CompactDifficulty::default(),
+            expected_block_subsidy: Amount::zero(),
             cur_time: DateTime32::from(cur_time),
             min_time: DateTime32::from(PREV - 100),
             max_time: DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN),
