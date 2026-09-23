@@ -797,6 +797,18 @@ impl Service<Request> for Mempool {
                 // with the same mined IDs as recently mined transactions.
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
                 tx_downloads.cancel(&mined_ids);
+                // Admission keeps its candidates' download accounting, so finish mined ones
+                // here instead of retrying them only to find them in the chain.
+                for candidate in
+                    self.admission
+                        .grow(block.previous_block_hash, block.hash, &mined_ids)
+                {
+                    tx_downloads.finish_admission(candidate.tx.transaction.id);
+                    if let Some(response) = candidate.response {
+                        let _ = response
+                            .send(Err("transaction was mined while it was verified".into()));
+                    }
+                }
                 storage.clear_mined_dependencies(&mined_ids);
 
                 let storage::RemovedTransactionIds { mined, invalidated } =

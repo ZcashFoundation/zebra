@@ -1,6 +1,6 @@
 //! Proposal admission boundaries, using controlled consensus and real committed state tips.
 
-use std::{collections::HashSet, future::Future, sync::Arc, time::Duration};
+use std::{collections::HashSet, future::Future, sync::Arc, task::Poll, time::Duration};
 
 use futures::FutureExt;
 use tokio::sync::oneshot;
@@ -693,6 +693,7 @@ async fn an_evicting_insertion_rebuilds_the_template() {
 #[tokio::test]
 async fn stale_proposal_reverifies_without_releasing_its_response() {
     // Exercise Grow, Reset, and a committed tip that advances before its notification.
+    // Grow rebuilds the proposal; the others re-verify the transaction.
     for (block_count, lagging_notification) in [(1, false), (2, false), (1, true)] {
         let (
             mut mempool,
@@ -768,12 +769,23 @@ async fn stale_proposal_reverifies_without_releasing_its_response() {
             .get(&id.mined_id())
             .is_none());
         // Even a failure for the old parent is stale work, not a rejection of the transaction.
-        held.respond(Err::<block::Hash, BoxError>(
-            zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
-                zebra_consensus::error::TransactionError::BadBalance,
-            ))
-            .into(),
+        held.respond(proposal_error(
+            zebra_consensus::error::TransactionError::BadBalance,
         ));
+        if block_count == 1 && !lagging_notification {
+            // A new block carries the semantically verified candidate onto the new tip, so only
+            // its proposal is rebuilt.
+            let rebuilt = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+            assert_eq!(proposed(rebuilt.request()), [id]);
+            assert!(matches!(
+                result.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            ));
+            assert!(changes.try_recv().is_err());
+            rebuilt.respond(block::Hash([0; 32]));
+            drive(&mut mempool, result).await.unwrap().unwrap();
+            continue;
+        }
         let retry = drive(&mut mempool, tx_verifier.expect_request_that(|_| true)).await;
         assert_eq!(retry.request().transaction.id, id);
         assert!(matches!(
@@ -991,6 +1003,111 @@ async fn batches_leave_room_for_the_header_and_coinbase() {
     for result in results {
         drive(&mut mempool, result).await.unwrap().unwrap();
     }
+}
+
+#[tokio::test]
+async fn new_block_finishes_mined_candidates_and_carries_the_rest() {
+    let (mut mempool, _, _, _, _tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let txs = block_transactions(3);
+    // Proposals are only checked on top of the committed genesis tip.
+    let genesis: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let (previous, tip, other) = (block::Hash([1; 32]), genesis.hash(), block::Hash([3; 32]));
+    let mined_output = OutPoint::from_usize(txs[0].transaction.id.mined_id(), 0);
+    for (tx, spent, parent) in [
+        (&txs[0], Vec::new(), previous),
+        (&txs[1], vec![mined_output], previous),
+        (&txs[2], Vec::new(), other),
+    ] {
+        mempool
+            .admission
+            .push(Candidate::new(tx.clone(), spent, Some(parent), None));
+    }
+
+    let mined = mempool.admission.grow(
+        previous,
+        tip,
+        &[txs[0].transaction.id.mined_id()].into_iter().collect(),
+    );
+    assert_eq!(
+        mined
+            .iter()
+            .map(|candidate| candidate.tx.transaction.id)
+            .collect::<Vec<_>>(),
+        [txs[0].transaction.id]
+    );
+
+    // The spend of a mined output is carried without its mempool dependency, while a
+    // candidate verified against another tip is still retried.
+    let mut storage = Storage::new(&super::super::Config::default());
+    let retries = futures::future::poll_fn(|cx| mempool.admission.poll(cx, &mut storage, tip))
+        .now_or_never()
+        .expect("stale candidates are returned without waiting");
+    assert!(matches!(
+        retries.as_slice(),
+        [(candidate, Verdict::Retry)] if candidate.tx.transaction.id == txs[2].transaction.id
+    ));
+    let mut admitting =
+        futures::future::poll_fn(|cx| mempool.admission.poll(cx, &mut storage, tip));
+    let proposal = tokio::select! {
+        proposal = proposals.expect_request_that(|_| true) => proposal,
+        _ = &mut admitting => panic!("the carried candidate waits for its proposal"),
+    };
+    assert_eq!(proposed(proposal.request()), [txs[1].transaction.id]);
+}
+
+/// A check whose candidates were all mined finishes without verdicts, even if a reset returns
+/// the tip to its parent before its failed proposal completes.
+#[tokio::test]
+async fn check_emptied_by_a_new_block_finishes_quietly() {
+    let (mut mempool, _, _, _, _tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let tx = block_transactions(1).remove(0);
+    let genesis: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let parent = genesis.hash();
+    mempool
+        .admission
+        .push(Candidate::new(tx.clone(), Vec::new(), Some(parent), None));
+    let mut storage = Storage::new(&super::super::Config::default());
+
+    let proposal = {
+        let mut admitting =
+            futures::future::poll_fn(|cx| mempool.admission.poll(cx, &mut storage, parent));
+        tokio::select! {
+            proposal = proposals.expect_request_that(|_| true) => proposal,
+            _ = &mut admitting => panic!("the candidate waits for its proposal"),
+        }
+    };
+    let mined = mempool.admission.grow(
+        parent,
+        block::Hash([2; 32]),
+        &[tx.transaction.id.mined_id()].into_iter().collect(),
+    );
+    assert_eq!(mined.len(), 1);
+    proposal.respond(proposal_error(
+        zebra_consensus::error::TransactionError::BadBalance,
+    ));
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while mempool.admission.checks_in_flight() > 0 {
+            let verdicts = futures::future::poll_fn(|cx| {
+                Poll::Ready(mempool.admission.poll(cx, &mut storage, parent))
+            })
+            .await;
+            assert!(verdicts.is_pending(), "an emptied check has no verdicts");
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the emptied check finishes");
 }
 
 #[tokio::test]

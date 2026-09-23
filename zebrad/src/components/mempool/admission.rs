@@ -93,7 +93,6 @@ struct Check {
     candidates: Vec<Candidate>,
     ancestors: Vec<UnminedTxId>,
     parent: block::Hash,
-    stale: bool,
     work: BoxFuture<'static, Result<bool, BoxError>>,
 }
 
@@ -162,6 +161,12 @@ impl Admission {
         self.waiting.len() + self.splits.iter().map(Vec::len).sum::<usize>()
     }
 
+    /// The number of proposals still retained for their verification work.
+    #[cfg(test)]
+    pub fn checks_in_flight(&self) -> usize {
+        self.checks.len()
+    }
+
     /// Queue a candidate for the next batch, without inserting or publishing it.
     pub fn push(&mut self, candidate: Candidate) {
         self.waiting.push(candidate);
@@ -169,16 +174,56 @@ impl Admission {
 
     /// Mark all work stale, but retain it until all proposal/proof work actually finishes.
     pub fn reset(&mut self) {
-        for check in &mut self.checks {
-            check.stale = true;
-        }
         for candidate in self
             .waiting
             .iter_mut()
             .chain(self.splits.iter_mut().flatten())
+            .chain(
+                self.checks
+                    .iter_mut()
+                    .flat_map(|check| &mut check.candidates),
+            )
         {
             candidate.stale = true;
         }
+    }
+
+    /// Carry candidates verified at `previous` onto its child `tip`, and return the ones `tip`
+    /// mined.
+    ///
+    /// Stored mempool transactions stay across a new block without semantic re-verification,
+    /// and each carried candidate's next proposal checks it against the new block. In-flight
+    /// checks for `previous` still finish, then their carried candidates are rebuilt.
+    pub fn grow(
+        &mut self,
+        previous: block::Hash,
+        tip: block::Hash,
+        mined_ids: &HashSet<Hash>,
+    ) -> Vec<Candidate> {
+        let mut mined = Vec::new();
+        let mut carry = |candidates: &mut Vec<Candidate>| {
+            let (was_mined, kept): (Vec<_>, Vec<_>) = std::mem::take(candidates)
+                .into_iter()
+                .partition(|candidate| mined_ids.contains(&candidate.tx.transaction.id.mined_id()));
+            mined.extend(was_mined);
+            *candidates = kept;
+            for candidate in candidates.iter_mut() {
+                if candidate.parent == Some(previous) {
+                    candidate.parent = Some(tip);
+                    // Outputs of mined parents are now chain outputs, checked by the proposal.
+                    candidate
+                        .spent
+                        .retain(|outpoint| !mined_ids.contains(&outpoint.hash));
+                }
+            }
+        };
+        carry(&mut self.waiting);
+        self.splits.iter_mut().for_each(&mut carry);
+        self.checks
+            .iter_mut()
+            .for_each(|check| carry(&mut check.candidates));
+        self.splits.retain(|split| !split.is_empty());
+        mined
     }
 
     /// Return the verdicts of the next completed proposal, or stale candidates needing a retry.
@@ -224,7 +269,24 @@ impl Admission {
         storage: &mut Storage,
         parent: block::Hash,
     ) -> Option<Vec<(Candidate, Verdict)>> {
-        if check.stale || check.parent != parent || matches!(result, Ok(false)) {
+        // `grow` removes mined candidates from in-flight checks, which are kept until their
+        // work finishes, so a check can end with no candidates left.
+        if check.candidates.is_empty() {
+            return None;
+        }
+        // Rebuild outdated proposals: `start` retries the candidates whose semantic
+        // verification no longer applies, and checks the rest against the current parent.
+        if check.parent != parent
+            || check.candidates.iter().any(|candidate| candidate.stale)
+            || !storage.contains_exact_ancestors(&check.ancestors)
+        {
+            if !check.candidates.is_empty() {
+                self.splits.push(check.candidates);
+            }
+            return None;
+        }
+        // The committed tip moved before this mempool saw it.
+        if matches!(result, Ok(false)) {
             return Some(
                 check
                     .candidates
@@ -232,11 +294,6 @@ impl Admission {
                     .map(|candidate| (candidate, Verdict::Retry))
                     .collect(),
             );
-        }
-        // Semantic verification still applies, so only rebuild the changed packages.
-        if !storage.contains_exact_ancestors(&check.ancestors) {
-            self.splits.push(check.candidates);
-            return None;
         }
         match result {
             Ok(_) => Some(
@@ -259,9 +316,7 @@ impl Admission {
                 None
             }
             Err(error) => {
-                let Some(candidate) = check.candidates.pop() else {
-                    unreachable!("checks hold at least one candidate, and this one holds one")
-                };
+                let candidate = check.candidates.pop().expect("already checked nonempty");
                 if deterministic_rejection(error.as_ref()) {
                     storage.reject(
                         candidate.tx.transaction.id,
@@ -354,7 +409,6 @@ impl Admission {
             candidates,
             ancestors,
             parent,
-            stale: false,
             work,
         });
     }
