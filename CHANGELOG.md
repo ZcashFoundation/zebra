@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 6.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.1) - 2026-09-23
+
+### Fixed
+
+- The syncer no longer stalls permanently after a sync restart near the chain tip. Zebra 6.4.0 started treating blocks queued for their parent as already downloaded, so once a restart cancelled the parent's download, every later attempt to obtain new tips failed with "queued download of hash behind our chain tip" until Zebra was restarted.
+
 ## [Zebra 6.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.0) - 2026-09-23
 
 ### Added
