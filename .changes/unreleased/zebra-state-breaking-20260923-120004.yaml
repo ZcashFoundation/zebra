@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: '`SemanticallyVerifiedBlock` gains a public `received_time: Option<Instant>` field, the local time the block verifier received the block. Code constructing it literally must set it; use `None` for blocks that did not pass through the block verifier ([#11341](https://github.com/ZcashFoundation/zebra/pull/11341)).'
-time: 2026-09-23T12:00:04.000000000Z

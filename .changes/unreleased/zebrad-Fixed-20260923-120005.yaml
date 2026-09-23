@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: 'The mempool now frees a peer''s download slot when a transaction from that peer times out during verification. Before, each timeout permanently used up one of the peer''s slots, until the mempool rejected every further transaction from that peer as a full queue ([#11229](https://github.com/ZcashFoundation/zebra/pull/11229)).'
-time: 2026-09-23T12:00:05.000000000Z

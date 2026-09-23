@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [13.0.0] - 2026-09-23
+
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in public protocol messages ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed the `misbehavior_score` field and `MetaAddr::misbehavior` method. Misbehavior is now tracked per peer group by the `AddressBook`, and read with the new `AddressBook::misbehavior_score` method, also available on the `AddressBookPeers` trait: currently it returns `MAX_PEER_MISBEHAVIOR_SCORE` for a banned group and `0` otherwise, because scores are not currently accumulated since those are the only two scores being used. `AddressBook::bans` now returns the new `BanList` type instead of an `Arc<IndexMap<IpAddr, Instant>>`; query it with `BanList::is_banned`, which applies both the peer group mapping and ban expiry ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
+### Added
+
+- A `fuzzing` feature, off by default, which makes the `protocol` module public for the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies and leaves default and release builds unchanged ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
+
+### Changed
+
+- Concurrent reconnection-candidate selection can no longer hand the same peer to two connection attempts: a candidate is now chosen and marked `AttemptPending` in a single atomic step. `init()`, the public API, and network-visible behavior are unchanged ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+- Outbound connection pacing is now applied only when an address-book candidate is returned. An empty candidate-selection attempt no longer delays the next available connection attempt. Crawls are still skipped while rate-limited, and the intervals are unchanged ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+- `zebra-network` no longer pulls the unmaintained `ordered-map` crate or its legacy `quickcheck` 0.9 and `rand` 0.7 dependency subtree into downstream builds ([#10516](https://github.com/ZcashFoundation/zebra/issues/10516)).
+- `network.max_connections_per_ip` now limits IPv6 peer connections per `/64` subnet, rather than per individual address. A single machine with a standard IPv6 `/64` allocation has 2^64 distinct addresses, so per-address limiting did not bound the number of connections one machine could open. IPv4 connections are still limited per address ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+- Peer bans now expire after 24 hours, matching `zcashd`'s `DEFAULT_MISBEHAVING_BANTIME`. Bans were previously kept until restart. A peer whose ban has lapsed is banned again as soon as it misbehaves again. Lapsed bans are pruned when a new ban is applied ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
+### Security
+
+- Peer misbehavior bans now apply to the whole peer group — one IPv4 address, or one IPv6 `/64` subnet — instead of a single address. Bans were previously keyed by the full address, so a peer could avoid its ban by reconnecting from another of the 2^64 addresses in its `/64` ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
 ## [12.0.0] - 2026-08-10
 
 ### Breaking Changes

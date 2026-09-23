@@ -1136,3 +1136,49 @@ async fn zip234_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<()
 
     Ok(())
 }
+
+/// A same-hash forged block body is only rejected by the state's contextual
+/// authorizing-data commitment check, so that rejection is the one signal that
+/// attributes the forgery to the peer that served it. Check the suggested
+/// misbehaviour score survives every wrapper between the state and the syncer.
+#[test]
+fn state_auth_commitment_errors_score_the_serving_peer() {
+    let commitment_error =
+        zebra_chain::block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+            expected: [1; 32],
+            actual: [2; 32],
+        };
+    let commit_error = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(commitment_error),
+    ));
+
+    // Box the error the same way the state's `CommitSemanticallyVerifiedBlock`
+    // handler does. This mirrors the wrapping manually, so it won't fail
+    // automatically if the state changes its error type — keep it in sync by hand.
+    let source: BoxError = Box::new(zs::CommitSemanticallyVerifiedError::from(commit_error));
+
+    let err = map_commit_error(source, block::Hash([0; 32]));
+
+    assert!(
+        matches!(err, VerifyBlockError::Commit(_)),
+        "state commit errors must be unwrapped into VerifyBlockError::Commit, got: {err:?}"
+    );
+    assert!(
+        !err.is_duplicate_request(),
+        "a forged body is not a duplicate request, so it must not be treated as benign"
+    );
+    assert_eq!(
+        err.misbehavior_score(),
+        100,
+        "an authorizing-data commitment mismatch must score the peer that served the body"
+    );
+
+    // The syncer reads the score through `RouterError`, so it must survive that
+    // wrapper too, otherwise the serving peer is never banned.
+    let router_err = crate::router::RouterError::from(err);
+    assert_eq!(
+        router_err.misbehavior_score(),
+        100,
+        "the score must reach the syncer through RouterError"
+    );
+}
