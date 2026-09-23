@@ -21,7 +21,10 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::{
     super::{
-        admission::{required_package, Admission, Candidate, Verdict, MAX_PACKAGE_COUNT},
+        admission::{
+            required_package, validation_miner_params, Admission, Candidate, Verdict,
+            COINBASE_RESERVE_BYTES, COINBASE_RESERVE_SIGOPS, MAX_PACKAGE_COUNT,
+        },
         storage::{ExactTipRejectionError, SameEffectsChainRejectionError},
         Mempool, MempoolError, Storage,
     },
@@ -968,6 +971,29 @@ async fn split_width_is_configurable() {
 }
 
 #[tokio::test]
+async fn batches_leave_room_for_the_header_and_coinbase() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let mut txs = block_transactions(3);
+    // Together they fit the raw block size limit, but not with a header and coinbase.
+    let half = usize::try_from(block::MAX_BLOCK_BYTES).unwrap() / 2;
+    txs[1].transaction.size = half;
+    txs[2].transaction.size = half - 100;
+
+    let results = hold_then_queue(&mut mempool, &mut tx_verifier, &mut proposals, &txs).await;
+    for tx in &txs[1..] {
+        let proposal = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+        assert_eq!(proposed(proposal.request()), [tx.transaction.id]);
+        proposal.respond(block::Hash([0; 32]));
+    }
+    for result in results {
+        drive(&mut mempool, result).await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
 async fn conflicting_candidates_are_not_batched_together() {
     let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
         setup(&Network::Mainnet, u64::MAX, true).await;
@@ -1045,6 +1071,31 @@ async fn candidate_conflicting_with_its_ancestor_is_rejected() {
     ));
     assert!(drive(&mut mempool, result).await.unwrap().is_err());
     assert_cached_rejection(&mut mempool, &child).await;
+}
+
+/// Batches reserve room for the admission coinbase, so a full batch does not fail its proposal
+/// only because the coinbase pushes the block over its limits.
+#[test]
+fn coinbase_reserve_covers_the_admission_coinbase() {
+    use zebra_chain::{amount::Amount, parameters::NetworkUpgrade::*};
+
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        let miner_params = validation_miner_params(&network);
+        for upgrade in [Canopy, Nu5, Nu6, Nu6_1] {
+            let Some(height) = upgrade.activation_height(&network) else {
+                continue;
+            };
+            let coinbase = zebra_rpc::TransactionTemplate::new_coinbase(
+                &network,
+                height,
+                &miner_params,
+                Amount::zero(),
+            )
+            .expect("the validation coinbase is valid");
+            assert!(coinbase.data().as_ref().len() <= COINBASE_RESERVE_BYTES);
+            assert!(coinbase.sigops() <= COINBASE_RESERVE_SIGOPS);
+        }
+    }
 }
 
 #[test]
