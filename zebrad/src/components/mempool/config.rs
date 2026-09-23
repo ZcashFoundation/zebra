@@ -47,6 +47,18 @@ pub struct Config {
     /// If unset, defaults to [`DEFAULT_MAX_DATACARRIER_BYTES`]. This size includes the OP_RETURN
     /// opcode and pushdata overhead. Matches zcashd's `-datacarriersize` default behavior.
     pub max_datacarrier_bytes: Option<u32>,
+
+    /// The number of pieces a failed admission proposal is split into.
+    ///
+    /// The mempool checks newly verified transactions together as one block proposal. If that
+    /// proposal fails, it is split into this many pieces, which are checked concurrently, until
+    /// each failure is attributed to a single transaction. Wider splits find invalid transactions
+    /// in fewer rounds and with less total work, but check more proposals at once. The pieces
+    /// always come from one failed proposal, so together they never hold more than one block's
+    /// worth of new transactions, although each piece also rechecks its own unmined ancestors.
+    ///
+    /// Values below 2 are treated as 2.
+    pub admission_split_width: usize,
 }
 
 impl Default for Config {
@@ -67,6 +79,8 @@ impl Default for Config {
             debug_enable_at_height: None,
 
             max_datacarrier_bytes: Some(DEFAULT_MAX_DATACARRIER_BYTES),
+
+            admission_split_width: DEFAULT_ADMISSION_SPLIT_WIDTH,
         }
     }
 }
@@ -76,3 +90,6 @@ impl Default for Config {
 /// Equivalent to zcashd's `MAX_OP_RETURN_RELAY`:
 /// <https://github.com/zcash/zcash/blob/v6.10.0/src/script/standard.h#L22-L26>
 pub const DEFAULT_MAX_DATACARRIER_BYTES: u32 = 83;
+
+/// Default number of concurrently checked pieces a failed admission proposal is split into.
+pub const DEFAULT_ADMISSION_SPLIT_WIDTH: usize = 4;

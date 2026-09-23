@@ -10,7 +10,7 @@
 //!    * activates when the syncer is near the chain tip
 //!    * spawns [download and verify tasks][`downloads::Downloads`] for each crawled or gossiped transaction
 //!    * validates batches of candidates and their required ancestors as block proposals before admission,
-//!      splitting failed batches to find the invalid candidates
+//!      splitting failed batches into concurrently checked pieces to find the invalid candidates
 //!    * publishes validated mining templates to RPC subscribers through a watch channel
 //!    * handles in-memory [storage][`storage::Storage`] of unmined transactions
 //!  * [Crawler][`crawler::Crawler`]
@@ -394,8 +394,12 @@ impl Mempool {
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
         let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
         let transaction_verified = Arc::new(Notify::new());
-        let admission =
-            admission::Admission::new(network.clone(), read_state.clone(), block_verifier.clone());
+        let admission = admission::Admission::new(
+            network.clone(),
+            read_state.clone(),
+            block_verifier.clone(),
+            config.admission_split_width,
+        );
         let (block_templates, template_receiver, template_requests) =
             block_template::BlockTemplates::new(
                 network.clone(),
