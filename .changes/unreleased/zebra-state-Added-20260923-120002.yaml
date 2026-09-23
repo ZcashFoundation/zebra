@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'The concrete error type `AwaitUtxoError` for handling failed `AwaitUtxo` state requests ([#11205](https://github.com/ZcashFoundation/zebra/pull/11205)).'
+time: 2026-09-23T12:00:02.000000000Z
