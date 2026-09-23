@@ -90,9 +90,13 @@ pub(super) type Outcome = (Candidate, Result<bool, BoxError>);
 /// One validation context, independent of the configured mining payout and template cache.
 ///
 /// Candidates are checked in batches: one proposal holds every waiting candidate that fits in a
-/// block without conflicting with an earlier one. A failed batch is split in half until each
-/// failure is attributed to a single candidate, so only single-candidate results are reported or
-/// cached as rejections.
+/// block without conflicting with an earlier one. A failed batch is split into up to
+/// `split_width` pieces, which are checked concurrently, until each failure is attributed to a
+/// single candidate, so only single-candidate results are reported or cached as rejections.
+///
+/// A new batch starts only after every piece of the previous one has finished, so the candidates
+/// in flight never exceed one block's worth. Each piece also carries its own copy of any unmined
+/// ancestors, which pieces may share.
 pub(super) struct Admission {
     network: Network,
     read_state: ReadState,
@@ -101,15 +105,23 @@ pub(super) struct Admission {
     coinbase_cache: CoinbaseCache,
     /// Candidates in arrival order, waiting for a batch.
     waiting: VecDeque<Candidate>,
-    /// Halves of failed batches, checked depth-first before any new batch.
+    /// Pieces of failed batches, checked depth-first before any new batch.
     splits: Vec<Vec<Candidate>>,
-    /// At most one proposal, retained until its blocking verification work has finished.
-    check: Option<Check>,
+    /// Proposals retained until their blocking verification work has finished: one batch, or
+    /// up to `split_width` pieces of one.
+    checks: Vec<Check>,
+    /// The number of pieces a failed batch is split into, and checked at once.
+    split_width: usize,
 }
 
 impl Admission {
     /// Create the private transparent validation context, even on non-mining nodes.
-    pub fn new(network: Network, read_state: ReadState, verifier: BlockVerifier) -> Self {
+    pub fn new(
+        network: Network,
+        read_state: ReadState,
+        verifier: BlockVerifier,
+        split_width: usize,
+    ) -> Self {
         let miner_params = MinerParams::new(
             &network,
             mining::Config {
@@ -130,7 +142,8 @@ impl Admission {
             coinbase_cache: CoinbaseCache::default(),
             waiting: VecDeque::new(),
             splits: Vec::new(),
-            check: None,
+            checks: Vec::new(),
+            split_width: split_width.max(2),
         }
     }
 
@@ -147,7 +160,7 @@ impl Admission {
 
     /// Mark all work stale, but retain it until all proposal/proof work actually finishes.
     pub fn reset(&mut self) {
-        if let Some(check) = &mut self.check {
+        for check in &mut self.checks {
             check.stale = true;
         }
         for candidate in self
@@ -169,79 +182,129 @@ impl Admission {
         storage: &mut Storage,
         parent: block::Hash,
     ) -> Poll<Vec<Outcome>> {
-        loop {
-            if self.check.is_none() {
-                let retries = self.start(storage, parent);
-                if !retries.is_empty() {
-                    return Poll::Ready(retries);
-                }
+        'poll: loop {
+            let retries = self.start_ready(storage, parent);
+            if !retries.is_empty() {
+                return Poll::Ready(retries);
             }
-            let Some(check) = &mut self.check else {
-                return Poll::Pending;
-            };
-            let Poll::Ready(mut result) = check.work.as_mut().poll(cx) else {
-                return Poll::Pending;
-            };
-            let mut check = self.check.take().expect("the completed check is present");
-            if check.stale
-                || check.parent != parent
-                || check.ancestors.iter().any(|id| {
-                    storage
-                        .transactions()
-                        .get(&id.mined_id())
-                        .map(|tx| tx.transaction.id)
-                        != Some(*id)
-                })
-            {
-                result = Ok(false);
+            for index in 0..self.checks.len() {
+                let Poll::Ready(result) = self.checks[index].work.as_mut().poll(cx) else {
+                    continue;
+                };
+                let check = self.checks.swap_remove(index);
+                let outcomes = self.finish(check, result, storage, parent);
+                if outcomes.is_empty() {
+                    // Start the failed check's pieces before polling the others again.
+                    continue 'poll;
+                }
+                return Poll::Ready(outcomes);
             }
-            match result {
-                // Any failure of a batch may belong to one of its candidates, including errors
-                // that are not cached, so each half is checked again without its sibling.
-                Err(_) if check.candidates.len() > 1 => {
-                    let second = check.candidates.split_off(check.candidates.len() / 2);
-                    self.splits.push(second);
-                    self.splits.push(check.candidates);
-                }
-                Err(error) => {
-                    let candidate = check
-                        .candidates
-                        .pop()
-                        .expect("a failed check has one candidate");
-                    if deterministic_rejection(error.as_ref()) {
-                        storage.reject(
-                            candidate.tx.transaction.id,
-                            ExactTipRejectionError::FailedProposal {
-                                reason: error.to_string(),
-                                ancestors: check.ancestors.into(),
-                            }
-                            .into(),
-                        );
-                    }
-                    return Poll::Ready(vec![(candidate, Err(error))]);
-                }
-                Ok(passed) => {
-                    return Poll::Ready(
-                        check
-                            .candidates
-                            .into_iter()
-                            .map(|candidate| (candidate, Ok(passed)))
-                            .collect(),
-                    );
-                }
-            }
+            return Poll::Pending;
         }
     }
 
-    /// Start the next split or batch, returning the candidates that are stale for `parent`.
+    /// Report a completed check's outcomes, or split it without outcomes if its failure is not
+    /// yet attributed to one candidate.
+    fn finish(
+        &mut self,
+        mut check: Check,
+        mut result: Result<bool, BoxError>,
+        storage: &mut Storage,
+        parent: block::Hash,
+    ) -> Vec<Outcome> {
+        if check.stale
+            || check.parent != parent
+            || check.ancestors.iter().any(|id| {
+                storage
+                    .transactions()
+                    .get(&id.mined_id())
+                    .map(|tx| tx.transaction.id)
+                    != Some(*id)
+            })
+        {
+            result = Ok(false);
+        }
+        match result {
+            // Any failure of a batch may belong to one of its candidates, including errors that
+            // are not cached, so each piece is checked again without its siblings.
+            Err(_) if check.candidates.len() > 1 => {
+                let size = check
+                    .candidates
+                    .len()
+                    .div_ceil(self.split_width.min(check.candidates.len()));
+                let mut pieces = Vec::new();
+                let mut rest = check.candidates;
+                while rest.len() > size {
+                    let tail = rest.split_off(size);
+                    pieces.push(rest);
+                    rest = tail;
+                }
+                pieces.push(rest);
+                // Pop pieces in arrival order.
+                self.splits.extend(pieces.into_iter().rev());
+                Vec::new()
+            }
+            Err(error) => {
+                let candidate = check
+                    .candidates
+                    .pop()
+                    .expect("a failed check has one candidate");
+                if deterministic_rejection(error.as_ref()) {
+                    storage.reject(
+                        candidate.tx.transaction.id,
+                        ExactTipRejectionError::FailedProposal {
+                            reason: error.to_string(),
+                            ancestors: check.ancestors.into(),
+                        }
+                        .into(),
+                    );
+                }
+                vec![(candidate, Err(error))]
+            }
+            Ok(passed) => check
+                .candidates
+                .into_iter()
+                .map(|candidate| (candidate, Ok(passed)))
+                .collect(),
+        }
+    }
+
+    /// Start pending pieces up to the split width, or a new batch once all pieces have finished.
+    fn start_ready(&mut self, storage: &Storage, parent: block::Hash) -> Vec<Outcome> {
+        let mut retries = Vec::new();
+        loop {
+            let split = if !self.splits.is_empty() {
+                if self.checks.len() >= self.split_width {
+                    break;
+                }
+                self.splits.pop()
+            } else if self.checks.is_empty() && !self.waiting.is_empty() {
+                None
+            } else {
+                break;
+            };
+            let is_batch = split.is_none();
+            self.start(split, storage, parent, &mut retries);
+            if is_batch {
+                break;
+            }
+        }
+        retries
+    }
+
+    /// Start a split, or a batch if `split` is `None`, adding stale candidates to `retries`.
     ///
     /// A split is a subset of a batch that already fit in a block without conflicts, so its
     /// candidates are only deferred if their ancestor packages changed since.
-    fn start(&mut self, storage: &Storage, parent: block::Hash) -> Vec<Outcome> {
-        let split = self.splits.pop();
+    fn start(
+        &mut self,
+        split: Option<Vec<Candidate>>,
+        storage: &Storage,
+        parent: block::Hash,
+        retries: &mut Vec<Outcome>,
+    ) {
         let is_split = split.is_some();
         let mut queue = split.map_or_else(|| std::mem::take(&mut self.waiting), VecDeque::from);
-        let mut retries = Vec::new();
         let mut batch = Batch::default();
         let mut candidates = Vec::new();
         let mut deferred = VecDeque::new();
@@ -271,7 +334,7 @@ impl Admission {
             self.waiting = deferred;
         }
         if candidates.is_empty() {
-            return retries;
+            return;
         }
         let package = package.unwrap_or_else(|| Ok(batch.package(storage, &candidates)));
         let work = verify_package(
@@ -284,14 +347,13 @@ impl Admission {
             parent,
         )
         .boxed();
-        self.check = Some(Check {
+        self.checks.push(Check {
             candidates,
             ancestors: batch.ancestors,
             parent,
             stale: false,
             work,
         });
-        retries
     }
 }
 
@@ -687,8 +749,8 @@ where
         })
         .await??;
 
-        // ponytail: recheck one block-bounded package; reuse proofs only through a future
-        // consensus API bound to the exact witnessed transactions and committed parent.
+        // Shielded proofs and signatures that passed mempool verification are skipped through
+        // the consensus verifier's bundle cache; scripts and contextual checks run again.
         let check = verifier.oneshot(zebra_consensus::Request::CheckProposal(proposal));
         tokio::pin!(check);
         let result = match tokio::time::timeout(TRANSACTION_VERIFY_TIMEOUT, &mut check).await {
