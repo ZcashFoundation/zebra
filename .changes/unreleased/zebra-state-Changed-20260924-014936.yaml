@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: '`ReadRequest::GetBlockTemplateChainInfo` respects height-dependent median-time limits and the local two-hour future limit, returning an error when no valid timestamp range exists.'
+time: 2026-09-24T01:49:36.621706512+02:00
