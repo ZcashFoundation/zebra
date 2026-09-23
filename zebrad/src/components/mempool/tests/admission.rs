@@ -21,7 +21,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::{
     super::{
-        admission::{required_package, Admission, MAX_PACKAGE_COUNT},
+        admission::{required_package, Admission, Candidate, MAX_PACKAGE_COUNT},
         storage::{ExactTipRejectionError, SameEffectsChainRejectionError},
         Mempool, MempoolError, Storage,
     },
@@ -459,13 +459,15 @@ async fn stale_package_limit_failure_is_not_cached() {
     tx.transaction.size = usize::try_from(block::MAX_BLOCK_BYTES).unwrap() + 1;
     mempool
         .admission
-        .start(&storage, old_parent, tx, Vec::new(), None);
-    let (_, result) = tokio::time::timeout(
+        .push(Candidate::new(tx, Vec::new(), old_parent, None));
+    let mut outcomes = tokio::time::timeout(
         Duration::from_secs(10),
         futures::future::poll_fn(|cx| mempool.admission.poll(cx, &mut storage, old_parent)),
     )
     .await
     .unwrap();
+    assert_eq!(outcomes.len(), 1);
+    let (_, result) = outcomes.remove(0);
     assert!(matches!(result, Ok(false)));
     assert!(storage.should_download_or_verify(id).is_ok());
 }
@@ -773,6 +775,225 @@ async fn stale_proposal_reverifies_without_releasing_its_response() {
         assert!(changes.try_recv().is_err());
         retry.respond(Err(zebra_consensus::error::TransactionError::BadBalance));
     }
+}
+
+/// Queue a transaction and answer its semantic verification with `tx` itself.
+async fn queue_verified(
+    mempool: &mut Mempool,
+    tx_verifier: &mut MockService<
+        transaction::MempoolRequest,
+        transaction::MempoolResponse,
+        PanicAssertion,
+        zebra_consensus::error::TransactionError,
+    >,
+    tx: &VerifiedUnminedTx,
+) -> oneshot::Receiver<Result<(), BoxError>> {
+    let result = queue_candidate(mempool, tx).await.unwrap();
+    drive(mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse::from(tx.clone()));
+    result
+}
+
+/// Wait until `count` verified candidates are waiting for a proposal.
+async fn wait_for_queued(mempool: &mut Mempool, count: usize) {
+    drive(mempool, async {}).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while mempool.admission.queued() < count {
+            mempool.dummy_call().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("verified candidates reach admission");
+}
+
+/// The non-coinbase transactions in a proposal, in block order.
+fn proposed(request: &zebra_consensus::Request) -> Vec<zebra_chain::transaction::UnminedTxId> {
+    let zebra_consensus::Request::CheckProposal(block) = request else {
+        panic!("admission only checks proposals")
+    };
+    block.transactions[1..]
+        .iter()
+        .map(|tx| tx.unmined_id())
+        .collect()
+}
+
+fn block_transactions(count: usize) -> Vec<VerifiedUnminedTx> {
+    let txs: Vec<_> = Network::Mainnet
+        .unmined_transactions_in_blocks(982_681..)
+        .filter(|tx| {
+            !tx.transaction.transaction.is_coinbase()
+                && !tx.transaction.transaction.inputs().is_empty()
+        })
+        .take(count)
+        .collect();
+    assert_eq!(
+        txs.len(),
+        count,
+        "the block fixture has enough transactions"
+    );
+    txs
+}
+
+#[tokio::test]
+async fn failed_batch_is_bisected_to_its_invalid_candidate() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let txs = block_transactions(3);
+    let ids: Vec<_> = txs.iter().map(|tx| tx.transaction.id).collect();
+
+    // Candidates verified while a proposal is in flight wait, then share one proposal.
+    let first = queue_verified(&mut mempool, &mut tx_verifier, &txs[0]).await;
+    let held = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(proposed(held.request()), ids[..1]);
+    let valid = queue_verified(&mut mempool, &mut tx_verifier, &txs[1]).await;
+    let invalid = queue_verified(&mut mempool, &mut tx_verifier, &txs[2]).await;
+    wait_for_queued(&mut mempool, 2).await;
+    held.respond(block::Hash([0; 32]));
+    drive(&mut mempool, first).await.unwrap().unwrap();
+
+    let batch = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(proposed(batch.request()), ids[1..]);
+    batch.respond(Err::<block::Hash, BoxError>(
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::BadBalance,
+        ))
+        .into(),
+    ));
+
+    // Each half is rechecked alone, in arrival order.
+    let half = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(proposed(half.request()), ids[1..2]);
+    half.respond(block::Hash([0; 32]));
+    drive(&mut mempool, valid).await.unwrap().unwrap();
+    let half = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(proposed(half.request()), ids[2..]);
+    half.respond(Err::<block::Hash, BoxError>(
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::BadBalance,
+        ))
+        .into(),
+    ));
+    assert!(drive(&mut mempool, invalid).await.unwrap().is_err());
+
+    for id in &ids[..2] {
+        assert!(mempool.storage().contains_transaction_exact(&id.mined_id()));
+    }
+    // Only the candidate that failed alone is cached as a rejection.
+    assert!(matches!(
+        queue_candidate(&mut mempool, &txs[2])
+            .await
+            .unwrap_err()
+            .downcast_ref::<MempoolError>(),
+        Some(MempoolError::StorageExactTip(
+            ExactTipRejectionError::FailedProposal { .. }
+        )),
+    ));
+}
+
+#[tokio::test]
+async fn conflicting_candidates_are_not_batched_together() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let txs = block_transactions(3);
+    let mut conflicting = txs[2].clone();
+    conflicting.transaction = Arc::new(
+        (*conflicting.transaction.transaction)
+            .clone()
+            .with_transparent_inputs(txs[1].transaction.transaction.inputs().to_vec()),
+    )
+    .into();
+
+    let first = queue_verified(&mut mempool, &mut tx_verifier, &txs[0]).await;
+    let held = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    let spender = queue_verified(&mut mempool, &mut tx_verifier, &txs[1]).await;
+    let conflict = queue_verified(&mut mempool, &mut tx_verifier, &conflicting).await;
+    wait_for_queued(&mut mempool, 2).await;
+    held.respond(block::Hash([0; 32]));
+    drive(&mut mempool, first).await.unwrap().unwrap();
+
+    // The later conflicting candidate is deferred, rather than failing the earlier one's batch.
+    let batch = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(proposed(batch.request()), [txs[1].transaction.id]);
+    batch.respond(block::Hash([0; 32]));
+    drive(&mut mempool, spender).await.unwrap().unwrap();
+
+    // Alone, it forms a valid proposal, but storage rejects the double-spend.
+    let alone = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(proposed(alone.request()), [conflicting.transaction.id]);
+    alone.respond(block::Hash([0; 32]));
+    assert!(drive(&mut mempool, conflict).await.unwrap().is_err());
+}
+
+/// A child that double-spends an input of its mempool parent passes semantic verification,
+/// which only sees the chain UTXO set, so its proposal must still reject it.
+#[tokio::test]
+async fn candidate_conflicting_with_its_ancestor_is_rejected() {
+    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
+        setup(&Network::Mainnet, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+    let mut proposals = mock_proposals(&mut mempool);
+    let txs = block_transactions(2);
+    let parent = txs[0].clone();
+    assert!(!parent.transaction.transaction.outputs().is_empty());
+    let parent_output = OutPoint::from_usize(parent.transaction.id.mined_id(), 0);
+    mempool
+        .storage()
+        .insert(parent.clone(), Vec::new(), None)
+        .unwrap();
+
+    let mut inputs = parent.transaction.transaction.inputs().to_vec();
+    let mut spend_parent = inputs[0].clone();
+    let zebra_chain::transparent::Input::PrevOut { outpoint, .. } = &mut spend_parent else {
+        panic!("the fixture spends a transparent output")
+    };
+    *outpoint = parent_output;
+    inputs.push(spend_parent);
+    let mut child = txs[1].clone();
+    child.transaction = Arc::new(
+        (*child.transaction.transaction)
+            .clone()
+            .with_transparent_inputs(inputs),
+    )
+    .into();
+
+    let result = queue_candidate(&mut mempool, &child).await.unwrap();
+    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
+        .await
+        .respond(transaction::MempoolResponse {
+            transaction: child.clone(),
+            spent_mempool_outpoints: vec![parent_output],
+        });
+    let proposal = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
+    assert_eq!(
+        proposed(proposal.request()),
+        [parent.transaction.id, child.transaction.id]
+    );
+    proposal.respond(Err::<block::Hash, BoxError>(
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::DuplicateTransparentSpend(
+                parent.transaction.transaction.inputs()[0]
+                    .outpoint()
+                    .expect("the fixture spends a transparent output"),
+            ),
+        ))
+        .into(),
+    ));
+    assert!(drive(&mut mempool, result).await.unwrap().is_err());
+    assert!(matches!(
+        queue_candidate(&mut mempool, &child)
+            .await
+            .unwrap_err()
+            .downcast_ref::<MempoolError>(),
+        Some(MempoolError::StorageExactTip(
+            ExactTipRejectionError::FailedProposal { .. }
+        )),
+    ));
 }
 
 #[test]

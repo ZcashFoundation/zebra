@@ -213,8 +213,8 @@ where
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
     pending_per_peer: HashMap<SocketAddr, usize>,
 
-    /// The completed transaction whose proposal admission still occupies its queue/peer slot.
-    admission: Option<UnminedTxId>,
+    /// Completed transactions whose proposal admission still occupies their queue/peer slots.
+    admission: HashSet<UnminedTxId>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -277,7 +277,7 @@ where
                         continue;
                     }
 
-                    assert!(this.admission.replace(tx.transaction.id).is_none());
+                    assert!(this.admission.insert(tx.transaction.id));
                     (Ok(Ok((tx, spent_mempool_outpoints, tip, rsp_tx))), None)
                 }
                 Ok(Err(boxed_err)) => {
@@ -341,7 +341,7 @@ where
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
-            admission: None,
+            admission: HashSet::new(),
         }
     }
 
@@ -590,7 +590,7 @@ where
         let removed_txids: Vec<UnminedTxId> = self
             .cancel_handles
             .keys()
-            .filter(|txid| mined_ids.contains(&txid.mined_id()) && Some(**txid) != self.admission)
+            .filter(|txid| mined_ids.contains(&txid.mined_id()) && !self.admission.contains(*txid))
             .cloned()
             .collect();
 
@@ -606,7 +606,7 @@ where
 
     /// Release a completed admission's deduplication, global and per-peer queue slot.
     pub fn finish_admission(&mut self, txid: UnminedTxId) -> Option<SocketAddr> {
-        assert_eq!(self.admission.take(), Some(txid));
+        assert!(self.admission.remove(&txid));
         let Some((_, _, source)) = self.cancel_handles.remove(&txid) else {
             unreachable!("admission retains its download accounting");
         };
@@ -618,7 +618,7 @@ where
 
     /// Move the retained admission accounting across a chain reset without cancelling its work.
     pub fn transfer_admission(&mut self, replacement: &mut Self) {
-        if let Some(txid) = self.admission.take() {
+        for txid in std::mem::take(&mut self.admission) {
             let entry = self
                 .cancel_handles
                 .remove(&txid)
@@ -628,7 +628,7 @@ where
                 *replacement.pending_per_peer.entry(source).or_default() += 1;
             }
             assert!(replacement.cancel_handles.insert(txid, entry).is_none());
-            assert!(replacement.admission.replace(txid).is_none());
+            assert!(replacement.admission.insert(txid));
         }
     }
 
@@ -644,7 +644,7 @@ where
             let _ = cancel_tx.send(CancelDownloadAndVerify);
         }
         self.pending_per_peer.clear();
-        self.admission = None;
+        self.admission.clear();
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
         metrics::gauge!("mempool.currently.queued.transactions",).set(self.pending.len() as f64);
@@ -663,17 +663,17 @@ where
 
     /// Get the number of transactions awaiting download, verification or proposal admission.
     ///
-    /// Count cancelled handles until they are drained, without giving away a retained admission's
-    /// slot for re-verification when its proposal becomes stale.
+    /// Count cancelled handles until they are drained, without giving away retained admissions'
+    /// slots for re-verification when their proposals become stale.
     pub fn in_flight(&self) -> usize {
-        self.pending.len() + usize::from(self.admission.is_some())
+        self.pending.len() + self.admission.len()
     }
 
-    /// Get pending requests and their announcing peers, excluding the retained admission.
+    /// Get pending requests and their announcing peers, excluding retained admissions.
     pub fn transaction_requests(&self) -> impl Iterator<Item = (&Gossip, Option<SocketAddr>)> {
         self.cancel_handles
             .iter()
-            .filter(|(tx_id, _)| Some(**tx_id) != self.admission)
+            .filter(|(tx_id, _)| !self.admission.contains(*tx_id))
             .map(|(_tx_id, (_handle, tx, source))| (tx, *source))
     }
 

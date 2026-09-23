@@ -9,7 +9,8 @@
 //!  * [Mempool Service][`Mempool`]
 //!    * activates when the syncer is near the chain tip
 //!    * spawns [download and verify tasks][`downloads::Downloads`] for each crawled or gossiped transaction
-//!    * validates each candidate and its required ancestors as a block proposal before admission
+//!    * validates batches of candidates and their required ancestors as block proposals before admission,
+//!      splitting failed batches to find the invalid candidates
 //!    * publishes validated mining templates to RPC subscribers through a watch channel
 //!    * handles in-memory [storage][`storage::Storage`] of unmined transactions
 //!  * [Crawler][`crawler::Crawler`]
@@ -825,22 +826,18 @@ impl Service<Request> for Mempool {
                 }
             }
             // Clean up completed download tasks and add to mempool if successful.
-            while self.admission.pending.is_none() {
-                let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) else {
-                    break;
-                };
+            while let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) {
                 match result {
                     Ok(Ok((tx, spent_mempool_outpoints, expected_tip, rsp_tx))) => {
                         if expected_tip
                             == best_tip_height.map(|height| (height, *last_seen_tip_hash))
                         {
-                            self.admission.start(
-                                storage,
-                                *last_seen_tip_hash,
+                            self.admission.push(admission::Candidate::new(
                                 tx,
                                 spent_mempool_outpoints,
+                                *last_seen_tip_hash,
                                 rsp_tx,
-                            );
+                            ));
                         } else {
                             let source = tx_downloads.finish_admission(tx.transaction.id);
                             tx_downloads.download_if_needed_and_verify(
@@ -893,25 +890,28 @@ impl Service<Request> for Mempool {
                 };
             }
 
-            if let Poll::Ready((pending, result)) =
-                self.admission.poll(cx, storage, *last_seen_tip_hash)
+            // Apply each proposal's outcomes before polling again: later batches snapshot
+            // their ancestor packages from storage.
+            while let Poll::Ready(outcomes) = self.admission.poll(cx, storage, *last_seen_tip_hash)
             {
-                let tx_id = pending.tx.transaction.id;
-                let source = tx_downloads.finish_admission(tx_id);
-                if matches!(result, Ok(false)) {
-                    // A changed committed parent/ancestor set is not an invalid transaction.
-                    tx_downloads.download_if_needed_and_verify(
-                        pending.tx.transaction.into(),
-                        source,
-                        pending.response,
-                    ).expect(
-                        "finishing admission reserves global and peer capacity for its immediate retry",
-                    );
-                } else {
+                for (candidate, result) in outcomes {
+                    let tx_id = candidate.tx.transaction.id;
+                    let source = tx_downloads.finish_admission(tx_id);
+                    if matches!(result, Ok(false)) {
+                        // A changed committed parent/ancestor set is not an invalid transaction.
+                        tx_downloads.download_if_needed_and_verify(
+                            candidate.tx.transaction.into(),
+                            source,
+                            candidate.response,
+                        ).expect(
+                            "finishing admission reserves global and peer capacity for its immediate retry",
+                        );
+                        continue;
+                    }
                     let result = result.and_then(|_| {
                         let previous_count = storage.transaction_count();
                         let result = storage
-                            .insert(pending.tx, pending.spent, best_tip_height)
+                            .insert(candidate.tx, candidate.spent, best_tip_height)
                             .map(|_| ())
                             .map_err(BoxError::from);
                         // On error, insertion never adds a retained entry, so any
@@ -927,11 +927,11 @@ impl Service<Request> for Mempool {
                     } else {
                         invalidated_ids.insert(tx_id);
                     }
-                    if let Some(response) = pending.response {
+                    if let Some(response) = candidate.response {
                         let _ = response.send(result);
                     }
                 }
-                // Other completed downloads may already have delivered their wakeup.
+                // Retries are queued after the download stream was drained in this poll.
                 self.background_work.notify.notify_one();
             }
 
