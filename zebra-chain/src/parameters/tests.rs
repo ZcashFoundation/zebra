@@ -171,6 +171,72 @@ fn branch_id_bijective() {
     assert_eq!(CONSENSUS_BRANCH_IDS.len(), branch_ids.len());
 }
 
+/// NU7's deployment ID must agree with the transaction parser and signing implementation.
+#[test]
+fn nu7_branch_id_and_transaction_formats() {
+    use std::sync::Arc;
+
+    use crate::{
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        transaction::{HashType, Transaction},
+    };
+    use zcash_protocol::consensus::BranchId;
+
+    let branch_id = Nu7.branch_id().expect("NU7 has an assigned branch ID");
+    assert_eq!(u32::from(branch_id), 0x7719_0ad9);
+    assert_eq!(BranchId::try_from(branch_id).unwrap(), BranchId::Nu7);
+    assert_eq!(
+        NetworkUpgrade::try_from(u32::from(BranchId::Nu7)).unwrap(),
+        Nu7
+    );
+    assert_eq!(
+        NetworkUpgrade::from(zcash_protocol::consensus::NetworkUpgrade::Nu7),
+        Nu7
+    );
+    for obsolete_id in [0x7719_0ad8, 0xffff_fffe, 0xffff_ffff] {
+        assert!(NetworkUpgrade::try_from(obsolete_id).is_err());
+        assert!(BranchId::try_from(obsolete_id).is_err());
+    }
+    for network in [Mainnet, Network::new_default_testnet()] {
+        assert_eq!(Nu7.activation_height(&network), None);
+    }
+
+    // Empty codec/digest fixtures from librustzcash PR 3047 at 517047de130e.
+    // These are not spendable transactions. They pin the NU7 header and both
+    // supported formats without rewriting bytes or substituting another branch.
+    for (version, encoded, digest) in [
+        (
+            5,
+            "050000800a27a726d90a197700000000010000000000000000",
+            "328d975581fbf002206ef6f0b69fe57fb47f40ec31c59ac62c3565d4e259e128",
+        ),
+        (
+            6,
+            "0600008098b684d8d90a19770000000001000000000000000000",
+            "78296c68a370c2e1f058d997c81c7b011c4562c52fc5ca2994ad59cd179fbe9e",
+        ),
+    ] {
+        let bytes = hex::decode(encoded).unwrap();
+        let expected_digest = <[u8; 32]>::from_hex(digest).unwrap();
+        let transaction: Transaction = bytes.as_slice().zcash_deserialize_into().unwrap();
+        assert_eq!(transaction.version(), version);
+        assert_eq!(transaction.network_upgrade(), Some(Nu7));
+        assert_eq!(transaction.zcash_serialize_to_vec().unwrap(), bytes);
+        assert_eq!(transaction.hash().0, expected_digest);
+        assert_eq!(
+            transaction
+                .sighash(Nu7, HashType::ALL, Arc::new(Vec::new()), None)
+                .unwrap()
+                .0,
+            expected_digest,
+        );
+        assert!(matches!(
+            transaction.sighash(Nu6_3, HashType::ALL, Arc::new(Vec::new()), None),
+            Err(crate::Error::InvalidConsensusBranchId)
+        ));
+    }
+}
+
 #[test]
 fn branch_id_extremes_mainnet() {
     let _init_guard = zebra_test::init();

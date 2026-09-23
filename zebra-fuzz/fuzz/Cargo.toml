@@ -59,6 +59,15 @@ tokio-util = { version = "0.7.14", features = ["codec"] }
 orchard = "0.15.0"
 zcash_protocol = "0.10.0"
 
+# This standalone workspace must use the same NU7 implementation as the root workspace.
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", rev = "517047de130ed81059903458c933aab6684b353a" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", rev = "517047de130ed81059903458c933aab6684b353a" }
+
+[patch."https://github.com/zcash/librustzcash"]
+equihash = { version = "=0.3.0" }
+zcash_transparent = { version = "=0.10.0" }
+
 [[bin]]
 name = "rpc_handler_fuzz"
 path = "fuzz_targets/rpc_handler_fuzz.rs"

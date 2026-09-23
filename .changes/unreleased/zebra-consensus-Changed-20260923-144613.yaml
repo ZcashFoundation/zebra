@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Pin `zcash_primitives` 0.30.1 and `zcash_protocol` 0.10.6 to librustzcash revision `517047de130ed81059903458c933aab6684b353a` for assigned NU7 support. These experimental workspace patches must be replaced with released dependencies before publication.
+time: 2026-09-23T14:46:13.196124328+02:00

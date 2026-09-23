@@ -921,6 +921,8 @@ fn snapshot_rpc_getnetworkinfo(
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_peer_info", get_peer_info, {
+            // Peer versions vary; handshake tests cover protocol compatibility.
+            "[].version" => "[version]",
             "[].lastrecv" => dynamic_redaction(|value, _path| {
                 assert!(value.as_u64().unwrap() > 0, "lastrecv should be non-zero");
                 "[lastrecv]"
@@ -1187,6 +1189,12 @@ pub async fn test_mining_rpcs<State, ReadState>(
                 .await
                 .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                     expected_difficulty: fake_difficulty,
+                    expected_block_subsidy:
+                        zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+                            fake_tip_height.next().unwrap(),
+                            network,
+                        )
+                        .unwrap(),
                     tip_height: fake_tip_height,
                     tip_hash: fake_tip_hash,
                     cur_time: fake_cur_time,

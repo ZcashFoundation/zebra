@@ -269,12 +269,16 @@ impl Block {
     /// including UTXOs created by earlier transactions in this block. It can also contain unrelated
     /// UTXOs, which are ignored.
     ///
+    /// `previous_value_pools` must be the exact parent's balances. Reserve-funded coinbase and
+    /// funding outputs are validated against that context once NSM reissuance starts.
+    ///
     /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
@@ -317,35 +321,67 @@ impl Block {
             },
         )?;
 
-        let nsm_reserve_change = self.nsm_reserve_change(network, transaction_fees)?;
+        let height = self.coinbase_height().ok_or(ValueBalanceError::Subsidy(
+            subsidy::SubsidyError::NoCoinbase,
+        ))?;
+        let previous_reserve = previous_value_pools.nsm_reserve_amount();
+        let additional = subsidy::nsm_subsidy(height, network, previous_reserve)
+            .map_err(ValueBalanceError::NsmReserve)?;
+        let contribution = subsidy::nsm_fee_contribution(height, network, transaction_fees)
+            .map_err(ValueBalanceError::NsmReserve)?;
+        let nsm_reserve_change = contribution
+            .checked_sub(additional)
+            .expect("the difference of two nonnegative amounts fits a signed amount");
+
+        // These checks need the exact parent, not a best-tip estimate. Running them here uses
+        // the existing ordered contextual commit/proposal path, without waiting for a parent
+        // inside semantic verification or blocking the state writer.
+        if network
+            .nsm_reissuance_height()
+            .is_some_and(|start| height >= start)
+        {
+            let total = subsidy::block_subsidy(height, network, previous_reserve)
+                .map_err(ValueBalanceError::Subsidy)?;
+            let deferred = subsidy::subsidy_is_valid(self, network, total)
+                .map_err(ValueBalanceError::Subsidy)?;
+            subsidy::miner_fees_are_valid(
+                self.transactions.first().ok_or(ValueBalanceError::Subsidy(
+                    subsidy::SubsidyError::NoCoinbase,
+                ))?,
+                height,
+                transaction_fees,
+                total,
+                deferred,
+                network,
+            )
+            .map_err(ValueBalanceError::Subsidy)?;
+            if deferred != deferred_pool_balance_change {
+                return Err(ValueBalanceError::Subsidy(
+                    subsidy::SubsidyError::InvalidMinerFees,
+                ));
+            }
+        }
 
         let mut chain_value_pool_change = tx_pool_sum.neg();
         chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
         chain_value_pool_change.set_nsm_reserve_amount(nsm_reserve_change);
 
+        if NetworkUpgrade::Nu7
+            .activation_height(network)
+            .is_some_and(|activation| height + 1 == Some(activation))
+        {
+            let seeded = previous_value_pools
+                .add_chain_value_pool_change(chain_value_pool_change)?
+                .with_nsm_reserve_seed(height, network)?;
+            chain_value_pool_change.set_nsm_reserve_amount(
+                seeded
+                    .nsm_reserve_amount()
+                    .checked_sub(previous_reserve)
+                    .expect("the difference of two nonnegative amounts fits a signed amount"),
+            );
+        }
+
         Ok(chain_value_pool_change)
-    }
-
-    /// Returns the amount this block's `transaction_fees` add to the NSM reserve.
-    ///
-    /// From NU7 activation, 60% of a block's transaction fees are removed from circulation into
-    /// the Network Sustainability Mechanism reserve instead of being claimed by the miner, so the
-    /// coinbase transaction claims that much less and the same amount accrues to the reserve.
-    /// This is zero before NU7 activates.
-    ///
-    /// See [`subsidy::nsm_fee_contribution`] for the specification.
-    fn nsm_reserve_change(
-        &self,
-        network: &Network,
-        transaction_fees: Amount<NonNegative>,
-    ) -> Result<Amount<NegativeAllowed>, ValueBalanceError> {
-        let Some(height) = self.coinbase_height() else {
-            return Ok(Amount::zero());
-        };
-
-        subsidy::nsm_fee_contribution(height, network, transaction_fees)
-            .and_then(|contribution| contribution.constrain())
-            .map_err(ValueBalanceError::NsmReserve)
     }
 
     /// Compute the root of the authorizing data Merkle tree,

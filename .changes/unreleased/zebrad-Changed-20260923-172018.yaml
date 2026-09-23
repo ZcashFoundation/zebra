@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Existing version 28 databases upgrade in place to 28.1.0 without a resync. Pre-NU7 records remain compatible with version 28.0, including the historical reserve seed block immediately before activation. ([#11496](https://github.com/ZcashFoundation/zebra/pull/11496))
+time: 2026-09-23T17:20:18.220400746+02:00

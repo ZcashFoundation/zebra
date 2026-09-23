@@ -33,9 +33,8 @@ impl IntoDisk for ValueBalance<NonNegative> {
         let bytes = self.to_bytes();
 
         // The `nsm_reserve` balance is the last 8 bytes of the 56-byte form, so truncating it
-        // yields the v28.0 record exactly. Keep writing the v28.0 width while the reserve is
-        // zero — always the case before NU7 activation — so a database stays byte-compatible
-        // with v28.0 until then.
+        // yields the v28.0 record exactly. Height-aware writers omit the derived seed before
+        // NU7, and zero reserves continue to use the narrow layout afterwards.
         if self.nsm_reserve_amount().is_zero() {
             bytes[..V28_VALUE_POOL_BYTES].to_vec()
         } else {

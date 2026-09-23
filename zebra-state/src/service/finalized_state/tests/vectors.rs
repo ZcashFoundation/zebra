@@ -29,6 +29,146 @@ use zebra_chain::{
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
+/// A pre-NU7 v28 cache must retain its old record layout, including the historical seed block.
+#[test]
+fn nsm_seed_preserves_v28_cache_across_minor_upgrade() {
+    use crate::{
+        config::{
+            state_database_format_version_on_disk, write_state_database_format_version_to_disk,
+        },
+        constants::state_database_format_version_in_code,
+        service::finalized_state::{
+            zebra_db::chain::{BLOCK_INFO, CHAIN_VALUE_POOLS},
+            FinalizedState,
+        },
+        CheckpointVerifiedBlock, Config,
+    };
+    use semver::Version;
+    use std::{
+        sync::Arc,
+        thread,
+        time::{Duration, Instant},
+    };
+    use zebra_chain::{
+        block::Block,
+        parameters::testnet::{ConfiguredActivationHeights, ParametersBuilder},
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        value_balance::ValueBalance,
+    };
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let network = ParametersBuilder::default()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(2),
+            blossom: Some(2),
+            heartwood: Some(2),
+            canopy: Some(2),
+            nu5: Some(2),
+            nu6: Some(2),
+            nu6_1: Some(2),
+            nu6_2: Some(2),
+            nu6_3: Some(2),
+            nu7: Some(2),
+        })
+        .unwrap()
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![])
+        .to_network()
+        .unwrap();
+    let open = || {
+        FinalizedState::new(
+            &config,
+            &network,
+            #[cfg(feature = "elasticsearch")]
+            false,
+        )
+        .unwrap()
+    };
+    let mut state = open();
+    let mut block_size = 0;
+    for bytes in [
+        &*zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES,
+        &*zebra_test::vectors::BLOCK_TESTNET_1_BYTES,
+    ] {
+        let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+        block_size = block.zcash_serialized_size();
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block).into(),
+                None,
+                "v28 NSM compatibility test",
+            )
+            .unwrap();
+    }
+
+    let expected = state.db.finalized_value_pool();
+    assert!(!expected.nsm_reserve_amount().is_zero());
+    let db_path = state.db.db().path().to_path_buf();
+    let tip_bytes = state
+        .db
+        .db()
+        .get_cf(&state.db.db().cf_handle(CHAIN_VALUE_POOLS).unwrap(), [])
+        .unwrap()
+        .unwrap();
+    let legacy_pools: [u8; 48] = tip_bytes
+        .try_into()
+        .expect("the pre-NU7 tip must remain readable by the v28.0 decoder");
+    assert_eq!(
+        ValueBalance::from_bytes(&legacy_pools)
+            .unwrap()
+            .with_nsm_reserve_seed(Height(1), &network)
+            .unwrap(),
+        expected,
+    );
+    let info_bytes = state
+        .db
+        .db()
+        .get_cf(
+            &state.db.db().cf_handle(BLOCK_INFO).unwrap(),
+            Height(1).as_bytes(),
+        )
+        .unwrap()
+        .unwrap();
+    let legacy_size = u32::from_le_bytes(
+        info_bytes[48..]
+            .try_into()
+            .expect("v28.0 stores the block size immediately after the value pools"),
+    );
+    assert_eq!(usize::try_from(legacy_size).unwrap(), block_size);
+    drop(state);
+
+    // All records have the v28.0 layout. Reopen that cache through the actual minor-upgrade path.
+    write_state_database_format_version_to_disk(&config, &Version::new(28, 0, 0), &network)
+        .unwrap();
+    let state = open();
+    let started = Instant::now();
+    while !state.db.finished_format_upgrades() {
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "minor upgrade must finish"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(state.db.db().path(), db_path);
+    assert_eq!(state.finalized_tip_height(), Some(Height(1)));
+    assert_eq!(state.db.finalized_value_pool(), expected);
+    let info = state.db.block_info(Height(1).into()).unwrap();
+    assert_eq!(*info.value_pools(), expected);
+    assert_eq!(info.size(), legacy_size);
+    assert_eq!(
+        state_database_format_version_on_disk(&config, &network).unwrap(),
+        Some(state_database_format_version_in_code()),
+    );
+}
+
 /// Check that the sprout tree database serialization format has not changed.
 #[test]
 fn sprout_note_commitment_tree_serialization() {

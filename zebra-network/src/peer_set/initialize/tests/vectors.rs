@@ -14,6 +14,7 @@
 //! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
+    collections::HashSet,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -42,8 +43,8 @@ use crate::{
     peer_set::{
         crawler_services,
         initialize::{
-            accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
-            DiscoveredPeer,
+            accept_inbound_connections, add_initial_peers, crawl_and_dial, limit_initial_peers,
+            open_listener, DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker,
@@ -58,11 +59,6 @@ use Network::*;
 ///
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
-
-/// The amount of time to run the peer cache updater task, before testing what it has done.
-///
-/// Using a very short time can make the peer cache updater not run at all.
-const PEER_CACHE_UPDATER_TEST_DURATION: Duration = Duration::from_secs(25);
 
 /// The amount of time to run the listener, before testing what it has done.
 ///
@@ -356,101 +352,59 @@ async fn peer_limit_two_testnet() {
     // Any number of address book peers is valid here, because some peers might have failed.
 }
 
-/// Test zebra-network writes a peer cache file, and can read it back manually.
-#[tokio::test]
-async fn written_peer_cache_can_be_read_manually() {
-    let _init_guard = zebra_test::init();
-
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
-    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
-
-    // Use a temporary peer cache directory, so this test doesn't read or write the default
-    // peer cache directory, which is shared with other tests and local zebrad instances.
-    let peer_cache_dir =
-        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
-    let config = Config {
-        cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
-        ..Config::default()
-    };
-    let address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
-
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
-
-    let approximate_peer_count = address_book
-        .lock()
-        .expect("previous thread panicked while holding address book lock")
-        .len();
-    if approximate_peer_count > 0 {
-        let cached_peers = config
-            .load_peer_cache()
-            .await
-            .expect("unexpected error reading peer cache");
-
-        assert!(
-            !cached_peers.is_empty(),
-            "unexpected empty peer cache from manual load: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
-}
-
-/// Test zebra-network writes a peer cache file, and reads it back automatically.
+/// Test that startup loads exactly the written cache into its connection candidates and address book.
 #[tokio::test]
 async fn written_peer_cache_is_automatically_read_on_startup() {
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
-    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
-
-    // Use a temporary peer cache directory, so this test doesn't read or write the default
-    // peer cache directory, which is shared with other tests and local zebrad instances.
     let peer_cache_dir =
         tempfile::tempdir().expect("creating a temporary cache directory should succeed");
-    let mut config = Config {
+    let config = Config {
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
+        // The disk cache must be the only source of initial peers.
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
         ..Config::default()
     };
-    let _address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let expected_peers: HashSet<PeerSocketAddr> = ["127.1.1.1:8233", "127.1.1.2:8233"]
+        .into_iter()
+        .map(|addr| addr.parse().expect("test peer addresses are valid"))
+        .collect();
 
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
-
-    // The address book also contains unverified DNS seed addresses, so only test automatic
-    // loading when the peer cache updater actually wrote at least one cacheable peer.
-    let cached_peers = config
-        .load_peer_cache()
+    // The persistent_mode_peer_cache integration test covers the background writer with a
+    // real local peer. Here, write the cache directly: DNS seeds have no last-seen timestamp,
+    // so finding seeds alone does not guarantee any cacheable peers.
+    config
+        .update_peer_cache(expected_peers.clone())
         .await
-        .expect("unexpected error reading peer cache");
-    if !cached_peers.is_empty() {
-        // Make sure our only peers are coming from the disk cache
-        config.initial_mainnet_peers = Default::default();
+        .expect("writing the temporary peer cache should succeed");
 
-        let address_book =
-            init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        address_book_updater_task_handle,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
 
-        // Let the peer cache reader run and fill the address book.
-        tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+    // Exercise the startup loader without opening sockets or handshaking with public peers.
+    let initial_peers = limit_initial_peers(&config, address_book_updater).await;
+    assert_eq!(initial_peers, expected_peers);
 
-        // We should have loaded at least one peer from the cache
-        let approximate_cached_peer_count = address_book
-            .lock()
-            .expect("previous thread panicked while holding address book lock")
-            .len();
-        assert!(
-            approximate_cached_peer_count > 0,
-            "unexpected empty address book using cache from previous instance: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
+    // The loader drops the last change sender. Wait for its queued address updates to drain.
+    drop(address_book_service);
+    let _ = tokio::time::timeout(Duration::from_secs(5), address_book_updater_task_handle)
+        .await
+        .expect("queued address updates should drain before the timeout")
+        .expect("the address book updater should shut down without panicking");
+    let loaded_peers: HashSet<_> = address_book
+        .lock()
+        .expect("previous thread panicked while holding address book lock")
+        .peers()
+        .map(|peer| peer.addr)
+        .collect();
+    assert_eq!(loaded_peers, expected_peers);
 }
 
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.

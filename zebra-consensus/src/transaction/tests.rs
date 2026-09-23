@@ -3843,9 +3843,6 @@ fn nu7_network() -> Network {
 
 /// ZIP 2003: the V4 version rule must accept V4 for every network upgrade from Sapling to NU6.3,
 /// and reject it from NU7 onward.
-///
-/// This exercises the rule directly rather than through the verifier, so it does not depend on
-/// NU7 having a consensus branch ID that `zcash_protocol` recognises.
 #[test]
 fn v4_transactions_are_rejected_from_nu7_onward() {
     let tx = Transaction::test_v4(
@@ -3883,14 +3880,14 @@ fn v4_transactions_are_rejected_from_nu7_onward() {
 #[test]
 fn v5_and_v6_transactions_are_supported_at_nu7() {
     let v5 = Transaction::test_v5(
-        NetworkUpgrade::Nu5,
+        NetworkUpgrade::Nu7,
         Vec::new(),
         Vec::new(),
         LockTime::Height(Height(0)),
         Height(1),
     );
     let v6 = Transaction::test_v6(
-        NetworkUpgrade::Nu6_3,
+        NetworkUpgrade::Nu7,
         Vec::new(),
         Vec::new(),
         LockTime::Height(Height(0)),
