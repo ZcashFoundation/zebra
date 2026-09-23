@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Invalid contextual subsidy claims count toward peer misbehavior, matching other invalid coinbase payouts.
+time: 2026-09-24T01:49:32.402960321+02:00

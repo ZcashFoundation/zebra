@@ -127,8 +127,25 @@ impl CommitBlockError {
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
+    ///
+    /// Consensus-invalid subsidies score 100, including errors nested in chain value
+    /// calculations. Duplicate requests, shutdowns, and unrelated contextual errors score 0.
     pub fn misbehavior_score(&self) -> u32 {
-        0
+        match self {
+            Self::ValidateContextError(error)
+                if matches!(
+                    error.as_ref(),
+                    ValidateContextError::Subsidy(_)
+                        | ValidateContextError::CalculateBlockChainValueChange {
+                            value_balance_error: ValueBalanceError::Subsidy(_),
+                            ..
+                        }
+                ) =>
+            {
+                100
+            }
+            _ => 0,
+        }
     }
 }
 
@@ -563,24 +580,4 @@ impl DuplicateNullifierError for ironwood::Nullifier {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use zebra_chain::block::Height;
-
-    #[test]
-    fn commit_block_error_misbehavior_scores() {
-        let context_err = CommitBlockError::ValidateContextError(Box::new(
-            ValidateContextError::NonSequentialBlock {
-                candidate_height: Height(5),
-                parent_height: Height(3),
-            },
-        ));
-        assert_eq!(context_err.misbehavior_score(), 0);
-
-        let dup_err = CommitBlockError::Duplicate {
-            hash_or_height: None,
-            location: KnownBlock::BestChain,
-        };
-        assert_eq!(dup_err.misbehavior_score(), 0);
-    }
-}
+mod tests;

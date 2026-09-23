@@ -919,6 +919,19 @@ fn verify_block_error_misbehavior_scores() {
     assert_eq!(VerifyBlockError::Commit(dup_err).misbehavior_score(), 0);
 }
 
+/// Contextual payout failures must retain their peer penalty through state and router errors.
+#[test]
+fn contextual_subsidy_errors_score_through_router() {
+    let contextual = zs::ValidateContextError::Subsidy(SubsidyError::FundingStreamNotFound);
+    let source: BoxError = Box::new(zs::CommitSemanticallyVerifiedError::from(contextual));
+    let error = map_commit_error(source, block::Hash([1; 32]));
+    assert_eq!(error.misbehavior_score(), 100);
+    assert_eq!(
+        crate::router::RouterError::from(error).misbehavior_score(),
+        100
+    );
+}
+
 /// Duplicate block errors must stay classified as duplicate requests after the
 /// state wraps them, so they don't restart the syncer or turn `submitblock`
 /// duplicates into rejections.

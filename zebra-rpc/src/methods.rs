@@ -2627,6 +2627,7 @@ where
         {
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
+                read_state,
                 block_proposal_bytes,
                 &self.network,
                 latest_chain_tip,
@@ -3045,9 +3046,7 @@ where
             _ => unreachable!("unmatched response to a solution rate request"),
         };
 
-        Ok(solution_rate
-            .try_into()
-            .expect("per-second solution rate always fits in u64"))
+        solution_rate.try_into().map_misc_error()
     }
 
     async fn get_network_info(&self) -> Result<GetNetworkInfoResponse> {

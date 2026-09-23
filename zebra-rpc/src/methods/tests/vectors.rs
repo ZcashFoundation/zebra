@@ -2546,6 +2546,175 @@ async fn rpc_getnetworksolps_uses_the_effective_height() {
     .expect("solution-rate regression must not stall");
 }
 
+/// A state estimate that exceeds the RPC's integer width must return an error, not panic.
+#[tokio::test]
+async fn rpc_getnetworksolps_rejects_unrepresentable_rates() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for rate in [u128::from(u64::MAX), u128::from(u64::MAX) + 1] {
+            let read_state = tower::service_fn(move |request| async move {
+                assert!(matches!(request, ReadRequest::SolutionRate { .. }));
+                Ok::<_, BoxError>(ReadResponse::SolutionRate(Some(rate)))
+            });
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, _) = RpcImpl::new(
+                Mainnet,
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                MockService::build().for_unit_tests(),
+                MockSyncStatus::default(),
+                NoChainTip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let result = rpc.get_network_sol_ps(None, None).await;
+            if rate == u128::from(u64::MAX) {
+                assert_eq!(result.unwrap(), u64::MAX);
+            } else {
+                assert_eq!(
+                    result
+                        .expect_err("unrepresentable rates must return an RPC error")
+                        .code(),
+                    i32::from(server::error::LegacyCode::Misc),
+                );
+            }
+        }
+    })
+    .await
+    .expect("solution-rate conversion must not stall");
+}
+
+/// Mandatory payouts must use the proposal parent's reserve before transaction verification.
+#[tokio::test]
+async fn rpc_proposal_rejects_invalid_subsidy_before_verification() {
+    use types::get_block_template::{
+        proposal::proposal_block_from_template, BlockProposalResponse,
+    };
+    use zebra_chain::parameters::{
+        subsidy::{scheduled_block_subsidy, subsidy_is_valid, SubsidyError},
+        testnet::{
+            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient, ConfiguredFundingStreams,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let height = Height(1_000);
+        let network = Parameters::build()
+            .with_slow_start_interval(Height::MIN)
+            .with_activation_heights(ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(3),
+                nu6_1: Some(4),
+                nu6_2: Some(5),
+                nu6_3: Some(6),
+                nu7: Some(height.0),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_nsm_reissuance_height(Some(height))
+            .with_funding_streams(vec![ConfiguredFundingStreams {
+                height_range: Some(height..Height(1_010)),
+                recipients: Some(vec![ConfiguredFundingStreamRecipient::new_for(
+                    FundingStreamReceiver::MajorGrants,
+                )]),
+            }])
+            .to_network()
+            .unwrap();
+        let parent_hash = Hash([1; 32]);
+        let template = template_extending(&network, height.previous().unwrap(), parent_hash);
+        let proposal = proposal_block_from_template(&template, None, &network).unwrap();
+        let scheduled = scheduled_block_subsidy(height, &network).unwrap();
+        let expected_block_subsidy = (scheduled + Amount::try_from(1_375).unwrap()).unwrap();
+        subsidy_is_valid(&proposal, &network, scheduled).unwrap();
+        assert_eq!(
+            subsidy_is_valid(&proposal, &network, expected_block_subsidy),
+            Err(SubsidyError::FundingStreamNotFound),
+        );
+
+        for (tip_height, tip_hash, subsidy, should_verify) in [
+            (height.previous().unwrap(), parent_hash, expected_block_subsidy, false),
+            (height.previous().unwrap(), Hash([2; 32]), scheduled, false),
+            (height, parent_hash, scheduled, false),
+            (height.previous().unwrap(), parent_hash, scheduled, true),
+        ] {
+            let chain_info = GetBlockTemplateChainInfo {
+                tip_height,
+                tip_hash,
+                expected_block_subsidy: subsidy,
+                expected_difficulty: template.bits,
+                cur_time: template.cur_time,
+                min_time: template.min_time,
+                max_time: template.max_time,
+                chain_history_root: fake_history_tree(&network).hash(),
+            };
+            let read_state = tower::service_fn(move |request| {
+                assert!(matches!(request, ReadRequest::ChainInfo));
+                std::future::ready(Ok::<_, BoxError>(ReadResponse::ChainInfo(chain_info.clone())))
+            });
+            let verifier_calls = Arc::new(AtomicUsize::new(0));
+            let calls = verifier_calls.clone();
+            let verifier = tower::service_fn(move |request| {
+                let zebra_consensus::Request::CheckProposal(block) = request else {
+                    panic!("proposal RPC must not commit blocks")
+                };
+                calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok::<_, BoxError>(block.hash()))
+            });
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, _) = RpcImpl::new(
+                network.clone(),
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                verifier,
+                MockSyncStatus::default(),
+                NoChainTip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let response = rpc
+                .get_block_template(Some(GetBlockTemplateParameters {
+                    mode: GetBlockTemplateRequestMode::Proposal,
+                    data: Some(HexData(proposal.zcash_serialize_to_vec().unwrap())),
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+            assert_eq!(
+                verifier_calls.load(Ordering::SeqCst),
+                usize::from(should_verify),
+                "only payouts validated against the proposal parent may reach transaction verification",
+            );
+            if should_verify {
+                assert_eq!(
+                    response,
+                    GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+                );
+            } else {
+                assert!(matches!(
+                    response,
+                    GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
+                ));
+            }
+        }
+    })
+    .await
+    .expect("proposal preflight must not stall");
+}
+
 /// Historical RPC rewards and same-height templates must use the parent's reserve, including
 /// the funding and deferred shares. Missing future parents must not become zero-reserve forecasts.
 #[tokio::test(flavor = "multi_thread")]

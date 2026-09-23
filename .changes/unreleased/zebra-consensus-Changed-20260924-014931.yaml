@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Contextual subsidy errors retain a misbehavior score of 100 when propagated through block verification and the verifier router.
+time: 2026-09-24T01:49:31.348685144+02:00
