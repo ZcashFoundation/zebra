@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'The end-of-support halt time is now 12 weeks instead of 15 weeks, moving this release''s halt to early November 2026 ([#11491](https://github.com/ZcashFoundation/zebra/pull/11491)).'
-time: 2026-09-22T00:00:00.000000000Z

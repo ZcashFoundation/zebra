@@ -1,8 +1,0 @@
-project: zebra-network
-kind: Security
-body: 'Peer misbehavior bans now apply to the whole peer group — one IPv4 address,
-  or one IPv6 `/64` subnet — instead of a single address. Bans were previously
-  keyed by the full address, so a peer could avoid its ban by reconnecting from
-  another of the 2^64 addresses in its `/64`
-  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
-time: 2026-09-01T12:00:00.000000000Z

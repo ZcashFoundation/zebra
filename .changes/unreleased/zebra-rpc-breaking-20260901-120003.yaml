@@ -1,8 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: 'Replaced `impl From<MetaAddr> for PeerInfo` with
-  `PeerInfo::from_meta_addr(meta_addr, banscore)`. The `banscore` field of
-  `getpeerinfo` now comes from the address book''s per-peer-group ban state, so
-  every address in an IPv6 `/64` reports the same score
-  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
-time: 2026-09-01T12:00:03.000000000Z

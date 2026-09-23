@@ -1,7 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Peer bans now expire after 24 hours instead of lasting until Zebra
-  restarts, so a peer banned by mistake — or one sharing an IPv6 `/64` with a
-  misbehaving peer — is not shut out permanently
-  ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).'
-time: 2026-09-02T10:00:02.000000000Z

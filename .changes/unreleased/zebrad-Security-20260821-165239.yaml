@@ -1,7 +1,0 @@
-project: zebrad
-kind: Security
-body: >
-  Penalize coinbase scriptSig rewrite in inbound path
-  ([GHSA-4f6v-mj46-gxg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4f6v-mj46-gxg3)).
-  Thanks to @craftsoldier for reporting the issue.
-time: 2026-08-21T16:52:39.000000000Z
