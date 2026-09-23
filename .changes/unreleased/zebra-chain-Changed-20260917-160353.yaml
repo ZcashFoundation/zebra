@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: '`transaction::zip317::MARGINAL_FEE` is now 1000 zatoshis per logical action instead of 5000, per [zcash/zips#1352](https://github.com/zcash/zips/pull/1352); `conventional_fee()` and `unpaid_actions()` follow it ([#11290](https://github.com/ZcashFoundation/zebra/pull/11290)).'
-time: 2026-09-17T16:03:53.000000000Z

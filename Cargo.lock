@@ -7244,7 +7244,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "12.0.0"
+version = "13.0.0"
 dependencies = [
  "bech32",
  "bitflags",
@@ -7606,7 +7606,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "7.0.0"
+version = "6.4.0"
 dependencies = [
  "abscissa_core",
  "anyhow",
