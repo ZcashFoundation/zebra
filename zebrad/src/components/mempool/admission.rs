@@ -1,7 +1,7 @@
-//! A single retained, non-publishing proposal check before verified-set admission.
+//! Batched, non-publishing proposal checks before verified-set admission.
 
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     sync::Arc,
     task::{Context, Poll},
 };
@@ -13,8 +13,11 @@ use tower::ServiceExt;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, MAX_BLOCK_BYTES},
+    ironwood, orchard,
     parameters::Network,
+    sapling,
     serialization::ZcashSerialize,
+    sprout,
     transaction::{Hash, UnminedTxId, VerifiedUnminedTx},
     transparent::OutPoint,
 };
@@ -41,30 +44,67 @@ pub(super) const MAX_PACKAGE_COUNT: usize = 100;
 #[error("{0}")]
 struct PackageRejection(&'static str);
 
-/// Proposal validation owns its transaction and response until the mempool consumes the result.
-pub(super) struct Pending {
+/// A semantically verified transaction, owned by admission until its proposal check completes.
+pub(super) struct Candidate {
     /// The individually verified transaction, still invisible to mempool consumers.
     pub tx: VerifiedUnminedTx,
     /// Its direct mempool spends, rechecked by final storage insertion.
     pub spent: Vec<OutPoint>,
-    /// The committed parent required by this proposal.
+    /// The committed parent its semantic verification used.
     pub parent: block::Hash,
     /// The original queue caller, held through stale retries.
     pub response: Option<oneshot::Sender<Result<(), BoxError>>>,
+    stale: bool,
+}
+
+impl Candidate {
+    pub fn new(
+        tx: VerifiedUnminedTx,
+        spent: Vec<OutPoint>,
+        parent: block::Hash,
+        response: Option<oneshot::Sender<Result<(), BoxError>>>,
+    ) -> Self {
+        Self {
+            tx,
+            spent,
+            parent,
+            response,
+            stale: false,
+        }
+    }
+}
+
+/// One proposal over a batch of candidates and the union of their mempool ancestors.
+struct Check {
+    candidates: Vec<Candidate>,
     ancestors: Vec<UnminedTxId>,
+    parent: block::Hash,
     stale: bool,
     work: BoxFuture<'static, Result<bool, BoxError>>,
 }
 
+/// The completed admission of one candidate: `Ok(true)` passed its proposal, `Ok(false)` needs
+/// re-verification against the current tip, and an error rejects it.
+pub(super) type Outcome = (Candidate, Result<bool, BoxError>);
+
 /// One validation context, independent of the configured mining payout and template cache.
+///
+/// Candidates are checked in batches: one proposal holds every waiting candidate that fits in a
+/// block without conflicting with an earlier one. A failed batch is split in half until each
+/// failure is attributed to a single candidate, so only single-candidate results are reported or
+/// cached as rejections.
 pub(super) struct Admission {
     network: Network,
     read_state: ReadState,
     verifier: BlockVerifier,
     miner_params: MinerParams,
     coinbase_cache: CoinbaseCache,
+    /// Candidates in arrival order, waiting for a batch.
+    waiting: VecDeque<Candidate>,
+    /// Halves of failed batches, checked depth-first before any new batch.
+    splits: Vec<Vec<Candidate>>,
     /// At most one proposal, retained until its blocking verification work has finished.
-    pub pending: Option<Pending>,
+    check: Option<Check>,
 }
 
 impl Admission {
@@ -88,102 +128,273 @@ impl Admission {
             verifier,
             miner_params,
             coinbase_cache: CoinbaseCache::default(),
-            pending: None,
+            waiting: VecDeque::new(),
+            splits: Vec::new(),
+            check: None,
         }
     }
 
-    /// Mark work stale, but retain it until all proposal/proof work actually finishes.
+    /// The number of candidates waiting for a batch or a split recheck.
+    #[cfg(test)]
+    pub fn queued(&self) -> usize {
+        self.waiting.len() + self.splits.iter().map(Vec::len).sum::<usize>()
+    }
+
+    /// Queue a candidate for the next batch, without inserting or publishing it.
+    pub fn push(&mut self, candidate: Candidate) {
+        self.waiting.push_back(candidate);
+    }
+
+    /// Mark all work stale, but retain it until all proposal/proof work actually finishes.
     pub fn reset(&mut self) {
-        if let Some(pending) = &mut self.pending {
-            pending.stale = true;
+        if let Some(check) = &mut self.check {
+            check.stale = true;
+        }
+        for candidate in self
+            .waiting
+            .iter_mut()
+            .chain(self.splits.iter_mut().flatten())
+        {
+            candidate.stale = true;
         }
     }
 
-    /// Snapshot a complete bounded package without inserting or publishing the candidate.
-    pub fn start(
-        &mut self,
-        storage: &Storage,
-        parent: block::Hash,
-        tx: VerifiedUnminedTx,
-        spent: Vec<OutPoint>,
-        response: Option<oneshot::Sender<Result<(), BoxError>>>,
-    ) {
-        assert!(
-            self.pending.is_none(),
-            "only one proposal admission can run"
-        );
-        let stale = !required_outputs_available(storage, &spent);
-        let mut ancestors = Vec::new();
-        let package = required_package(storage, &tx, &spent, &mut ancestors);
-        let network = self.network.clone();
-        let read_state = self.read_state.clone();
-        let verifier = self.verifier.clone();
-        let miner_params = self.miner_params.clone();
-        let cache = self.coinbase_cache.clone();
-        let work = verify_package(
-            network,
-            read_state,
-            verifier,
-            miner_params,
-            cache,
-            package,
-            parent,
-        )
-        .boxed();
-        self.pending = Some(Pending {
-            tx,
-            spent,
-            parent,
-            response,
-            ancestors,
-            stale,
-            work,
-        });
-    }
-
-    /// A ready result is still checked against the reconciled storage before final insertion.
+    /// Return the outcomes of the next completed proposal, or stale candidates needing a retry.
+    ///
+    /// Callers must apply each result to storage before polling again, because later batches
+    /// snapshot their ancestor packages from it.
     pub fn poll(
         &mut self,
         cx: &mut Context<'_>,
         storage: &mut Storage,
         parent: block::Hash,
-    ) -> Poll<(Pending, Result<bool, BoxError>)> {
-        let Some(pending) = &mut self.pending else {
-            return Poll::Pending;
-        };
-        let Poll::Ready(mut result) = pending.work.as_mut().poll(cx) else {
-            return Poll::Pending;
-        };
-        if pending.stale
-            || pending.parent != parent
-            || pending.ancestors.iter().any(|id| {
-                storage
-                    .transactions()
-                    .get(&id.mined_id())
-                    .map(|tx| tx.transaction.id)
-                    != Some(*id)
-            })
-        {
-            result = Ok(false);
-        }
-        if let Err(error) = &result {
-            if deterministic_rejection(error.as_ref()) {
-                storage.reject(
-                    pending.tx.transaction.id,
-                    ExactTipRejectionError::FailedProposal {
-                        reason: error.to_string(),
-                        ancestors: std::mem::take(&mut pending.ancestors).into(),
+    ) -> Poll<Vec<Outcome>> {
+        loop {
+            if self.check.is_none() {
+                let retries = self.start(storage, parent);
+                if !retries.is_empty() {
+                    return Poll::Ready(retries);
+                }
+            }
+            let Some(check) = &mut self.check else {
+                return Poll::Pending;
+            };
+            let Poll::Ready(mut result) = check.work.as_mut().poll(cx) else {
+                return Poll::Pending;
+            };
+            let mut check = self.check.take().expect("the completed check is present");
+            if check.stale
+                || check.parent != parent
+                || check.ancestors.iter().any(|id| {
+                    storage
+                        .transactions()
+                        .get(&id.mined_id())
+                        .map(|tx| tx.transaction.id)
+                        != Some(*id)
+                })
+            {
+                result = Ok(false);
+            }
+            match result {
+                // Any failure of a batch may belong to one of its candidates, including errors
+                // that are not cached, so each half is checked again without its sibling.
+                Err(_) if check.candidates.len() > 1 => {
+                    let second = check.candidates.split_off(check.candidates.len() / 2);
+                    self.splits.push(second);
+                    self.splits.push(check.candidates);
+                }
+                Err(error) => {
+                    let candidate = check
+                        .candidates
+                        .pop()
+                        .expect("a failed check has one candidate");
+                    if deterministic_rejection(error.as_ref()) {
+                        storage.reject(
+                            candidate.tx.transaction.id,
+                            ExactTipRejectionError::FailedProposal {
+                                reason: error.to_string(),
+                                ancestors: check.ancestors.into(),
+                            }
+                            .into(),
+                        );
                     }
-                    .into(),
-                );
+                    return Poll::Ready(vec![(candidate, Err(error))]);
+                }
+                Ok(passed) => {
+                    return Poll::Ready(
+                        check
+                            .candidates
+                            .into_iter()
+                            .map(|candidate| (candidate, Ok(passed)))
+                            .collect(),
+                    );
+                }
             }
         }
-        Poll::Ready((
-            self.pending
-                .take()
-                .expect("the completed admission is present"),
-            result,
-        ))
+    }
+
+    /// Start the next split or batch, returning the candidates that are stale for `parent`.
+    ///
+    /// A split is a subset of a batch that already fit in a block without conflicts, so its
+    /// candidates are only deferred if their ancestor packages changed since.
+    fn start(&mut self, storage: &Storage, parent: block::Hash) -> Vec<Outcome> {
+        let split = self.splits.pop();
+        let is_split = split.is_some();
+        let mut queue = split.map_or_else(|| std::mem::take(&mut self.waiting), VecDeque::from);
+        let mut retries = Vec::new();
+        let mut batch = Batch::default();
+        let mut candidates = Vec::new();
+        let mut deferred = VecDeque::new();
+        let mut package = None;
+        while let Some(candidate) = queue.pop_front() {
+            if !candidate.is_current(storage, parent) {
+                retries.push((candidate, Ok(false)));
+                continue;
+            }
+            match batch.add(storage, &candidate) {
+                Ok(true) => candidates.push(candidate),
+                // Its own package failed, so check it alone to report the failure.
+                Err(error) if candidates.is_empty() => {
+                    package = Some(Err(error));
+                    candidates.push(candidate);
+                    break;
+                }
+                Ok(false) | Err(_) => deferred.push_back(candidate),
+            }
+        }
+        deferred.append(&mut queue);
+        if is_split {
+            while let Some(candidate) = deferred.pop_back() {
+                self.waiting.push_front(candidate);
+            }
+        } else {
+            self.waiting = deferred;
+        }
+        if candidates.is_empty() {
+            return retries;
+        }
+        let package = package.unwrap_or_else(|| Ok(batch.package(storage, &candidates)));
+        let work = verify_package(
+            self.network.clone(),
+            self.read_state.clone(),
+            self.verifier.clone(),
+            self.miner_params.clone(),
+            self.coinbase_cache.clone(),
+            package,
+            parent,
+        )
+        .boxed();
+        self.check = Some(Check {
+            candidates,
+            ancestors: batch.ancestors,
+            parent,
+            stale: false,
+            work,
+        });
+        retries
+    }
+}
+
+impl Candidate {
+    /// Whether this candidate's semantic verification and direct mempool spends still apply.
+    fn is_current(&self, storage: &Storage, parent: block::Hash) -> bool {
+        !self.stale && self.parent == parent && required_outputs_available(storage, &self.spent)
+    }
+}
+
+/// A transparent spend or revealed nullifier: two transactions with the same one conflict.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Spend {
+    Transparent(OutPoint),
+    Sprout(sprout::Nullifier),
+    Sapling(sapling::Nullifier),
+    Orchard(orchard::Nullifier),
+    Ironwood(ironwood::Nullifier),
+}
+
+fn spends_of(tx: &VerifiedUnminedTx) -> impl Iterator<Item = Spend> + '_ {
+    let tx = &tx.transaction.transaction;
+    tx.spent_outpoints()
+        .map(Spend::Transparent)
+        .chain(tx.sprout_nullifiers().map(Spend::Sprout))
+        .chain(tx.sapling_nullifiers().map(Spend::Sapling))
+        .chain(tx.orchard_nullifiers().map(Spend::Orchard))
+        .chain(tx.ironwood_nullifiers().map(Spend::Ironwood))
+}
+
+/// The union of candidate packages that fits in one block without conflicting spends.
+#[derive(Default)]
+struct Batch {
+    /// Mempool ancestors in topological order, witnessed for staleness and rejection expiry.
+    ancestors: Vec<UnminedTxId>,
+    included: HashSet<Hash>,
+    spends: HashSet<Spend>,
+    bytes: usize,
+    sigops: u32,
+}
+
+impl Batch {
+    /// Add a candidate and its missing ancestors, returning `Ok(false)` if they would conflict
+    /// with the batch or exceed block limits, and an error if its own package is invalid.
+    ///
+    /// An empty batch always accepts a valid package, so the first waiting candidate is checked.
+    fn add(&mut self, storage: &Storage, candidate: &Candidate) -> Result<bool, BoxError> {
+        if self
+            .included
+            .contains(&candidate.tx.transaction.id.mined_id())
+        {
+            return Ok(false);
+        }
+        let mut ancestors = Vec::new();
+        let package = package_refs(storage, &candidate.tx, &candidate.spent, &mut ancestors)
+            .inspect_err(|_| {
+                // A failed package is checked alone, so its witnesses bound its cached rejection.
+                if self.included.is_empty() {
+                    self.ancestors = ancestors;
+                }
+            })?;
+        let added: Vec<_> = package
+            .into_iter()
+            .filter(|tx| !self.included.contains(&tx.transaction.id.mined_id()))
+            .collect();
+        let mut spends = HashSet::new();
+        let mut bytes = self.bytes;
+        let mut sigops = self.sigops;
+        for tx in &added {
+            // Only conflicts with the rest of the batch are deferred. A package that conflicts
+            // with itself fails its proposal, so it is isolated and rejected like any other.
+            for spend in spends_of(tx) {
+                if self.spends.contains(&spend) {
+                    return Ok(false);
+                }
+                spends.insert(spend);
+            }
+            bytes = bytes.saturating_add(tx.transaction.size);
+            sigops = sigops.saturating_add(tx.block_sigop_count());
+        }
+        if check_limits(bytes, sigops).is_err() {
+            return Ok(false);
+        }
+        self.spends.extend(spends);
+        self.bytes = bytes;
+        self.sigops = sigops;
+        for tx in added {
+            let id = tx.transaction.id;
+            self.included.insert(id.mined_id());
+            if id != candidate.tx.transaction.id {
+                self.ancestors.push(id);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Ancestors first, so every transaction follows the outputs it spends.
+    fn package(&self, storage: &Storage, candidates: &[Candidate]) -> Vec<VerifiedUnminedTx> {
+        self.ancestors
+            .iter()
+            .map(|id| storage.transactions()[&id.mined_id()].clone())
+            .chain(candidates.iter().map(|candidate| candidate.tx.clone()))
+            .collect()
     }
 }
 
@@ -297,12 +508,12 @@ fn deterministic_rejection(error: &(dyn std::error::Error + 'static)) -> bool {
 /// Return the complete mandatory ancestor closure followed by the candidate, never a selection.
 /// Record exact ancestor witnesses as they are visited, including the bounded prefix proving a
 /// limit failure, so rejection caching can expire when that dependency context changes.
-pub(super) fn required_package(
-    storage: &Storage,
-    candidate: &VerifiedUnminedTx,
+fn package_refs<'a>(
+    storage: &'a Storage,
+    candidate: &'a VerifiedUnminedTx,
     spent: &[OutPoint],
     ancestors: &mut Vec<UnminedTxId>,
-) -> Result<Vec<VerifiedUnminedTx>, BoxError> {
+) -> Result<Vec<&'a VerifiedUnminedTx>, BoxError> {
     if !required_outputs_available(storage, spent) {
         return Err("a required mempool output is no longer available".into());
     }
@@ -355,8 +566,21 @@ pub(super) fn required_package(
         }
     }
     package.push(candidate);
-    // Do not clone any transactions until the whole closure passes the work and block limits.
-    Ok(package.into_iter().cloned().collect())
+    Ok(package)
+}
+
+/// The candidate package as owned transactions.
+#[cfg(test)]
+pub(super) fn required_package(
+    storage: &Storage,
+    candidate: &VerifiedUnminedTx,
+    spent: &[OutPoint],
+    ancestors: &mut Vec<UnminedTxId>,
+) -> Result<Vec<VerifiedUnminedTx>, BoxError> {
+    Ok(package_refs(storage, candidate, spent, ancestors)?
+        .into_iter()
+        .cloned()
+        .collect())
 }
 
 fn required_outputs_available(storage: &Storage, spent: &[OutPoint]) -> bool {
