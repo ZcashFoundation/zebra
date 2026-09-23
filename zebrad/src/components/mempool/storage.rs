@@ -669,6 +669,18 @@ impl Storage {
         self.transactions().values().map(|tx| tx.transaction.id)
     }
 
+    /// Returns `true` if every witnessed proposal ancestor is still stored with its exact ID.
+    ///
+    /// Removing or replacing any of them changes the package a proposal result applies to.
+    pub fn contains_exact_ancestors(&self, ancestors: &[UnminedTxId]) -> bool {
+        ancestors.iter().all(|id| {
+            self.transactions()
+                .get(&id.mined_id())
+                .map(|tx| tx.transaction.id)
+                == Some(*id)
+        })
+    }
+
     /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the verified set.
     ///
     /// Each [`VerifiedUnminedTx`] contains an [`UnminedTx`],
@@ -823,12 +835,7 @@ impl Storage {
             // Removing or replacing a witnessed ancestor changes the proposal context.
             match error {
                 ExactTipRejectionError::FailedProposal { ancestors, .. } => {
-                    ancestors.iter().all(|id| {
-                        self.transactions()
-                            .get(&id.mined_id())
-                            .map(|tx| tx.transaction.id)
-                            == Some(*id)
-                    })
+                    self.contains_exact_ancestors(ancestors)
                 }
                 _ => true,
             }
