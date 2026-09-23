@@ -69,6 +69,10 @@ pub struct VerifiedSet {
 
     /// The set of revealed Ironwood nullifiers.
     ironwood_nullifiers: HashSet<ironwood::Nullifier>,
+
+    /// Overrides the next random victim to exercise cascade eviction deterministically.
+    #[cfg(test)]
+    pub(super) eviction_victim: Option<transaction::Hash>,
 }
 
 impl Drop for VerifiedSet {
@@ -222,7 +226,7 @@ impl VerifiedSet {
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     #[allow(clippy::unwrap_in_result)]
-    pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
+    pub fn evict_one(&mut self) -> Vec<VerifiedUnminedTx> {
         use rand::distributions::{Distribution, WeightedIndex};
         use rand::prelude::thread_rng;
 
@@ -236,13 +240,15 @@ impl VerifiedSet {
             "there is at least one weight, all weights are non-negative, and the total is positive",
         );
 
-        let key_to_remove = keys
+        let key_to_remove = *keys
             .get(dist.sample(&mut thread_rng()))
             .expect("should have a key at every index in the distribution");
 
-        // Removes the randomly selected transaction and all of its dependents from the set,
-        // then returns just the randomly selected transaction
-        self.remove(key_to_remove).pop()
+        #[cfg(test)]
+        let key_to_remove = self.eviction_victim.take().unwrap_or(key_to_remove);
+
+        // Return every removed transaction so the caller can cache all eviction rejections.
+        self.remove(&key_to_remove)
     }
 
     /// Clears a list of mined transaction ids from the lists of dependencies for

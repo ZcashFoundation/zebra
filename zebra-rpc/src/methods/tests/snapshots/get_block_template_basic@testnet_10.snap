@@ -27,7 +27,7 @@ expression: block_template
     "sigops": 0,
     "required": true
   },
-  "longpollid": "00018424203eab7f731654008728000000000000000000",
+  "longpollid": "00018424203eab7f731654014005000000000000000000",
   "target": "0555540000000000000000000000000000000000000000000000000000000000",
   "mintime": 1654008606,
   "mutable": [
@@ -41,5 +41,5 @@ expression: block_template
   "curtime": 1654008617,
   "bits": "20055554",
   "height": 1842421,
-  "maxtime": 1654008728
+  "maxtime": 1654014005
 }

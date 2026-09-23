@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: breaking
+body: 'Clarify the existing snapshot semantics of mempool change notifications: they are not atomic with chain commits, so consumers requiring current transaction validity must check against the state they use ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).'
+time: 2026-09-22T17:08:01.855642858+02:00

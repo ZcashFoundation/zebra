@@ -9,6 +9,9 @@
 //!  * [Mempool Service][`Mempool`]
 //!    * activates when the syncer is near the chain tip
 //!    * spawns [download and verify tasks][`downloads::Downloads`] for each crawled or gossiped transaction
+//!    * validates batches of candidates and their required ancestors as block proposals before admission,
+//!      splitting failed batches into concurrently checked pieces to find the invalid candidates
+//!    * publishes validated mining templates to RPC subscribers through a watch channel
 //!    * handles in-memory [storage][`storage::Storage`] of unmined transactions
 //!  * [Crawler][`crawler::Crawler`]
 //!    * runs in the background to periodically poll peers for fresh unmined transactions
@@ -22,12 +25,14 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
+    net::SocketAddr,
     pin::{pin, Pin},
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -35,18 +40,20 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_node_services::mempool::{
     CreatedOrSpent, Gossip, MempoolChange, MempoolTxSubscriber, Request, Response,
 };
+use zebra_rpc::{BlockTemplateRequest, BlockTemplateResponse, MinerParams};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
 use crate::components::sync::SyncStatus;
 
+mod admission;
+pub(crate) mod block_template;
 pub mod config;
 mod crawler;
 pub mod downloads;
@@ -72,6 +79,9 @@ pub use storage::{
 
 #[cfg(test)]
 pub use self::tests::UnboxMempoolError;
+
+#[cfg(test)]
+pub(crate) use self::tests::admission::admission_read_state;
 
 use downloads::{
     Downloads as TxDownloads, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
@@ -160,8 +170,8 @@ impl ActiveState {
         std::mem::take(self)
     }
 
-    /// Returns a list of requests that will retry every stored and pending transaction.
-    fn transaction_retry_requests(&self) -> Vec<Gossip> {
+    /// Returns stored and pending retry requests, preserving pending requests' peer attribution.
+    fn transaction_retry_requests(&self) -> Vec<(Gossip, Option<SocketAddr>)> {
         match self {
             ActiveState::Disabled => Vec::new(),
             ActiveState::Enabled {
@@ -174,10 +184,12 @@ impl ActiveState {
                 let storage = storage
                     .transactions()
                     .values()
-                    .map(|tx| tx.transaction.clone().into());
+                    .map(|tx| (tx.transaction.clone().into(), None));
                 transactions.extend(storage);
 
-                let pending = tx_downloads.transaction_requests().cloned();
+                let pending = tx_downloads
+                    .transaction_requests()
+                    .map(|(tx, source)| (tx.clone(), source));
                 transactions.extend(pending);
 
                 transactions
@@ -237,6 +249,24 @@ impl ActiveState {
     }
 }
 
+/// Wake the background queue checker as well as the current service caller.
+#[derive(Default)]
+pub(crate) struct BackgroundWork {
+    pub(super) notify: tokio::sync::Notify,
+    original: futures::task::AtomicWaker,
+}
+
+impl std::task::Wake for BackgroundWork {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.notify.notify_one();
+        self.original.wake();
+    }
+}
+
 /// Mempool async management and query service.
 ///
 /// The mempool is the set of all verified transactions that this node is aware
@@ -284,6 +314,15 @@ pub struct Mempool {
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 
+    /// The only owner of published mining templates and override requests.
+    block_templates: block_template::BlockTemplates,
+
+    /// The one retained candidate validation, including work made stale by a reset.
+    admission: admission::Admission,
+
+    /// Keeps completed internal work moving even when Tower has no outstanding requests.
+    background_work: Arc<BackgroundWork>,
+
     // Diagnostics
     //
     /// Queued transactions pending download or verification transmitter.
@@ -319,10 +358,31 @@ impl Mempool {
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
-    ) -> (Self, MempoolTxSubscriber) {
+        read_state: block_template::ReadState,
+        block_verifier: block_template::BlockVerifier,
+        miner_params: Option<MinerParams>,
+    ) -> (
+        Self,
+        MempoolTxSubscriber,
+        watch::Receiver<Option<Arc<BlockTemplateResponse>>>,
+        mpsc::Sender<BlockTemplateRequest>,
+    ) {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
         let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
+        let admission = admission::Admission::new(
+            network.clone(),
+            read_state.clone(),
+            block_verifier.clone(),
+            config.admission_split_width,
+        );
+        let (block_templates, template_receiver, template_requests) =
+            block_template::BlockTemplates::new(
+                network.clone(),
+                miner_params,
+                read_state,
+                block_verifier,
+            );
 
         let mut service = Mempool {
             network: network.clone(),
@@ -337,6 +397,9 @@ impl Mempool {
             tx_verifier,
             transaction_sender,
             misbehavior_sender,
+            block_templates,
+            admission,
+            background_work: Arc::default(),
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -352,7 +415,17 @@ impl Mempool {
         let is_caught_up_to_start = service.is_caught_up_to_start();
         service.update_state(None, is_caught_up_to_start);
 
-        (service, transaction_subscriber)
+        (
+            service,
+            transaction_subscriber,
+            template_receiver,
+            template_requests,
+        )
+    }
+
+    /// Return the wakeup source used by the background queue checker.
+    pub(crate) fn background_work(&self) -> Arc<BackgroundWork> {
+        self.background_work.clone()
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -459,18 +532,6 @@ impl Mempool {
             ActiveState::Disabled => false,
             ActiveState::Enabled { .. } => true,
         }
-    }
-
-    /// Remove expired transaction ids from a given list of inserted ones.
-    fn remove_expired_from_peer_list(
-        send_to_peers_ids: &HashSet<UnminedTxId>,
-        expired_transactions: &HashSet<UnminedTxId>,
-    ) -> HashSet<UnminedTxId> {
-        send_to_peers_ids
-            .iter()
-            .filter(|id| !expired_transactions.contains(id))
-            .copied()
-            .collect()
     }
 
     /// Update metrics for the mempool.
@@ -581,6 +642,25 @@ impl Mempool {
             }
         }
     }
+
+    /// Drive template production without making ordinary mempool requests wait for it.
+    fn poll_templates(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
+        let storage = match &self.active_state {
+            ActiveState::Disabled => None,
+            ActiveState::Enabled {
+                storage,
+                last_seen_tip_hash,
+                ..
+            } => Some((storage, *last_seen_tip_hash)),
+        };
+        if let Poll::Ready(Err(error)) =
+            self.block_templates
+                .poll(cx, storage, self.latest_chain_tip.best_tip_hash())
+        {
+            return Err(error);
+        }
+        Ok(())
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -590,6 +670,10 @@ impl Service<Request> for Mempool {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.background_work.original.register(cx.waker());
+        let work_waker = std::task::Waker::from(self.background_work.clone());
+        let mut work_context = Context::from_waker(&work_waker);
+        let cx = &mut work_context;
         let is_caught_up_to_start = self.is_caught_up_to_start();
         let should_check_tip = self.is_enabled() || is_caught_up_to_start;
         let tip_action = should_check_tip
@@ -599,12 +683,16 @@ impl Service<Request> for Mempool {
         // TODO: Consider broadcasting a `MempoolChange` when the mempool is disabled.
         let is_state_changed = self.update_state(tip_action.as_ref(), is_caught_up_to_start);
 
+        if is_state_changed || tip_action.is_some() {
+            self.block_templates.mark_changed();
+        }
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
         // When the mempool is disabled we still return that the service is ready.
         // Otherwise, callers could block waiting for the mempool to be enabled.
         if !self.is_enabled() {
             self.update_metrics();
+            self.poll_templates(cx)?;
 
             return Poll::Ready(Ok(()));
         }
@@ -626,16 +714,9 @@ impl Service<Request> for Mempool {
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
             );
 
-            let previous_state = self.active_state.take();
+            self.admission.reset();
+            let mut previous_state = self.active_state.take();
             let tx_retries = previous_state.transaction_retry_requests();
-
-            // Use the same code for dropping and resetting the mempool,
-            // to avoid subtle bugs.
-            //
-            // Drop the current contents of the state,
-            // cancelling any pending download tasks,
-            // and dropping completed verification results.
-            std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
             //
@@ -646,6 +727,22 @@ impl Service<Request> for Mempool {
             // incompatible consensus rules).
             self.enable_at_tip(reset_tip_action);
 
+            if let (
+                ActiveState::Enabled {
+                    tx_downloads: previous,
+                    ..
+                },
+                ActiveState::Enabled {
+                    tx_downloads: current,
+                    ..
+                },
+            ) = (&mut previous_state, &mut self.active_state)
+            {
+                previous.transfer_admission(current);
+            }
+            // Completed proposal work stays owned by `admission`; only downloads are cancelled.
+            std::mem::drop(previous_state);
+
             // Re-verify the transactions that were pending or valid at the previous tip.
             // This saves us the time and data needed to re-download them.
             if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
@@ -654,14 +751,15 @@ impl Service<Request> for Mempool {
                     "re-verifying mempool transactions after a chain fork"
                 );
 
-                for tx in tx_retries {
+                for (tx, source) in tx_retries {
                     // This is just an efficiency optimisation, so we don't care if queueing
                     // transaction requests fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx, None, None);
+                    let _result = tx_downloads.download_if_needed_and_verify(tx, source, None);
                 }
             }
 
             self.update_metrics();
+            self.poll_templates(cx)?;
 
             return Poll::Ready(Ok(()));
         }
@@ -677,50 +775,83 @@ impl Service<Request> for Mempool {
             let mut invalidated_ids = HashSet::<_>::new();
             let mut mined_mempool_ids = HashSet::<_>::new();
 
+            // Whether the verified set changed, so the block template is worth rebuilding.
+            //
+            // # Security
+            //
+            // This is not the same as `invalidated_ids` being non-empty: that set also reports
+            // transactions that failed verification and were never in the mempool. Rebuilding for
+            // those lets a peer pace invalid transactions to make Zebra re-select, re-construct
+            // and re-validate a whole block on every one of them, and re-signing a v5 transaction
+            // gives each attempt a fresh `UnminedTxId` that exact rejection caching won't stop.
+            let mut verified_set_changed = false;
+
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
+            // Handle best chain tip changes
+            if let Some(TipAction::Grow { block }) = tip_action {
+                tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
+                *last_seen_tip_hash = block.hash;
+
+                // Cancel downloads/verifications/storage of transactions
+                // with the same mined IDs as recently mined transactions.
+                let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                tx_downloads.cancel(&mined_ids);
+                // Admission keeps its candidates' download accounting, so finish mined ones
+                // here instead of retrying them only to find them in the chain.
+                for candidate in
+                    self.admission
+                        .grow(block.previous_block_hash, block.hash, &mined_ids)
+                {
+                    tx_downloads.finish_admission(candidate.tx.transaction.id);
+                    if let Some(response) = candidate.response {
+                        let _ = response
+                            .send(Err("transaction was mined while it was verified".into()));
+                    }
+                }
+                storage.clear_mined_dependencies(&mined_ids);
+
+                let storage::RemovedTransactionIds { mined, invalidated } =
+                    storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
+
+                // Clear any transaction rejections if they might have become valid after
+                // the new block was added to the tip.
+                storage.clear_tip_rejections();
+
+                verified_set_changed |= !mined.is_empty() || !invalidated.is_empty();
+
+                mined_mempool_ids.extend(mined);
+                invalidated_ids.extend(invalidated);
+            }
+
+            // Remove expired transactions from the mempool.
+            //
+            // Lock times never expire, because block times are strictly increasing.
+            // So we don't need to check them here.
+            if let Some(tip_height) = best_tip_height {
+                let expired_transactions = storage.remove_expired_transactions(tip_height);
+                if !expired_transactions.is_empty() {
+                    verified_set_changed = true;
+
+                    tracing::debug!(
+                        ?expired_transactions,
+                        "removed expired transactions from the mempool",
+                    );
+
+                    invalidated_ids.extend(expired_transactions);
+                }
+            }
             // Clean up completed download tasks and add to mempool if successful.
             while let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) {
                 match result {
-                    Ok(Ok((tx, spent_mempool_outpoints, expected_tip_height, rsp_tx))) => {
-                        // # Correctness:
-                        //
-                        // It's okay to use tip height here instead of the tip hash since
-                        // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
-                        // the best chain changes (which is the only way to stay at the same height), and the
-                        // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
-                        if best_tip_height == expected_tip_height {
-                            let tx_id = tx.transaction.id;
-                            let insert_result =
-                                storage.insert(tx, spent_mempool_outpoints, best_tip_height);
-
-                            tracing::trace!(
-                                ?insert_result,
-                                "got Ok(_) transaction verify, tried to store",
-                            );
-
-                            if let Ok(inserted_id) = insert_result {
-                                // Save transaction ids that we will send to peers
-                                send_to_peers_ids.insert(inserted_id);
-                            } else {
-                                invalidated_ids.insert(tx_id);
-                            }
-
-                            // Send the result to responder channel if one was provided.
-                            if let Some(rsp_tx) = rsp_tx {
-                                let _ = rsp_tx
-                                    .send(insert_result.map(|_| ()).map_err(|err| err.into()));
-                            }
-                        } else {
-                            tracing::trace!("chain grew during tx verification, retrying ..",);
-
-                            // We don't care if re-queueing the transaction request fails.
-                            let _result = tx_downloads.download_if_needed_and_verify(
-                                tx.transaction.into(),
-                                None,
-                                rsp_tx,
-                            );
-                        }
+                    // Admission retries candidates verified against another tip.
+                    Ok(Ok((tx, spent_mempool_outpoints, expected_tip, rsp_tx))) => {
+                        self.admission.push(admission::Candidate::new(
+                            tx,
+                            spent_mempool_outpoints,
+                            expected_tip.map(|(_, hash)| hash),
+                            rsp_tx,
+                        ));
                     }
                     Ok(Err(boxed_err)) => {
                         let (tx_id, error) = *boxed_err;
@@ -763,46 +894,60 @@ impl Service<Request> for Mempool {
                 };
             }
 
-            // Handle best chain tip changes
-            if let Some(TipAction::Grow { block }) = tip_action {
-                tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
-                *last_seen_tip_hash = block.hash;
+            // Apply each proposal's verdicts before polling again: later batches snapshot
+            // their ancestor packages from storage.
+            let mut retried = false;
+            while let Poll::Ready(verdicts) = self.admission.poll(cx, storage, *last_seen_tip_hash)
+            {
+                for (candidate, verdict) in verdicts {
+                    let tx_id = candidate.tx.transaction.id;
+                    let source = tx_downloads.finish_admission(tx_id);
+                    let result = match verdict {
+                        admission::Verdict::Retry => {
+                            // A changed committed parent is not an invalid transaction.
+                            tx_downloads.download_if_needed_and_verify(
+                                candidate.tx.transaction.into(),
+                                source,
+                                candidate.response,
+                            ).expect(
+                                "finishing admission reserves global and peer capacity for its immediate retry",
+                            );
+                            retried = true;
+                            continue;
+                        }
+                        admission::Verdict::Rejected(error) => Err(error),
+                        admission::Verdict::Passed => {
+                            let previous_count = storage.transaction_count();
+                            let result = storage
+                                .insert(candidate.tx, candidate.spent, best_tip_height)
+                                .map(|_| ())
+                                .map_err(BoxError::from);
+                            // On error, insertion never adds a retained entry, so any
+                            // eviction of existing entries decreases the count. No-op errors do
+                            // not invalidate an otherwise current template.
+                            verified_set_changed |=
+                                result.is_ok() || storage.transaction_count() != previous_count;
+                            result
+                        }
+                    };
 
-                // Cancel downloads/verifications/storage of transactions
-                // with the same mined IDs as recently mined transactions.
-                let mined_ids = block.transaction_hashes.iter().cloned().collect();
-                tx_downloads.cancel(&mined_ids);
-                storage.clear_mined_dependencies(&mined_ids);
-
-                let storage::RemovedTransactionIds { mined, invalidated } =
-                    storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
-
-                // Clear any transaction rejections if they might have become valid after
-                // the new block was added to the tip.
-                storage.clear_tip_rejections();
-
-                mined_mempool_ids.extend(mined);
-                invalidated_ids.extend(invalidated);
+                    if result.is_ok() {
+                        send_to_peers_ids.insert(tx_id);
+                    } else {
+                        invalidated_ids.insert(tx_id);
+                    }
+                    if let Some(response) = candidate.response {
+                        let _ = response.send(result);
+                    }
+                }
+            }
+            // Retries are queued after the download stream was drained in this poll.
+            if retried {
+                self.background_work.notify.notify_one();
             }
 
-            // Remove expired transactions from the mempool.
-            //
-            // Lock times never expire, because block times are strictly increasing.
-            // So we don't need to check them here.
-            if let Some(tip_height) = best_tip_height {
-                let expired_transactions = storage.remove_expired_transactions(tip_height);
-                // Remove transactions that are expired from the peers list
-                send_to_peers_ids =
-                    Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
-
-                if !expired_transactions.is_empty() {
-                    tracing::debug!(
-                        ?expired_transactions,
-                        "removed expired transactions from the mempool",
-                    );
-
-                    invalidated_ids.extend(expired_transactions);
-                }
+            if verified_set_changed {
+                self.block_templates.mark_changed();
             }
 
             // Send transactions that were not rejected nor expired to peers and RPC listeners.
@@ -854,6 +999,7 @@ impl Service<Request> for Mempool {
         }
 
         self.update_metrics();
+        self.poll_templates(cx)?;
 
         Poll::Ready(Ok(()))
     }
@@ -988,6 +1134,11 @@ impl Service<Request> for Mempool {
                             .map(|result| result.map_err(BoxError::from))
                             .collect();
 
+                    // Prime newly queued futures so their completions wake the queue checker.
+                    if rsp.iter().any(Result::is_ok) {
+                        self.background_work.notify.notify_one();
+                    }
+
                     // We've added transactions to the queue
                     self.update_metrics();
 
@@ -999,16 +1150,18 @@ impl Service<Request> for Mempool {
                 // enforced inside the downloader.
                 Request::QueueFromPeer { candidates, source } => {
                     trace!(req_count = ?candidates.len(), ?source, "got mempool QueueFromPeer request");
+                    let mut queued = false;
 
                     for candidate in candidates {
                         if storage.should_download_or_verify(candidate.id()).is_err() {
                             continue;
                         }
-                        let _ = tx_downloads.download_if_needed_and_verify(
-                            candidate,
-                            Some(source),
-                            None,
-                        );
+                        queued |= tx_downloads
+                            .download_if_needed_and_verify(candidate, Some(source), None)
+                            .is_ok();
+                    }
+                    if queued {
+                        self.background_work.notify.notify_one();
                     }
 
                     self.update_metrics();

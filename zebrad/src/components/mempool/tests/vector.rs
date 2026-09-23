@@ -36,7 +36,7 @@ type MockPeerSet = MockService<zn::Request, zn::Response, PanicAssertion>;
 type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
-type MockTxVerifier =
+pub(super) type MockTxVerifier =
     MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion, TransactionError>;
 
 /// A stale NU6.2 branch ID has no peer score at NU6.3 activation.
@@ -712,8 +712,11 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     Ok(())
 }
 
+/// A reset retries downloads and verification without freeing their announcing peer's slots.
 #[tokio::test(flavor = "multi_thread")]
-async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> {
+async fn mempool_reset_preserves_pending_peer_slots() -> Result<(), Report> {
+    use crate::components::mempool::downloads::MAX_INBOUND_CONCURRENCY_PER_PEER;
+
     // Use a configured Testnet where a network upgrade activates at height 2.
     //
     // The mempool resets (and cancels pending downloads) when the chain tip reaches the block
@@ -751,9 +754,6 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_1_BYTES
         .zcash_deserialize_into()
         .unwrap();
-    let block2: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_2_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
 
     // Don't commit the genesis block during setup: we commit it below so we control when the
     // mempool first sees a chain tip (it can only be enabled once there is a tip).
@@ -762,7 +762,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         mut peer_set,
         mut state_service,
         mut chain_tip_change,
-        _tx_verifier,
+        mut tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
     ) = setup(&network, u64::MAX, false).await;
@@ -786,27 +786,44 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
-    // Queue transaction from block 2 for download. Block 2 is never committed, so the
-    // transaction is never mined and the download can be retried after the reset.
-    let txid = block2.transactions[0].unmined_id();
-    let response = mempool
+    // Keep one pushed transaction in verification and the remaining peer slots in download.
+    // None are in the block that triggers the reset.
+    let source = "127.0.0.1:8233".parse().unwrap();
+    let mut transactions = network.unmined_transactions_in_blocks(2..=10);
+    let pushed = transactions
+        .next()
+        .expect("a vector transaction")
+        .transaction;
+    let txids: HashSet<_> = transactions
+        .by_ref()
+        .take(MAX_INBOUND_CONCURRENCY_PER_PEER - 1)
+        .map(|tx| tx.transaction.id)
+        .collect();
+    let extra = transactions
+        .next()
+        .expect("a further vector transaction")
+        .transaction
+        .id;
+    assert_eq!(txids.len(), MAX_INBOUND_CONCURRENCY_PER_PEER - 1);
+    mempool
         .ready()
         .await
         .unwrap()
-        .call(Request::Queue(vec![txid.into()]))
+        .call(Request::QueueFromPeer {
+            candidates: iter::once(Gossip::Tx(pushed.clone()))
+                .chain(txids.iter().copied().map(Gossip::Id))
+                .collect(),
+            source,
+        })
         .await
         .unwrap();
-    let queued_responses = match response {
-        Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
-    };
-    assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
-    assert_eq!(mempool.tx_downloads().in_flight(), 1);
-
-    // Query the mempool to make it poll chain_tip_change
-    mempool.dummy_call().await;
-
+    let verification = tx_verifier
+        .expect_request_that(|request| request.transaction.id == pushed.id)
+        .await;
+    assert_eq!(
+        mempool.tx_downloads().in_flight(),
+        MAX_INBOUND_CONCURRENCY_PER_PEER
+    );
     // Push block 1 to the state. Its next height (2) is the Overwinter activation height, so this
     // triggers a network-upgrade reset, which must cancel all pending transaction downloads.
     state_service
@@ -836,21 +853,68 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 
     // Ignore all the previous network requests.
     while let Some(_request) = peer_set.try_next_request().await {}
+    drop(verification);
 
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
 
-    // Check if download was cancelled and transaction was retried.
-    let request = peer_set
-        .try_next_request()
-        .await
-        .expect("unexpected missing mempool retry");
-
+    // Each download and the pushed verification must be retried. Hold their responses
+    // so no peer slot can be released while testing the cap.
+    let mut retried_downloads = Vec::new();
+    let mut remaining = txids;
+    for _ in 0..MAX_INBOUND_CONCURRENCY_PER_PEER - 1 {
+        let request = peer_set
+            .try_next_request()
+            .await
+            .expect("each pending download must be retried");
+        let zn::Request::TransactionsById(ids) = request.request() else {
+            panic!("unexpected network request");
+        };
+        assert_eq!(ids.len(), 1);
+        assert!(remaining.remove(ids.iter().next().unwrap()));
+        retried_downloads.push(request);
+    }
+    let _retried_verification = tx_verifier
+        .expect_request_that(|request| request.transaction.id == pushed.id)
+        .await;
     assert_eq!(
-        request.request(),
-        &zebra_network::Request::TransactionsById(iter::once(txid).collect()),
+        mempool.tx_downloads().in_flight(),
+        MAX_INBOUND_CONCURRENCY_PER_PEER
     );
-    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![extra.into()],
+            source,
+        })
+        .await
+        .unwrap();
+    assert!(
+        !mempool
+            .tx_downloads()
+            .transaction_requests()
+            .any(|(tx, _)| tx.id() == extra),
+        "a reset must not let the original peer exceed its occupied slots"
+    );
+
+    // Spare global capacity remains available to a different peer.
+    mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueFromPeer {
+            candidates: vec![extra.into()],
+            source: "127.0.0.2:8233".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    assert!(mempool
+        .tx_downloads()
+        .transaction_requests()
+        .any(|(tx, _)| tx.id() == extra));
 
     Ok(())
 }
@@ -1467,11 +1531,9 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         mut mempool_transaction_receiver,
     ) = setup(&network, u64::MAX, true).await;
     mempool.enable(&mut recent_syncs).await;
+    let mut proposals = super::admission::mock_proposals(&mut mempool);
 
-    let verified_unmined_tx = network
-        .unmined_transactions_in_blocks(1..=10)
-        .find(|tx| !tx.transaction.transaction.outputs().is_empty())
-        .expect("should have at least 1 tx with transparent outputs");
+    let verified_unmined_tx = super::admission::candidate();
 
     let unmined_tx = verified_unmined_tx.transaction.clone();
     let unmined_tx_id = unmined_tx.id;
@@ -1487,7 +1549,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     // Call mempool with an AwaitOutput request
 
     let request = Request::AwaitOutput(outpoint);
-    let await_output_response_fut = mempool.ready().await.unwrap().call(request);
+    let mut await_output_response_fut = mempool.ready().await.unwrap().call(request);
 
     // Queue the transaction with the pending output to be added to the mempool
 
@@ -1505,24 +1567,58 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         panic!("wrong response from mempool to Queued request");
     };
 
-    let result_rx = results.remove(0).expect("should pass initial checks");
+    let mut result_rx = results.remove(0).expect("should pass initial checks");
     assert!(results.is_empty(), "should have 1 result for 1 queued tx");
 
-    // Wait for post-verification steps in mempool's Downloads
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    // Note: Buffered services shouldn't be polled without being called.
-    //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
-    mempool
+    let proposal = super::admission::drive(
+        &mut mempool,
+        proposals.expect_request_that(|request| {
+            matches!(request, zebra_consensus::Request::CheckProposal(block)
+                if block.transactions.iter().any(|tx| tx.unmined_id() == unmined_tx_id))
+        }),
+    )
+    .await;
+    assert!(matches!(
+        result_rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(await_output_response_fut.as_mut().now_or_never().is_none());
+    assert!(mempool.storage().created_output(&outpoint).is_none());
+    assert!(mempool_transaction_receiver.try_recv().is_err());
+    let Response::TransactionIds(ids) = mempool
         .ready()
         .await
-        .expect("polling mempool should succeed");
-
-    tokio::time::timeout(Duration::from_secs(10), result_rx)
+        .unwrap()
+        .call(Request::TransactionIds)
         .await
-        .expect("should not time out")
-        .expect("mempool tx verification result channel should not be closed")
-        .expect("mocked verification should be successful");
+        .unwrap()
+    else {
+        panic!("transaction ids response expected");
+    };
+    assert!(!ids.contains(&unmined_tx_id));
+    let Response::Queued(mut duplicates) = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![Gossip::Id(unmined_tx_id)]))
+        .await
+        .unwrap()
+    else {
+        panic!("queue response expected");
+    };
+    assert_eq!(
+        duplicates.remove(0).unbox_mempool_error(),
+        MempoolError::AlreadyQueued
+    );
+    let zebra_consensus::Request::CheckProposal(block) = proposal.request() else {
+        panic!("proposal request expected");
+    };
+    let hash = block.hash();
+    proposal.respond(hash);
+    super::admission::drive(&mut mempool, result_rx)
+        .await
+        .expect("admission response channel remains open")
+        .expect("successful proposal is admitted");
 
     assert_eq!(
         mempool.storage().transaction_count(),
@@ -2196,7 +2292,7 @@ fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {
 }
 
 /// Create a new [`Mempool`] instance using mocked services.
-async fn setup(
+pub(super) async fn setup(
     network: &Network,
     tx_cost_limit: u64,
     should_commit_genesis_block: bool,
@@ -2235,7 +2331,7 @@ async fn setup_with_mempool_config(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, _, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
@@ -2243,7 +2339,7 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _templates, _template_requests) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -2253,6 +2349,17 @@ async fn setup_with_mempool_config(
         latest_chain_tip,
         chain_tip_change.clone(),
         misbehavior_tx,
+        super::admission::admission_read_state(state_service.clone(), network),
+        Buffer::new(
+            BoxService::new(tower::service_fn(|request| async move {
+                let zebra_consensus::Request::CheckProposal(block) = request else {
+                    panic!("the mempool only verifies block proposals");
+                };
+                Ok::<_, BoxError>(block.hash())
+            })),
+            1,
+        ),
+        None,
     );
 
     // Keep the change feed drained in the background so tests that ignore it
@@ -2462,4 +2569,208 @@ async fn verification_timeout_releases_peer_slot() {
         .as_mut()
         .download_if_needed_and_verify(Gossip::Tx(tx), Some(source), None)
         .expect("a further transaction from the same source should queue after slots are freed");
+}
+
+/// Checks that a transaction mined while its verification was finishing is dropped rather than
+/// admitted.
+///
+/// A task's success is queued in `pending` before the stream consumes it, and `cancel()` runs in
+/// between when a block arrives that mines the same transaction. Cancellation can't reach a task
+/// that has already finished, and the mined-id filter only skips the transaction recorded in
+/// `admission`, which isn't set until the stream consumes the result. So the accounting entry is
+/// removed while the success is still queued.
+///
+/// Yielding it then admits a mined transaction, and leaves `finish_admission()` with no
+/// accounting to release, where it hits its `unreachable!`: a remote peer can crash the node by
+/// submitting a transaction that is mined while it verifies.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn mined_transaction_is_dropped_rather_than_admitted() {
+    use std::collections::HashSet;
+
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+    use zebra_node_services::mempool::Gossip;
+
+    use crate::components::mempool::downloads::{
+        Downloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    };
+
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let mut state: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let mut tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+        state.clone(),
+    ));
+
+    let verified = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("a vector transaction");
+    let mined_id = verified.transaction.id.mined_id();
+
+    // The task checks the best chain and reads the tip before it verifies.
+    let state_responder = tokio::spawn(async move {
+        loop {
+            state
+                .expect_request_that(|_| true)
+                .await
+                .respond_with(|request| match request {
+                    zs::Request::Transaction(_) => zs::Response::Transaction(None),
+                    zs::Request::Tip => zs::Response::Tip(None),
+                    other => panic!("unexpected state request: {other:?}"),
+                });
+        }
+    });
+
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(verified.transaction.clone()), None, None)
+        .expect("queue the transaction");
+
+    // Let the task reach the verifier, and answer it, so its success is queued in `pending`.
+    tx_verifier
+        .expect_request_that(|_| true)
+        .await
+        .respond(transaction::MempoolResponse::from(verified));
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+
+    // A block mines the transaction before the stream consumes that success.
+    downloads.cancel(&HashSet::from([mined_id]));
+
+    let admitted = downloads.as_mut().next().now_or_never();
+
+    state_responder.abort();
+
+    assert!(
+        !matches!(admitted, Some(Some(Ok(Ok(_))))),
+        "a transaction mined while it was verifying must not be admitted: its download \
+         accounting is already gone, so admitting it panics the mempool in finish_admission()"
+    );
+    assert_eq!(
+        downloads.transaction_requests().count(),
+        0,
+        "the mined transaction's accounting should stay released"
+    );
+}
+
+/// Cancellation and a reset must preserve the retained admission's global and peer retry slots.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn cancelled_download_preserves_stale_admission_retry() {
+    use std::collections::HashSet;
+
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+
+    use crate::components::mempool::downloads::{
+        Downloads, MAX_INBOUND_CONCURRENCY, MAX_INBOUND_CONCURRENCY_PER_PEER,
+        TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    };
+
+    let peer_set =
+        tower::service_fn(|_| futures::future::pending::<Result<zn::Response, BoxError>>());
+    let state = tower::service_fn(|request| async move {
+        Ok::<_, BoxError>(match request {
+            zs::Request::Transaction(_) => zs::Response::Transaction(None),
+            zs::Request::Tip => zs::Response::Tip(None),
+            other => panic!("unexpected state request: {other:?}"),
+        })
+    });
+    let mut tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    ));
+    let verified = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("a vector transaction");
+    let source = Some("127.0.0.1:8233".parse().unwrap());
+    let (response, received) = oneshot::channel();
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(
+            Gossip::Tx(verified.transaction.clone()),
+            source,
+            Some(response),
+        )
+        .unwrap();
+    tx_verifier
+        .expect_request_that(|_| true)
+        .await
+        .respond(transaction::MempoolResponse::from(verified));
+    let (verified, _, _, response) = downloads.as_mut().next().await.unwrap().unwrap().unwrap();
+
+    let gossip = |index: usize| {
+        let mut bytes = [0xaa; 32];
+        bytes[..8].copy_from_slice(&u64::try_from(index).unwrap().to_le_bytes());
+        Gossip::Id(zebra_chain::transaction::UnminedTxId::Legacy(
+            zebra_chain::transaction::Hash(bytes),
+        ))
+    };
+    for index in 0..MAX_INBOUND_CONCURRENCY - 1 {
+        let source = source.filter(|_| index < MAX_INBOUND_CONCURRENCY_PER_PEER - 1);
+        downloads
+            .as_mut()
+            .download_if_needed_and_verify(gossip(index), source, None)
+            .unwrap();
+    }
+    // The cancelled task's handle is not drained while proposal admission is retained.
+    downloads.cancel(&HashSet::from([gossip(0).id().mined_id()]));
+    assert!(matches!(
+        downloads.as_mut().download_if_needed_and_verify(
+            gossip(MAX_INBOUND_CONCURRENCY),
+            None,
+            None,
+        ),
+        Err(MempoolError::FullQueue)
+    ));
+
+    // Reset with one admission and the other four peer slots occupied before cancellation.
+    // Only pending downloads are retried; the retained admission transfers exactly once.
+    let retries: Vec<_> = downloads
+        .transaction_requests()
+        .map(|(tx, source)| (tx.clone(), source))
+        .collect();
+    let mut replacement = Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    );
+    downloads.transfer_admission(&mut replacement);
+    downloads.cancel_all();
+    for (tx, source) in retries {
+        replacement
+            .download_if_needed_and_verify(tx, source, None)
+            .expect("reset retries exclude the transferred admission");
+    }
+    downloads = Box::pin(replacement);
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
+    downloads
+        .download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY), source, None)
+        .expect("cancellation frees exactly one global and peer slot across reset");
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 1), None, None),
+        Err(MempoolError::FullQueue)
+    ));
+
+    let source = downloads.finish_admission(verified.transaction.id);
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(verified.transaction), source, response)
+        .expect("the retained admission reserves capacity for its stale retry");
+    tx_verifier
+        .expect_request_that(|_| true)
+        .await
+        .respond(Err(TransactionError::WrongVersion));
+    assert!(timeout(Duration::from_secs(1), received)
+        .await
+        .expect("verification answers the original caller")
+        .expect("the retry preserves the response channel")
+        .is_err());
 }

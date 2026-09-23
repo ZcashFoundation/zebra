@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Apply Testnet minimum-difficulty activation to the candidate block height when constructing mining work ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).
+time: 2026-09-22T16:13:00.689736944+02:00

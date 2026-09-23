@@ -434,7 +434,7 @@ fn setup(
         ChainTipSender::new(None, network);
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _templates, _template_requests) = Mempool::new(
         network,
         &Config {
             tx_cost_limit: 160_000_000,
@@ -447,6 +447,23 @@ fn setup(
         latest_chain_tip,
         chain_tip_change,
         misbehavior_tx,
+        Buffer::new(
+            BoxService::new(tower::service_fn(|_| async {
+                Err::<zs::ReadResponse, crate::BoxError>(
+                    "no proposal state in storage-only tests".into(),
+                )
+            })),
+            1,
+        ),
+        Buffer::new(
+            BoxService::new(tower::service_fn(|_| async {
+                Err::<block::Hash, crate::BoxError>(
+                    "no proposal verification in storage-only tests".into(),
+                )
+            })),
+            1,
+        ),
+        None,
     );
 
     let mut transaction_receiver = mempool_transaction_subscriber.subscribe();
