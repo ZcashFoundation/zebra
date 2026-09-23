@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: 'The checkpoint verifier now resets its progress to the state tip only when a block it accepted fails to commit to the state. It used to reset on any error, including rejections of side-chain, duplicate, or invalid blocks, which could rewind it below the last verified checkpoint while a checkpoint range was still committing and stall verification until the skipped blocks were submitted again ([#11385](https://github.com/ZcashFoundation/zebra/pull/11385)).'
+time: 2026-09-23T12:00:01.000000000Z
