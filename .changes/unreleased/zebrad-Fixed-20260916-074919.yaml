@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Build `librocksdb-sys` with bindgen's `runtime` feature, so libclang loads correctly when more than one bindgen version is resolved ([#11444](https://github.com/ZcashFoundation/zebra/pull/11444)).
+time: 2026-09-16T07:49:19.674938949-04:00

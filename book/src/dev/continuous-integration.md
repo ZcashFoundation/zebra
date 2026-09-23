@@ -63,7 +63,7 @@ Two independent hold checks, both required by the ruleset:
   write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
 
 The release PR passes a freeze through Merge Freeze's **Unblock 1 pull request**
-action; the `A-release` label controls Zebra's release checks but does not bypass a
+action; the `release` label controls Zebra's release checks but does not bypass a
 freeze. That action needs the project's freeze method to be _Push a status update to
 all PRs_, which is the method this installation uses.
 

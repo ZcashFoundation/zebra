@@ -300,6 +300,7 @@ profiles are used on GCP VMs with `NEXTEST_FILTER` selecting specific tests.
 Weekly runs include:
 
 - Full Mainnet synchronization
+- Go lightwalletd cached-state tests (`lwd-sync-update`, `lwd-rpc-send-tx`, `lwd-grpc-wallet`), which also run in manual runs and on PRs labeled `run-stateful-tests`, but not on `main` pushes
 - Extended integration suites
 - Resource cleanup
 
