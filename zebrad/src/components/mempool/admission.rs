@@ -39,6 +39,13 @@ use super::{
 /// Matches zcashd's `DEFAULT_ANCESTOR_LIMIT`; blocks may contain larger packages.
 pub(super) const MAX_PACKAGE_COUNT: usize = 100;
 
+/// Room left in a batch for the admission proposal's coinbase: a transparent payout to the
+/// built-in validation address, plus any funding stream outputs.
+pub(super) const COINBASE_RESERVE_BYTES: usize = 1_000;
+
+/// Signature operations left in a batch for the admission proposal's coinbase.
+pub(super) const COINBASE_RESERVE_SIGOPS: u32 = 20;
+
 /// A deterministic failure of the bounded, mandatory transaction package.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -135,18 +142,7 @@ impl Admission {
         verifier: BlockVerifier,
         split_width: usize,
     ) -> Self {
-        let miner_params = MinerParams::new(
-            &network,
-            mining::Config {
-                miner_address: Some(
-                    default_miner_address(network.kind(), &MinerAddressType::Transparent)
-                        .parse()
-                        .expect("the built-in validation address is valid"),
-                ),
-                ..Default::default()
-            },
-        )
-        .expect("the transparent validation payout matches the network");
+        let miner_params = validation_miner_params(&network);
         Self {
             network,
             read_state,
@@ -312,7 +308,7 @@ impl Admission {
         parent: block::Hash,
         retries: &mut Vec<(Candidate, Verdict)>,
     ) -> Vec<Candidate> {
-        let mut batch = Batch::default();
+        let mut batch = Batch::new(&self.network);
         let mut candidates = Vec::new();
         let mut deferred = Vec::new();
         for candidate in queue {
@@ -394,28 +390,47 @@ enum Fit {
 }
 
 /// The union of candidate packages that fits in one block without conflicting spends.
-#[derive(Default)]
 struct Batch {
     /// Mempool ancestors in topological order, witnessed for staleness and rejection expiry.
     ancestors: Vec<UnminedTxId>,
     included: HashSet<Hash>,
     spends: HashSet<Spend>,
+    /// Block bytes used, starting with the header, transaction count and coinbase reserve.
     bytes: usize,
+    /// Block sigops used, starting with the coinbase reserve.
     sigops: u32,
 }
 
 impl Batch {
+    fn new(network: &Network) -> Self {
+        Self {
+            ancestors: Vec::new(),
+            included: HashSet::new(),
+            spends: HashSet::new(),
+            // A CompactSize transaction count takes at most 5 bytes for any block-sized count.
+            bytes: block::Header::serialized_size(network) + 5 + COINBASE_RESERVE_BYTES,
+            sigops: COINBASE_RESERVE_SIGOPS,
+        }
+    }
+
+    /// Whether these block totals leave room for the header and coinbase reserve.
+    ///
+    /// The reserve over-estimates the coinbase, so the first candidate is only held to its own
+    /// package limits, and its proposal decides whether the real block fits. A batch always
+    /// starts.
+    fn fits(&self, bytes: usize, sigops: u32) -> bool {
+        self.included.is_empty() || check_limits(bytes, sigops).is_ok()
+    }
+
     /// Add a candidate and its missing ancestors, leaving the batch unchanged unless it fits.
     fn add(&mut self, storage: &Storage, candidate: &Candidate) -> Fit {
         let tx = &candidate.tx;
         // Skip the ancestor walk when the candidate alone cannot fit.
         if self.included.contains(&tx.transaction.id.mined_id())
-            || (!self.included.is_empty()
-                && check_limits(
-                    self.bytes.saturating_add(tx.transaction.size),
-                    self.sigops.saturating_add(tx.block_sigop_count()),
-                )
-                .is_err())
+            || !self.fits(
+                self.bytes.saturating_add(tx.transaction.size),
+                self.sigops.saturating_add(tx.block_sigop_count()),
+            )
         {
             return Fit::Deferred;
         }
@@ -443,7 +458,7 @@ impl Batch {
             bytes = bytes.saturating_add(tx.transaction.size);
             sigops = sigops.saturating_add(tx.block_sigop_count());
         }
-        if check_limits(bytes, sigops).is_err() {
+        if !self.fits(bytes, sigops) {
             return Fit::Deferred;
         }
         self.spends.extend(spends);
@@ -467,6 +482,22 @@ impl Batch {
             .chain(candidates.iter().map(|candidate| candidate.tx.clone()))
             .collect()
     }
+}
+
+/// The transparent payout used by every admission proposal, even on non-mining nodes.
+pub(super) fn validation_miner_params(network: &Network) -> MinerParams {
+    MinerParams::new(
+        network,
+        mining::Config {
+            miner_address: Some(
+                default_miner_address(network.kind(), &MinerAddressType::Transparent)
+                    .parse()
+                    .expect("the built-in validation address is valid"),
+            ),
+            ..Default::default()
+        },
+    )
+    .expect("the transparent validation payout matches the network")
 }
 
 /// Only cache known transaction/package failures. In particular, `ValidateProposal` also wraps
