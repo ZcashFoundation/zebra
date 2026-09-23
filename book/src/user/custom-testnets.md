@@ -5,6 +5,7 @@ Custom Testnets in Zebra enable testing consensus rule changes on a public, conf
 Zebra's Testnet can be configured with custom:
 
 - Network upgrade activation heights,
+- NSM reissuance heights,
 - Network names,
 - Network magics,
 - Slow start intervals,
@@ -16,6 +17,11 @@ It's also possible to disable Proof-of-Work validation by setting `disable_pow` 
 Configuring any of those Testnet parameters except the network name with non-default values will result in an incompatible custom Testnet. Incompatible Testnets will fail to successfully complete peer handshakes with one another, or could provide one another with invalid blocks or invalid mempool transactions. Peer node connections that consistently provide invalid blocks or mempool transactions should be considered misbehaving peer connections and dropped.
 
 All of these parameters are optional, if they are all omitted or set to their default values, Zebra will run on the default public Testnet.
+
+To test NU7 reserve reissuance, set `network.testnet_parameters.nsm_reissuance_height`
+and configure a NU7 activation height. See the [Regtest example](regtest.md#testing-nu7-reissuance).
+Reissuance is disabled when the setting is omitted; public Mainnet and Testnet heights
+remain unset.
 
 ## Usage
 

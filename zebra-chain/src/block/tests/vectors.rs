@@ -18,6 +18,7 @@ use crate::{
     },
     transaction::{LockTime, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 use super::generate; // TODO: this should be rewritten as strategies
@@ -110,7 +111,12 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
 
     assert!(
         block
-            .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero(), &Network::Mainnet)
+            .chain_value_pool_change(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &Network::Mainnet,
+                ValueBalance::zero()
+            )
             .is_err(),
         "block-level aggregation should propagate transaction value-balance errors"
     );
@@ -197,7 +203,12 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
         (fee * 6 / 10).try_into().expect("valid amount");
 
     let pool_change = block
-        .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero(), &network)
+        .chain_value_pool_change(
+            &utxos,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )
         .expect("chain value pool change should be calculable");
 
     assert_eq!(pool_change.nsm_reserve_amount(), expected_reserve_change);
@@ -218,11 +229,173 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
 
     assert_eq!(
         block
-            .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero(), &pre_nu7)
+            .chain_value_pool_change(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &pre_nu7,
+                ValueBalance::zero()
+            )
             .expect("chain value pool change should be calculable")
             .nsm_reserve_amount(),
         Amount::<NegativeAllowed>::zero(),
     );
+}
+
+/// Seed, reissue, fund and roll back using the same contextual accounting used by state commits.
+#[test]
+fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::{
+        amount::NegativeAllowed,
+        parameters::{
+            subsidy::{
+                block_subsidy, cumulative_scheduled_issuance, funding_stream_address,
+                funding_stream_values, scheduled_block_subsidy, FundingStreamReceiver,
+                SubsidyError,
+            },
+            testnet::{
+                ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams, Parameters,
+            },
+        },
+        value_balance::ValueBalanceError,
+    };
+    use std::ops::Neg;
+
+    let height = Height(1_000);
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(height.0),
+            ..Default::default()
+        })?
+        .with_nsm_reissuance_height(Some(height))
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(height..Height(1_010)),
+            recipients: Some(vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ]),
+        }])
+        .to_network()?;
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000u64)?;
+    let before_seed = ValueBalance::from_transparent_amount(
+        (cumulative_scheduled_issuance(Height(998), &network)? - reserve)?,
+    );
+    let header: Header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    let make_block = |height, outputs| Block {
+        header: Arc::new(header),
+        transactions: vec![Arc::new(Transaction::test_v1(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            outputs,
+            LockTime::unlocked(),
+        ))],
+    };
+    let before_activation = make_block(
+        Height(999),
+        vec![transparent::Output::new(
+            scheduled_block_subsidy(Height(999), &network)?,
+            transparent::Script::new(&[]),
+        )],
+    );
+    let seed_change = before_activation.chain_value_pool_change(
+        &HashMap::new(),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        before_seed,
+    )?;
+    let seeded = before_seed.add_chain_value_pool_change(seed_change)?;
+    assert_eq!(
+        seeded.nsm_reserve_amount(),
+        reserve,
+        "zero fees must still seed historical underclaims"
+    );
+
+    // An old database record has no reserve bytes. Its activation-boundary read must recover the
+    // exact same seed, while repeated normalization must not credit it twice.
+    let legacy = ValueBalance::from_bytes(&seeded.to_bytes()[..48])?;
+    assert_eq!(legacy.with_nsm_reserve_seed(Height(999), &network)?, seeded);
+    assert_eq!(seeded.with_nsm_reserve_seed(Height(999), &network)?, seeded);
+
+    let total = block_subsidy(height, &network, reserve)?;
+    assert_eq!(
+        (total - scheduled_block_subsidy(height, &network)?)?.zatoshis(),
+        1_375
+    );
+    let funding = funding_stream_values(height, &network, total)?;
+    let grant = funding[&FundingStreamReceiver::MajorGrants];
+    let deferred = funding[&FundingStreamReceiver::Deferred];
+    assert_eq!(grant.zatoshis(), total.zatoshis() * 8 / 100);
+    assert_eq!(deferred.zatoshis(), total.zatoshis() * 12 / 100);
+    let grant_script = funding_stream_address(height, &network, FundingStreamReceiver::MajorGrants)
+        .expect("configured funding address")
+        .script();
+    let miner = (total - grant - deferred)?;
+    let block = make_block(
+        height,
+        vec![
+            transparent::Output::new(miner, transparent::Script::new(&[])),
+            transparent::Output::new(grant, grant_script.clone()),
+        ],
+    );
+    let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
+    let change =
+        block.chain_value_pool_change(&HashMap::new(), deferred_change, &network, seeded)?;
+    assert_eq!(change.nsm_reserve_amount().zatoshis(), -1_375);
+    let after = seeded.add_chain_value_pool_change(change)?;
+    assert_eq!(after.nsm_reserve_amount().zatoshis(), 9_999_998_625);
+    assert_eq!(
+        after.total()?,
+        cumulative_scheduled_issuance(height, &network)?
+    );
+    assert_eq!(ValueBalance::from_bytes(&after.to_bytes())?, after);
+
+    // Keeping the total correct but paying funding from scheduled issuance alone is invalid.
+    let scheduled_grant =
+        funding_stream_values(height, &network, scheduled_block_subsidy(height, &network)?)?
+            [&FundingStreamReceiver::MajorGrants];
+    let underfunded = make_block(
+        height,
+        vec![
+            transparent::Output::new(
+                (total - scheduled_grant - deferred)?,
+                transparent::Script::new(&[]),
+            ),
+            transparent::Output::new(scheduled_grant, grant_script),
+        ],
+    );
+    assert!(matches!(
+        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, seeded),
+        Err(ValueBalanceError::Subsidy(
+            SubsidyError::FundingStreamNotFound
+        )),
+    ));
+    let mut other_parent = seeded;
+    other_parent.set_nsm_reserve_amount((reserve * 2)?);
+    assert!(block
+        .chain_value_pool_change(&HashMap::new(), deferred_change, &network, other_parent)
+        .is_err());
+
+    // Both a reissuance reorg and an activation-crossing reorg restore the exact prior pools.
+    assert_eq!(after.add_chain_value_pool_change(change.neg())?, seeded);
+    assert_eq!(
+        seeded.add_chain_value_pool_change(seed_change.neg())?,
+        before_seed
+    );
+    Ok(())
 }
 
 #[test]

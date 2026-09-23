@@ -239,17 +239,8 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu6_2, ConsensusBranchId(0x5437f330)),
     // The NU6.3 (Ironwood) consensus branch id, matching zcash_protocol's `BranchId::Nu6_3`.
     (Nu6_3, ConsensusBranchId(0x37a5165b)),
-    // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in
-    // librustzcash. The NU7 deployment ZIP (`zcash/zips#1363`) assigns that CONSENSUS_BRANCH_ID,
-    // but `zcash_protocol` still uses its own 0xffffffff placeholder, behind
-    // `zcash_unstable = "nu7"`, which Zebra does not enable. Until both agree, every transaction
-    // at a NU7 height fails sighash precomputation with `InvalidConsensusBranchId`, so the
-    // placeholder below is only reachable from tests.
-    #[cfg(any(test, feature = "zebra-test"))]
-    (Nu7, ConsensusBranchId(0xfffffffe)),
-    // Distinct test placeholder so it never collides with the `Nu7` placeholder above
-    // (which is gated on `test`/`zebra-test`, independent of `zfuture`); a collision would break
-    // the `branch_id_bijective` test under `--cfg zcash_unstable="zfuture"`.
+    // ZIP 259, matching zcash_protocol's `BranchId::Nu7`.
+    (Nu7, ConsensusBranchId(0x77190ad9)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xfffffffd)),
 ];
@@ -601,7 +592,6 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_2 => Self::Nu6_2,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_3 => Self::Nu6_3,
-            #[cfg(zcash_unstable = "nu7")]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zcash_protocol::consensus::NetworkUpgrade::ZFuture => Self::ZFuture,

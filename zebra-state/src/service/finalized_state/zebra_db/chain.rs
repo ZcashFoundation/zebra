@@ -17,8 +17,14 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
-    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
+    amount::{Amount, NonNegative},
+    block::Height,
+    block_info::BlockInfo,
+    history_tree::HistoryTree,
+    parameters::NetworkUpgrade,
+    serialization::ZcashSerialize as _,
+    transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -175,9 +181,29 @@ impl ZebraDb {
     pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
         let chain_value_pools_cf = self.chain_value_pools_cf();
 
-        chain_value_pools_cf
+        let value_pools = chain_value_pools_cf
             .zs_get(&())
-            .unwrap_or_else(ValueBalance::zero)
+            .unwrap_or_else(ValueBalance::zero);
+        match self.finalized_tip_height() {
+            Some(height) => value_pools
+                .with_nsm_reserve_seed(height, &self.network())
+                .expect("finalized issued supply cannot exceed scheduled issuance"),
+            None => value_pools,
+        }
+    }
+
+    /// Omits the derived historical NSM seed until NU7, preserving the v28.0 disk layout.
+    ///
+    /// Readers reconstruct the seed at activation minus one from the stored issued pools.
+    pub(crate) fn value_pool_for_disk(
+        &self,
+        height: Height,
+        mut value_pool: ValueBalance<NonNegative>,
+    ) -> ValueBalance<NonNegative> {
+        if NetworkUpgrade::current(&self.network(), height) < NetworkUpgrade::Nu7 {
+            value_pool.set_nsm_reserve_amount(Amount::zero());
+        }
+        value_pool
     }
 
     /// Returns the stored `BlockInfo` for the given block.
@@ -186,7 +212,13 @@ impl ZebraDb {
 
         let block_info_cf = self.block_info_cf();
 
-        block_info_cf.zs_get(&height)
+        let info = block_info_cf.zs_get(&height)?;
+        Some(BlockInfo::new(
+            info.value_pools()
+                .with_nsm_reserve_seed(height, &self.network())
+                .expect("finalized issued supply cannot exceed scheduled issuance"),
+            info.size(),
+        ))
     }
 }
 
@@ -259,6 +291,7 @@ impl DiskWriteBatch {
                 &utxos_spent_by_block,
                 finalized.deferred_pool_balance_change,
                 &db.network(),
+                value_pool,
             )
             .map_err(|value_balance_error| {
                 ValidateContextError::CalculateBlockChainValueChange {
@@ -281,6 +314,7 @@ impl DiskWriteBatch {
 
         // Update value pool metrics for observability (ZIP-209 compliance monitoring)
         value_pool_metrics(&new_value_pool);
+        let new_value_pool = db.value_pool_for_disk(finalized.height, new_value_pool);
 
         let _ = db
             .chain_value_pools_cf()

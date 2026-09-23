@@ -4,10 +4,10 @@
 
 use std::collections::HashMap;
 
+use crate::amount::Amount;
+use crate::parameters::NetworkUpgrade::*;
+use crate::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 use color_eyre::Report;
-use zebra_chain::amount::Amount;
-use zebra_chain::parameters::NetworkUpgrade::*;
-use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 
 use super::*;
 
@@ -87,7 +87,12 @@ fn test_funding_stream_values() -> Result<(), Report> {
         nu6_1_fund_height_range.end,
         nu6_1_fund_height_range.end.next().unwrap(),
     ] {
-        let fsv = funding_stream_values(height, network, block_subsidy(height, network)?).unwrap();
+        let fsv = funding_stream_values(
+            height,
+            network,
+            block_subsidy(height, network, Amount::zero())?,
+        )
+        .unwrap();
 
         if height < canopy_activation_height {
             assert!(fsv.is_empty());
@@ -160,4 +165,109 @@ fn test_funding_stream_ranges_dont_overlap() -> Result<(), Report> {
         }
     }
     Ok(())
+}
+
+#[test]
+fn cumulative_issuance_matches_the_schedule() -> Result<(), Report> {
+    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
+
+    assert_eq!(
+        cumulative_scheduled_issuance(Height(2_726_399), &Network::Mainnet)?.zatoshis(),
+        15_750_000 * 100_000_000i64,
+    );
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(20))
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(130),
+            nu7: Some(250),
+            ..Default::default()
+        })?
+        .with_halving_interval(48)?
+        .with_funding_streams(Vec::new())
+        .to_network()?;
+    let mut sum = Amount::zero();
+    for height in 0..900 {
+        sum = (sum + scheduled_block_subsidy(Height(height), &network)?)?;
+        assert_eq!(
+            cumulative_scheduled_issuance(Height(height), &network)?,
+            sum
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn cumulative_issuance_stops_at_the_halving_limit_during_slow_start() -> Result<(), Report> {
+    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
+
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(200))
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(200),
+            nu7: Some(201),
+            ..Default::default()
+        })?
+        .with_halving_interval(1)?
+        .with_funding_streams(Vec::new())
+        .to_network()?;
+    let scheduled = (0..=200)
+        .map(|height| scheduled_block_subsidy(Height(height), &network))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum::<Result<Amount<NonNegative>, _>>()?;
+    assert_eq!(scheduled.zatoshis(), 83_937_500_000);
+    assert_eq!(
+        cumulative_scheduled_issuance(Height(200), &network)?,
+        scheduled
+    );
+    Ok(())
+}
+
+#[test]
+fn reissuance_height_requires_nu7_and_a_valid_height() {
+    use crate::parameters::{
+        network::error::ParametersBuilderError,
+        testnet::{ConfiguredActivationHeights, Parameters},
+    };
+
+    let builder = Parameters::build().with_funding_streams(Vec::new());
+    assert_eq!(
+        builder
+            .with_nsm_reissuance_height(Some(Height(1)))
+            .to_network()
+            .unwrap_err(),
+        ParametersBuilderError::InvalidNsmReissuanceHeight,
+    );
+    for height in [Height(0), Height(99), Height(Height::MAX.0 + 1)] {
+        let builder = Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                nu7: Some(100),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_nsm_reissuance_height(Some(height))
+            .with_funding_streams(Vec::new());
+        assert_eq!(
+            builder.to_network().unwrap_err(),
+            ParametersBuilderError::InvalidNsmReissuanceHeight
+        );
+    }
+}
+
+#[test]
+fn halving_interval_validation_bounds_nu7_arithmetic() {
+    use crate::parameters::{network::error::ParametersBuilderError, testnet::Parameters};
+
+    let maximum = HeightDiff::MAX / 6;
+    for interval in [0, maximum + 1] {
+        assert_eq!(
+            Parameters::build()
+                .with_halving_interval(interval)
+                .unwrap_err(),
+            ParametersBuilderError::InvalidHalvingInterval,
+        );
+    }
+    for interval in [1, maximum] {
+        assert!(Parameters::build().with_halving_interval(interval).is_ok());
+    }
 }

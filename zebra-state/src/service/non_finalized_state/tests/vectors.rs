@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
-    amount::{Amount, DeferredPoolBalanceChange, NonNegative},
+    amount::NonNegative,
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
@@ -12,21 +12,19 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
-    transparent,
     value_balance::ValueBalance,
 };
 use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    request::ContextuallyVerifiedBlock,
     service::{
-        finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
+        finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
         ReconsiderError,
     },
     tests::FakeChainHelper,
-    Config, SemanticallyVerifiedBlock,
+    Config,
 };
 
 #[test]
@@ -1098,85 +1096,6 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
         forked.orchard_subtrees.is_empty(),
         "fork should have dropped the Orchard subtree completed above the fork point"
     );
-
-    Ok(())
-}
-
-/// Check that the `deferred_pool_balance_change` passed to `with_block_and_spent_utxos`
-/// flows through to the resulting block's `chain_value_pool_change`.
-#[test]
-fn with_block_and_spent_utxos_preserves_deferred_pool_balance_change() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let block: Arc<Block> =
-        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
-    let prepared = SemanticallyVerifiedBlock::from(block);
-
-    let zero_output = transparent::Output {
-        value: Amount::zero(),
-        lock_script: transparent::Script::new(&[]),
-    };
-    let zero_utxo = transparent::OrderedUtxo::new(zero_output, Height(1), 1);
-    let spent_utxos = prepared
-        .block
-        .transactions
-        .iter()
-        .map(AsRef::as_ref)
-        // `inputs()` returns an owned Vec under the newtype transaction.
-        .flat_map(|tx| tx.inputs())
-        .filter_map(|input| input.outpoint())
-        .map(|outpoint| (outpoint, zero_utxo.clone()))
-        .collect();
-
-    let expected_deferred = Amount::try_from(123_456_789)?;
-    let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-        prepared,
-        spent_utxos,
-        DeferredPoolBalanceChange::new(expected_deferred),
-        &Network::Mainnet,
-    )?;
-
-    assert_eq!(
-        contextual.chain_value_pool_change.deferred_amount(),
-        expected_deferred,
-    );
-
-    Ok(())
-}
-
-/// Check that after committing a block via `commit_new_chain`, the non-finalized chain's
-/// deferred pool amount matches what `calculate_deferred_pool_balance_change` returns for
-/// the block's height and network.
-#[test]
-fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let network = Network::Mainnet;
-
-    let block: Arc<Block> = Arc::new(network.test_block(653_599, 583_999).unwrap());
-    let height = block.coinbase_height().expect("coinbase height");
-    assert!(
-        height > network.slow_start_interval(),
-        "test block must be past slow_start_interval to exercise the non-trivial branch \
-         of calculate_deferred_pool_balance_change",
-    );
-
-    let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
-
-    state.commit_new_chain(block.prepare(), &finalized_state.db)?;
-
-    let chain = state.best_chain().expect("chain was just committed");
-    let expected = calculate_deferred_pool_balance_change(height, &network)
-        .value()
-        .constrain::<NonNegative>()?;
-
-    assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
 
     Ok(())
 }

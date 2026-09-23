@@ -194,3 +194,41 @@ fn should_allow_unshielded_coinbase_spends_rejected_on_testnet() {
         "unexpected error: {err}"
     );
 }
+
+/// A configured reissuance height must survive serialization and reject invalid boundaries.
+#[test]
+fn nsm_reissuance_configuration_is_validated() {
+    let _init_guard = zebra_test::init();
+    let configuration = |height| {
+        format!(
+            "network = 'Regtest'\n\
+             [testnet_parameters]\n\
+             nsm_reissuance_height = {height}\n\
+             [testnet_parameters.activation_heights]\n\
+             NU7 = 9\n"
+        )
+    };
+    let config: Config = toml::from_str(&configuration(12)).unwrap();
+    let config: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    let reserve = zebra_chain::amount::Amount::try_from(100_000_000).unwrap();
+    assert_eq!(
+        zebra_chain::parameters::subsidy::nsm_subsidy(Height(11), &config.network, reserve)
+            .unwrap()
+            .zatoshis(),
+        0,
+    );
+    assert!(
+        zebra_chain::parameters::subsidy::nsm_subsidy(Height(12), &config.network, reserve)
+            .unwrap()
+            .zatoshis()
+            > 0
+    );
+
+    for height in [0, 8, u32::MAX] {
+        assert!(toml::from_str::<Config>(&configuration(height)).is_err());
+    }
+    assert!(toml::from_str::<Config>(
+        "network = 'Regtest'\n[testnet_parameters]\nnsm_reissuance_height = 12\n"
+    )
+    .is_err());
+}
