@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Configured Testnets with a different temporary Orchard-disabling height cannot use the public network's default initial peers.
+time: 2026-09-24T01:49:28.183344818+02:00

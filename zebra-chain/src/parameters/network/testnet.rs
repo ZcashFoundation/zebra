@@ -17,8 +17,8 @@ use crate::{
                 BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
                 POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
             },
-            funding_stream_address_period, FundingStreamReceiver, FundingStreamRecipient,
-            FundingStreams,
+            funding_stream_address_period, height_for_halving, FundingStreamReceiver,
+            FundingStreamRecipient, FundingStreams, ParameterSubsidy,
         },
         Network, NetworkKind, NetworkUpgrade,
     },
@@ -725,8 +725,11 @@ impl ParametersBuilder {
     /// height ranges by repeating the recipients that have been configured.
     ///
     /// This should be called after configuring the desired network upgrade activation heights.
-    pub fn extend_funding_streams(mut self) -> Self {
+    /// Returns an error if the first halving height is unsupported, or configured funding
+    /// streams would have a zero address-change interval.
+    pub fn extend_funding_streams(mut self) -> Result<Self, ParametersBuilderError> {
         let network = self.to_network_unchecked();
+        self.validate_halving_interval(&network)?;
 
         for funding_streams in &mut self.funding_streams {
             funding_streams.extend_recipient_addresses(
@@ -737,7 +740,7 @@ impl ParametersBuilder {
             );
         }
 
-        self
+        Ok(self)
     }
 
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
@@ -772,8 +775,9 @@ impl ParametersBuilder {
 
     /// Sets the pre- and post-Blossom halving intervals for the [`Parameters`] being built.
     ///
-    /// Returns an error if the interval is nonpositive, exceeds [`HeightDiff::MAX`] divided
-    /// by six (which would overflow the post-NU7 interval), or funding streams already lock it.
+    /// Returns an error if the interval is nonpositive, exceeds [`Height::MAX`], or funding
+    /// streams already lock it. The first halving height and funding stream address period
+    /// are validated by [`Self::to_network`] and [`Self::extend_funding_streams`].
     pub fn with_halving_interval(
         mut self,
         pre_blossom_halving_interval: HeightDiff,
@@ -781,7 +785,9 @@ impl ParametersBuilder {
         if self.should_lock_funding_stream_address_period {
             return Err(ParametersBuilderError::HalvingIntervalAfterFundingStreams);
         }
-        if pre_blossom_halving_interval <= 0 || pre_blossom_halving_interval > HeightDiff::MAX / 6 {
+        if pre_blossom_halving_interval <= 0
+            || pre_blossom_halving_interval > HeightDiff::from(Height::MAX.0)
+        {
             return Err(ParametersBuilderError::InvalidHalvingInterval);
         }
 
@@ -876,6 +882,16 @@ impl ParametersBuilder {
         Ok(())
     }
 
+    fn validate_halving_interval(&self, network: &Network) -> Result<(), ParametersBuilderError> {
+        if height_for_halving(1, network).is_none()
+            || (!self.funding_streams.is_empty()
+                && network.funding_stream_address_change_interval() == 0)
+        {
+            return Err(ParametersBuilderError::InvalidHalvingInterval);
+        }
+        Ok(())
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
@@ -925,6 +941,7 @@ impl ParametersBuilder {
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
         self.validate_nsm_reissuance_height()?;
         let network = self.to_network_unchecked();
+        self.validate_halving_interval(&network)?;
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
         for fs in &self.funding_streams {
@@ -960,7 +977,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints: _,
-            temporary_orchard_disabling_soft_fork_height: _,
+            temporary_orchard_disabling_soft_fork_height,
             nsm_reissuance_height,
         } = Self::default();
 
@@ -976,6 +993,8 @@ impl ParametersBuilder {
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
             && self.lockbox_disbursements == lockbox_disbursements
+            && self.temporary_orchard_disabling_soft_fork_height
+                == temporary_orchard_disabling_soft_fork_height
             && self.nsm_reissuance_height == nsm_reissuance_height
     }
 }
@@ -1104,7 +1123,7 @@ impl Parameters {
             .with_checkpoints(checkpoints.unwrap_or_default())?;
 
         if Some(true) == extend_funding_stream_addresses_as_required {
-            parameters = parameters.extend_funding_streams();
+            parameters = parameters.extend_funding_streams()?;
         }
         parameters.validate_nsm_reissuance_height()?;
 

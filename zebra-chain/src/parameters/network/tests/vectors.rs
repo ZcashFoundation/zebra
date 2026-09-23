@@ -769,3 +769,19 @@ fn temporary_orchard_disabling_soft_fork_heights() {
     );
     assert!(!disabled.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
 }
+
+#[test]
+fn public_testnet_peers_require_matching_orchard_disable_height() {
+    let builder = testnet::Parameters::build();
+    assert!(builder.is_compatible_with_default_parameters());
+    let public_height = Network::new_default_testnet()
+        .temporary_orchard_disabling_soft_fork_height()
+        .unwrap();
+    assert!(!builder
+        .clone()
+        .with_temporary_orchard_disabling_soft_fork_height(public_height.next().unwrap())
+        .is_compatible_with_default_parameters());
+    assert!(!builder
+        .disable_temporary_orchard_disabling_soft_fork()
+        .is_compatible_with_default_parameters());
+}

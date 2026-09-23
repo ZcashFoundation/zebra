@@ -742,6 +742,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         })
         .expect("activation heights are valid")
         .extend_funding_streams()
+        .expect("halving height and funding stream address interval are valid")
         .to_network()
         .expect("configured network is valid");
 
@@ -886,6 +887,7 @@ async fn mempool_reset_keeps_active_state_when_sync_status_falls_behind() -> Res
         })
         .expect("activation heights are valid")
         .extend_funding_streams()
+        .expect("halving height and funding stream address interval are valid")
         .to_network()
         .expect("configured network is valid");
 
