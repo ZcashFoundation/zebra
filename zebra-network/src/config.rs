@@ -607,7 +607,10 @@ struct DTestnetParameters {
     nsm_reissuance_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    /// Omission retains the default streams; an explicitly empty list disables them.
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Must yield a supported first halving height; configured funding streams also need
+    /// a nonzero address-change interval.
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     #[serde(default)]
@@ -980,6 +983,7 @@ where
     }
 
     // Set configured funding streams after setting any parameters that affect the funding stream address period.
+    let funding_streams_specified = funding_streams.is_some();
     let mut funding_streams_vec = funding_streams.unwrap_or_default();
 
     if let Some(funding_streams) = post_nu6_funding_streams {
@@ -990,7 +994,7 @@ where
         funding_streams_vec.insert(0, funding_streams);
     }
 
-    if !funding_streams_vec.is_empty() {
+    if funding_streams_specified || !funding_streams_vec.is_empty() {
         params_builder = params_builder.with_funding_streams(funding_streams_vec);
     }
 
@@ -1003,7 +1007,9 @@ where
         .map_err(de::Error::custom)?;
 
     if let Some(true) = extend_funding_stream_addresses_as_required {
-        params_builder = params_builder.extend_funding_streams();
+        params_builder = params_builder
+            .extend_funding_streams()
+            .map_err(de::Error::custom)?;
     }
 
     // Retain the default soft-fork activation height unless one is configured.

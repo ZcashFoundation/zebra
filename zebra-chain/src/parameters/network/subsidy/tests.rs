@@ -255,11 +255,15 @@ fn reissuance_height_requires_nu7_and_a_valid_height() {
 }
 
 #[test]
-fn halving_interval_validation_bounds_nu7_arithmetic() {
+fn halving_intervals_reject_unserializable_and_unsupported_heights() {
     use crate::parameters::{network::error::ParametersBuilderError, testnet::Parameters};
 
-    let maximum = HeightDiff::MAX / 6;
-    for interval in [0, maximum + 1] {
+    for interval in [
+        0,
+        HeightDiff::from(Height::MAX.0) + 1,
+        HeightDiff::from(u32::MAX) + 1,
+        HeightDiff::MAX / 6 + 1,
+    ] {
         assert_eq!(
             Parameters::build()
                 .with_halving_interval(interval)
@@ -267,7 +271,178 @@ fn halving_interval_validation_bounds_nu7_arithmetic() {
             ParametersBuilderError::InvalidHalvingInterval,
         );
     }
-    for interval in [1, maximum] {
-        assert!(Parameters::build().with_halving_interval(interval).is_ok());
+}
+
+#[test]
+fn funding_streams_require_a_nonzero_address_period() -> Result<(), Report> {
+    use crate::parameters::{network::error::ParametersBuilderError, testnet::Parameters};
+
+    let builder = Parameters::build().with_halving_interval(1)?;
+
+    assert_eq!(
+        builder.clone().to_network().unwrap_err(),
+        ParametersBuilderError::InvalidHalvingInterval,
+    );
+    assert_eq!(
+        builder.clone().extend_funding_streams().unwrap_err(),
+        ParametersBuilderError::InvalidHalvingInterval,
+    );
+    let streamless = builder
+        .with_funding_streams(Vec::new())
+        .extend_funding_streams()?
+        .to_network()?;
+    let first_halving = streamless.height_for_first_halving();
+    assert_eq!(halving(first_halving, &streamless), 1);
+    assert_eq!(halving(first_halving.previous()?, &streamless), 0);
+    Ok(())
+}
+
+#[test]
+fn first_halving_must_fit_the_supported_height_range() -> Result<(), Report> {
+    use crate::parameters::{
+        network::error::ParametersBuilderError,
+        testnet::{ConfiguredActivationHeights, Parameters},
+    };
+
+    // Blossom at 1 and NU7 at 2 place the first halving at 6 * interval - 7.
+    let maximum_interval = (HeightDiff::from(Height::MAX.0) + 7) / 6;
+    let builder = Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(1),
+            nu7: Some(2),
+            ..Default::default()
+        })?;
+    let network = builder
+        .clone()
+        .with_halving_interval(maximum_interval)?
+        .with_funding_streams(Vec::new())
+        .to_network()?;
+    let first_halving = network.height_for_first_halving();
+    assert_eq!(halving(first_halving, &network), 1);
+    assert_eq!(halving(first_halving.previous()?, &network), 0);
+
+    for streams in [false, true] {
+        let mut invalid = builder
+            .clone()
+            .with_halving_interval(maximum_interval + 1)?;
+        if !streams {
+            invalid = invalid.with_funding_streams(Vec::new());
+        }
+        assert_eq!(
+            invalid.clone().extend_funding_streams().unwrap_err(),
+            ParametersBuilderError::InvalidHalvingInterval,
+        );
+        assert_eq!(
+            invalid.to_network().unwrap_err(),
+            ParametersBuilderError::InvalidHalvingInterval,
+        );
     }
+    Ok(())
+}
+
+#[test]
+fn halving_heights_invert_slow_start_across_spacing_changes() -> Result<(), Report> {
+    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
+
+    for (blossom, nu7, first_halving) in [
+        (100, None, 60),
+        (60, None, 60),
+        (50, None, 70),
+        (50, Some(69), 72),
+        (50, Some(70), 70),
+        (50, Some(71), 70),
+    ] {
+        let network = Parameters::build()
+            .with_slow_start_interval(Height(20))
+            .with_activation_heights(ConfiguredActivationHeights {
+                blossom: Some(blossom),
+                canopy: Some(blossom),
+                nu7,
+                ..Default::default()
+            })?
+            .with_halving_interval(50)?
+            .with_funding_streams(Vec::new())
+            .to_network()?;
+        assert_eq!(network.height_for_first_halving(), Height(first_halving));
+        for index in 1..=4 {
+            let height = height_for_halving(index, &network).unwrap();
+            assert_eq!(halving(height, &network), index);
+            assert_eq!(halving(height.previous()?, &network), index - 1);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_subsidy_still_requires_fixed_lockbox_disbursements() -> Result<(), Report> {
+    use std::sync::Arc;
+
+    use crate::{
+        block::Header,
+        parameters::testnet::{
+            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            ConfiguredFundingStreams, ConfiguredLockboxDisbursement, Parameters,
+        },
+        serialization::ZcashDeserializeInto,
+        transaction::LockTime,
+    };
+
+    let height = Height(2_000);
+    let address: Address = "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz".parse()?;
+    let amount = Amount::<NonNegative>::try_from(100)?;
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(1),
+            canopy: Some(1),
+            nu6_1: Some(height.0),
+            ..Default::default()
+        })?
+        .with_halving_interval(24)?
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(height..height.next()?),
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::ZcashFoundation,
+                numerator: 5,
+                addresses: Some(vec![address.to_string()]),
+            }]),
+        }])
+        .with_lockbox_disbursements(vec![ConfiguredLockboxDisbursement {
+            address: address.to_string(),
+            amount,
+        }])
+        .to_network()?;
+    let subsidy = scheduled_block_subsidy(height, &network)?;
+    assert_eq!(subsidy, Amount::<NonNegative>::zero());
+    let header: Header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    let make_block = |outputs| Block {
+        header: Arc::new(header),
+        transactions: vec![Arc::new(Transaction::test_v1(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            outputs,
+            LockTime::unlocked(),
+        ))],
+    };
+    assert_eq!(
+        subsidy_is_valid(&make_block(Vec::new()), &network, subsidy),
+        Err(SubsidyError::OneTimeLockboxDisbursementNotFound),
+    );
+    // No zero-valued proportional funding output is required alongside the fixed payout.
+    let paid = make_block(vec![Output::new(amount, address.script())]);
+    let deferred = DeferredPoolBalanceChange::new(Amount::try_from(-100)?);
+    assert_eq!(subsidy_is_valid(&paid, &network, subsidy)?, deferred);
+    miner_fees_are_valid(
+        &paid.transactions[0],
+        height,
+        Amount::zero(),
+        subsidy,
+        deferred,
+        &network,
+    )?;
+    Ok(())
 }

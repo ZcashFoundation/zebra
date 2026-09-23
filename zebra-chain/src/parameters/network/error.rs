@@ -51,7 +51,7 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidNsmReissuanceHeight,
 
-    #[error("halving interval must be positive and fit after the Blossom and NU7 scaling")]
+    #[error("halving interval must be positive, give a supported first halving height, and give funding streams a nonzero address period")]
     #[non_exhaustive]
     InvalidHalvingInterval,
 

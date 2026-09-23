@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: An explicit empty Testnet funding-stream list survives configuration serialization and disables the default streams; omitting the list retains the defaults.
+time: 2026-09-24T01:49:26.071858136+02:00

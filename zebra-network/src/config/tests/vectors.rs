@@ -116,6 +116,48 @@ fn funding_streams_serialization_roundtrip() {
     assert_eq!(config, deserialized);
 }
 
+#[test]
+fn empty_funding_streams_survive_configuration_roundtrip() {
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        network: testnet::Parameters::build()
+            .with_funding_streams(Vec::new())
+            .to_network()
+            .unwrap(),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+    let deserialized: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    let Network::Testnet(params) = deserialized.network else {
+        panic!("configured Testnet must stay a Testnet");
+    };
+    assert!(params.funding_streams().is_empty());
+
+    let omitted: Config =
+        toml::from_str("network = 'Testnet'\n[testnet_parameters]\ncheckpoints = true\n").unwrap();
+    let Network::Testnet(params) = omitted.network else {
+        panic!("configured Testnet must stay a Testnet");
+    };
+    assert_eq!(
+        params.funding_streams(),
+        testnet::Parameters::default().funding_streams(),
+    );
+}
+
+#[test]
+fn funding_stream_extension_rejects_zero_address_period() {
+    let _init_guard = zebra_test::init();
+    let config = r#"
+network = "Testnet"
+initial_testnet_peers = []
+[testnet_parameters]
+checkpoints = true
+pre_blossom_halving_interval = 1
+extend_funding_stream_addresses_as_required = true
+"#;
+    assert!(toml::from_str::<Config>(config).is_err());
+}
+
 /// Checks that a configured Testnet's temporary Orchard-disabling soft fork height
 /// survives a serialization round-trip.
 #[test]
