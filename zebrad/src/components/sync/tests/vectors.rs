@@ -388,6 +388,129 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+/// Test that obtain_tips downloads blocks that are queued in the state, waiting for their parent.
+///
+/// A sync restart cancels in-flight downloads, but blocks that were already queued in the state
+/// stay there, so a peer response can contain a missing parent followed by its queued children.
+/// If queued blocks were treated as present, obtain_tips would reject every such download set with
+/// "queued download of hash behind our chain tip", and the sync would stall forever.
+#[tokio::test]
+async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxError> {
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let block2_hash = block2.hash();
+
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    // ChainSync::request_genesis
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    // ChainSync::obtain_tips
+
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![block1_hash, block2_hash]));
+
+    // Block 1 is missing, because its download was cancelled by a sync restart.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    for _ in 1..sync::FANOUT {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block0_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test obtain tips error")));
+    }
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    // Recheck every hash in the merged download set: block 2 is queued, waiting for block 1.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    state_service
+        .expect_request(zs::Request::KnownBlock(block2_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::Queue)));
+
+    // Both blocks are downloaded, so the missing parent reaches the state.
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
+
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
+        [(block1_hash, block1), (block2_hash, block2)]
+            .iter()
+            .cloned()
+            .collect();
+
+    for _ in 1..=2 {
+        block_verifier_router
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
+            .await
+            .respond_with(|req| req.block().hash());
+    }
+    assert_eq!(
+        remaining_blocks,
+        HashMap::new(),
+        "expected the missing parent and its queued child to be verified by obtain tips"
+    );
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
 /// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
 #[tokio::test]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
