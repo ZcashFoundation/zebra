@@ -1406,6 +1406,13 @@ where
 
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
+    ///
+    /// Blocks that are only queued in the state, waiting for their parent, are treated as not
+    /// present. A sync restart cancels in-flight downloads, so the parent of a queued block may
+    /// never arrive unless the syncer downloads it again along with its queued children. If the
+    /// syncer skipped queued blocks, `obtain_tips` would reject every download set that contains
+    /// them, and the sync would stall until Zebra restarts. Re-submitting a queued block is
+    /// harmless: the block verifier rejects it as a duplicate, which doesn't restart the sync.
     pub(crate) async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
@@ -1416,7 +1423,9 @@ where
             .await
             .map_err(|e| eyre!(e))?
         {
-            zs::Response::KnownBlock(loc) => Ok(loc.is_some()),
+            zs::Response::KnownBlock(loc) => {
+                Ok(loc.is_some_and(|loc| loc != zs::KnownBlock::Queue))
+            }
             _ => unreachable!("wrong response to known block request"),
         }
     }

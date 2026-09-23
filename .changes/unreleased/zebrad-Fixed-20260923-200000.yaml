@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'The syncer no longer stalls permanently after a sync restart near the chain tip. Zebra 6.4.0 started treating blocks queued for their parent as already downloaded, so once a restart cancelled the parent''s download, every later attempt to obtain new tips failed with "queued download of hash behind our chain tip" until Zebra was restarted.'
+time: 2026-09-23T20:00:00.000000000Z
