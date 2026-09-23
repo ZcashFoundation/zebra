@@ -14,10 +14,10 @@ use rand::{
 };
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, NonNegative},
     block::{Header, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
-    serialization::{CompactSizeMessage, ZcashSerialize},
+    serialization::{CompactSizeMessage, ZcashDeserializeInto, ZcashSerialize},
     transaction::{
         self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx,
         MIN_TRANSPARENT_TX_SIZE,
@@ -48,9 +48,9 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 /// Selects mempool transactions for block production according to [ZIP-317],
 /// using a fake coinbase transaction and the mempool.
 ///
-/// The fake coinbase transaction's serialized size and sigops must be at least as large
-/// as the real coinbase transaction. (The real coinbase transaction depends on the total
-/// fees from the transactions returned by this function.)
+/// The sizing coinbase must have at least the bytes, sigops, and shielded components of the
+/// fee-bearing coinbase. Both use the same subsidy and miner parameters; changing only the
+/// reward amount does not change these costs.
 ///
 /// Returns selected transactions from `mempool_txs`.
 ///
@@ -59,6 +59,7 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 pub fn select_mempool_transactions(
     net: &Network,
     height: Height,
+    block_subsidy: Amount<NonNegative>,
     miner_params: &MinerParams,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
@@ -67,16 +68,21 @@ pub fn select_mempool_transactions(
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
     //
-    // The fake coinbase only depends on the height and miner parameters (its fee is always zero),
-    // so it's constant per block. Reuse the same per-block cache as the real coinbase to avoid
-    // re-proving a shielded coinbase on every `getblocktemplate` call just to read its size.
+    // The sizing coinbase depends on the contextual subsidy as well as height and miner
+    // parameters. Reuse the real coinbase cache to avoid repeating shielded proofs.
     let fake_coinbase_tx = coinbase_cache
-        .and_then(|cache| cache.get(height, Amount::zero()))
+        .and_then(|cache| cache.get(height, block_subsidy, Amount::zero()))
         .unwrap_or_else(|| {
-            let cb = TransactionTemplate::new_coinbase(net, height, miner_params, Amount::zero())
-                .expect("valid coinbase transaction template");
+            let cb = TransactionTemplate::new_coinbase(
+                net,
+                height,
+                miner_params,
+                block_subsidy,
+                Amount::zero(),
+            )
+            .expect("valid coinbase transaction template");
             if let Some(cache) = coinbase_cache {
-                cache.store(height, Amount::zero(), cb.clone());
+                cache.store(height, block_subsidy, Amount::zero(), cb.clone());
             }
             cb
         });
@@ -107,9 +113,25 @@ pub fn select_mempool_transactions(
     remaining_block_bytes -= Header::serialized_size(net);
     remaining_block_bytes -= max_transaction_count_size();
 
-    // Adjust the limits based on the coinbase transaction
-    remaining_block_bytes -= fake_coinbase_tx.data.as_ref().len();
-    remaining_block_sigops -= fake_coinbase_tx.sigops;
+    // Reserve every coinbase cost before selecting candidates. Checked subtraction also handles
+    // a coinbase that exhausts the byte or sigop budget without wrapping.
+    let Some(block_bytes) = remaining_block_bytes.checked_sub(fake_coinbase_tx.data.as_ref().len())
+    else {
+        return selected_txs;
+    };
+    let Some(block_sigops) = remaining_block_sigops.checked_sub(fake_coinbase_tx.sigops) else {
+        return selected_txs;
+    };
+    let coinbase: Transaction = fake_coinbase_tx
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .expect("locally constructed coinbase must deserialize");
+    if !remaining_shielded.try_add(&coinbase) {
+        return selected_txs;
+    }
+    remaining_block_bytes = block_bytes;
+    remaining_block_sigops = block_sigops;
 
     // > Repeat while there is any candidate transaction
     // > that pays at least the conventional fee:

@@ -302,6 +302,9 @@ impl From<RecvError> for AwaitUtxoError {
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
+    #[error("invalid contextual subsidy: {0}")]
+    Subsidy(#[from] zebra_chain::parameters::subsidy::SubsidyError),
+
     #[error("block hash {block_hash} was previously invalidated")]
     #[non_exhaustive]
     BlockPreviouslyInvalidated { block_hash: block::Hash },

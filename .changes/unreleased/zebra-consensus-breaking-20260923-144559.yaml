@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Move `block::check::{miner_fees_are_valid, subsidy_is_valid}` and `funding_stream_address` to `zebra_chain::parameters::subsidy`; remove `block::subsidy`. Monetary checks use the contextual total subsidy and return `SubsidyError`.
+time: 2026-09-23T14:45:59.9186327+02:00

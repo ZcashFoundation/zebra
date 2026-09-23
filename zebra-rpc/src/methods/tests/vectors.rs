@@ -47,7 +47,7 @@ use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::get_block_template::{
-        constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+        constants::{CAPABILITIES_FIELD, NONCE_RANGE_FIELD},
         CoinbaseCache, GetBlockTemplateRequestMode,
     },
 };
@@ -95,6 +95,11 @@ async fn rpc_getinfo() {
             tip_height: Height::MIN,
             chain_history_root: HistoryTree::default().hash(),
             expected_difficulty: Default::default(),
+            expected_block_subsidy: zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+                Height(1),
+                &Mainnet,
+            )
+            .unwrap(),
             cur_time: zebra_chain::serialization::DateTime32::now(),
             min_time: zebra_chain::serialization::DateTime32::now(),
             max_time: zebra_chain::serialization::DateTime32::now(),
@@ -2450,92 +2455,332 @@ async fn rpc_getnetworksolps() {
     }
 }
 
-/// `get_network_sol_ps` with a zero or negative block count falls back to the PoW averaging
-/// window, which ZIP 218 makes height-dependent from NU7: the state request must ask for the
-/// window at the requested height, or at the tip height when no height is requested.
+/// A future height must use the tip's averaging window, not a future upgrade's window.
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getnetworksolps_uses_the_height_dependent_averaging_window() {
+async fn rpc_getnetworksolps_uses_the_effective_height() {
     let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let network = testnet::Parameters::build()
+            .with_activation_heights(testnet::ConfiguredActivationHeights {
+                before_overwinter: Some(1),
+                nu7: Some(121),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_funding_streams(vec![])
+            .to_network()
+            .unwrap();
 
-    // NU7 activates at height 1,000 on this network: the averaging window is 17 blocks below
-    // that height, and 102 blocks at and above it.
-    let network = Network::new_regtest(
-        testnet::ConfiguredActivationHeights {
-            canopy: Some(1),
-            nu5: Some(2),
-            nu6: Some(3),
-            nu6_1: Some(4),
-            nu6_2: Some(5),
-            nu6_3: Some(6),
-            nu7: Some(1_000),
-            ..Default::default()
+        let mut blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        // Extend the checkpoint fixture with fast recent blocks and slow older blocks, so
+        // a 17-block estimate is observably different from a 102-block estimate.
+        for height in 2..=120 {
+            let mut block = (*blocks[1]).clone();
+            let header = Arc::make_mut(&mut block.header);
+            let parent = blocks.last().unwrap();
+            header.previous_block_hash = parent.hash();
+            header.time =
+                parent.header.time + chrono::Duration::seconds(if height > 103 { 1 } else { 100 });
+            let mut inputs = block.transactions[0].inputs();
+            let zebra_chain::transparent::Input::Coinbase {
+                height: input_height,
+                ..
+            } = &mut inputs[0]
+            else {
+                panic!("fixture starts with a coinbase")
+            };
+            *input_height = Height(height);
+            block.transactions[0] = Arc::new(
+                (*block.transactions[0])
+                    .clone()
+                    .with_transparent_inputs(inputs),
+            );
+            blocks.push(Arc::new(block));
         }
-        .into(),
-    );
 
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-    let (mock_tip, mock_tip_sender) = MockChainTip::new();
-    mock_tip_sender.send_best_tip_height(Height(1_500));
-
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
-        network,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        MockService::build().for_unit_tests(),
-        state,
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    // (num_blocks, height, expected `num_blocks` in the SolutionRate request to the state)
-    let get_network_sol_ps_inputs: [(Option<i32>, Option<i32>, usize); 5] = [
-        // No requested height: the window at the tip height (1,500, post-NU7) is 102.
-        (Some(0), None, 102),
-        (Some(-1), None, 102),
-        // A requested height picks the window at that height, even in a different era than the
-        // tip's.
-        (Some(0), Some(999), 17),
-        (Some(0), Some(1_000), 102),
-        // An explicit positive block count is passed through unchanged.
-        (Some(120), None, 120),
-    ];
-
-    for (num_blocks_input, height_input, expected_num_blocks) in get_network_sol_ps_inputs {
-        let mut read_state = read_state.clone();
-
-        let request_handler = async move {
-            read_state
-                .expect_request_that(|request| {
-                    matches!(
-                        request,
-                        ReadRequest::SolutionRate { num_blocks, .. }
-                            if *num_blocks == expected_num_blocks
-                    )
-                })
-                .await
-                .respond(ReadResponse::SolutionRate(Some(0)));
-        };
-
-        let (result, ()) = tokio::join!(
-            rpc.get_network_sol_ps(num_blocks_input, height_input),
-            request_handler,
+        let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &network).await;
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _) = RpcImpl::new(
+            network,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            state,
+            Buffer::new(read_state, 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
         );
-
+        let recent = rpc.get_network_sol_ps(Some(17), Some(120)).await.unwrap();
+        let long = rpc.get_network_sol_ps(Some(102), Some(120)).await.unwrap();
         assert!(
-            result.is_ok(),
-            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) failed: {result:?}"
+            recent > long,
+            "the fixture must distinguish the two windows"
         );
-    }
+        for height in [None, Some(-1), Some(120), Some(121), Some(i32::MAX)] {
+            assert_eq!(
+                rpc.get_network_sol_ps(Some(0), height).await.unwrap(),
+                recent
+            );
+            assert_eq!(
+                rpc.get_network_sol_ps(Some(-1), height).await.unwrap(),
+                recent
+            );
+        }
+        assert_eq!(
+            rpc.get_network_sol_ps(Some(102), Some(121)).await.unwrap(),
+            long
+        );
+        assert_eq!(rpc.get_network_sol_ps(Some(0), Some(0)).await.unwrap(), 0);
+    })
+    .await
+    .expect("solution-rate regression must not stall");
+}
+
+/// Historical RPC rewards and same-height templates must use the parent's reserve, including
+/// the funding and deferred shares. Missing future parents must not become zero-reserve forecasts.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
+    use types::get_block_template::{BlockTemplateResponse, MinerParams};
+    use types::long_poll::LongPollInput;
+    use zebra_chain::parameters::{
+        subsidy::scheduled_block_subsidy,
+        testnet::{
+            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient, ConfiguredFundingStreams,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let height = Height(1_000);
+        let network = Parameters::build()
+            .with_slow_start_interval(Height::MIN)
+            .with_activation_heights(ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(3),
+                nu6_1: Some(4),
+                nu6_2: Some(5),
+                nu6_3: Some(6),
+                nu7: Some(height.0),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_nsm_reissuance_height(Some(height))
+            .with_funding_streams(vec![ConfiguredFundingStreams {
+                height_range: Some(height..Height(1_010)),
+                recipients: Some(vec![
+                    ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                    ConfiguredFundingStreamRecipient {
+                        receiver: FundingStreamReceiver::Deferred,
+                        numerator: 12,
+                        addresses: None,
+                    },
+                ]),
+            }])
+            .to_network()
+            .unwrap();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _) = RpcImpl::new(
+            network.clone(),
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            state,
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let miner = MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
+        let cache = CoinbaseCache::default();
+        let scheduled = scheduled_block_subsidy(height, &network)
+            .unwrap()
+            .zatoshis();
+        let mut previous_coinbase = None;
+        for (reserve, additional, parent_hash) in [
+            (10_000_000_000u64, 1_375, Hash([1; 32])),
+            (20_000_000_000u64, 2_750, Hash([2; 32])),
+        ] {
+            let mut pools = ValueBalance::zero();
+            pools.set_nsm_reserve_amount(reserve.try_into().unwrap());
+            let response = async {
+                read_state
+                    .expect_request(ReadRequest::BlockInfo(Height(999).into()))
+                    .await
+                    .respond(ReadResponse::BlockInfo(Some(BlockInfo::new(pools, 0))));
+            };
+            let (subsidy, ()) = tokio::join!(rpc.get_block_subsidy(Some(height.0)), response);
+            let subsidy = subsidy.unwrap();
+            let total = scheduled + additional;
+            let funding = total * 8 / 100;
+            let deferred = total * 12 / 100;
+            let miner_reward = total - funding - deferred;
+            assert_eq!(subsidy.total_block_subsidy().zatoshis(), total);
+            assert_eq!(subsidy.funding_streams_total().zatoshis(), funding);
+            assert_eq!(subsidy.lockbox_total().zatoshis(), deferred);
+            assert_eq!(subsidy.miner().zatoshis(), miner_reward);
+
+            let chain_info = GetBlockTemplateChainInfo {
+                tip_height: Height(999),
+                tip_hash: parent_hash,
+                expected_block_subsidy: total.try_into().unwrap(),
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                cur_time: DateTime32::from(1654008617),
+                min_time: DateTime32::from(1654008606),
+                max_time: DateTime32::from(1654008728),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
+            };
+            let long_poll_id = LongPollInput::new(
+                chain_info.tip_height,
+                parent_hash,
+                chain_info.max_time,
+                std::iter::empty(),
+            )
+            .generate_id();
+            let make_template = |fees: i64| {
+                let mut transaction = Mainnet
+                    .unmined_transactions_in_blocks(..)
+                    .find(|tx| !tx.transaction.transaction.is_coinbase())
+                    .unwrap();
+                transaction.miner_fee = fees.try_into().unwrap();
+                BlockTemplateResponse::new_internal(
+                    &network,
+                    &cache,
+                    &miner,
+                    &chain_info,
+                    long_poll_id,
+                    vec![(0, transaction)],
+                    None,
+                )
+            };
+            let template = make_template(0);
+            let coinbase: Transaction = template
+                .coinbase_txn
+                .data
+                .as_ref()
+                .zcash_deserialize_into()
+                .unwrap();
+            let mut values: Vec<_> = coinbase
+                .outputs()
+                .iter()
+                .map(|o| o.value.zatoshis())
+                .collect();
+            values.sort();
+            assert_eq!(values, vec![funding, miner_reward]);
+            assert_eq!(values.iter().sum::<i64>() + deferred, total);
+
+            // Three and four zatoshis have the same miner share. Returning to three exercises
+            // a cached response without confusing the gross fee with the coinbase payout.
+            for fees in [3, 4, 3] {
+                let template = make_template(fees);
+                let coinbase: Transaction = template
+                    .coinbase_txn
+                    .data
+                    .as_ref()
+                    .zcash_deserialize_into()
+                    .unwrap();
+                let paid = coinbase
+                    .outputs()
+                    .iter()
+                    .map(|output| output.value.zatoshis())
+                    .sum::<i64>();
+                assert_eq!(paid + deferred, total + fees - fees * 60 / 100);
+                let reported_fees = template
+                    .transactions
+                    .iter()
+                    .map(|transaction| transaction.fee.zatoshis())
+                    .sum::<i64>();
+                assert_eq!(template.coinbase_txn.fee.zatoshis(), -reported_fees);
+                assert_eq!(template.mutable, ["time"]);
+            }
+            if let Some(previous) = previous_coinbase {
+                assert_ne!(
+                    template.coinbase_txn, previous,
+                    "same-height reorg must replace rewards"
+                );
+            }
+            previous_coinbase = Some(template.coinbase_txn);
+        }
+
+        let missing_parent = async {
+            read_state
+                .expect_request(ReadRequest::BlockInfo(Height(1_001).into()))
+                .await
+                .respond(ReadResponse::BlockInfo(None));
+        };
+        let (future, ()) = tokio::join!(rpc.get_block_subsidy(Some(1_002)), missing_parent);
+        assert_eq!(
+            future.unwrap_err().code(),
+            i32::from(server::error::LegacyCode::InvalidParameter)
+        );
+    })
+    .await
+    .expect("NSM RPC regression must not stall");
+}
+
+#[test]
+fn getblocktemplate_mutations_preserve_coinbase_balance() {
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::subsidy::{
+            funding_stream_values, miner_fees_are_valid, scheduled_block_subsidy,
+            FundingStreamReceiver::Deferred, SubsidyError,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+    let height = NetworkUpgrade::Nu6.activation_height(&Mainnet).unwrap();
+    let template = template_extending(&Mainnet, height.previous().unwrap(), Hash([1; 32]));
+    let coinbase: Transaction = template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .unwrap();
+    let subsidy = scheduled_block_subsidy(height, &Mainnet).unwrap();
+    let deferred = funding_stream_values(height, &Mainnet, subsidy).unwrap();
+    let deferred = DeferredPoolBalanceChange::new(deferred[&Deferred].constrain().unwrap());
+
+    miner_fees_are_valid(
+        &coinbase,
+        height,
+        Amount::zero(),
+        subsidy,
+        deferred,
+        &Mainnet,
+    )
+    .unwrap();
+    assert!(matches!(
+        miner_fees_are_valid(
+            &coinbase,
+            height,
+            1.try_into().unwrap(),
+            subsidy,
+            deferred,
+            &Mainnet
+        ),
+        Err(SubsidyError::InvalidMinerFees),
+    ));
+    // A required coinbase cannot be kept valid by changing its fees or parent independently.
+    assert!(template.coinbase_txn.required);
+    assert_eq!(template.mutable, ["time"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2618,6 +2863,12 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                 .await
                 .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                     expected_difficulty: fake_difficulty,
+                    expected_block_subsidy:
+                        zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+                            fake_tip_height.next().unwrap(),
+                            &Mainnet,
+                        )
+                        .unwrap(),
                     tip_height: fake_tip_height,
                     tip_hash: fake_tip_hash,
                     cur_time: fake_cur_time,
@@ -2680,7 +2931,6 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         .expect("test vector is valid")
     );
     assert_eq!(get_block_template.min_time, fake_min_time);
-    assert_eq!(get_block_template.mutable, MUTABLE_FIELD.to_vec());
     assert_eq!(get_block_template.nonce_range, NONCE_RANGE_FIELD);
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
@@ -2924,6 +3174,11 @@ async fn getblocktemplate_precomputed() {
         let mut read_state = read_state.clone();
         let mut mempool = mempool.clone();
         let chain_history_root = fake_history_tree(&net).hash();
+        let expected_block_subsidy = zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+            tip_height.next().unwrap(),
+            &net,
+        )
+        .unwrap();
 
         let read_state_responder = tokio::spawn(async move {
             loop {
@@ -2936,6 +3191,7 @@ async fn getblocktemplate_precomputed() {
                                 expected_difficulty: CompactDifficulty::from(
                                     ExpandedDifficulty::from(U256::one()),
                                 ),
+                                expected_block_subsidy,
                                 tip_height,
                                 tip_hash,
                                 cur_time: DateTime32::from(1654008617),
@@ -3108,6 +3364,9 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     // tip once per wake, so this separates a parked call from one spinning through its wait.
     let tip_reads = Arc::new(AtomicUsize::new(0));
 
+    let expected_block_subsidy =
+        zebra_chain::parameters::subsidy::scheduled_block_subsidy(tip_height.next().unwrap(), &net)
+            .unwrap();
     let chain_history_root = fake_history_tree(&net).hash();
     let read_state_responder = tokio::spawn({
         let mut read_state = read_state.clone();
@@ -3123,6 +3382,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
                     .respond_with(move |req| match req {
                         ReadRequest::ChainInfo => {
                             ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                                expected_block_subsidy,
                                 expected_difficulty: CompactDifficulty::from(
                                     ExpandedDifficulty::from(U256::one()),
                                 ),
@@ -3356,6 +3616,11 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
         let mut read_state = read_state.clone();
         let mut mempool = mempool.clone();
         let chain_history_root = fake_history_tree(&net).hash();
+        let expected_block_subsidy = zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+            tip_height.next().unwrap(),
+            &net,
+        )
+        .unwrap();
 
         let read_state_responder = tokio::spawn(async move {
             loop {
@@ -3365,6 +3630,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
                     .respond_with(move |req| match req {
                         ReadRequest::ChainInfo => {
                             ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                                expected_block_subsidy,
                                 expected_difficulty: CompactDifficulty::from(
                                     ExpandedDifficulty::from(U256::one()),
                                 ),
@@ -3893,6 +4159,11 @@ async fn rpc_getdifficulty() {
         rx,
         None,
     );
+    let expected_block_subsidy = zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+        fake_tip_height.next().unwrap(),
+        &Mainnet,
+    )
+    .unwrap();
 
     // Fake the ChainInfo response: smallest numeric difficulty
     // (this is invalid on mainnet and testnet under the consensus rules)
@@ -3903,6 +4174,7 @@ async fn rpc_getdifficulty() {
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_block_subsidy,
                 expected_difficulty: fake_difficulty,
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
@@ -3929,6 +4201,7 @@ async fn rpc_getdifficulty() {
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_block_subsidy,
                 expected_difficulty: fake_difficulty,
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
@@ -3952,6 +4225,7 @@ async fn rpc_getdifficulty() {
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_block_subsidy,
                 expected_difficulty: fake_difficulty.into(),
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
@@ -3975,6 +4249,7 @@ async fn rpc_getdifficulty() {
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_block_subsidy,
                 expected_difficulty: fake_difficulty.into(),
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
@@ -4579,6 +4854,11 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
 
     let chain_info = GetBlockTemplateChainInfo {
         expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        expected_block_subsidy: zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+            tip_height.next().unwrap(),
+            net,
+        )
+        .unwrap(),
         tip_height,
         tip_hash,
         cur_time: DateTime32::now(),

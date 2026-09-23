@@ -79,15 +79,10 @@ pub(crate) const NSM_FEE_NUMERATOR: u64 = 6;
 /// See [`NSM_FEE_NUMERATOR`].
 pub(crate) const NSM_FEE_DENOMINATOR: u64 = 10;
 
-/// The numerator of the fraction of the NSM reserve reissued in each block, once NSM reissuance
-/// starts.
-///
-/// `NSM_SUBSIDY_FRACTION := 1375 / 10_000_000_000` in the NU7 deployment ZIP. It is the
-/// 25-second-block analogue of ZIP 234's decay coefficient: it reissues about half of a reserve
-/// balance over one post-NU7 halving interval, when no further fees are contributed.
-pub(crate) const NSM_SUBSIDY_NUMERATOR: u64 = 1375;
+/// ZIP 237's scaled logarithm, divided by the halving interval to obtain the release rate.
+pub(crate) const NSM_LN2_SCALED: u64 = 6_931_680_000;
 
 /// The denominator of the fraction of the NSM reserve reissued in each block.
 ///
-/// See [`NSM_SUBSIDY_NUMERATOR`].
+/// See [`NSM_LN2_SCALED`].
 pub(crate) const NSM_SUBSIDY_DENOMINATOR: u64 = 10_000_000_000;

@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: '`subsidy::block_subsidy` now requires the parent NSM reserve and returns the total subsidy; use `scheduled_block_subsidy` for the schedule alone. `Block::chain_value_pool_change` requires the parent value pools. NSM configuration adds `RegtestParameters::nsm_reissuance_height`, `Parameters::nsm_reissuance_height`, and `ParametersBuilder::with_nsm_reissuance_height`; exhaustive matches must handle `SubsidyError::Other` and `ValueBalanceError::Subsidy`.'
+time: 2026-09-23T14:45:58.813078036+02:00

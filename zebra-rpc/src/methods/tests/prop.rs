@@ -387,6 +387,7 @@ proptest! {
             let response_fut = rpc.get_blockchain_info();
             let mock_state_handler = {
                 let mut state = state.clone();
+                let expected_block_subsidy = zebra_chain::parameters::subsidy::scheduled_block_subsidy(Height(1), &network).unwrap();
                 async move {
                     state
                         .expect_request(zebra_state::ReadRequest::UsageInfo)
@@ -409,6 +410,7 @@ proptest! {
                             tip_height: Height::MIN,
                             chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
+                            expected_block_subsidy,
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
                             max_time: DateTime32::now()
@@ -457,6 +459,7 @@ proptest! {
             let response_fut = rpc.get_blockchain_info();
             let mock_state_handler = {
                 let mut state = state.clone();
+                let expected_block_subsidy = zebra_chain::parameters::subsidy::scheduled_block_subsidy(block_height, &network).unwrap();
                 async move {
                     state
                         .expect_request(zebra_state::ReadRequest::UsageInfo)
@@ -483,6 +486,7 @@ proptest! {
                             tip_height: block_height,
                             chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
+                            expected_block_subsidy,
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
                             max_time: DateTime32::now()

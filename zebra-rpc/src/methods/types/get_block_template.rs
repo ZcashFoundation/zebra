@@ -329,24 +329,25 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
-        // From NU7, the coinbase may only claim `MinerFees`: the rest of the block's transaction
-        // fees are removed from circulation into the NSM reserve. A template built from the whole
-        // of the fees would be rejected by `miner_fees_are_valid()`. This is the whole of the fees
-        // before NU7, so it is a no-op until then.
-        let claimable_fee = zebra_chain::parameters::subsidy::miner_fees(height, net, txs_fee)
-            .expect("miner fees are a subset of non-negative transaction fees");
-
-        // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
-        // shielded address) as a last resort — caching the result so subsequent requests for the
-        // same height and fees reuse it.
+        // The subsidy depends on the parent's reserve, which can change on a same-height reorg.
         let coinbase_txn = coinbase_cache
-            .get(height, claimable_fee)
+            .get(height, chain_info.expected_block_subsidy, txs_fee)
             .unwrap_or_else(|| {
-                let coinbase_txn =
-                    TransactionTemplate::new_coinbase(net, height, miner_params, claimable_fee)
-                        .expect("valid coinbase tx");
+                let coinbase_txn = TransactionTemplate::new_coinbase(
+                    net,
+                    height,
+                    miner_params,
+                    chain_info.expected_block_subsidy,
+                    txs_fee,
+                )
+                .expect("valid coinbase tx");
 
-                coinbase_cache.store(height, claimable_fee, coinbase_txn.clone());
+                coinbase_cache.store(
+                    height,
+                    chain_info.expected_block_subsidy,
+                    txs_fee,
+                    coinbase_txn.clone(),
+                );
 
                 coinbase_txn
             });
@@ -573,12 +574,13 @@ impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     }
 }
 
-/// Caches recently built coinbase transactions for the next block, keyed on `(height, fee)`.
+/// Caches recently built coinbase transactions by `(height, subsidy, gross transaction fees)`.
 ///
 /// `getblocktemplate` clients commonly short-poll (re-request without long polling), and building
 /// the coinbase to a shielded address re-runs an expensive Sapling/Orchard proof. The coinbase only
-/// depends on `(height, fees)` for a given miner configuration, so repeated requests within the
+/// depends on `(height, subsidy, fees)` for a given miner configuration, so repeated requests within the
 /// same block can reuse the cached transaction instead of re-proving it on every call.
+/// Gross fees remain part of the key even when different totals round to the same miner payout.
 ///
 /// Each `getblocktemplate` call needs two coinbase transactions at the same height: a zero-fee
 /// "fake" coinbase for ZIP-317 weight estimation, and the real coinbase with actual fees. Entries
@@ -588,7 +590,7 @@ pub(crate) struct CoinbaseCache(
     Arc<
         Mutex<
             HashMap<
-                (block::Height, Amount<NonNegative>),
+                (block::Height, Amount<NonNegative>, Amount<NonNegative>),
                 TransactionTemplate<amount::NegativeOrZero>,
             >,
         >,
@@ -596,23 +598,25 @@ pub(crate) struct CoinbaseCache(
 );
 
 impl CoinbaseCache {
-    /// Returns the cached coinbase transaction if it was built for `height` and `fee`.
+    /// Returns the coinbase built for this height, contextual subsidy, and fee.
     fn get(
         &self,
         height: block::Height,
+        subsidy: Amount<NonNegative>,
         fee: Amount<NonNegative>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&(height, fee))
+            .get(&(height, subsidy, fee))
             .cloned()
     }
 
-    /// Stores `coinbase` as the cached transaction for `height` and `fee`.
+    /// Stores the coinbase for this height, contextual subsidy, and fee.
     fn store(
         &self,
         height: block::Height,
+        subsidy: Amount<NonNegative>,
         fee: Amount<NonNegative>,
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
@@ -621,22 +625,22 @@ impl CoinbaseCache {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        // Evict entries from previous heights so the map stays bounded.
-        map.retain(|&(h, _), _| h == height);
+        // Keep only the current height and subsidy, bounding same-height fork churn too.
+        map.retain(|&(h, s, _), _| h == height && s == subsidy);
         // Only 2 entries are ever useful (zero-fee fake + current real-fee coinbase), but mempool
         // fee churn can accumulate stale entries within a block. Cap at 4 to stay well above the
         // useful set while preventing unbounded growth. When evicting, preserve the zero-fee sizing
         // coinbase — losing it recreates the churn this cache exists to prevent.
-        if !map.contains_key(&(height, fee)) && map.len() >= 4 {
+        if !map.contains_key(&(height, subsidy, fee)) && map.len() >= 4 {
             let evict_key = map
                 .keys()
                 .copied()
-                .find(|&(_, f)| f != Amount::<NonNegative>::zero());
+                .find(|&(_, _, f)| f != Amount::<NonNegative>::zero());
             if let Some(key) = evict_key {
                 map.remove(&key);
             }
         }
-        map.insert((height, fee), coinbase);
+        map.insert((height, subsidy, fee), coinbase);
     }
 }
 

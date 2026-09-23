@@ -949,6 +949,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &net,
         Height(block_template.height()),
         &miner_params,
+        zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+            Height(block_template.height()),
+            &net,
+        )?,
         Amount::zero(),
     )
     .expect("coinbase transaction should be valid under the given parameters");
@@ -1014,6 +1018,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &net,
         Height(block_template.height()),
         &miner_params,
+        zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+            Height(block_template.height()),
+            &net,
+        )?,
         Amount::zero(),
     )
     .expect("coinbase transaction should be valid under the given parameters");
@@ -1342,4 +1350,140 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     output.assert_failure()?;
 
     Ok(())
+}
+
+/// Historical underclaims must fund real NU7 templates, including after rollback and restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        block::Block,
+        parameters::{subsidy::scheduled_block_subsidy, testnet::RegtestParameters},
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(180), async {
+        let network = Network::new_regtest(RegtestParameters {
+            activation_heights: ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(4),
+                nu6_1: Some(5),
+                nu6_2: Some(6),
+                nu6_3: Some(7),
+                nu7: Some(9),
+                ..Default::default()
+            },
+            nsm_reissuance_height: Some(Height(12)),
+            ..Default::default()
+        });
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.state.ephemeral = false;
+        config.state.debug_skip_non_finalized_state_backup_task = true;
+        config.mempool.debug_enable_at_height = Some(0);
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let test_dir = child
+            .dir
+            .take()
+            .expect("test directory is retained for restart");
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+        let withheld = Amount::<NonNegative>::try_from(100_000_000)?;
+        let coinbase_value = |block: &Block| {
+            block.transactions[0]
+                .outputs()
+                .iter()
+                .map(|output| output.value)
+                .sum::<Result<Amount<NonNegative>, _>>()
+        };
+
+        for expected_height in 1..12 {
+            let (mut block, height) = client.block_from_template(&network).await?;
+            assert_eq!(height, Height(expected_height));
+            if expected_height == 1 {
+                // Pre-NU6 underclaims are valid. At Canopy the history commitment is
+                // independent of the current coinbase; only its Merkle root changes.
+                let coinbase = Arc::make_mut(&mut block.transactions[0]);
+                let mut outputs = coinbase.outputs();
+                outputs[0].value = (outputs[0].value - withheld)?;
+                *coinbase = coinbase.clone().with_transparent_outputs(outputs);
+                Arc::make_mut(&mut block.header).merkle_root = block.transactions.iter().collect();
+            }
+            client.submit_block(block).await?;
+        }
+
+        // Regtest has no slow start, so its scheduled genesis subsidy is also
+        // unissued. All subsequent subsidies except the deliberate underclaim
+        // above have been paid in full, and there are no transaction fees.
+        let mut reserve = u64::from((scheduled_block_subsidy(Height(0), &network)? + withheld)?);
+        let additional = |reserve: u64| {
+            // floor(LN2_SCALED / (144 * 2 * 3)) for this regtest's halving interval.
+            (reserve * 8_022_777).div_ceil(10_000_000_000)
+        };
+        let first_additional = additional(reserve);
+        let expected =
+            (scheduled_block_subsidy(Height(12), &network)? + Amount::try_from(first_additional)?)?;
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(12));
+        assert_eq!(coinbase_value(&block)?, expected);
+
+        let mut overclaim = block.clone();
+        let coinbase = Arc::make_mut(&mut overclaim.transactions[0]);
+        let mut outputs = coinbase.outputs();
+        outputs[0].value = (outputs[0].value + Amount::try_from(1)?)?;
+        *coinbase = coinbase.clone().with_transparent_outputs(outputs);
+        Arc::make_mut(&mut overclaim.header).merkle_root = overclaim.transactions.iter().collect();
+        let encoded = hex::encode(overclaim.zcash_serialize_to_vec()?);
+        let response: SubmitBlockResponse = client
+            .json_result_from_call("submitblock", format!(r#"["{encoded}"]"#))
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert_eq!(
+            response,
+            SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected),
+            "contextual validation must reject excess NSM issuance",
+        );
+        client.submit_block(block.clone()).await?;
+        reserve -= first_additional;
+
+        let params = serde_json::to_string(&[block.hash().to_string()])?;
+        let _: () = client
+            .json_result_from_call("invalidateblock", &params)
+            .await
+            .map_err(|err| eyre!(err))?;
+        let (replacement, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(12));
+        assert_eq!(
+            coinbase_value(&replacement)?,
+            expected,
+            "rollback restores reserve"
+        );
+        let reconsidered: Vec<zebra_chain::block::Hash> = client
+            .json_result_from_call("reconsiderblock", &params)
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert_eq!(reconsidered, [block.hash()]);
+
+        child.kill(true)?;
+        child.wait_with_output()?;
+        let mut child = test_dir.spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(13));
+        assert_eq!(
+            coinbase_value(&block)?,
+            (scheduled_block_subsidy(height, &network)? + Amount::try_from(additional(reserve))?)?,
+            "restart retains the prior reserve debit",
+        );
+        client.submit_block(block).await?;
+        child.kill(false)?;
+        child.wait_with_output()?.assert_was_killed()?;
+        Ok(())
+    })
+    .await?
 }

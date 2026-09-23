@@ -603,6 +603,8 @@ struct DTestnetParameters {
     disable_pow: Option<bool>,
     genesis_hash: Option<String>,
     activation_heights: Option<ConfiguredActivationHeights>,
+    /// First height that reissues the NSM reserve on this configured network.
+    nsm_reissuance_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
@@ -690,6 +692,7 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
+            nsm_reissuance_height: params.nsm_reissuance_height(),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
@@ -795,7 +798,9 @@ impl<'de> Deserialize<'de> for Config {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
             }
             (DNetwork::ConfiguredRegtest { params, .. }, _) => {
-                Network::new_regtest(build_regtest_params(*params))
+                testnet::Parameters::new_regtest(build_regtest_params(*params))
+                    .map(Network::new_configured_testnet)
+                    .map_err(de::Error::custom)?
             }
             (DNetwork::DefaultForKind(NetworkKind::Mainnet), _) => Network::Mainnet,
             (DNetwork::DefaultForKind(NetworkKind::Testnet), Some(params)) => {
@@ -805,7 +810,9 @@ impl<'de> Deserialize<'de> for Config {
                 Network::new_default_testnet()
             }
             (DNetwork::DefaultForKind(NetworkKind::Regtest), Some(params)) => {
-                Network::new_regtest(build_regtest_params(params))
+                testnet::Parameters::new_regtest(build_regtest_params(params))
+                    .map(Network::new_configured_testnet)
+                    .map_err(de::Error::custom)?
             }
             (DNetwork::DefaultForKind(NetworkKind::Regtest), None) => {
                 Network::new_regtest(Default::default())
@@ -899,6 +906,7 @@ where
         disable_pow,
         genesis_hash,
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -963,6 +971,8 @@ where
             .map_err(de::Error::custom)?
     }
 
+    params_builder = params_builder.with_nsm_reissuance_height(nsm_reissuance_height);
+
     if let Some(halving_interval) = pre_blossom_halving_interval {
         params_builder = params_builder
             .with_halving_interval(halving_interval.into())
@@ -1024,6 +1034,7 @@ where
 fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
     let DTestnetParameters {
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -1046,6 +1057,7 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
 
     RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
+        nsm_reissuance_height,
         funding_streams: Some(funding_streams_vec),
         lockbox_disbursements,
         checkpoints: Some(checkpoints),
