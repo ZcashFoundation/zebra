@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
-- Updated the following local packages: zebra-rpc
+- Updated the following local packages: zebra-node-services, zebra-chain, zebra-rpc
 
 ## [10.0.1] - 2026-08-10
 
