@@ -2921,10 +2921,7 @@ async fn cancelled_download_preserves_stale_admission_retry() {
         state,
         Arc::new(Notify::new()),
     ));
-    let verified = Network::Mainnet
-        .unmined_transactions_in_blocks(1..=10)
-        .next()
-        .expect("a vector transaction");
+    let verified = super::admission::candidate();
     let source = Some("127.0.0.1:8233".parse().unwrap());
     let (response, received) = oneshot::channel();
     downloads
@@ -2948,30 +2945,73 @@ async fn cancelled_download_preserves_stale_admission_retry() {
             zebra_chain::transaction::Hash(bytes),
         ))
     };
-    for index in 0..MAX_INBOUND_CONCURRENCY - 1 {
-        let source = source.filter(|_| index < MAX_INBOUND_CONCURRENCY_PER_PEER - 1);
+    let (cancel_response, cancelled) = oneshot::channel();
+    let mut cancel_response = Some(cancel_response);
+    for index in 0..MAX_INBOUND_CONCURRENCY_PER_PEER - 1 {
         downloads
             .as_mut()
-            .download_if_needed_and_verify(gossip(index), source, None)
+            .download_if_needed_and_verify(gossip(index), source, cancel_response.take())
             .unwrap();
     }
-    // The cancelled task's handle is not drained while proposal admission is retained.
-    downloads.cancel(&HashSet::from([gossip(0).id().mined_id()]));
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY_PER_PEER);
     assert!(matches!(
-        downloads.as_mut().download_if_needed_and_verify(
-            gossip(MAX_INBOUND_CONCURRENCY),
-            None,
-            None,
-        ),
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY), source, None),
+        Err(MempoolError::FullQueue)
+    ));
+    for index in MAX_INBOUND_CONCURRENCY_PER_PEER - 1..MAX_INBOUND_CONCURRENCY - 1 {
+        downloads
+            .as_mut()
+            .download_if_needed_and_verify(gossip(index), None, None)
+            .unwrap();
+    }
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY);
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY), None, None),
         Err(MempoolError::FullQueue)
     ));
 
-    // Reset with one admission and the other four peer slots occupied before cancellation.
+    // Cancellation releases a download immediately, even before its task handle is reaped.
+    // A completed admission remains reserved until its verdict, including when it was mined.
+    downloads.cancel(&HashSet::from([
+        gossip(0).id().mined_id(),
+        verified.transaction.id.mined_id(),
+    ]));
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
+    assert_eq!(
+        downloads.transaction_requests().count(),
+        MAX_INBOUND_CONCURRENCY - 2
+    );
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(
+            Gossip::Tx(verified.transaction.clone()),
+            source,
+            None
+        ),
+        Err(MempoolError::AlreadyQueued)
+    ));
+    downloads
+        .download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY), source, None)
+        .expect("cancellation immediately frees exactly one global and peer slot");
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 1), None, None),
+        Err(MempoolError::FullQueue)
+    ));
+    assert!(timeout(Duration::from_secs(1), cancelled)
+        .await
+        .expect("cancellation answers the cancelled caller")
+        .expect("the cancelled task retains its response channel")
+        .is_err());
+
+    // Reset with one admission and the other four peer slots occupied.
     // Only pending downloads are retried; the retained admission transfers exactly once.
     let retries: Vec<_> = downloads
         .transaction_requests()
         .map(|(tx, source)| (tx.clone(), source))
         .collect();
+    assert_eq!(retries.len(), MAX_INBOUND_CONCURRENCY - 1);
+    assert!(!retries
+        .iter()
+        .any(|(tx, _)| tx.id() == verified.transaction.id));
     let mut replacement = Downloads::new(
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
@@ -2979,27 +3019,73 @@ async fn cancelled_download_preserves_stale_admission_retry() {
         Arc::new(Notify::new()),
     );
     downloads.transfer_admission(&mut replacement);
+    assert_eq!(replacement.in_flight(), 1);
+    assert_eq!(replacement.transaction_requests().count(), 0);
+    downloads.transfer_admission(&mut replacement);
+    assert_eq!(
+        replacement.in_flight(),
+        1,
+        "admission is transferred only once"
+    );
     downloads.cancel_all();
+    assert_eq!(downloads.in_flight(), 0);
     for (tx, source) in retries {
         replacement
             .download_if_needed_and_verify(tx, source, None)
             .expect("reset retries exclude the transferred admission");
     }
     downloads = Box::pin(replacement);
-    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
-    downloads
-        .download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY), source, None)
-        .expect("cancellation frees exactly one global and peer slot across reset");
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY);
     assert!(matches!(
         downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 1), None, None),
         Err(MempoolError::FullQueue)
     ));
 
-    let source = downloads.finish_admission(verified.transaction.id);
+    // Leave spare global capacity to check the transferred admission still occupies a peer slot.
+    downloads.cancel(&HashSet::from([gossip(
+        MAX_INBOUND_CONCURRENCY_PER_PEER - 1,
+    )
+    .id()
+    .mined_id()]));
+    let cancellation = timeout(Duration::from_secs(1), downloads.as_mut().next())
+        .await
+        .expect("the cancelled download completes")
+        .expect("cancellation yields a completion")
+        .expect("cancellation does not time out")
+        .expect_err("the download was cancelled");
+    assert_eq!(
+        cancellation.0,
+        gossip(MAX_INBOUND_CONCURRENCY_PER_PEER - 1).id()
+    );
+    assert!(matches!(
+        cancellation.1,
+        crate::components::mempool::downloads::TransactionDownloadVerifyError::Cancelled
+    ));
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 1), source, None),
+        Err(MempoolError::FullQueue)
+    ));
+    downloads
+        .download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 1), None, None)
+        .expect("a different source can use the spare global slot");
+
+    let retry_id = verified.transaction.id;
+    let retry_source = downloads.finish_admission(retry_id);
+    assert_eq!(
+        retry_source, source,
+        "the retry preserves its announcing peer"
+    );
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
     downloads
         .as_mut()
-        .download_if_needed_and_verify(Gossip::Tx(verified.transaction), source, response)
+        .download_if_needed_and_verify(Gossip::Tx(verified.transaction), retry_source, response)
         .expect("the retained admission reserves capacity for its stale retry");
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY);
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(Gossip::Id(retry_id), retry_source, None),
+        Err(MempoolError::AlreadyQueued)
+    ));
     tx_verifier
         .expect_request_that(|_| true)
         .await
@@ -3009,4 +3095,20 @@ async fn cancelled_download_preserves_stale_admission_retry() {
         .expect("verification answers the original caller")
         .expect("the retry preserves the response channel")
         .is_err());
+    let completion = timeout(Duration::from_secs(1), downloads.as_mut().next())
+        .await
+        .expect("the retry completion releases its slot")
+        .expect("the retry yields a completion")
+        .expect("the retry does not time out")
+        .expect_err("the verifier rejected the retry");
+    assert_eq!(completion.0, retry_id);
+    assert_eq!(downloads.in_flight(), MAX_INBOUND_CONCURRENCY - 1);
+    downloads
+        .download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 2), source, None)
+        .expect("the terminal retry releases exactly one global and peer slot");
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(gossip(MAX_INBOUND_CONCURRENCY + 3), None, None),
+        Err(MempoolError::FullQueue)
+    ));
+    downloads.cancel_all();
 }
