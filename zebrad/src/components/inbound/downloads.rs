@@ -1,10 +1,14 @@
 //! A download stream that handles gossiped blocks from peers.
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{
@@ -13,7 +17,8 @@ use futures::{
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
-use tokio::{sync::oneshot, task::JoinHandle};
+use thiserror::Error;
+use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -27,6 +32,102 @@ use zebra_state as zs;
 use crate::components::sync::MIN_CONCURRENCY_LIMIT;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// How long to wait for the parent-height lookup that decides whether a behind-tip gossiped block
+/// was forged.
+///
+/// Bounds a drop path that also fires for honest old blocks. Timing out is treated as "no proof",
+/// so a slow state read costs the supplying peer nothing.
+const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A gossiped block was dropped before verification because its coinbase height was outside the
+/// accepted range around the chain tip.
+///
+/// Peers legitimately serve blocks that are genuinely far ahead of the tip while Zebra is catching
+/// up, and blocks that are genuinely older than the finalized tip, so this error is returned for
+/// every such drop. But a peer can also answer a [`BlocksByHash`](zn::Request::BlocksByHash) request
+/// with a canonical header and a rewritten coinbase height, because the coinbase scriptSig is
+/// excluded from the V5 transaction ID and therefore from the block hash (ZIP-244). The initial hash
+/// check still passes, so the forged height reaches these drops before consensus validation, and the
+/// verifier never scores the peer (GHSA-4f6v-mj46-gxg3).
+///
+/// The downloader attaches the supplying peer's address to the drop only when the parent header
+/// Zebra already holds proves the claimed height wrong (see [`advertiser_if_parent_contradicts`]),
+/// so the inbound handler scores a proven rewrite, and never an authentic block.
+///
+/// This is the inbound-gossip sibling of the sync path's height limit errors (GHSA-g95h-hw6g-pvgv).
+#[derive(Copy, Clone, Debug, Error)]
+pub enum HeightLimitError {
+    /// The block's coinbase height is above the lookahead limit.
+    #[error("gossiped block height {height:?} too far ahead of the tip: {hash:?}")]
+    AboveLookahead {
+        height: block::Height,
+        hash: block::Hash,
+    },
+
+    /// The block's coinbase height is behind the finalized tip.
+    #[error("gossiped block height {height:?} behind the finalized tip: {hash:?}")]
+    BehindTip {
+        height: block::Height,
+        hash: block::Hash,
+    },
+}
+
+impl HeightLimitError {
+    /// The misbehavior score for a gossiped block whose parent proves its height was rewritten.
+    ///
+    /// A rewritten coinbase height is unambiguous misbehavior whichever limit it crossed, so score it
+    /// at the ban threshold, matching the sync path (GHSA-g95h-hw6g-pvgv).
+    pub fn misbehavior_score(&self) -> u32 {
+        zn::constants::MAX_PEER_MISBEHAVIOR_SCORE
+    }
+}
+
+/// Returns `advertiser_addr` if the parent header Zebra already holds proves that a gossiped block's
+/// claimed `block_height` was rewritten, and `None` if there is no such proof.
+///
+/// # Security
+///
+/// A peer can answer a `BlocksByHash` request with a canonical header and a rewritten coinbase
+/// height, because the coinbase scriptSig is excluded from the V5 transaction ID and therefore from
+/// the block hash (ZIP-244). The hash check passes, so the forged height reaches the height limit
+/// drops before consensus validation. Peers also legitimately serve blocks that are genuinely far
+/// ahead of the tip or genuinely older than the finalized tip, so the drop is only attributed to the
+/// supplying peer when the parent header Zebra holds contradicts the claimed height: a block's height
+/// is one more than its parent's, so a held parent whose height disagrees proves the body was
+/// rewritten, whichever limit the claimed height crossed.
+///
+/// A parent Zebra does not hold, a height consistent with the parent, and a failed or timed-out
+/// lookup are all treated as no proof, so honest peers are never scored and a slow state read costs
+/// the peer nothing. (GHSA-4f6v-mj46-gxg3, the inbound-gossip sibling of GHSA-g95h-hw6g-pvgv.)
+async fn advertiser_if_parent_contradicts<ZS>(
+    state: ZS,
+    parent_hash: block::Hash,
+    block_height: block::Height,
+    advertiser_addr: Option<PeerSocketAddr>,
+) -> Option<PeerSocketAddr>
+where
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
+{
+    // There is no peer to score, so skip the state lookup.
+    let advertiser_addr = advertiser_addr?;
+
+    match timeout(
+        PARENT_LOOKUP_TIMEOUT,
+        state.oneshot(zs::Request::BlockHeader(parent_hash.into())),
+    )
+    .await
+    {
+        Ok(Ok(zs::Response::BlockHeader {
+            height: parent_height,
+            ..
+        })) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
+        // Parent unknown, height consistent with it, or the lookup failed or timed out: there is no
+        // proof of misbehavior, so the peer is not scored.
+        _ => None,
+    }
+}
 
 /// The maximum number of concurrent inbound download and verify tasks.
 /// Also used as the maximum lookahead limit, before block verification.
@@ -75,7 +176,7 @@ pub enum DownloadAction {
 /// Manages download and verification of blocks gossiped to this peer.
 #[pin_project]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV, ZS>
+pub struct Downloads<ZN, ZV, ZS, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -86,6 +187,7 @@ where
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Configuration
     //
@@ -105,7 +207,7 @@ where
     state: ZS,
 
     /// Allows efficient access to the best tip of the blockchain.
-    latest_chain_tip: zs::LatestChainTip,
+    latest_chain_tip: ZSTip,
 
     // Internal downloads state
     //
@@ -131,7 +233,7 @@ where
     in_flight_ips: HashSet<IpAddr>,
 }
 
-impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -142,6 +244,7 @@ where
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     type Item = Result<block::Hash, (BoxError, Option<PeerSocketAddr>)>;
 
@@ -179,7 +282,7 @@ where
     }
 }
 
-impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, ZS, ZSTip> Downloads<ZN, ZV, ZS, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
@@ -190,6 +293,7 @@ where
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network`, `verifier`, and `state` services.
     /// The `latest_chain_tip` must be linked to the provided `state` service.
@@ -202,7 +306,7 @@ where
         network: ZN,
         verifier: ZV,
         state: ZS,
-        latest_chain_tip: zs::LatestChainTip,
+        latest_chain_tip: ZSTip,
     ) -> Self {
         // The syncer already warns about the minimum.
         let full_verify_concurrency_limit =
@@ -286,7 +390,7 @@ where
 
         let fut = async move {
             // Check if the block is already in the state.
-            match state.oneshot(zs::Request::KnownBlock(hash)).await {
+            match state.clone().oneshot(zs::Request::KnownBlock(hash)).await {
                 Ok(zs::Response::KnownBlock(None)) => Ok(()),
                 Ok(zs::Response::KnownBlock(Some(_))) => Err("already present".into()),
                 Ok(_) => unreachable!("wrong response"),
@@ -375,7 +479,26 @@ where
                 );
                 metrics::counter!("gossip.max.height.limit.dropped.block.count").increment(1);
 
-                Err("gossiped block height too far ahead").map_err(|e| (e.into(), None))?;
+                // # Security
+                //
+                // Attribute the drop to the supplying peer only if the parent Zebra holds proves the
+                // claimed height was rewritten (GHSA-4f6v-mj46-gxg3). A genuinely far-ahead block
+                // has a parent Zebra does not hold yet, so it is dropped anonymously.
+                let advertiser_addr = advertiser_if_parent_contradicts(
+                    state,
+                    block.header.previous_block_hash,
+                    block_height,
+                    advertiser_addr,
+                )
+                .await;
+
+                return Err((
+                    BoxError::from(HeightLimitError::AboveLookahead {
+                        height: block_height,
+                        hash,
+                    }),
+                    advertiser_addr,
+                ));
             } else if block_height < min_accepted_height {
                 debug!(
                     ?hash,
@@ -387,8 +510,27 @@ where
                 );
                 metrics::counter!("gossip.min.height.limit.dropped.block.count").increment(1);
 
-                Err("gossiped block height behind the finalized tip")
-                    .map_err(|e| (e.into(), None))?;
+                // # Security
+                //
+                // Attribute the drop to the supplying peer only if the parent Zebra holds proves the
+                // claimed height was rewritten (GHSA-4f6v-mj46-gxg3). A genuinely old block is
+                // consistent with its parent, or has a parent Zebra does not hold, so it is dropped
+                // anonymously.
+                let advertiser_addr = advertiser_if_parent_contradicts(
+                    state,
+                    block.header.previous_block_hash,
+                    block_height,
+                    advertiser_addr,
+                )
+                .await;
+
+                return Err((
+                    BoxError::from(HeightLimitError::BehindTip {
+                        height: block_height,
+                        hash,
+                    }),
+                    advertiser_addr,
+                ));
             }
 
             verifier

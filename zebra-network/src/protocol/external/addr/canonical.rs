@@ -56,8 +56,11 @@ pub fn canonical_peer_addr(peer_socket_addr: impl Into<PeerSocketAddr>) -> PeerS
     canonical_socket_addr(*peer_socket_addr).into()
 }
 
-/// Returns the connection limit key for an IP address, used to group peers when
-/// enforcing [`Config::max_connections_per_ip`](crate::config::Config).
+/// Returns the peer group key for an IP address: the set of addresses Zebra
+/// treats as one entity.
+///
+/// Used to enforce [`Config::max_connections_per_ip`](crate::config::Config),
+/// and to apply misbehavior bans.
 ///
 /// - IPv4: the address itself. Each address costs an attacker a separate IPv4
 ///   allocation, so it already bounds a single host's share.
@@ -67,10 +70,13 @@ pub fn canonical_peer_addr(peer_socket_addr: impl Into<PeerSocketAddr>) -> PeerS
 /// - IPv4-mapped IPv6 addresses map to their plain IPv4 address, so both
 ///   spellings share one key.
 ///
+/// The port is always dropped, so a peer cannot get a fresh key by
+/// reconnecting from a different source port.
+///
 /// # Security
 ///
-/// The connection limit is only as strong as this grouping. Every limit
-/// check must key peers through this function.
+/// Connection limits and bans are only as strong as this grouping. Every
+/// limit and ban check must key peers through this function.
 pub(crate) fn connection_limit_key(ip: IpAddr) -> IpAddr {
     // Unmap IPv4-mapped IPv6 first, so that both spellings of an IPv4 host
     // share one key.

@@ -3,7 +3,7 @@
 
 use std::{
     cmp::max,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::Arc,
     task::{Context, Poll},
     time::Instant,
@@ -11,7 +11,6 @@ use std::{
 
 use chrono::Utc;
 use futures::future;
-use indexmap::IndexMap;
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot, watch},
@@ -24,7 +23,7 @@ use crate::{
     address_book::AddressMetrics,
     address_book_peers::AddressBookPeers,
     meta_addr::{MetaAddr, MetaAddrChange},
-    AddressBook, BoxError, Config,
+    AddressBook, BanList, BoxError, Config,
 };
 
 #[cfg(test)]
@@ -172,7 +171,7 @@ struct AddressBookHandler {
     address_book: Arc<std::sync::Mutex<AddressBook>>,
 
     /// The channel used to publish the ban list when it changes.
-    bans_sender: Arc<watch::Sender<Arc<IndexMap<IpAddr, Instant>>>>,
+    bans_sender: Arc<watch::Sender<BanList>>,
 }
 
 impl AddressBookHandler {
@@ -202,10 +201,11 @@ impl AddressBookHandler {
 
                 // `UpdateMisbehavior` events should only be passed to `update()` here,
                 // so that this channel is always updated when new addresses are banned.
+                //
                 let bans = updated
                     .is_none()
                     .then(|| address_book.bans())
-                    .filter(|bans| bans.contains_key(&event_ip));
+                    .filter(|bans| bans.is_banned(event_ip));
 
                 // Don't hold the lock while sending the list of `bans`
                 drop(address_book);
@@ -296,7 +296,7 @@ impl AddressBookUpdater {
         local_listener: SocketAddr,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
-        watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
+        watch::Receiver<BanList>,
         AddressBookChangeSender,
         AddressBookService,
         watch::Receiver<AddressMetrics>,
@@ -325,7 +325,7 @@ impl AddressBookUpdater {
         channel_size: usize,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
-        watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
+        watch::Receiver<BanList>,
         AddressBookChangeSender,
         AddressBookService,
         watch::Receiver<AddressMetrics>,

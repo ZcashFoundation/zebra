@@ -25,7 +25,7 @@ The version number is incremented based on the level of change included in the r
 
 ### Supported Releases
 
-Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **15 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **12 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 

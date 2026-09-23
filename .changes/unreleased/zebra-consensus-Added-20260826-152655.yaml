@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Added
-body: '`sapling_prover()`, which returns the shared Sapling prover, so callers that build Sapling outputs do not have to parse the bundled Sapling parameters again.'
-time: 2026-08-26T15:26:55.000000000Z
