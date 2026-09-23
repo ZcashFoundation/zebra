@@ -100,7 +100,6 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Instant,
 };
@@ -112,7 +111,6 @@ use futures::{
     stream::FuturesUnordered,
     task::noop_waker,
 };
-use indexmap::IndexMap;
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
@@ -141,7 +139,7 @@ use crate::{
         external::{connection_limit_key, InventoryHash},
         internal::{Request, Response},
     },
-    BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
+    BanList, BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
 
 #[cfg(test)]
@@ -209,8 +207,8 @@ where
     /// A channel that asks the peer crawler task to connect to more peers.
     demand_signal: mpsc::Sender<MorePeers>,
 
-    /// A watch channel receiver with a copy of banned IP addresses.
-    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    /// A watch channel receiver with a snapshot of the banned peer groups.
+    bans_receiver: watch::Receiver<BanList>,
 
     /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
@@ -367,7 +365,7 @@ where
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<InventoryChange>,
-        bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+        bans_receiver: watch::Receiver<BanList>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
@@ -588,7 +586,7 @@ where
                 Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
 
-                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                    if self.bans_receiver.borrow().is_banned(key.ip()) {
                         warn!(?key, "service is banned, dropping service");
                         std::mem::drop(svc);
                         let cancel = self.cancel_handles.remove(&key);
@@ -669,7 +667,7 @@ where
             match peer_readiness {
                 // Still ready, add it back to the list.
                 Ok(()) => {
-                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                    if self.bans_receiver.borrow().is_banned(key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
                         std::mem::drop(svc);
                         continue;
@@ -1279,7 +1277,7 @@ where
         // Like `broadcast_all_queued`, don't deliver to peers that were banned
         // while the request was queued.
         let bans = self.bans_receiver.borrow().clone();
-        remaining_sidecars.retain(|key| !bans.contains_key(&key.ip()));
+        remaining_sidecars.retain(|key| !bans.is_banned(key.ip()));
 
         let ready_sidecars: Vec<D::Key> = remaining_sidecars
             .iter()
@@ -1361,7 +1359,7 @@ where
         };
 
         let bans = self.bans_receiver.borrow().clone();
-        remaining_peers.retain(|addr| !bans.contains_key(&addr.ip()));
+        remaining_peers.retain(|addr| !bans.is_banned(addr.ip()));
 
         let Ok(reserved_send_slot) = sender.try_reserve() else {
             self.queued_broadcast_all = Some((req, sender, remaining_peers));

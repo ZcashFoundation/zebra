@@ -2265,7 +2265,7 @@ async fn rpc_getpeerinfo() {
         res_iter
             .next()
             .expect("there should be a mock peer address"),
-        outbound_mock_peer_address.into()
+        PeerInfo::from_meta_addr(outbound_mock_peer_address, 0)
     );
 
     // Check for the inbound peer
@@ -2273,7 +2273,7 @@ async fn rpc_getpeerinfo() {
         res_iter
             .next()
             .expect("there should be a mock peer address"),
-        inbound_mock_peer_address.into()
+        PeerInfo::from_meta_addr(inbound_mock_peer_address, 0)
     );
 
     mempool.expect_no_requests().await;

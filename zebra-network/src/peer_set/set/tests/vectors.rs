@@ -5,7 +5,6 @@ use std::{
     collections::HashSet,
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
     time::Duration,
 };
 
@@ -27,7 +26,6 @@ use crate::{
     protocol::external::{types::Version, InventoryHash},
     BoxError, PeerSocketAddr, Request, Response, SharedPeerError,
 };
-use indexmap::IndexMap;
 use tokio::sync::watch;
 
 use super::{PeerSetBuilder, PeerVersions};
@@ -326,10 +324,10 @@ fn broadcast_all_queued_removes_banned_peers() {
             .build();
 
         let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
-        bans_map.insert(banned_ip, std::time::Instant::now());
+        let mut bans = crate::BanList::default();
+        bans.ban(banned_ip);
 
-        let (bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
+        let (bans_tx, bans_rx) = watch::channel(bans);
         let _ = bans_tx;
         peer_set.bans_receiver = bans_rx;
 
@@ -375,9 +373,9 @@ fn remove_unready_peer_clears_cancel_handle_and_updates_counts() {
         // Prepare a banned IP map (not strictly required for remove(), but keeps
         // the test's setup similar to real-world conditions).
         let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
-        bans_map.insert(banned_ip, std::time::Instant::now());
-        let (_bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
+        let mut bans = crate::BanList::default();
+        bans.ban(banned_ip);
+        let (_bans_tx, bans_rx) = watch::channel(bans);
         peer_set.bans_receiver = bans_rx;
 
         // Create a cancel handle as if a request was in-flight to `banned_addr`.

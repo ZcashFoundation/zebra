@@ -21,7 +21,7 @@ use std::{
 
 use chrono::Utc;
 use futures::{channel::mpsc, FutureExt, StreamExt};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexSet;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpSocket, TcpStream},
@@ -1256,12 +1256,9 @@ async fn listener_bans_zcashd_compat_peer_before_reserved_slot() {
     config.listen_addr = listen_addr;
 
     let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
-    let (bans_tx, bans_rx) = tokio::sync::watch::channel(
-        [(zcashd_compat_ip.into(), std::time::Instant::now())]
-            .into_iter()
-            .collect::<IndexMap<_, _>>()
-            .into(),
-    );
+    let mut bans = crate::BanList::default();
+    bans.ban(zcashd_compat_ip.into());
+    let (bans_tx, bans_rx) = tokio::sync::watch::channel(bans);
 
     let listen_fut = accept_inbound_connections(
         config,
@@ -1430,12 +1427,9 @@ async fn listener_bans_ipv4_mapped_inbound_connection() {
     let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
     // The ban is stored in the canonical IPv4 form, like `MetaAddr::new_misbehavior`
     // stores it.
-    let (bans_tx, bans_rx) = tokio::sync::watch::channel(
-        [(banned_ip.into(), std::time::Instant::now())]
-            .into_iter()
-            .collect::<IndexMap<IpAddr, Instant>>()
-            .into(),
-    );
+    let mut bans = crate::BanList::default();
+    bans.ban(banned_ip.into());
+    let (bans_tx, bans_rx) = tokio::sync::watch::channel(bans);
 
     let listen_fut = accept_inbound_connections(
         config,
@@ -1560,7 +1554,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
     let ban_deadline = Instant::now() + MISBEHAVIOR_FLUSH_TIMEOUT;
     let banned_ip: IpAddr = peer_ip.into();
     loop {
-        if address_book.lock().unwrap().bans().contains_key(&banned_ip) {
+        if address_book.lock().unwrap().bans().is_banned(banned_ip) {
             break;
         }
 
@@ -2255,7 +2249,7 @@ struct TestCrawler {
 
     /// Address book updater handles, kept alive while the crawler runs.
     _address_book_updater_handles: (
-        tokio::sync::watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
+        tokio::sync::watch::Receiver<crate::BanList>,
         tokio::sync::watch::Receiver<crate::address_book::AddressMetrics>,
         JoinHandle<Result<(), BoxError>>,
     ),
