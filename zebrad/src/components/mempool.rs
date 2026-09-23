@@ -832,26 +832,14 @@ impl Service<Request> for Mempool {
             // Clean up completed download tasks and add to mempool if successful.
             while let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) {
                 match result {
+                    // Admission retries candidates verified against another tip.
                     Ok(Ok((tx, spent_mempool_outpoints, expected_tip, rsp_tx))) => {
-                        if expected_tip
-                            == best_tip_height.map(|height| (height, *last_seen_tip_hash))
-                        {
-                            self.admission.push(admission::Candidate::new(
-                                tx,
-                                spent_mempool_outpoints,
-                                *last_seen_tip_hash,
-                                rsp_tx,
-                            ));
-                        } else {
-                            let source = tx_downloads.finish_admission(tx.transaction.id);
-                            tx_downloads.download_if_needed_and_verify(
-                                tx.transaction.into(),
-                                source,
-                                rsp_tx,
-                            ).expect(
-                                "finishing admission reserves global and peer capacity for its immediate retry",
-                            );
-                        }
+                        self.admission.push(admission::Candidate::new(
+                            tx,
+                            spent_mempool_outpoints,
+                            expected_tip.map(|(_, hash)| hash),
+                            rsp_tx,
+                        ));
                     }
                     Ok(Err(boxed_err)) => {
                         let (tx_id, error) = *boxed_err;
@@ -894,37 +882,42 @@ impl Service<Request> for Mempool {
                 };
             }
 
-            // Apply each proposal's outcomes before polling again: later batches snapshot
+            // Apply each proposal's verdicts before polling again: later batches snapshot
             // their ancestor packages from storage.
-            while let Poll::Ready(outcomes) = self.admission.poll(cx, storage, *last_seen_tip_hash)
+            let mut retried = false;
+            while let Poll::Ready(verdicts) = self.admission.poll(cx, storage, *last_seen_tip_hash)
             {
-                for (candidate, result) in outcomes {
+                for (candidate, verdict) in verdicts {
                     let tx_id = candidate.tx.transaction.id;
                     let source = tx_downloads.finish_admission(tx_id);
-                    if matches!(result, Ok(false)) {
-                        // A changed committed parent/ancestor set is not an invalid transaction.
-                        tx_downloads.download_if_needed_and_verify(
-                            candidate.tx.transaction.into(),
-                            source,
-                            candidate.response,
-                        ).expect(
-                            "finishing admission reserves global and peer capacity for its immediate retry",
-                        );
-                        continue;
-                    }
-                    let result = result.and_then(|_| {
-                        let previous_count = storage.transaction_count();
-                        let result = storage
-                            .insert(candidate.tx, candidate.spent, best_tip_height)
-                            .map(|_| ())
-                            .map_err(BoxError::from);
-                        // On error, insertion never adds a retained entry, so any
-                        // eviction of existing entries decreases the count. No-op errors do not
-                        // invalidate an otherwise current template.
-                        verified_set_changed |=
-                            result.is_ok() || storage.transaction_count() != previous_count;
-                        result
-                    });
+                    let result = match verdict {
+                        admission::Verdict::Retry => {
+                            // A changed committed parent is not an invalid transaction.
+                            tx_downloads.download_if_needed_and_verify(
+                                candidate.tx.transaction.into(),
+                                source,
+                                candidate.response,
+                            ).expect(
+                                "finishing admission reserves global and peer capacity for its immediate retry",
+                            );
+                            retried = true;
+                            continue;
+                        }
+                        admission::Verdict::Rejected(error) => Err(error),
+                        admission::Verdict::Passed => {
+                            let previous_count = storage.transaction_count();
+                            let result = storage
+                                .insert(candidate.tx, candidate.spent, best_tip_height)
+                                .map(|_| ())
+                                .map_err(BoxError::from);
+                            // On error, insertion never adds a retained entry, so any
+                            // eviction of existing entries decreases the count. No-op errors do
+                            // not invalidate an otherwise current template.
+                            verified_set_changed |=
+                                result.is_ok() || storage.transaction_count() != previous_count;
+                            result
+                        }
+                    };
 
                     if result.is_ok() {
                         send_to_peers_ids.insert(tx_id);
@@ -935,7 +928,9 @@ impl Service<Request> for Mempool {
                         let _ = response.send(result);
                     }
                 }
-                // Retries are queued after the download stream was drained in this poll.
+            }
+            // Retries are queued after the download stream was drained in this poll.
+            if retried {
                 self.background_work.notify.notify_one();
             }
 

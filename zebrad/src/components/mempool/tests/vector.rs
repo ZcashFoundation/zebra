@@ -36,7 +36,7 @@ type MockPeerSet = MockService<zn::Request, zn::Response, PanicAssertion>;
 type StateService = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
-type MockTxVerifier =
+pub(super) type MockTxVerifier =
     MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion, TransactionError>;
 
 /// A stale NU6.2 branch ID has no peer score at NU6.3 activation.
