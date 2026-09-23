@@ -1,15 +1,21 @@
 //! Fixed test vectors for indexer RPCs
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::BoxError;
 use zebra_chain::{
-    block::{Block, Height},
+    block::{self, Block, Height},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
-    serialization::ZcashDeserializeInto,
-    transaction::{self, UnminedTxId},
+    parameters::{Network, NetworkUpgrade},
+    serialization::{BytesInDisplayOrder, ZcashDeserializeInto, ZcashSerialize},
+    transaction::{self, LockTime, Transaction, UnminedTxId},
+    transparent,
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
 use zebra_state::{HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse};
@@ -19,7 +25,8 @@ use zebra_test::{
 };
 
 use crate::indexer::{
-    self, indexer_client::IndexerClient, BlockRequest, Empty, NonFinalizedStateChangeRequest,
+    self, indexer_client::IndexerClient, BlockAndHash, BlockRequest, Empty,
+    NonFinalizedStateChangeRequest, TransactionIdentifier,
 };
 
 #[tokio::test]
@@ -107,6 +114,12 @@ async fn test_non_finalized_state_change(
             .expect("response stream should not end while blocks are buffered")
             .expect("non-finalized state change response should not be an error message");
 
+        // The streamed identifiers match the ones `GetBlock` returns for the same block.
+        assert_eq!(
+            message.transaction_identifiers,
+            BlockAndHash::new(block.hash(), block.clone()).transaction_identifiers,
+        );
+
         let (_decoded_block, decoded_hash) = message.decode().expect("response should decode");
         assert_eq!(decoded_hash, block.hash());
     }
@@ -163,15 +176,150 @@ async fn test_get_block(
         .await
         .respond(ReadResponse::Block(Some(block.clone())));
 
-    let response = request_task
+    let by_height = request_task
         .await?
         .expect("get_block should succeed")
         .into_inner();
-    let (decoded_block, decoded_hash) = response.decode().expect("response should decode");
+    assert_transaction_identifiers_match(&by_height, &block);
+
+    // The same block requested by hash has an identical response.
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .get_block(tonic::Request::new(BlockRequest {
+                hash_or_height: expected_hash.bytes_in_display_order().to_vec(),
+            }))
+            .await
+    });
+
+    mock_read_service
+        .expect_request(ReadRequest::Block(HashOrHeight::Hash(expected_hash)))
+        .await
+        .respond(ReadResponse::Block(Some(block.clone())));
+
+    let by_hash = request_task
+        .await?
+        .expect("get_block should succeed")
+        .into_inner();
+    assert_eq!(by_hash, by_height);
+
+    let (decoded_block, decoded_hash) = by_height.decode().expect("response should decode");
     assert_eq!(decoded_hash, expected_hash);
     assert_eq!(decoded_block.hash(), expected_hash);
 
     Ok(())
+}
+
+/// Tests that [`BlockAndHash`] lists one identifier per transaction, in block order, for every
+/// transaction version.
+#[test]
+fn block_and_hash_transaction_identifiers() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut versions_seen = BTreeSet::new();
+
+    for network in Network::iter() {
+        for block in network.block_parsed_iter() {
+            let block = Arc::new(block);
+            let response = BlockAndHash::new(block.hash(), block.clone());
+            assert_transaction_identifiers_match(&response, &block);
+
+            versions_seen.extend(block.transactions.iter().map(|tx| tx.version()));
+        }
+    }
+
+    // None of the test vectors contain a V6 transaction, so add one to a block with a V5
+    // transaction.
+    let mut block: Block =
+        zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.zcash_deserialize_into()?;
+    block.transactions.push(Arc::new(Transaction::test_v6(
+        NetworkUpgrade::Nu6_3,
+        Vec::new(),
+        vec![transparent::Output::new(
+            0u64.try_into().expect("zero is a valid amount"),
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+        block::Height(0),
+    )));
+    let block = Arc::new(block);
+    let response = BlockAndHash::new(block.hash(), block.clone());
+    assert_transaction_identifiers_match(&response, &block);
+    versions_seen.extend(block.transactions.iter().map(|tx| tx.version()));
+
+    assert_eq!(
+        versions_seen,
+        (1..=6).collect(),
+        "the test should cover every transaction version"
+    );
+
+    Ok(())
+}
+
+/// Tests that [`TransactionIdentifier`] matches the ZIP-244 test vectors, with both identifiers
+/// reversed into display order.
+///
+/// Unlike [`block_and_hash_transaction_identifiers`], the expected values here don't come from
+/// Zebra's own hashing or display-order code.
+#[test]
+fn transaction_identifier_matches_zip244_vectors() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for test in zebra_test::zip0244::TEST_VECTORS.iter() {
+        let transaction: Transaction = test.tx.zcash_deserialize_into()?;
+        let TransactionIdentifier { txid, auth_digest } = TransactionIdentifier::new(&transaction);
+
+        let mut expected_txid = test.txid;
+        expected_txid.reverse();
+        let mut expected_auth_digest = test.auth_digest;
+        expected_auth_digest.reverse();
+
+        assert_eq!(txid, expected_txid.to_vec());
+        assert_eq!(auth_digest, expected_auth_digest.to_vec());
+    }
+
+    Ok(())
+}
+
+/// Asserts that `response` has the block's hash and serialized data, and one
+/// [`TransactionIdentifier`] per transaction in block order, matching Zebra's canonical txid and
+/// auth digest, with an empty auth digest for V1 to V4 transactions.
+fn assert_transaction_identifiers_match(response: &BlockAndHash, block: &Block) {
+    assert_eq!(
+        response.hash,
+        block.hash().bytes_in_display_order().to_vec()
+    );
+    assert_eq!(
+        response.data,
+        block
+            .zcash_serialize_to_vec()
+            .expect("test blocks serialize successfully"),
+    );
+    assert_eq!(
+        response.transaction_identifiers.len(),
+        block.transactions.len()
+    );
+
+    for (identifier, transaction) in response
+        .transaction_identifiers
+        .iter()
+        .zip(&block.transactions)
+    {
+        let TransactionIdentifier { txid, auth_digest } = identifier;
+
+        assert_eq!(*txid, transaction.hash().bytes_in_display_order().to_vec());
+
+        match transaction.auth_digest() {
+            Some(expected) => {
+                assert!(transaction.version() >= 5);
+                assert_eq!(*auth_digest, expected.bytes_in_display_order().to_vec());
+            }
+            None => {
+                assert!(transaction.version() <= 4);
+                assert!(auth_digest.is_empty());
+            }
+        }
+    }
 }
 
 async fn test_chain_tip_change(
