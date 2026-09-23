@@ -268,7 +268,7 @@ where
     ZS: zs::ReadState + Sync,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
-    type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
+    type Item = Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -290,7 +290,7 @@ where
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
+                    Poll::Ready(Some(Err((e, hash))))
                 }
             }
         } else {

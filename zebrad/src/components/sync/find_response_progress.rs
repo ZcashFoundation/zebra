@@ -1,0 +1,104 @@
+//! Classification of a response after its accepted hashes finish verification.
+
+use std::sync::{Arc, Mutex};
+
+use zebra_network::FindResponseFeedback;
+
+/// Shared classification state for the unique accepted hashes of one response.
+#[derive(Clone)]
+pub(super) struct FindResponseProgress {
+    inner: Arc<Mutex<Inner>>,
+}
+
+/// Remaining work and the one-shot feedback owned by a response.
+struct Inner {
+    remaining: usize,
+    abandoned: bool,
+    feedback: Option<FindResponseFeedback>,
+}
+
+impl FindResponseProgress {
+    /// Tracks `hash_count` unique hashes using `feedback`.
+    pub(super) fn new(hash_count: usize, feedback: FindResponseFeedback) -> Self {
+        assert!(
+            hash_count > 0,
+            "accepted responses contain at least one hash"
+        );
+
+        Self {
+            inner: Arc::new(Mutex::new(Inner {
+                remaining: hash_count,
+                abandoned: false,
+                feedback: Some(feedback),
+            })),
+        }
+    }
+
+    /// Records a verified hash, crediting the response only after all hashes verify.
+    pub(super) fn record_verified_hash(&self) {
+        self.finish_hash(false);
+    }
+
+    /// Records exhausted missing-block retries as a stall for the whole response.
+    pub(super) fn record_missing_hash(&self) {
+        self.report_stalled();
+    }
+
+    /// Records conclusive invalidity as a stall for the whole response.
+    pub(super) fn record_invalid_hash(&self) {
+        self.report_stalled();
+    }
+
+    /// Records an inconclusive local outcome without penalizing the response.
+    pub(super) fn record_abandoned_hash(&self) {
+        self.finish_hash(true);
+    }
+
+    /// Completes one hash and releases feedback when no unresolved hashes remain.
+    fn finish_hash(&self, abandoned: bool) {
+        let (feedback, useful) = {
+            let mut inner = self
+                .inner
+                .lock()
+                .expect("progress updates do not panic while locked");
+
+            if inner.feedback.is_none() {
+                return;
+            }
+
+            inner.remaining -= 1;
+            inner.abandoned |= abandoned;
+
+            let feedback = if inner.remaining == 0 {
+                inner.feedback.take()
+            } else {
+                None
+            };
+
+            (feedback, !inner.abandoned)
+        };
+
+        if let Some(feedback) = feedback {
+            if useful {
+                feedback.mark_useful();
+            }
+        }
+    }
+
+    /// Consumes feedback once when any accepted hash proves unusable.
+    fn report_stalled(&self) {
+        let feedback = self
+            .inner
+            .lock()
+            .expect("progress updates do not panic while locked")
+            .feedback
+            .take();
+
+        if let Some(feedback) = feedback {
+            feedback.mark_stalled();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
