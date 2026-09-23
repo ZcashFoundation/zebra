@@ -1,0 +1,58 @@
+# Weekly CodeQL analysis of the Rust code on `main`.
+#
+# Replaces GitHub's CodeQL default setup, which scanned every PR push for 16-25 minutes
+# without producing an actionable finding. See #11505 for the cost and coverage data.
+name: CodeQL
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+# Don't cancel a scheduled run's upload when a manual run starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd #v4.38.1
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd #v4.38.1
+        with:
+          # Matches the category default setup used, so results continue the same analysis.
+          category: /language:rust
+
+  failure-issue:
+    name: Open or update an issue for CodeQL failures
+    needs: analyze
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
+        with:
+          title-template: "{{refname}} CodeQL analysis failed: {{eventName}} in {{workflow}}"
+          label-name: ci-fail/main
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
