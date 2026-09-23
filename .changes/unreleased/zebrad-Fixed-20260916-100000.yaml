@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: 'The `docker-split-containers` mode of `scripts/install-zebra.sh` now prints a zcashd container command that can run. It defaulted to a zcashd Docker image that was never published; it now runs the hash-pinned sidecar `zcashd` from the Zebra image, downloading and verifying the binary on the host and bind-mounting it in. Pass `--zcashd-docker-image IMAGE` to use your own image instead ([#11413](https://github.com/ZcashFoundation/zebra/pull/11413)).'
-time: 2026-09-16T10:00:00.000000000Z
