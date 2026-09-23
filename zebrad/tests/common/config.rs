@@ -91,6 +91,15 @@ pub fn use_live_peers(config: &mut ZebradConfig) {
     config.network.initial_testnet_peers = defaults.initial_testnet_peers;
 }
 
+/// Returns the default DNS seeders for `network`.
+pub fn live_peers(network: &Network) -> IndexSet<String> {
+    zebra_network::Config {
+        network: network.clone(),
+        ..zebra_network::Config::default()
+    }
+    .initial_peer_hostnames()
+}
+
 pub fn persistent_test_config(network: &Network) -> Result<ZebradConfig> {
     let mut config = default_test_config(network);
     config.state.ephemeral = false;
