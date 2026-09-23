@@ -748,6 +748,11 @@ fn non_blocking_logger() -> Result<()> {
             let mut config = random_known_rpc_port_config(false, &Mainnet)?;
             config.tracing.filter = Some("trace".to_string());
             config.tracing.buffer_limit = 100;
+            // Trace-level startup logs fill the stdout pipe before the RPC server opens, so the
+            // logger overflows without any peer traffic. Don't dial live peers: they slow the
+            // test down, and compete with the live-network tests for the runner's IP.
+            config.network.initial_mainnet_peers = Default::default();
+            config.network.initial_testnet_peers = Default::default();
 
             let rpc_address = config
                 .rpc
