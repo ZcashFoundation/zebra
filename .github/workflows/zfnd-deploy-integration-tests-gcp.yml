@@ -134,7 +134,7 @@ jobs:
   #     decimal run id satisfies that, but anything appended after it would not, and
   #     the resources would leak.
   #   - The two names must DIFFER. GCE names an instance's boot disk after the
-  #     instance when none is given, and `create-with-container` gives none, so an
+  #     instance when none is given, and `instances create` gives none, so an
   #     identical data-disk name collides with the boot disk and creation fails.
   #
   # Neither the branch nor the commit is part of the name: both are carried on the
@@ -288,10 +288,10 @@ jobs:
 
       # Disk Mounting Logic Explanation:
       #
-      # The following step creates a GCP instance using create-with-container.
-      # The $CONTAINER_MOUNT_DISKS variable, constructed within the run script,
-      # defines how the created persistent disk (specified in $DISK_PARAMS)
-      # is mounted into the test container using --container-mount-disk.
+      # The following step creates a GCP instance whose container is launched by
+      # cloud-init. The $DOCKER_MOUNTS variable, constructed within the run script,
+      # defines how the created persistent disk (specified in $DISK_PARAMS) is
+      # bind-mounted into the test container, from a single host mount of the disk.
       #
       # If the test needs Lightwalletd state (inputs.needs_lwd_state is true or test_id is lwd-sync-full),
       # the same persistent disk is mounted to both the Zebra state path (inputs.zebra_state_dir)
@@ -325,11 +325,15 @@ jobs:
           IS_LONG_TEST: ${{ inputs.is_long_test }}
         run: |
 
-          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
+          # The cache disk is mounted once on the host (HOST_CACHE_DIR) and bind-mounted
+          # into the container at each path the tests expect. konlet did this with
+          # repeated --container-mount-disk; cloud-init needs docker -v flags instead.
+          HOST_CACHE_DIR=/mnt/disks/zebracache
+          DOCKER_MOUNTS="-v ${HOST_CACHE_DIR}:${{ inputs.zebra_state_dir }}"
 
           # Mount the same disk to the lwd path if needed
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
+            DOCKER_MOUNTS+=" -v ${HOST_CACHE_DIR}:${{ inputs.lwd_state_dir }}"
           fi
 
           # Environment variables for the container
@@ -347,6 +351,122 @@ jobs:
           for z in us-east1-b us-east1-c us-east1-d; do
             [ "${z}" = "${PRIMARY_ZONE}" ] || ORDERED_ZONES="${ORDERED_ZONES} ${z}"
           done
+
+          # Build the cloud-init document that replaces konlet.
+          #
+          # konlet (gce-container-declaration) is deprecated by Google, so the
+          # container is launched by a systemd unit instead. Three konlet behaviours
+          # have to be reproduced explicitly:
+          #   - it formatted an unformatted data disk (blkid || mkfs.ext4 below)
+          #   - it named the container klt-<instance> (now a fixed CONTAINER_NAME)
+          #   - --container-restart-policy=never (now Restart=no)
+          #
+          # The host mount point deliberately contains no hyphen. A path such as
+          # /mnt/disks/zebra-cache needs a \x2d escape in the systemd unit name, and
+          # that backslash does not survive cloud-init's runcmd shell: the mount then
+          # fails to enable while the container still starts, silently using the boot
+          # disk instead of the cache disk.
+          CONTAINER_NAME=zebrad-test
+
+          # CONTAINER_ENV is comma-separated, matching what --container-env took.
+          # docker reads it as an env file, one KEY=VALUE per line.
+          ENV_FILE_BODY=$(echo "${CONTAINER_ENV}" | tr ',' '\n' | sed 's/^/      /')
+
+          cat > /tmp/cloud-init.yaml <<CLOUDINIT
+          #cloud-config
+          bootcmd:
+          - mkdir -p ${HOST_CACHE_DIR}
+
+          write_files:
+          - path: /etc/zebrad-test.env
+            permissions: "0600"
+            owner: root
+            content: |
+          ${ENV_FILE_BODY}
+
+          - path: /etc/systemd/system/format-zebracache.service
+            permissions: "0644"
+            owner: root
+            content: |
+              [Unit]
+              Description=Format the cache disk if it has no filesystem
+              Before=mnt-disks-zebracache.mount
+              ConditionPathExists=/dev/disk/by-id/google-${NAME}
+
+              [Service]
+              Type=oneshot
+              RemainAfterExit=yes
+              # A disk restored from a cached-state image is already formatted, so
+              # blkid short-circuits and existing state is never touched.
+              ExecStart=/bin/sh -c 'blkid /dev/disk/by-id/google-${NAME} || mkfs.ext4 -F /dev/disk/by-id/google-${NAME}'
+
+              [Install]
+              WantedBy=multi-user.target
+
+          - path: /etc/systemd/system/mnt-disks-zebracache.mount
+            permissions: "0644"
+            owner: root
+            content: |
+              [Unit]
+              Description=zebrad cache disk
+              After=format-zebracache.service
+              Requires=format-zebracache.service
+              Before=zebrad-test.service
+
+              [Mount]
+              What=/dev/disk/by-id/google-${NAME}
+              Where=${HOST_CACHE_DIR}
+              Type=ext4
+              Options=discard,defaults
+
+              [Install]
+              WantedBy=multi-user.target
+
+          - path: /etc/systemd/system/zebrad-test.service
+            permissions: "0644"
+            owner: root
+            content: |
+              [Unit]
+              Description=zebrad integration test container
+              # Requires (not just RequiresMountsFor) so a failed mount stops the
+              # container outright rather than letting it run against the boot disk.
+              Requires=docker.service mnt-disks-zebracache.mount
+              After=docker.service network-online.target mnt-disks-zebracache.mount
+
+              [Service]
+              Type=exec
+              Restart=no
+              # konlet inherited docker's 10s SIGKILL, which can truncate zebrad's
+              # RocksDB flush. A unit can wait for it.
+              TimeoutStopSec=180
+              ExecStartPre=-/usr/bin/docker rm -f ${CONTAINER_NAME}
+              # Deliberately no --rm: later steps read this container's logs after it
+              # exits (to extract DB versions and build the cached-state image).
+              # konlet's --container-restart-policy=never also left the exited
+              # container in place; --rm would delete it and break those steps.
+              #
+              # --tty matches konlet's --container-tty, and is not cosmetic: a TTY
+              # merges stderr into stdout, and the log-parsing steps pipe
+              # 'docker logs' stdout only. Without it zebrad's output, which goes to
+              # stderr, is invisible to them. No --interactive: nothing reads stdin,
+              # and it fails under systemd without a terminal.
+              ExecStart=/usr/bin/docker run --name ${CONTAINER_NAME} \\
+                --tty \\
+                --network host \\
+                --env-file /etc/zebrad-test.env \\
+                ${DOCKER_MOUNTS} \\
+                ${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+              ExecStop=/usr/bin/docker stop -t 170 ${CONTAINER_NAME}
+
+              [Install]
+              WantedBy=multi-user.target
+
+          runcmd:
+          - systemctl daemon-reload
+          - systemctl enable --now format-zebracache.service
+          - systemctl enable --now mnt-disks-zebracache.mount
+          - systemctl enable --now zebrad-test.service
+          CLOUDINIT
 
           # Creates the data disk (when using a cached image) and the instance in one
           # zone. Returns non-zero if either call fails, leaving the caller to inspect
@@ -368,27 +488,21 @@ jobs:
               DISK_ATTACH_PARAMS="--create-disk=size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
             fi
 
-            # DISK_ATTACH_PARAMS and CONTAINER_MOUNT_DISKS each expand to one or more
-            # separate gcloud arguments, so they are deliberately left unquoted.
+            # DISK_ATTACH_PARAMS expands to one or more separate gcloud arguments, so
+            # it is deliberately left unquoted.
             # shellcheck disable=SC2086
-            gcloud compute instances create-with-container "${INSTANCE_NAME}" \
+            gcloud compute instances create "${INSTANCE_NAME}" \
             --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
             --boot-disk-size=50GB \
             --boot-disk-type=pd-ssd \
             --image-project=cos-cloud \
             --image-family=cos-stable \
             ${DISK_ATTACH_PARAMS} \
-            ${CONTAINER_MOUNT_DISKS} \
-            --container-stdin \
-            --container-tty \
-            --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
-            --container-env="${CONTAINER_ENV}" \
-            --container-restart-policy=never \
             --subnet=${{ vars.GCP_SUBNETWORK }} \
             --scopes cloud-platform \
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
-            --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
+            --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh,user-data=/tmp/cloud-init.yaml \
             --labels="app=${APP_NAME},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${GITHUB_REF_SLUG_URL},test=${TEST_ID},commit=${GITHUB_SHA_SHORT},long-test=${IS_LONG_TEST}" \
             --tags ${{ inputs.app_name }} \
             --zone "${zone}"
@@ -432,7 +546,8 @@ jobs:
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
-          CONTAINER_PREFIX="klt-${INSTANCE_NAME}"
+          # cloud-init names the container deterministically; konlet used klt-<instance>.
+          CONTAINER_PREFIX="zebrad-test"
 
           echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
 
