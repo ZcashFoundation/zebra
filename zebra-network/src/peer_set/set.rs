@@ -1209,6 +1209,10 @@ where
         // Waiting for a busy serving peer is better than asking a non-serving peer, which would
         // most likely answer `notfound` for a historic block, and get marked as missing it. But
         // peers only advertise recent blocks, which non-serving peers can usually serve.
+        //
+        // The inventory registry is best-effort, and can drop advertisements under load. Then a
+        // recent block waits for a serving peer, and the block is fetched again when it is
+        // advertised again, or by the syncer.
         let is_advertised = self
             .inventory_registry
             .advertising_peers(hash)
@@ -1229,8 +1233,11 @@ where
             return fut.map_err(Into::into).boxed();
         }
 
+        // Only wait for busy peers that could serve the block, like the fallback above: any busy
+        // peer for an advertised block, but only busy serving peers for a historic block.
         // Transaction downloads don't retry, so delaying their refusal would only slow them down.
-        let delay_refusal = is_block && self.busy_peer_might_have(&missing_peer_list, false);
+        let delay_refusal =
+            is_block && self.busy_peer_might_have(&missing_peer_list, !is_advertised);
         let kind = if delay_refusal { "delayed" } else { "instant" };
 
         tracing::debug!(

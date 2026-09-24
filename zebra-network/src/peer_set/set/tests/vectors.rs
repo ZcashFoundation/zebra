@@ -1445,6 +1445,110 @@ fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
     });
 }
 
+/// Check that a busy non-serving peer only delays the refusal of a block that was advertised.
+///
+/// Non-serving peers usually can't serve historic blocks, so waiting for one to finish its current
+/// request would only slow down the refusal. But peers advertise recent blocks, which non-serving
+/// peers can usually serve.
+#[test]
+fn peer_set_only_delays_block_refusal_for_busy_non_serving_peer_if_advertised() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, _handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (serving_addr, non_serving_addr) = (addrs[0], addrs[1]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // The test inventory channel only holds one change, so poll the peer set to process each
+        // change before sending the next one.
+        let mut send_inventory_change = |change| {
+            peer_set_guard
+                .inventory_sender()
+                .as_mut()
+                .expect("unexpected missing inv sender")
+                .send(change)
+                .expect("unexpected dropped receiver");
+        };
+
+        // Make the non-serving peer busy, by marking the serving peer as missing the requested
+        // blocks. The mock peer channel holds 2 requests.
+        let mut busy_futs = Vec::new();
+        for byte in [1, 9] {
+            send_inventory_change(InventoryStatus::new_missing(
+                InventoryHash::Block(block::Hash([byte; 32])),
+                serving_addr,
+            ));
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            busy_futs.push(peer_ready.call(block_request(byte)));
+        }
+
+        // A historic block that the ready serving peer is missing: the busy non-serving peer
+        // can't serve it either, so the refusal is instant.
+        send_inventory_change(InventoryStatus::new_missing(
+            InventoryHash::Block(block::Hash([2; 32])),
+            serving_addr,
+        ));
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert!(
+            peer_ready.cancel_handles.contains_key(&non_serving_addr),
+            "non-serving peer should be busy after 2 queued requests",
+        );
+
+        let refused_fut = peer_ready.call(block_request(2));
+        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+            .await
+            .expect("a busy non-serving peer should not delay the refusal of a historic block");
+        assert_not_found_registry(response);
+
+        // A recent block that the busy non-serving peer advertised: the refusal is delayed, so a
+        // retry can reach that peer once it is ready.
+        let advertised_hash = block::Hash([3; 32]);
+        send_inventory_change(InventoryStatus::new_missing(
+            InventoryHash::Block(advertised_hash),
+            serving_addr,
+        ));
+        peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        send_inventory_change(InventoryStatus::new_available(
+            InventoryHash::Block(advertised_hash),
+            non_serving_addr,
+        ));
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        let mut refused_fut = peer_ready.call(block_request(3));
+        assert!(
+            timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, &mut refused_fut)
+                .await
+                .is_err(),
+            "a busy non-serving peer should delay the refusal of a block it advertised",
+        );
+        assert_not_found_registry(refused_fut.await);
+    });
+}
+
 /// Check that block requests are refused instantly if every connected peer, ready or busy, is
 /// missing the block.
 #[test]
