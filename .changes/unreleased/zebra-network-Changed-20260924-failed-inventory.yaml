@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: 'Only retry peers that recently failed to return a block when no other peer might have it ([#11525](https://github.com/ZcashFoundation/zebra/pull/11525)).'
+time: 2026-09-24T00:38:27.544666125Z
