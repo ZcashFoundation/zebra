@@ -3818,6 +3818,192 @@ async fn v5_consensus_branch_ids() {
 
 // Utility functions
 
+// ZIP 2003: v4 transactions are disallowed from NU7 activation.
+//
+// <https://zips.z.cash/zip-2003>
+
+/// ZIP 2003: the V4 version rule must accept V4 for every network upgrade from Sapling to NU6.3,
+/// and reject it from NU7 onward.
+#[test]
+fn v4_transactions_are_rejected_from_nu7_onward() {
+    let tx = Transaction::test_v4(
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+
+    for nu in NetworkUpgrade::iter() {
+        let result = super::verify_v4_transaction_network_upgrade(&tx, nu);
+
+        match nu {
+            NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3 => {
+                assert_eq!(result, Ok(()), "V4 must be supported by {nu:?}");
+            }
+            _ => assert_eq!(
+                result,
+                Err(TransactionError::UnsupportedByNetworkUpgrade(4, nu)),
+                "V4 must be rejected by {nu:?}",
+            ),
+        }
+    }
+}
+
+/// ZIP 2003 only removes V4; V5 and V6 must still be supported at NU7.
+#[test]
+fn v5_and_v6_transactions_are_supported_at_nu7() {
+    let v5 = Transaction::test_v5(
+        NetworkUpgrade::Nu7,
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+    let v6 = Transaction::test_v6(
+        NetworkUpgrade::Nu7,
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+
+    assert_eq!(
+        super::verify_v5_transaction_network_upgrade(&v5, NetworkUpgrade::Nu7),
+        Ok(())
+    );
+    assert_eq!(
+        super::verify_v6_transaction_network_upgrade(&v6, NetworkUpgrade::Nu7),
+        Ok(())
+    );
+}
+
+/// ZIP 2003 rejects V4 at NU7 in block and mempool verification, including coinbase transactions.
+#[tokio::test]
+async fn v4_transaction_is_rejected_at_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    // NU7 is unscheduled on Mainnet and the default Testnet.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000_000),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let nu7_height = NetworkUpgrade::Nu7
+        .activation_height(&network)
+        .expect("NU7 activation height is configured");
+    let pre_nu7_height = (nu7_height - 1).expect("NU7 does not activate at the genesis height");
+
+    // Pay a ZIP 317 conventional fee so mempool admission reaches the version check.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        (pre_nu7_height - 1).expect("block height is too small"),
+        true,
+        0,
+        Amount::try_from(10_001).expect("invalid value"),
+    );
+    let known_utxos = Arc::new(known_utxos);
+    let tx = Arc::new(Transaction::test_v4(
+        vec![input],
+        vec![output],
+        LockTime::Height(Height(0)),
+        (nu7_height + 1).expect("expiry height is too large"),
+    ));
+    let (input, output) = mock_coinbase_transparent_output(nu7_height);
+    let coinbase = Arc::new(Transaction::test_v4(
+        vec![input],
+        vec![output],
+        LockTime::Height(Height(0)),
+        nu7_height,
+    ));
+
+    // The transfer succeeds before NU7; both it and the coinbase fail at activation.
+    for (transaction, height) in [
+        (tx.clone(), pre_nu7_height),
+        (tx.clone(), nu7_height),
+        (coinbase, nu7_height),
+    ] {
+        let expected = if height < nu7_height {
+            Ok(transaction.unmined_id())
+        } else {
+            Err(TransactionError::UnsupportedByNetworkUpgrade(
+                4,
+                NetworkUpgrade::Nu7,
+            ))
+        };
+        let result = BlockTxVerifier::new(
+            &network,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        )
+        .oneshot(BlockRequest {
+            transaction_hash: transaction.hash(),
+            known_utxos: if transaction.is_coinbase() {
+                Arc::default()
+            } else {
+                known_utxos.clone()
+            },
+            transaction,
+            height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+        assert_eq!(
+            result.map(|response| response.tx_id),
+            expected,
+            "{height:?}"
+        );
+    }
+
+    // Mempool admission also rejects V4 when the next block height reaches NU7.
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mempool_verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    // The verifier loads the spent UTXO before dispatching on the transaction version.
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+    });
+
+    assert_eq!(
+        mempool_verifier
+            .oneshot(MempoolRequest {
+                transaction: tx.into(),
+                height: nu7_height,
+            })
+            .await
+            .map(|_| ()),
+        Err(TransactionError::UnsupportedByNetworkUpgrade(
+            4,
+            NetworkUpgrade::Nu7
+        ))
+    );
+}
+
 /// Create a mock transparent transfer to be included in a transaction.
 ///
 /// First, this creates a fake unspent transaction output from a fake transaction included in the

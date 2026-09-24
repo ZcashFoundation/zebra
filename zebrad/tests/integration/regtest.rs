@@ -1,18 +1,21 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Result};
 use tower::ServiceExt;
 
 use zebra_chain::{
+    amount::Amount,
     block::{genesis::regtest_genesis_block, Block, Height},
-    parameters::{testnet::ConfiguredActivationHeights, Network},
+    parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
     serialization::ZcashSerialize as _,
+    transaction::{self, LockTime, Transaction},
     transparent,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{SubmitBlockErrorResponse, SubmitBlockResponse},
     config::mining::ExtraCoinbaseData,
+    methods::SendRawTransactionResponse,
     server::OPENED_RPC_ENDPOINT_MSG,
 };
 use zebra_test::{args, prelude::*};
@@ -1342,4 +1345,143 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     output.assert_failure()?;
 
     Ok(())
+}
+
+// A standard P2SH output whose redeem script is OP_TRUE. These spends still pass through the
+// real UTXO, maturity, standardness, script, fee, and transaction-version checks.
+fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: previous.hash(),
+            index: 0,
+        },
+        unlock_script: transparent::Script::new(&[0x01, 0x51]),
+        sequence: u32::MAX,
+    };
+    let mut output = previous.outputs()[0].clone();
+    output.value = (output.value - Amount::try_from(fee)?)?;
+    Ok(if nu7 {
+        Transaction::test_v5(
+            NetworkUpgrade::Nu7,
+            vec![input],
+            vec![output],
+            LockTime::unlocked(),
+            Height(105),
+        )
+    } else {
+        Transaction::test_v4(vec![input], vec![output], LockTime::unlocked(), Height(200))
+    })
+}
+
+async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
+    let data = hex::encode(tx.zcash_serialize_to_vec()?);
+    let response: SendRawTransactionResponse = client
+        .json_result_from_call("sendrawtransaction", format!(r#"["{data}"]"#))
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(response, SendRawTransactionResponse::new(tx.hash()));
+    Ok(())
+}
+
+async fn mempool(client: &RpcRequestClient, expected: &[transaction::Hash]) -> Result<()> {
+    let expected: HashSet<_> = expected.iter().map(ToString::to_string).collect();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let actual: HashSet<String> = client
+                .json_result_from_call("getrawmempool", "[]")
+                .await
+                .map_err(|err| eyre!(err))?;
+            if actual == expected {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| eyre!("mempool did not reach the expected transaction set: {expected:?}"))?
+}
+
+/// V4 admission follows the next block's upgrade, including eviction at the NU7 boundary.
+#[tokio::test(flavor = "multi_thread")]
+async fn nu7_v4_mempool_activation() -> Result<()> {
+    use zebra_chain::parameters::testnet::RegtestParameters;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let network = Network::new_regtest(RegtestParameters {
+            activation_heights: ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(4),
+                nu6_1: Some(5),
+                nu6_2: Some(6),
+                nu6_3: Some(7),
+                nu7: Some(105),
+                ..Default::default()
+            },
+            should_allow_unshielded_coinbase_spends: Some(true),
+            ..Default::default()
+        });
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.mempool.debug_enable_at_height = Some(0);
+        config.mining.miner_address = Some(
+            transparent::Address::from_script_hash(
+                network.kind(),
+                hex_literal::hex!("da1745e9b549bd0bfa1a569971c77eba30cd5a4b"),
+            )
+            .to_string()
+            .parse()?,
+        );
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+
+        let (first, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(1));
+        let coinbase = first.transactions[0].clone();
+        client.submit_block(first).await?;
+        for expected_height in 2..=103 {
+            let (block, height) = client.block_from_template(&network).await?;
+            assert_eq!(height, Height(expected_height));
+            client.submit_block(block).await?;
+        }
+
+        // Save an empty block so the admitted V4 transaction remains unmined at the boundary.
+        let (boundary, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(104));
+        let v4 = spend(&coinbase, false, 10_001)?;
+        send(&client, &v4).await?;
+        mempool(&client, &[v4.hash()]).await?;
+        client.submit_block(boundary).await?;
+        mempool(&client, &[]).await?;
+
+        // A fresh transaction avoids the rejection cache; its mature input is still unspent.
+        let rejected_v4 = spend(&coinbase, false, 10_002)?;
+        let data = hex::encode(rejected_v4.zcash_serialize_to_vec()?);
+        let response: serde_json::Value = serde_json::from_str(
+            &client
+                .text_from_call("sendrawtransaction", format!(r#"["{data}"]"#))
+                .await?,
+        )?;
+        assert_eq!(
+            response["error"]["code"],
+            i32::from(zebra_rpc::server::error::LegacyCode::Verify),
+        );
+        mempool(&client, &[]).await?;
+
+        // The same input remains spendable as V5, isolating rejection to the version rule.
+        let v5 = spend(&coinbase, true, 10_002)?;
+        send(&client, &v5).await?;
+        mempool(&client, &[v5.hash()]).await?;
+
+        child.kill(false)?;
+        let output = child.wait_with_output()?;
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+        Ok(())
+    })
+    .await?
 }

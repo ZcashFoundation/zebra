@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Experimental ZFuture networks reject v4 transactions under [ZIP 2003](https://zips.z.cash/zip-2003). Before upgrading a ZFuture chain that contains them, reset both its finalized state and non-finalized backups. Public networks are unaffected. ([#11528](https://github.com/ZcashFoundation/zebra/pull/11528))
+time: 2026-09-25T16:20:22.266532909+02:00
