@@ -1363,7 +1363,12 @@ where
         // The inventory registry is best-effort, and can drop advertisements under load. Then a
         // recent block waits for a serving peer, and the block is fetched again when it is
         // advertised again, or by the syncer.
-        let is_advertised = !advertising_peers.is_empty();
+        //
+        // Only connected advertisers count, so a peer can't advertise a block and disconnect to
+        // keep it treated as recent.
+        let is_advertised = advertising_peers
+            .iter()
+            .any(|addr| self.has_peer_with_addr(*addr));
         let busy_peer_might_have = self.cancel_handles.keys().any(|key| {
             !missing_peer_list.contains(key)
                 && (is_advertised || self.serving_peer_keys.contains(key))

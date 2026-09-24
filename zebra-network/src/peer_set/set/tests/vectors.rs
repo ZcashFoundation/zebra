@@ -1804,3 +1804,44 @@ fn peer_set_refuses_transaction_instantly_while_serving_peer_busy() {
         assert_eq!(received_request(&mut handles[1]), None);
     });
 }
+
+/// Check that an advertisement from a disconnected peer doesn't make a historic block go to a
+/// ready non-serving peer while a serving peer is busy.
+#[test]
+fn peer_set_ignores_disconnected_advertisers() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // A peer that isn't connected advertised the block.
+        let disconnected_addr: PeerSocketAddr =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 1).into();
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryStatus::new_available(
+                InventoryHash::Block(block::Hash([2; 32])),
+                disconnected_addr,
+            ),
+        );
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _fut = peer_ready.call(block_request(2));
+
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "a block advertised by a disconnected peer should wait for the busy serving peer",
+        );
+    });
+}
