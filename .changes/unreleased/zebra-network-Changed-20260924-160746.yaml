@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: '`Config` rejects explicitly out-of-order upgrade heights even when coincident activations previously hid the invalid ordering.'
+time: 2026-09-24T16:07:46.729804355+02:00

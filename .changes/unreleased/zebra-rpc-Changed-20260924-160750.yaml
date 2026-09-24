@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getblocktemplate` freshness checks use tip timestamps rather than estimated block distance, preserving the 125-minute allowance across NU7.'
+time: 2026-09-24T16:07:50.044914228+02:00

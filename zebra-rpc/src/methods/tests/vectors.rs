@@ -3002,7 +3002,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -3136,11 +3136,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         Amount::<NonNegative>::zero()
     );
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(3));
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
-        .expect_err("needs an error when estimated distance to network chain tip is far");
+        .expect_err("a stale tip must reject mining requests");
 
     assert_eq!(
         get_block_template_sync_error.code(),
@@ -3149,7 +3149,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     mock_sync_status.set_is_close_to_tip(false);
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
@@ -3160,11 +3160,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         ErrorCode::ServerError(-10).code()
     );
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(3));
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
-        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
+        .expect_err("a stale tip and unsynced node must reject mining requests");
 
     assert_eq!(
         get_block_template_sync_error.code(),
@@ -3252,7 +3252,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     mock_sync_status.set_is_close_to_tip(true);
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (get_block_template, ..) = tokio::join!(
         rpc.get_block_template(None),
@@ -3317,7 +3317,7 @@ async fn getblocktemplate_precomputed() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -3510,7 +3510,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -3762,7 +3762,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -4309,7 +4309,7 @@ async fn rpc_getdifficulty() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -4870,7 +4870,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
