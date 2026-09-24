@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Block downloads now prefer peers that serve historic blocks and delay refusals while those peers are busy, so retries do not immediately exhaust near the chain tip ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515)).'
+time: 2026-09-24T00:38:27.544659485Z

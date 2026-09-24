@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: 'Prefer block-serving peers for single-block `Request::BlocksByHash` requests without a ready advertiser, and delay local refusals by 1.5 seconds while an eligible busy peer might have the block. Refusals are counted in `zcash.net.peer_set.inventory_refusal` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515)).'
+time: 2026-09-24T00:38:27.544666125Z
