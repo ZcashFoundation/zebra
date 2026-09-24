@@ -137,6 +137,7 @@ async fn connection_run_loop_message_ok() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
+        last_block_request_failed: None,
         inv_collector: None,
         transient_addr: None,
         span: Span::current(),
@@ -465,6 +466,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
     let request = ClientRequest {
         request: Request::AdvertiseTransactionIds(HashSet::new(), None),
         tx: request_tx,
+        last_block_request_failed: None,
         inv_collector: None,
         transient_addr: None,
         span: Span::current(),
@@ -539,6 +541,7 @@ async fn connection_run_loop_send_timeout_expect_response() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
+        last_block_request_failed: None,
         inv_collector: None,
         transient_addr: None,
         span: Span::current(),
@@ -613,6 +616,7 @@ async fn connection_run_loop_receive_timeout() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
+        last_block_request_failed: None,
         inv_collector: None,
         transient_addr: None,
         span: Span::current(),
@@ -912,6 +916,7 @@ async fn connection_ping_pong_round_trip() {
         .send(ClientRequest {
             request: Request::Ping(nonce),
             tx: response_tx,
+            last_block_request_failed: None,
             inv_collector: None,
             transient_addr: None,
             span: Span::none(),

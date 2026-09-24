@@ -269,7 +269,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
-        .for_unit_tests();
+        .for_unit_tests::<Request, Response, BoxError>();
     let buffered_peer_set = Buffer::new(BoxService::new(peer_set), 10);
 
     // Keep a handle to the mock mempool so we can assert on the request the
@@ -290,7 +290,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
-        block_download_peer_set: buffered_peer_set,
+        block_download_peer_set: buffered_peer_set.boxed_clone(),
         block_verifier,
         mempool: buffered_mempool,
         state: state_service,
@@ -916,7 +916,7 @@ async fn caches_getaddr_response() {
 
         let peer_set = MockService::build()
             .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
-            .for_unit_tests();
+            .for_unit_tests::<Request, Response, BoxError>();
         let buffered_peer_set = Buffer::new(BoxService::new(peer_set.clone()), 10);
 
         let buffered_mempool_service =
@@ -932,7 +932,7 @@ async fn caches_getaddr_response() {
 
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
-            block_download_peer_set: buffered_peer_set,
+            block_download_peer_set: buffered_peer_set.boxed_clone(),
             block_verifier,
             mempool: buffered_mempool_service.clone(),
             state: state_service.clone(),
@@ -1161,7 +1161,7 @@ async fn setup(
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
-        block_download_peer_set: buffered_peer_set,
+        block_download_peer_set: buffered_peer_set.boxed_clone(),
         block_verifier,
         mempool: mempool_service.clone(),
         state: state_service.clone(),
@@ -1290,7 +1290,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
 
     let setup_data = InboundSetupData {
         address_book,
-        block_download_peer_set: buffered_peer_set,
+        block_download_peer_set: buffered_peer_set.boxed_clone(),
         block_verifier,
         mempool: buffered_mempool,
         state: state_service,

@@ -5,13 +5,16 @@ use std::{
     future::Future,
     iter,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
 use futures::{
     channel::{mpsc, oneshot},
-    future, ready,
+    ready,
     stream::{Stream, StreamExt},
     FutureExt,
 };
@@ -40,6 +43,10 @@ pub mod tests;
 pub struct Client {
     /// The metadata for the connected peer `service`.
     pub connection_info: Arc<ConnectionInfo>,
+
+    /// Whether the latest block request failed or was cancelled by the connection.
+    /// Explicit `notfound` responses count as responsive, not failed.
+    pub(super) last_block_request_failed: Arc<AtomicBool>,
 
     /// Used to shut down the corresponding heartbeat.
     /// This is always Some except when we take it on drop.
@@ -81,6 +88,10 @@ pub(crate) struct ClientRequest {
     /// returns a future that may be moved around before it resolves.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
 
+    /// Updates block-serving health when the connection completes or cancels this request.
+    /// Only block requests carry this handle.
+    pub last_block_request_failed: Option<Arc<AtomicBool>>,
+
     /// Used to register missing inventory in responses on `tx`,
     /// so that the peer set can route retries to other clients.
     pub inv_collector: Option<broadcast::Sender<InventoryChange>>,
@@ -93,6 +104,27 @@ pub(crate) struct ClientRequest {
     /// The tracing context for the request, so that work the connection task does
     /// processing messages in the context of this request will have correct context.
     pub span: tracing::Span,
+}
+
+#[cfg(test)]
+impl ClientRequest {
+    /// Responds through the connection's production health and inventory lifecycle.
+    pub(crate) fn respond(
+        self,
+        response: Result<Response, SharedPeerError>,
+    ) -> Result<(), Result<Response, SharedPeerError>> {
+        InProgressClientRequest::from(self).tx.send(response)
+    }
+
+    /// Acknowledges a caller's cancellation through the production sender lifecycle.
+    pub(crate) fn acknowledge_cancellation(self) {
+        let request = InProgressClientRequest::from(self);
+        assert!(
+            request.tx.is_canceled(),
+            "the caller must cancel its response first"
+        );
+        drop(request);
+    }
 }
 
 /// A receiver for the `peer::Server`, which wraps a `mpsc::Receiver`,
@@ -136,7 +168,7 @@ pub(super) struct InProgressClientRequest {
 }
 
 /// A `oneshot::Sender` for client responses, that must be used by calling `send()`.
-/// Also handles forwarding missing inventory to the inventory registry.
+/// Also publishes block-serving health and forwards missing inventory to the inventory registry.
 ///
 /// Panics on drop if `tx` has not been used or canceled.
 /// Panics if `tx.send()` is used more than once.
@@ -152,6 +184,9 @@ pub(super) struct MustUseClientResponseSender {
     ///
     /// Boxed to reduce the size of containing structures.
     pub missing_inv: Option<Box<MissingInventoryCollector>>,
+
+    /// The health signal for this block request, if any.
+    last_block_request_failed: Option<Arc<AtomicBool>>,
 }
 
 /// Forwards missing inventory in the response to the inventory registry.
@@ -187,12 +222,19 @@ impl From<ClientRequest> for InProgressClientRequest {
         let ClientRequest {
             request,
             tx,
+            last_block_request_failed,
             inv_collector,
             transient_addr,
             span,
         } = client_request;
 
-        let tx = MustUseClientResponseSender::new(tx, &request, inv_collector, transient_addr);
+        let tx = MustUseClientResponseSender::new(
+            tx,
+            &request,
+            inv_collector,
+            transient_addr,
+            last_block_request_failed,
+        );
 
         InProgressClientRequest { request, tx, span }
     }
@@ -265,21 +307,31 @@ impl MustUseClientResponseSender {
         request: &Request,
         inv_collector: Option<broadcast::Sender<InventoryChange>>,
         transient_addr: Option<PeerSocketAddr>,
+        last_block_request_failed: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
             tx: Some(tx),
             missing_inv: MissingInventoryCollector::new(request, inv_collector, transient_addr),
+            last_block_request_failed,
         }
     }
 
-    /// Forwards `response` to `tx.send()`, and missing inventory to `inv_collector`,
-    /// and marks this sender as used.
+    /// Publishes block-serving health, forwards missing inventory and `response`,
+    /// and marks this sender as used before the connection accepts another request.
     ///
     /// Panics if `tx.send()` is used more than once.
     pub fn send(
         mut self,
         response: Result<Response, SharedPeerError>,
     ) -> Result<(), Result<Response, SharedPeerError>> {
+        if let Some(last_block_request_failed) = &self.last_block_request_failed {
+            // Explicit missing inventory proves responsiveness, not a transport failure.
+            let failed = response
+                .as_ref()
+                .is_err_and(|error| !error.inner_debug().contains("NotFoundResponse"));
+            last_block_request_failed.store(failed, Ordering::Relaxed);
+        }
+
         // Forward any missing inventory to the registry.
         if let Some(missing_inv) = self.missing_inv.take() {
             missing_inv.send(&response);
@@ -323,6 +375,14 @@ impl MustUseClientResponseSender {
 impl Drop for MustUseClientResponseSender {
     #[instrument(skip(self))]
     fn drop(&mut self) {
+        // The connection acknowledges cancellation by dropping its unsent response sender.
+        // Publish before it accepts another request, not when the caller drops its future.
+        if self.tx.is_some() {
+            if let Some(last_block_request_failed) = &self.last_block_request_failed {
+                last_block_request_failed.store(true, Ordering::Relaxed);
+            }
+        }
+
         // we don't panic if we are shutting down anyway
         if !zebra_chain::shutdown::is_shutting_down() {
             // is_canceled() will not panic, because we check is_none() first
@@ -633,6 +693,9 @@ impl Service<Request> for Client {
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        let last_block_request_failed = matches!(&request, Request::BlocksByHash(_))
+            .then(|| self.last_block_request_failed.clone());
+
         let (tx, rx) = oneshot::channel();
         // get the current Span to propagate it to the peer connection task.
         // this allows the peer connection to enter the correct tracing context
@@ -640,44 +703,40 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest {
+        if let Err(e) = self.server_tx.try_send(ClientRequest {
             request,
             tx,
+            last_block_request_failed,
             inv_collector: Some(self.inv_collector.clone()),
             transient_addr: self.connection_info.connected_addr.get_transient_addr(),
             span,
         }) {
-            Err(e) => {
-                if e.is_disconnected() {
-                    let peer_error = self
-                        .error_slot
-                        .try_get_error()
-                        .unwrap_or_else(|| PeerError::ConnectionTaskExited.into());
+            if e.is_disconnected() {
+                let peer_error = self
+                    .error_slot
+                    .try_get_error()
+                    .unwrap_or_else(|| PeerError::ConnectionTaskExited.into());
 
-                    let ClientRequest { tx, .. } = e.into_inner();
-                    let _ = tx.send(Err(peer_error.clone()));
-
-                    future::ready(Err(peer_error)).boxed()
-                } else {
-                    // sending fails when there's not enough
-                    // channel space, but we called poll_ready
-                    panic!("called call without poll_ready");
-                }
-            }
-            Ok(()) => {
-                // The receiver end of the oneshot is itself a future.
-                rx.map(|oneshot_recv_result| {
-                    // The ClientRequest oneshot sender should not be dropped before sending a
-                    // response. But sometimes that happens during process or connection shutdown.
-                    // So we just return a generic error here.
-                    match oneshot_recv_result {
-                        Ok(result) => result,
-                        Err(oneshot::Canceled) => Err(PeerError::ConnectionDropped.into()),
-                    }
-                })
-                .boxed()
+                let InProgressClientRequest { tx, .. } = e.into_inner().into();
+                let _ = tx.send(Err(peer_error));
+            } else {
+                // sending fails when there's not enough
+                // channel space, but we called poll_ready
+                panic!("called call without poll_ready");
             }
         }
+
+        // The receiver end of the oneshot is itself a future.
+        rx.map(|oneshot_recv_result| {
+            // The ClientRequest oneshot sender should not be dropped before sending a
+            // response. But sometimes that happens during process or connection shutdown.
+            // So we just return a generic error here.
+            match oneshot_recv_result {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(PeerError::ConnectionDropped.into()),
+            }
+        })
+        .boxed()
     }
 }
 

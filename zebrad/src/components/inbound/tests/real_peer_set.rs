@@ -4,11 +4,12 @@
 
 use std::{iter, net::SocketAddr};
 
-use futures::FutureExt;
+use futures::{future::BoxFuture, FutureExt};
 use indexmap::IndexSet;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{
-    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt,
+    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, Service,
+    ServiceExt,
 };
 
 use zebra_chain::{
@@ -614,10 +615,15 @@ async fn setup(
         >,
     >,
     // outbound peer set (only has the connected peer)
-    Buffer<
-        BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
-        zebra_network::Request,
-    >,
+    impl Service<
+            Request,
+            Response = Response,
+            Error = BoxError,
+            Future = BoxFuture<'static, Result<Response, BoxError>>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
@@ -731,7 +737,7 @@ async fn setup(
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
-        block_download_peer_set: peer_set.clone(),
+        block_download_peer_set: peer_set.clone().boxed_clone(),
         block_verifier: buffered_block_verifier,
         mempool: mempool_service.clone(),
         state: state_service.clone(),

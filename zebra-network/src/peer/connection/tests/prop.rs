@@ -196,6 +196,7 @@ async fn send_block_request(
     let client_request = ClientRequest {
         request,
         tx: response_sender,
+        last_block_request_failed: None,
         // we skip inventory collection in these tests
         inv_collector: None,
         transient_addr: None,

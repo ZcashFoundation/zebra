@@ -28,7 +28,12 @@ use std::{
 
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
+use tower::{
+    buffer::Buffer,
+    timeout::Timeout,
+    util::{BoxCloneService, BoxService},
+    Service,
+};
 
 use zebra_chain::{
     block::{self, Height},
@@ -78,7 +83,7 @@ use downloads::{
     TRANSACTION_VERIFY_TIMEOUT,
 };
 
-type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
+type Outbound = BoxCloneService<zn::Request, zn::Response, zn::BoxError>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type TxVerifier = Buffer<
     BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
@@ -309,17 +314,24 @@ pub struct Mempool {
 
 impl Mempool {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(crate) fn new<ZN>(
         network: &Network,
         config: &Config,
-        outbound: Outbound,
+        outbound: ZN,
         state: State,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
-    ) -> (Self, MempoolTxSubscriber) {
+    ) -> (Self, MempoolTxSubscriber)
+    where
+        ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+            + Clone
+            + Send
+            + 'static,
+        ZN::Future: Send + 'static,
+    {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
         let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
@@ -332,7 +344,7 @@ impl Mempool {
             debug_enable_at_height: config.debug_enable_at_height.map(Height),
             latest_chain_tip,
             chain_tip_change,
-            outbound,
+            outbound: BoxCloneService::new(outbound),
             state,
             tx_verifier,
             transaction_sender,

@@ -3,7 +3,10 @@
 
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -31,12 +34,16 @@ pub struct LoadTrackedClient {
 
     /// The metadata for the connected peer `service`.
     connection_info: Arc<ConnectionInfo>,
+
+    /// Whether the latest block request failed or was cancelled by the connection.
+    last_block_request_failed: Arc<AtomicBool>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
 impl From<Client> for LoadTrackedClient {
     fn from(client: Client) -> Self {
         let connection_info = client.connection_info.clone();
+        let last_block_request_failed = client.last_block_request_failed.clone();
 
         let service = PeakEwma::new(
             client,
@@ -48,6 +55,7 @@ impl From<Client> for LoadTrackedClient {
         LoadTrackedClient {
             service,
             connection_info,
+            last_block_request_failed,
         }
     }
 }
@@ -61,6 +69,14 @@ impl LoadTrackedClient {
     /// Retrieve the services the peer advertised in its `version` message.
     pub fn remote_services(&self) -> PeerServices {
         self.connection_info.remote.services
+    }
+
+    /// Returns whether the latest block request failed or was cancelled by the connection.
+    ///
+    /// Other requests do not change this value. A block response, including explicit
+    /// `notfound`, clears it before the caller receives the result.
+    pub(crate) fn last_block_request_failed(&self) -> bool {
+        self.last_block_request_failed.load(Ordering::Relaxed)
     }
 
     /// Returns true if this peer connected directly to us from `ip`.

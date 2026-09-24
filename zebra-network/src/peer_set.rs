@@ -1,6 +1,7 @@
 pub(crate) mod candidate_set;
 mod initialize;
 mod inventory_registry;
+mod inventory_retry;
 mod limit;
 mod set;
 mod stall_tracker;

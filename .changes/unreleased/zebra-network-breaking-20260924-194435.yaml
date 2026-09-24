@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`{init, init_with_block_gossip_peer_ips}` now return an opaque cloneable `Service<Request>` rather than a concrete `Buffer`, so replace buffer type annotations with service bounds or `BoxCloneService`. Single-block request deadlines include initial buffer queueing. ([#11520](https://github.com/ZcashFoundation/zebra/pull/11520))'
+time: 2026-09-24T19:44:35.897192158+02:00

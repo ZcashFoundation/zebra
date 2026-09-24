@@ -19,7 +19,12 @@ use futures::{
     stream::Stream,
 };
 use tokio::sync::oneshot::{self, error::TryRecvError};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    timeout::Timeout,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
+};
 
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state::{self as zs};
@@ -75,8 +80,7 @@ pub const GETDATA_SENT_BYTES_LIMIT: usize = 1_000_000;
 /// many peers instead of just a few peers.)
 pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
 
-type BlockDownloadPeerSet =
-    Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
+type BlockDownloadPeerSet = BoxCloneService<zn::Request, zn::Response, zn::BoxError>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
 type SemanticBlockVerifier = Buffer<

@@ -1236,6 +1236,7 @@ where
 
             let client = Client {
                 connection_info,
+                last_block_request_failed: Default::default(),
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 inv_collector,
@@ -1482,6 +1483,7 @@ async fn send_one_heartbeat(
     match server_tx.try_send(ClientRequest {
         request,
         tx,
+        last_block_request_failed: None,
         // we're not requesting inventory, so we don't need to update the registry
         inv_collector: None,
         transient_addr: None,

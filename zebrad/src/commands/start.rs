@@ -448,7 +448,7 @@ impl StartCmd {
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
-            block_download_peer_set: peer_set.clone(),
+            block_download_peer_set: peer_set.clone().boxed_clone(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state: state.clone(),

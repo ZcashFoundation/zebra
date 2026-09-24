@@ -14,7 +14,7 @@ use std::{
 };
 
 use futures::{
-    future::{self, FutureExt},
+    future::{self, BoxFuture, FutureExt},
     sink::SinkExt,
     stream::{FuturesUnordered, StreamExt},
     Future, TryFutureExt,
@@ -49,7 +49,10 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{
-        crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
+        crawl_once, crawler_services,
+        inventory_retry::retry_busy_inventory,
+        next_reconnect_peer, ready_peer_count,
+        set::{InventoryService, MorePeers},
         ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
@@ -78,6 +81,10 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// [`tower::Service`] representing "the network" that load-balances requests
 /// over available peers.  The peer set automatically crawls the network to
 /// find more peer addresses and opportunistically connects to new peers.
+///
+/// Clones share one bounded request buffer. Single-block requests retry eligible
+/// peers within [`constants::REQUEST_TIMEOUT`], measured from [`Service::call`]
+/// and including queueing and retry readiness waits.
 ///
 /// Each peer connection's message handling is isolated from other
 /// connections, unlike in `zcashd`.  The peer connection first attempts to
@@ -109,7 +116,15 @@ pub async fn init<S, C>(
     latest_chain_tip: C,
     user_agent: String,
 ) -> (
-    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    impl Service<
+            Request,
+            Response = Response,
+            Error = BoxError,
+            Future = BoxFuture<'static, Result<Response, BoxError>>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<(PeerSocketAddr, u32)>,
 )
@@ -142,7 +157,15 @@ pub async fn init_with_block_gossip_peer_ips<S, C>(
     user_agent: String,
     block_gossip_peer_ips: Vec<IpAddr>,
 ) -> (
-    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    impl Service<
+            Request,
+            Response = Response,
+            Error = BoxError,
+            Future = BoxFuture<'static, Result<Response, BoxError>>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<(PeerSocketAddr, u32)>,
 )
@@ -271,7 +294,11 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
-    let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
+    // Retry outside the only buffer so the deadline includes initial queueing.
+    let peer_set = retry_busy_inventory(Buffer::new(
+        BoxService::new(InventoryService(peer_set)),
+        constants::PEERSET_BUFFER_SIZE,
+    ));
 
     // Connect peerset_tx to the 3 peer sources:
     //
