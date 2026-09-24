@@ -6,13 +6,13 @@
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 400)">
 <title>services</title>
 <!-- transaction_verifier -->
-<a id="node1" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_consensus/transaction/index.html">
+<a id="node1" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_consensus/transaction/index.html">
 <title>transaction_verifier</title>
 <ellipse fill="transparent" stroke="#000000" cx="342.6515" cy="-90" rx="86.7914" ry="18"/>
 <text text-anchor="middle" x="342.6515" y="-85.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">transaction_verifier</text>
 </a>
 <!-- state -->
-<a id="node2" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_state/service/index.html">
+<a id="node2" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_state/service/index.html">
 <title>state</title>
 <ellipse fill="transparent" stroke="#000000" cx="284.6515" cy="-18" rx="28.9676" ry="18"/>
 <text text-anchor="middle" x="284.6515" y="-13.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">state</text>
@@ -24,7 +24,7 @@
 <polygon fill="#000000" stroke="#000000" points="306.6352,-39.7109 297.6362,-34.119 301.1839,-44.1022 306.6352,-39.7109"/>
 </g>
 <!-- mempool -->
-<a id="node3" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebrad/components/mempool/index.html">
+<a id="node3" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebrad/components/mempool/index.html">
 <title>mempool</title>
 <ellipse fill="transparent" stroke="#000000" cx="413.6515" cy="-234" rx="47.5332" ry="18"/>
 <text text-anchor="middle" x="413.6515" y="-229.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">mempool</text>
@@ -42,7 +42,7 @@
 <polygon fill="#000000" stroke="#000000" points="322.6042,-22.456 312.0775,-23.6556 321.0547,-29.2824 322.6042,-22.456"/>
 </g>
 <!-- peer_set -->
-<a id="node9" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_network/peer_set/set/index.html">
+<a id="node9" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_network/peer_set/set/index.html">
 <title>peer_set</title>
 <ellipse fill="transparent" stroke="#000000" cx="489.6515" cy="-162" rx="43.4163" ry="18"/>
 <text text-anchor="middle" x="489.6515" y="-157.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">peer_set</text>
@@ -54,7 +54,7 @@
 <polygon fill="#000000" stroke="#000000" points="467.1796,-188.1105 472.032,-178.6921 462.3654,-183.0288 467.1796,-188.1105"/>
 </g>
 <!-- inbound -->
-<a id="node4" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebrad/components/inbound/index.html">
+<a id="node4" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebrad/components/inbound/index.html">
 <title>inbound</title>
 <ellipse fill="transparent" stroke="#000000" cx="229.6515" cy="-306" rx="42.8829" ry="18"/>
 <text text-anchor="middle" x="229.6515" y="-301.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">inbound</text>
@@ -72,7 +72,7 @@
 <polygon fill="#000000" stroke="#000000" points="372.5364,-253.847 380.5734,-246.9436 369.9855,-247.3283 372.5364,-253.847"/>
 </g>
 <!-- block_verifier_router -->
-<a id="node6" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_consensus/chain/index.html">
+<a id="node6" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_consensus/router/index.html">
 <title>block_verifier_router</title>
 <ellipse fill="transparent" stroke="#000000" cx="244.6515" cy="-234" rx="65.3859" ry="18"/>
 <text text-anchor="middle" x="244.6515" y="-229.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">block_verifier_router</text>
@@ -84,7 +84,7 @@
 <polygon fill="#000000" stroke="#000000" points="242.2022,-262.9169 240.8154,-252.4133 235.3494,-261.4892 242.2022,-262.9169"/>
 </g>
 <!-- rpc_server -->
-<a id="node5" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_rpc/server/index.html">
+<a id="node5" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_rpc/server/index.html">
 <title>rpc_server</title>
 <ellipse fill="transparent" stroke="#000000" cx="364.6515" cy="-378" rx="51.565" ry="18"/>
 <text text-anchor="middle" x="364.6515" y="-373.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">rpc_server</text>
@@ -108,7 +108,7 @@
 <polygon fill="#000000" stroke="#000000" points="268.6447,-257.3247 259.5541,-251.8831 263.2672,-261.806 268.6447,-257.3247"/>
 </g>
 <!-- checkpoint_verifier -->
-<a id="node7" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_consensus/checkpoint/index.html">
+<a id="node7" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_consensus/checkpoint/index.html">
 <title>checkpoint_verifier</title>
 <ellipse fill="transparent" stroke="#000000" cx="112.6515" cy="-90" rx="86.7972" ry="18"/>
 <text text-anchor="middle" x="112.6515" y="-85.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">checkpoint_verifier</text>
@@ -120,7 +120,7 @@
 <polygon fill="#000000" stroke="#000000" points="129.1594,-115.1615 121.3857,-107.9628 122.9735,-118.438 129.1594,-115.1615"/>
 </g>
 <!-- block_verifier -->
-<a id="node10" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebra_consensus/block/index.html">
+<a id="node10" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebra_consensus/block/index.html">
 <title>block_verifier</title>
 <ellipse fill="transparent" stroke="#000000" cx="244.6515" cy="-162" rx="65.9697" ry="18"/>
 <text text-anchor="middle" x="244.6515" y="-157.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">block_verifier</text>
@@ -138,7 +138,7 @@
 <polygon fill="#000000" stroke="#000000" points="252.8804,-35.0939 260.7533,-28.0039 250.1774,-28.6368 252.8804,-35.0939"/>
 </g>
 <!-- syncer -->
-<a id="node8" class="node" target="_blank" href="https://doc-internal.zebra.zfnd.org/zebrad/components/sync/index.html">
+<a id="node8" class="node" target="_blank" href="https://zebra.zfnd.org/internal/zebrad/components/sync/index.html">
 <title>syncer</title>
 <ellipse fill="transparent" stroke="#000000" cx="364.6515" cy="-306" rx="36.4761" ry="18"/>
 <text text-anchor="middle" x="364.6515" y="-301.8" font-family="'Opens sans', sans-serif" font-size="14.00" fill="#000000">syncer</text>
