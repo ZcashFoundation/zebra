@@ -19,7 +19,10 @@ use tower::{
 
 use zebra_chain::{
     block,
-    chain_tip::{ChainTip, AT_OR_NEAR_TIP_THRESHOLD},
+    chain_tip::{
+        mock::{MockChainTip, MockChainTipSender},
+        ChainTip, AT_OR_NEAR_TIP_THRESHOLD,
+    },
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction::{self, UnminedTxId},
@@ -34,7 +37,8 @@ use crate::{
         ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
     },
     peer_set::{
-        inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerSet,
+        inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD,
+        InventoryChange, PeerSet,
     },
     protocol::external::{
         types::{PeerServices, Version},
@@ -44,7 +48,7 @@ use crate::{
 };
 use tokio::sync::watch;
 
-use super::{super::poll_peer_set_on_notify, PeerSetBuilder, PeerVersions};
+use super::{super::poll_peer_set_on_notify, PeerSetBuilder, PeerSetGuard, PeerVersions};
 
 #[test]
 fn peer_set_ready_single_connection() {
@@ -1179,6 +1183,48 @@ fn mock_peers_with_services(
     )
 }
 
+/// Returns a peer set with a peer that serves historic blocks (`NODE_NETWORK`), then a peer that
+/// doesn't, their addresses and handles, and the chain tip sender for the peer set.
+///
+/// Must be called from inside a Tokio runtime.
+#[allow(clippy::type_complexity)]
+fn serving_and_non_serving_peer_set() -> (
+    PeerSet<
+        impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> + Unpin,
+        MockChainTip,
+    >,
+    PeerSetGuard,
+    Vec<PeerSocketAddr>,
+    Vec<ClientTestHarness>,
+    MockChainTipSender,
+) {
+    let (discovered_peers, addrs, handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    let (peer_set, peer_set_guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+
+    (peer_set, peer_set_guard, addrs, handles, best_tip)
+}
+
+/// Sends an inventory change to the peer set.
+///
+/// The test inventory channel only holds one change, so poll the peer set before sending the next
+/// one.
+fn send_inventory(peer_set_guard: &mut PeerSetGuard, change: InventoryChange) {
+    peer_set_guard
+        .inventory_sender()
+        .as_mut()
+        .expect("unexpected missing inv sender")
+        .send(change)
+        .expect("unexpected dropped receiver");
+}
+
 /// Returns a single block request for a test block hash made from `byte`.
 fn block_request(byte: u8) -> Request {
     Request::BlocksByHash(iter::once(block::Hash([byte; 32])).collect())
@@ -1306,17 +1352,9 @@ fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         // Make the serving peer busy: its request stays queued until the test receives it.
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
@@ -1380,17 +1418,9 @@ fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, _addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         let queued_request_notify = peer_set.queued_request_notify();
         let mut peer_set = Buffer::new(BoxService::new(peer_set), 10);
@@ -1453,17 +1483,9 @@ fn peer_set_refuses_queued_block_request_after_wait_timeout() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
@@ -1505,28 +1527,18 @@ fn peer_set_routes_advertised_block_to_non_serving_peer_while_serving_peer_busy(
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
         // The busy serving peer advertised the block, so it is a recent block.
         let advertised_inv = InventoryHash::Block(block::Hash([2; 32]));
-        peer_set_guard
-            .inventory_sender()
-            .as_mut()
-            .expect("unexpected missing inv sender")
-            .send(InventoryStatus::new_available(advertised_inv, addrs[0]))
-            .expect("unexpected dropped receiver");
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryStatus::new_available(advertised_inv, addrs[0]),
+        );
 
         let peer_ready = peer_set
             .ready()
@@ -1593,17 +1605,9 @@ fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
@@ -1658,38 +1662,22 @@ fn peer_set_only_waits_for_busy_non_serving_peer_if_block_advertised() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, _handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (serving_addr, non_serving_addr) = (addrs[0], addrs[1]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
-
-        // The test inventory channel only holds one change, so poll the peer set to process each
-        // change before sending the next one.
-        let mut send_inventory_change = |change| {
-            peer_set_guard
-                .inventory_sender()
-                .as_mut()
-                .expect("unexpected missing inv sender")
-                .send(change)
-                .expect("unexpected dropped receiver");
-        };
+        let (mut peer_set, mut peer_set_guard, addrs, _handles, _best_tip) =
+            serving_and_non_serving_peer_set();
+        let (serving_addr, non_serving_addr) = (addrs[0], addrs[1]);
 
         // Make the non-serving peer busy, by marking the serving peer as missing the requested
         // blocks. The mock peer channel holds 2 requests.
         let mut busy_futs = Vec::new();
         for byte in [1, 9] {
-            send_inventory_change(InventoryStatus::new_missing(
-                InventoryHash::Block(block::Hash([byte; 32])),
-                serving_addr,
-            ));
+            send_inventory(
+                &mut peer_set_guard,
+                InventoryStatus::new_missing(
+                    InventoryHash::Block(block::Hash([byte; 32])),
+                    serving_addr,
+                ),
+            );
             let peer_ready = peer_set
                 .ready()
                 .await
@@ -1699,10 +1687,10 @@ fn peer_set_only_waits_for_busy_non_serving_peer_if_block_advertised() {
 
         // A historic block that the ready serving peer is missing: the busy non-serving peer
         // can't serve it either, so the refusal is instant.
-        send_inventory_change(InventoryStatus::new_missing(
-            InventoryHash::Block(block::Hash([2; 32])),
-            serving_addr,
-        ));
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryStatus::new_missing(InventoryHash::Block(block::Hash([2; 32])), serving_addr),
+        );
         let peer_ready = peer_set
             .ready()
             .await
@@ -1721,31 +1709,31 @@ fn peer_set_only_waits_for_busy_non_serving_peer_if_block_advertised() {
         // A recent block that the busy non-serving peer advertised: the request waits for that
         // peer to become ready.
         let advertised_hash = block::Hash([3; 32]);
-        send_inventory_change(InventoryStatus::new_missing(
-            InventoryHash::Block(advertised_hash),
-            serving_addr,
-        ));
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryStatus::new_missing(InventoryHash::Block(advertised_hash), serving_addr),
+        );
         peer_set
             .ready()
             .await
             .expect("peer set service is always ready");
-        send_inventory_change(InventoryStatus::new_available(
-            InventoryHash::Block(advertised_hash),
-            non_serving_addr,
-        ));
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryStatus::new_available(InventoryHash::Block(advertised_hash), non_serving_addr),
+        );
         let peer_ready = peer_set
             .ready()
             .await
             .expect("peer set service is always ready");
 
-        let mut refused_fut = peer_ready.call(block_request(3));
+        let mut queued_fut = peer_ready.call(block_request(3));
         assert!(
-            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, &mut refused_fut)
+            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, &mut queued_fut)
                 .await
                 .is_err(),
             "a block request should wait for a busy non-serving peer that advertised it",
         );
-        assert_not_found_registry(refused_fut.await);
+        assert_not_found_registry(queued_fut.await);
     });
 }
 
@@ -1759,17 +1747,9 @@ fn peer_set_refuses_block_instantly_if_all_peers_missing() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         // Make the serving peer busy.
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
@@ -1778,12 +1758,10 @@ fn peer_set_refuses_block_instantly_if_all_peers_missing() {
         // one change, so poll the peer set to process each change before sending the next one.
         let missing_inv = InventoryHash::Block(block::Hash([2; 32]));
         for addr in addrs {
-            peer_set_guard
-                .inventory_sender()
-                .as_mut()
-                .expect("unexpected missing inv sender")
-                .send(InventoryStatus::new_missing(missing_inv, addr))
-                .expect("unexpected dropped receiver");
+            send_inventory(
+                &mut peer_set_guard,
+                InventoryStatus::new_missing(missing_inv, addr),
+            );
             peer_set
                 .ready()
                 .await
@@ -1815,32 +1793,19 @@ fn peer_set_refuses_transaction_instantly_while_serving_peer_busy() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
+            serving_and_non_serving_peer_set();
 
         // Make the serving peer busy.
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
         // Mark the requested transaction as missing on the ready non-serving peer only.
         let tx_id = UnminedTxId::Legacy(transaction::Hash([3; 32]));
-        peer_set_guard
-            .inventory_sender()
-            .as_mut()
-            .expect("unexpected missing inv sender")
-            .send(InventoryStatus::new_missing(
-                InventoryHash::from(tx_id),
-                addrs[1],
-            ))
-            .expect("unexpected dropped receiver");
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryStatus::new_missing(InventoryHash::from(tx_id), addrs[1]),
+        );
 
         let peer_ready = peer_set
             .ready()
