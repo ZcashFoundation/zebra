@@ -59,6 +59,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
     let _init_guard = zebra_test::init();
 
     let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             // These are dummy values. The particular values don't matter much,
             // as long as the nu5 one is smaller than the chains being generated
@@ -78,7 +79,9 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
-        .extend_funding_streams()
+        // These short chains have no historical funding-stream deposits to disburse.
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![])
         .to_network()
         .expect("failed to build configured network");
     let ledger_strategy =

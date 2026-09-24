@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: NU7 enforces ZIP 218 limits of 330 Orchard actions, 300 Sapling inputs plus outputs, and 25 Sprout JoinSplits per block, with a global budget of 330 that counts each JoinSplit twice.
+time: 2026-09-25T00:01:33.590740516+02:00

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: NU7 uses ZIP 218's 25-second target block spacing and triples the remaining halving intervals, dividing scheduled block rewards by three to preserve issuance per unit of time.
+time: 2026-09-25T00:01:32.486558588+02:00

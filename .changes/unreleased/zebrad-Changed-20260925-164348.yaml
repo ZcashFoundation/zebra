@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Public Testnet mining requires synchronization and a recent chain tip, matching Mainnet. Only networks with Proof-of-Work disabled bypass these checks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+time: 2026-09-25T16:43:48.674836155+02:00

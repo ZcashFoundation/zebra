@@ -43,7 +43,7 @@ use std::{
 use chrono::Utc;
 use derive_getters::Getters;
 use derive_new::new;
-use futures::{future::OptionFuture, stream::FuturesOrdered, StreamExt, TryFutureExt};
+use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
@@ -69,10 +69,11 @@ use zebra_chain::{
             block_subsidy, founders_reward, funding_stream_values, miner_subsidy,
             FundingStreamReceiver,
         },
-        ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
+        ConsensusBranchId, Network, NetworkUpgrade,
     },
     serialization::{
-        BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -1080,12 +1081,13 @@ where
             let template = self.precomputed_template_for_state_tip(cache).await?;
 
             let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
+            let now = DateTime32::now();
 
-            if !is_client_template {
+            if !is_client_template || now > template.max_time {
                 let mut template = (*template).clone();
-                template.submit_old = client_long_poll_id
-                    .as_ref()
-                    .map(|old_long_poll_id| template.long_poll_id.submit_old(old_long_poll_id));
+                template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
+                    now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
+                });
 
                 return Some(template);
             }
@@ -1096,16 +1098,9 @@ where
 
             // `max_time` is inclusive. Wait until the clock passes it, not for the template's
             // original time range again: cached `cur_time` may already be several seconds old.
-            let now = DateTime32::now();
             let duration_until_max_time = max_time.saturating_duration_since(now);
-            let wait_for_max_time: OptionFuture<_> = if max_time >= now {
-                Some(tokio::time::sleep(
-                    duration_until_max_time.to_std() + Duration::from_secs(1),
-                ))
-            } else {
-                None
-            }
-            .into();
+            let wait_for_max_time =
+                tokio::time::sleep(duration_until_max_time.to_std() + Duration::from_secs(1));
 
             tokio::select! {
                 biased;
@@ -1117,13 +1112,8 @@ where
 
                 () = template_changes.changed() => {}
 
-                Some(()) = wait_for_max_time => {
-                    let template = self.precomputed_template_for_state_tip(cache).await?;
-                    let mut template = (*template).clone();
-                    template.submit_old = Some(false);
-
-                    return Some(template);
-                }
+                // Recheck wall time after waking: the monotonic timer cannot detect clock changes.
+                () = wait_for_max_time => {}
             }
         }
     }
@@ -2721,6 +2711,10 @@ where
             )
             .generate_id();
 
+            // A forward clock correction can expire the range while state or mempool reads
+            // are pending. Never disable the deadline just because it has already elapsed.
+            max_time_reached |= client_long_poll_id.is_some() && DateTime32::now() > max_time;
+
             // The loop finishes if:
             // - the client didn't pass a long poll ID,
             // - the server long poll ID is different to the client long poll ID, or
@@ -2763,24 +2757,11 @@ where
             let mut wait_for_new_tip = latest_chain_tip.clone();
             let wait_for_new_tip = wait_for_new_tip.best_tip_changed();
 
-            // Wait for the maximum block time to elapse. This can change the block header
-            // on testnet. (On mainnet it can happen due to a network disconnection, or a
-            // rapid drop in hash rate.)
-            //
-            // This duration might be slightly lower than the actual maximum,
-            // if cur_time was clamped to min_time. In that case the wait is very long,
-            // and it's ok to return early.
-            //
-            // It can also be zero if cur_time was clamped to max_time. In that case,
-            // we want to wait for another change, and ignore this timeout. So we use an
-            // `OptionFuture::None`.
-            let duration_until_max_time = max_time.saturating_duration_since(cur_time);
-            let wait_for_max_time: OptionFuture<_> = if duration_until_max_time.seconds() > 0 {
-                Some(tokio::time::sleep(duration_until_max_time.to_std()))
-            } else {
-                None
-            }
-            .into();
+            // `max_time` is inclusive. Use wall time, not the captured and clamped cur_time,
+            // so time spent building or a clock adjustment cannot extend the long poll.
+            let duration_until_max_time = max_time.saturating_duration_since(DateTime32::now());
+            let wait_for_max_time =
+                tokio::time::sleep(duration_until_max_time.to_std() + Duration::from_secs(1));
 
             // Optional TODO:
             // `zcashd` generates the next coinbase transaction while waiting for changes.
@@ -2817,7 +2798,7 @@ where
 
                 // The max time does not elapse during normal operation on mainnet,
                 // and it rarely elapses on testnet.
-                Some(_elapsed) = wait_for_max_time => {
+                () = wait_for_max_time => {
                     // This log is very rare so it's ok to be info.
                     tracing::info!(
                         ?max_time,
@@ -2827,7 +2808,7 @@ where
                         "returning from long poll because max time was reached"
                     );
 
-                    max_time_reached = true;
+                    max_time_reached = DateTime32::now() > max_time;
                 }
             }
         };
@@ -2867,9 +2848,9 @@ where
             "selected transactions for the template from the mempool"
         );
 
-        // - After this point, the template only depends on the previously fetched data.
+        // Build from the fetched snapshot, then recheck the local-clock bound before serving.
 
-        Ok(BlockTemplateResponse::new_internal(
+        let template = BlockTemplateResponse::new_internal(
             &self.network,
             &coinbase_cache,
             miner_params,
@@ -2877,8 +2858,13 @@ where
             server_long_poll_id,
             mempool_txs,
             submit_old,
-        )
-        .into())
+        );
+
+        // Coinbase construction can take seconds. Recheck the whole advertised range after it,
+        // just as the cache does, rather than returning timestamps invalidated by clock rollback.
+        (template.max_time <= DateTime32::now().saturating_add(Duration32::from_hours(2)))
+            .then(|| template.into())
+            .ok_or_misc_error("local clock moved backwards while building the block template")
     }
 
     async fn submit_block(
@@ -3020,16 +3006,11 @@ where
         height: Option<i32>,
     ) -> Result<u64> {
         // Default number of blocks is 120 if not supplied.
-        let mut num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
-        // But if it is 0 or negative, it uses the proof of work averaging window.
-        if num_blocks < 1 {
-            num_blocks = i32::try_from(POW_AVERAGING_WINDOW).expect("fits in i32");
-        }
-        let num_blocks =
-            usize::try_from(num_blocks).expect("just checked for negatives, i32 fits in usize");
-
-        // Default height is the tip height if not supplied. Negative values also mean the tip
-        // height. Since negative values aren't valid heights, we can just use the conversion.
+        let num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
+        // State chooses a nonpositive count's averaging window after resolving the effective
+        // height in the same chain snapshot, including future-height clamping and reorgs.
+        let num_blocks = (num_blocks > 0)
+            .then(|| usize::try_from(num_blocks).expect("positive i32 fits in usize"));
         let height = height.and_then(|height| height.try_into_height().ok());
 
         let mut read_state = self.read_state.clone();
@@ -3049,9 +3030,7 @@ where
             _ => unreachable!("unmatched response to a solution rate request"),
         };
 
-        Ok(solution_rate
-            .try_into()
-            .expect("per-second solution rate always fits in u64"))
+        solution_rate.try_into().map_misc_error()
     }
 
     async fn get_network_info(&self) -> Result<GetNetworkInfoResponse> {

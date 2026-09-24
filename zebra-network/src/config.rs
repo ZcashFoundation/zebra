@@ -1002,7 +1002,9 @@ where
         .map_err(de::Error::custom)?;
 
     if let Some(true) = extend_funding_stream_addresses_as_required {
-        params_builder = params_builder.extend_funding_streams();
+        params_builder = params_builder
+            .extend_funding_streams()
+            .map_err(de::Error::custom)?;
     }
 
     // Retain the default soft-fork activation height unless one is configured.

@@ -25,6 +25,42 @@ use crate::config::mining::{default_miner_address, MinerAddressType};
 
 use super::MinerParams;
 
+/// Only explicitly PoW-disabled networks may mine without synchronization.
+#[test]
+fn mining_requires_a_recent_tip_and_sync_status() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+
+    let (tip, sender) = MockChainTip::new();
+    let mut sync = MockSyncStatus::default();
+    sender.send_best_tip_height(Height(1_000_000));
+
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        for (age, close, valid) in [
+            (chrono::Duration::minutes(1), true, true),
+            (chrono::Duration::hours(3), true, false),
+            (chrono::Duration::minutes(1), false, false),
+        ] {
+            sender.send_best_tip_block_time(chrono::Utc::now() - age);
+            sync.set_is_close_to_tip(close);
+            assert_eq!(
+                super::check_synced_to_tip(&network, tip.clone(), sync.clone()).is_ok(),
+                valid,
+                "{network:?}, age {age}, sync status {close}",
+            );
+        }
+    }
+
+    let regtest = Network::new_regtest(Default::default());
+    let pow_disabled = testnet::Parameters::build()
+        .with_disable_pow(true)
+        .to_network()
+        .expect("PoW-disabled Testnet parameters are valid");
+    for network in [regtest, pow_disabled] {
+        let (empty_tip, _sender) = MockChainTip::new();
+        assert!(super::check_synced_to_tip(&network, empty_tip, sync.clone()).is_ok());
+    }
+}
+
 /// Tests that coinbase transactions can be generated.
 ///
 /// This test needs to be run with the `--release` flag so that it runs for ~ 30 seconds instead of

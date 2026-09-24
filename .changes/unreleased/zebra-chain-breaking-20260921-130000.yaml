@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: '[ZIP 218](https://zips.z.cash/zip-0218) parameters for NU7: a 25-second target block spacing, a 102-block difficulty averaging window, a 5,040,000-block halving interval, and a block subsidy divided by a further factor of 3, so issuance per unit of wall clock time is unchanged. Implementers of `subsidy::ParameterSubsidy` must provide `post_nu7_halving_interval()`. `NetworkUpgrade::averaging_window()` and `averaging_window_for_height()` replace the `POW_AVERAGING_WINDOW` constant for consensus checks. Adds `parameters::{POST_NU7_POW_TARGET_SPACING, NU7_POW_TARGET_SPACING_RATIO, POST_NU7_POW_AVERAGING_WINDOW, MAX_POW_AVERAGING_WINDOW}`. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))'
+time: 2026-09-21T13:00:00.000000000Z

@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`parameters::subsidy::height_for_halving` applies the slow-start shift once before Blossom and NU7 spacing changes, including when the first halving precedes Blossom.'
+time: 2026-09-24T01:49:21.848420437+02:00

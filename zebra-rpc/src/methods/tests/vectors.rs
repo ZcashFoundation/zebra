@@ -2450,6 +2450,142 @@ async fn rpc_getnetworksolps() {
     }
 }
 
+/// A future height must use the tip's averaging window, not a future upgrade's window.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getnetworksolps_uses_the_effective_height() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let network = testnet::Parameters::build()
+            .with_slow_start_interval(zebra_chain::block::Height::MIN)
+            .with_activation_heights(testnet::ConfiguredActivationHeights {
+                before_overwinter: Some(1),
+                nu7: Some(121),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_funding_streams(vec![])
+            .to_network()
+            .unwrap();
+
+        let mut blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        // Extend the checkpoint fixture with fast recent blocks and slow older blocks, so
+        // a 17-block estimate is observably different from a 102-block estimate.
+        for height in 2..=120 {
+            let mut block = (*blocks[1]).clone();
+            let header = Arc::make_mut(&mut block.header);
+            let parent = blocks.last().unwrap();
+            header.previous_block_hash = parent.hash();
+            header.time =
+                parent.header.time + chrono::Duration::seconds(if height > 103 { 1 } else { 100 });
+            let mut inputs = block.transactions[0].inputs();
+            let zebra_chain::transparent::Input::Coinbase {
+                height: input_height,
+                ..
+            } = &mut inputs[0]
+            else {
+                panic!("fixture starts with a coinbase")
+            };
+            *input_height = Height(height);
+            block.transactions[0] = Arc::new(
+                (*block.transactions[0])
+                    .clone()
+                    .with_transparent_inputs(inputs),
+            );
+            blocks.push(Arc::new(block));
+        }
+
+        let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &network).await;
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _) = RpcImpl::new(
+            network,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            state,
+            Buffer::new(read_state, 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let recent = rpc.get_network_sol_ps(Some(17), Some(120)).await.unwrap();
+        let long = rpc.get_network_sol_ps(Some(102), Some(120)).await.unwrap();
+        assert!(
+            recent > long,
+            "the fixture must distinguish the two windows"
+        );
+        for height in [None, Some(-1), Some(120), Some(121), Some(i32::MAX)] {
+            for num_blocks in [0, -1] {
+                assert_eq!(
+                    rpc.get_network_sol_ps(Some(num_blocks), height)
+                        .await
+                        .unwrap(),
+                    recent
+                );
+            }
+        }
+        assert_eq!(
+            rpc.get_network_sol_ps(Some(102), Some(121)).await.unwrap(),
+            long
+        );
+        assert_eq!(rpc.get_network_sol_ps(Some(0), Some(0)).await.unwrap(), 0);
+    })
+    .await
+    .expect("solution-rate regression must not stall");
+}
+
+/// A state estimate that exceeds the RPC's integer width must return an error, not panic.
+#[tokio::test]
+async fn rpc_getnetworksolps_rejects_unrepresentable_rates() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for rate in [u128::from(u64::MAX), u128::from(u64::MAX) + 1] {
+            let read_state = tower::service_fn(move |request| async move {
+                assert!(matches!(request, ReadRequest::SolutionRate { .. }));
+                Ok::<_, BoxError>(ReadResponse::SolutionRate(Some(rate)))
+            });
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, _) = RpcImpl::new(
+                Mainnet,
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                MockService::build().for_unit_tests(),
+                MockSyncStatus::default(),
+                NoChainTip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let result = rpc.get_network_sol_ps(None, None).await;
+            if rate == u128::from(u64::MAX) {
+                assert_eq!(result.unwrap(), u64::MAX);
+            } else {
+                assert_eq!(
+                    result
+                        .expect_err("unrepresentable rates must return an RPC error")
+                        .code(),
+                    i32::from(server::error::LegacyCode::Misc),
+                );
+            }
+        }
+    })
+    .await
+    .expect("solution-rate conversion must not stall");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
@@ -2499,7 +2635,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -2628,11 +2764,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         Amount::<NonNegative>::zero()
     );
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(3));
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
-        .expect_err("needs an error when estimated distance to network chain tip is far");
+        .expect_err("a stale tip must reject mining requests");
 
     assert_eq!(
         get_block_template_sync_error.code(),
@@ -2641,7 +2777,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     mock_sync_status.set_is_close_to_tip(false);
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
@@ -2652,11 +2788,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         ErrorCode::ServerError(-10).code()
     );
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::hours(3));
     let get_block_template_sync_error = rpc
         .get_block_template(None)
         .await
-        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
+        .expect_err("a stale tip and unsynced node must reject mining requests");
 
     assert_eq!(
         get_block_template_sync_error.code(),
@@ -2744,7 +2880,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     mock_sync_status.set_is_close_to_tip(true);
 
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (get_block_template, ..) = tokio::join!(
         rpc.get_block_template(None),
@@ -2763,6 +2899,81 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     // mempool transactions should be omitted if the tip hash in the GetChainInfo response from the state
     // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.
     assert!(get_block_template.transactions.is_empty());
+
+    // Simulate a state snapshot captured before a backwards wall-clock adjustment.
+    // Its cur_time still fits, but its advertised maximum no longer does.
+    let mut rollback_state = read_state.clone();
+    let (rollback_result, ..) = tokio::join!(
+        rpc.get_block_template(None),
+        make_mock_mempool_request_handler(vec![], fake_tip_hash),
+        async {
+            rollback_state
+                .expect_request(ReadRequest::ChainInfo)
+                .await
+                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                    expected_difficulty: fake_difficulty,
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    cur_time: fake_cur_time,
+                    min_time: fake_min_time,
+                    max_time: DateTime32::now()
+                        .saturating_add(zebra_chain::serialization::Duration32::from_hours(3)),
+                    chain_history_root: fake_history_tree(&Mainnet).hash(),
+                }));
+        },
+    );
+    assert_eq!(
+        rollback_result
+            .expect_err("the whole range must fit the current clock bound")
+            .code(),
+        i32::from(server::error::LegacyCode::Misc),
+    );
+
+    // An already-expired long poll must return even without a tip or mempool change.
+    // Exercise both the on-demand path and the precomputed path with the same work.
+    for cached in [false, true] {
+        if cached {
+            rpc.gbt
+                .template_cache()
+                .expect("configured mining has a template cache")
+                .publish(*get_block_template.clone());
+        }
+        let mut poll_state = read_state.clone();
+        let mut poll_mempool = mempool.clone();
+        let response = tokio::time::timeout(Duration::from_secs(5), async {
+            let (response, ..) = tokio::join!(
+                rpc.get_block_template(Some(GetBlockTemplateParameters {
+                    long_poll_id: Some(get_block_template.long_poll_id),
+                    ..Default::default()
+                })),
+                async {
+                    if cached {
+                        poll_state
+                            .expect_request(ReadRequest::Tip)
+                            .await
+                            .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
+                    } else {
+                        make_mock_read_state_request_handler().await;
+                        poll_mempool
+                            .expect_request(mempool::Request::FullTransactions)
+                            .await
+                            .respond(mempool::Response::FullTransactions {
+                                transactions: vec![],
+                                transaction_dependencies: Default::default(),
+                                last_seen_tip_hash: fake_tip_hash,
+                            });
+                    }
+                },
+            );
+            response
+        })
+        .await
+        .expect("an expired timestamp range must end long polling")
+        .expect("expired work can be replaced")
+        .try_into_template()
+        .expect("template-mode response");
+        assert_eq!(response.submit_old, Some(false), "cached: {cached}");
+    }
 
     mempool.expect_no_requests().await;
 }
@@ -2809,7 +3020,7 @@ async fn getblocktemplate_precomputed() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -2996,7 +3207,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -3021,6 +3232,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let tip_reads = Arc::new(AtomicUsize::new(0));
 
     let chain_history_root = fake_history_tree(&net).hash();
+    let now = DateTime32::now();
     let read_state_responder = tokio::spawn({
         let mut read_state = read_state.clone();
         let tip_reads = tip_reads.clone();
@@ -3040,9 +3252,11 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
                                 ),
                                 tip_height,
                                 tip_hash,
-                                cur_time: DateTime32::from(1654008617),
-                                min_time: DateTime32::from(1654008606),
-                                max_time: DateTime32::from(1654008719),
+                                cur_time: now,
+                                min_time: now,
+                                max_time: now.saturating_add(
+                                    zebra_chain::serialization::Duration32::from_minutes(2),
+                                ),
                                 chain_history_root,
                             })
                         }
@@ -3244,7 +3458,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -3785,7 +3999,7 @@ async fn rpc_getdifficulty() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -4337,7 +4551,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -4403,80 +4617,6 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
             .previous_block_hash,
         committed_hash,
     );
-}
-
-/// Cached `cur_time` must not extend the maximum-time long-poll deadline.
-#[tokio::test(start_paused = true)]
-async fn getblocktemplate_long_poll_accounts_for_template_age() {
-    let _init_guard = zebra_test::init();
-    let net = Network::Mainnet;
-    let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
-    let tip_hash = Hash([0xab; 32]);
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let (mock_tip, mock_tip_sender) = MockChainTip::new();
-    mock_tip_sender.send_best_tip_height(tip_height);
-    mock_tip_sender.send_best_tip_hash(tip_hash);
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
-        net.clone(),
-        mining::Config {
-            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
-                NetworkType::Main,
-                [0x7e; 20],
-            )),
-            ..Default::default()
-        },
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool, 1),
-        state,
-        read_state.clone(),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-    let cache = rpc.gbt.template_cache().unwrap();
-    let mut template = template_extending(&net, tip_height, tip_hash);
-    let now = DateTime32::now();
-    template.cur_time = now.saturating_sub(Duration32::from_minutes(5));
-    template.min_time = now
-        .saturating_sub(Duration32::from_minutes(89))
-        .saturating_add(Duration32::from_seconds(1));
-    template.max_time = now.saturating_add(Duration32::from_minutes(1));
-    template.long_poll_id =
-        LongPollInput::new(tip_height, tip_hash, template.max_time, std::iter::empty())
-            .generate_id();
-    let client_id = template.long_poll_id;
-    cache.publish(template);
-
-    let waiting = rpc.precomputed_block_template(Some(client_id));
-    tokio::pin!(waiting);
-    tokio::select! {
-        biased;
-        _ = &mut waiting => panic!("long polling must wait while the template is current"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
-            request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-        }
-    }
-    assert!(futures::poll!(&mut waiting).is_pending());
-
-    // Only one minute remains; restarting max_time - cur_time would wait six minutes.
-    tokio::time::advance(Duration::from_secs(62)).await;
-    let (served, ()) = tokio::join!(waiting, async {
-        read_state
-            .expect_request(ReadRequest::Tip)
-            .await
-            .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-    });
-    let served = served.expect("long polling must return at the maximum-time deadline");
-    assert_eq!(served.previous_block_hash, tip_hash);
-    assert_eq!(served.submit_old, Some(false));
 }
 
 /// Returns a template for the block after `(tip_height, tip_hash)`, as the updater would publish.

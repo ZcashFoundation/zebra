@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getnetworksolps` returns an RPC error instead of panicking when the estimated solution rate exceeds its supported integer range.'
+time: 2026-09-24T01:49:33.458307784+02:00

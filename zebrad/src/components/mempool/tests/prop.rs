@@ -69,6 +69,7 @@ proptest! {
         height_offset in 0i64..40,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 1),
                 nu6_3: Some(activation_height),
@@ -100,6 +101,7 @@ proptest! {
         height_offset in -40i64..0,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 41),
                 nu6_3: Some(activation_height),
@@ -131,6 +133,7 @@ proptest! {
         height_offset in -100i64..-40,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 101),
                 nu6_3: Some(activation_height),
@@ -162,6 +165,7 @@ proptest! {
         height_offset in 40i64..1_000,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 1),
                 nu6_3: Some(activation_height),
@@ -198,6 +202,7 @@ proptest! {
         prop_assume!(transaction_upgrade != NetworkUpgrade::Nu6_3);
 
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 1),
                 nu6_3: Some(activation_height),
