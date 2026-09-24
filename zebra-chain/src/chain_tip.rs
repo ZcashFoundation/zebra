@@ -2,7 +2,7 @@
 
 use std::{future, sync::Arc};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 use crate::{block, parameters::Network, transaction, BoxError};
 
@@ -15,16 +15,13 @@ mod tests;
 
 pub use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 
-/// The maximum estimated distance to the network chain tip that is considered "at or near tip".
+/// The maximum age of the best tip considered "at or near tip".
 ///
-/// Allows for normal block-time variance and propagation delay. Considering the 75 second target
-/// for the time between blocks on mainnet, the node is considered far from the tip once the
-/// estimated distance exceeds this threshold, after approximately 20 hours and 51 minutes without
-/// a new block.
-///
-/// Since block production is approximately a Poisson process, this larger tolerance avoids
-/// enabling peer stall detection during normal long gaps between blocks.
-pub const AT_OR_NEAR_TIP_THRESHOLD: block::HeightDiff = 1_000;
+/// Preserves the allowance of 1,000 blocks at Blossom's 75-second spacing: 20 hours
+/// and 50 minutes. A time limit avoids shortening this tolerance when NU7 activates.
+/// This allows normal block-time variance and propagation delay without enabling
+/// peer stall detection during long gaps between blocks.
+pub const AT_OR_NEAR_TIP_MAX_AGE: Duration = Duration::seconds(75_000);
 
 /// An interface for querying the chain tip.
 ///
@@ -132,14 +129,11 @@ pub trait ChainTip {
 
     /// Returns `true` if the node is at or near the network chain tip.
     ///
-    /// Returns `false` if the chain is empty or the node is more than
-    /// [`AT_OR_NEAR_TIP_THRESHOLD`] blocks behind the estimated network tip,
-    /// meaning stall detection should remain active.
-    fn is_at_or_near_network_tip(&self, network: &Network) -> bool {
-        match self.estimate_distance_to_network_chain_tip(network) {
-            None => false,
-            Some((distance, _height)) => distance <= AT_OR_NEAR_TIP_THRESHOLD,
-        }
+    /// Returns `false` if the chain is empty or its best tip is older than
+    /// [`AT_OR_NEAR_TIP_MAX_AGE`], meaning stall detection should remain active.
+    fn is_at_or_near_network_tip(&self, now: DateTime<Utc>) -> bool {
+        self.best_tip_height_and_block_time()
+            .is_some_and(|(_, block_time)| now - block_time <= AT_OR_NEAR_TIP_MAX_AGE)
     }
 }
 

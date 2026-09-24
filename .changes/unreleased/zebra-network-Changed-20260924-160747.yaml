@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Serializing and deserializing a Regtest `Config` preserves the effective activation heights of coincident upgrades instead of applying earlier defaults.
+time: 2026-09-24T16:07:47.835286098+02:00

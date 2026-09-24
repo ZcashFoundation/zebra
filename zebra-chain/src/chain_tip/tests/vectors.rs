@@ -3,7 +3,7 @@ use chrono::{Duration, TimeZone, Utc};
 use crate::{
     block,
     chain_tip::{
-        mock::MockChainTip, ChainTip, NetworkChainTipHeightEstimator, AT_OR_NEAR_TIP_THRESHOLD,
+        mock::MockChainTip, ChainTip, NetworkChainTipHeightEstimator, AT_OR_NEAR_TIP_MAX_AGE,
     },
     parameters::{
         testnet::{ConfiguredActivationHeights, Parameters},
@@ -11,21 +11,23 @@ use crate::{
     },
 };
 
-/// Check that the at-or-near-tip threshold is inclusive.
+/// Freshness uses elapsed time, including the boundary and future timestamps.
 #[test]
-fn at_or_near_network_tip_threshold_is_inclusive() {
-    let network = Network::Mainnet;
-    let (chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+fn at_or_near_network_tip_uses_tip_age() {
+    let now = Utc.timestamp_opt(1_600_000_000, 0).unwrap();
+    let (chain_tip, sender) = MockChainTip::new();
+    assert!(!chain_tip.is_at_or_near_network_tip(now));
+    sender.send_best_tip_height(block::Height(2_500_000));
 
-    mock_chain_tip_sender.send_best_tip_height(block::Height(2_500_000));
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(AT_OR_NEAR_TIP_THRESHOLD);
-
-    assert!(chain_tip.is_at_or_near_network_tip(&network));
-
-    mock_chain_tip_sender
-        .send_estimated_distance_to_network_chain_tip(AT_OR_NEAR_TIP_THRESHOLD + 1);
-
-    assert!(!chain_tip.is_at_or_near_network_tip(&network));
+    for (age, near_tip) in [
+        (-Duration::hours(1), true),
+        (Duration::hours(8), true),
+        (AT_OR_NEAR_TIP_MAX_AGE, true),
+        (AT_OR_NEAR_TIP_MAX_AGE + Duration::seconds(1), false),
+    ] {
+        sender.send_best_tip_block_time(now - age);
+        assert_eq!(chain_tip.is_at_or_near_network_tip(now), near_tip);
+    }
 }
 
 /// A spacing change applies to the interval ending at the activation block.
