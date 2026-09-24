@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: '`CommitBlockError::misbehavior_score` returns 100 for contextual subsidy errors, including those nested in chain value-pool calculations. Unrelated state errors retain their previous scores.'
-time: 2026-09-24T01:49:30.293445575+02:00

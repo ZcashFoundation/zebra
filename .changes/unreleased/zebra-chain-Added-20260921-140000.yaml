@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Added
-body: 'The NU7 Network Sustainability Mechanism reserve starts with historical unissued supply at activation minus one, then accrues 60% of block transaction fees and pays additional subsidies from the configured reissuance height. The reserve is excluded from Issued Supply. Adds `subsidy::{nsm_fee_contribution, miner_fees, nsm_subsidy, scheduled_block_subsidy, cumulative_scheduled_issuance, funding_stream_address, miner_fees_are_valid, subsidy_is_valid}` and `ValueBalance::with_nsm_reserve_seed`.'
-time: 2026-09-21T14:00:00.000000000Z

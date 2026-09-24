@@ -127,32 +127,16 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
 #[test]
 fn chain_value_pool_change_accrues_the_nsm_reserve() {
     use crate::{
-        amount::NegativeAllowed, parameters::testnet::ConfiguredActivationHeights,
-        transaction::Hash as TransactionHash, transparent::OutPoint,
+        parameters::testnet::ConfiguredActivationHeights, transaction::Hash as TransactionHash,
+        transparent::OutPoint,
     };
 
     let _init_guard = zebra_test::init();
-
-    // NU7 activates at height 1000 on this network, and the block below is at height 1000.
-    let network = Network::new_regtest(
-        ConfiguredActivationHeights {
-            canopy: Some(1),
-            nu5: Some(2),
-            nu6: Some(3),
-            nu6_1: Some(4),
-            nu6_2: Some(5),
-            nu6_3: Some(6),
-            nu7: Some(1_000),
-            ..Default::default()
-        }
-        .into(),
-    );
 
     let height = Height(1_000);
     let spent_value: Amount<NonNegative> = 100_000.try_into().expect("valid amount");
     let change: Amount<NonNegative> = 90_000.try_into().expect("valid amount");
     // The one non-coinbase transaction below pays a fee of 10,000 zatoshi.
-    let fee = 10_000;
 
     let coinbase = Transaction::test_v1(
         vec![transparent::Input::Coinbase {
@@ -198,47 +182,34 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
         transactions: vec![Arc::new(coinbase), Arc::new(spend)],
     };
 
-    // 60% of the 10,000 zatoshi fee is removed from circulation.
-    let expected_reserve_change: Amount<NegativeAllowed> =
-        (fee * 6 / 10).try_into().expect("valid amount");
-
-    let pool_change = block
-        .chain_value_pool_change(
-            &utxos,
-            DeferredPoolBalanceChange::zero(),
-            &network,
-            ValueBalance::zero(),
-        )
-        .expect("chain value pool change should be calculable");
-
-    assert_eq!(pool_change.nsm_reserve_amount(), expected_reserve_change);
-
-    // The same block before NU7 activates contributes nothing to the reserve.
-    let pre_nu7 = Network::new_regtest(
-        ConfiguredActivationHeights {
-            canopy: Some(1),
-            nu5: Some(2),
-            nu6: Some(3),
-            nu6_1: Some(4),
-            nu6_2: Some(5),
-            nu6_3: Some(6),
-            ..Default::default()
-        }
-        .into(),
-    );
-
-    assert_eq!(
-        block
-            .chain_value_pool_change(
-                &utxos,
-                DeferredPoolBalanceChange::zero(),
-                &pre_nu7,
-                ValueBalance::zero()
-            )
-            .expect("chain value pool change should be calculable")
-            .nsm_reserve_amount(),
-        Amount::<NegativeAllowed>::zero(),
-    );
+    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000)] {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(3),
+                nu6_1: Some(4),
+                nu6_2: Some(5),
+                nu6_3: Some(6),
+                nu7,
+                ..Default::default()
+            }
+            .into(),
+        );
+        assert_eq!(
+            block
+                .chain_value_pool_change(
+                    &utxos,
+                    DeferredPoolBalanceChange::zero(),
+                    &network,
+                    ValueBalance::zero(),
+                )
+                .expect("chain value pool change should be calculable")
+                .nsm_reserve_amount()
+                .zatoshis(),
+            expected_reserve,
+        );
+    }
 }
 
 /// Seed, reissue, fund and roll back using the same contextual accounting used by state commits.

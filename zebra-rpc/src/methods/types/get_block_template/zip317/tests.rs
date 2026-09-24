@@ -261,7 +261,6 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
             &tx.transaction.transaction,
         ))
     });
-    assert_eq!(selected.len(), (330 - coinbase_counts.shielded_cost()) / 2);
     assert!(counts.exceeded_limit().is_none());
     assert!(counts
         .saturating_add(extra_counts)

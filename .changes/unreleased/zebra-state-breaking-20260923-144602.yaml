@@ -1,4 +1,4 @@
 project: zebra-state
 kind: breaking
-body: '`ContextuallyVerifiedBlock::with_block_and_spent_utxos` now requires the parent value pools. `GetBlockTemplateChainInfo` adds `expected_block_subsidy`, and `ValidateContextError` adds `Subsidy` with a conversion from `subsidy::SubsidyError`, so callers must account for contextual NSM issuance.'
+body: '`ContextuallyVerifiedBlock::with_block_and_spent_utxos` requires parent value pools. `GetBlockTemplateChainInfo` adds `expected_block_subsidy`, and `ValidateContextError` adds `Subsidy` with a conversion from `subsidy::SubsidyError`, so callers must account for contextual NSM issuance. `CommitBlockError::misbehavior_score` returns 100 for these errors, including nested value-pool errors; unrelated scores are unchanged.'
 time: 2026-09-23T14:46:02.131629644+02:00

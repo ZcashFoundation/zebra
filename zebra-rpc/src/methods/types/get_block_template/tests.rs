@@ -140,16 +140,13 @@ fn template_reports_selected_transaction_dependencies() {
         selected,
         None,
     );
-    let parent_index = template
-        .transactions
-        .iter()
-        .position(|tx| tx.hash == parent_hash)
-        .unwrap();
-    let child_index = template
-        .transactions
-        .iter()
-        .position(|tx| tx.hash == child_hash)
-        .unwrap();
+    let [parent_index, child_index] = [parent_hash, child_hash].map(|hash| {
+        template
+            .transactions
+            .iter()
+            .position(|tx| tx.hash == hash)
+            .unwrap()
+    });
     let json = serde_json::to_value(&template).unwrap();
     assert!(parent_index < child_index);
     assert_eq!(
@@ -307,14 +304,8 @@ fn coinbase_cache_reuses_built_coinbase() {
     let subsidy = scheduled_block_subsidy(height, &net).unwrap();
 
     let build = || {
-        TransactionTemplate::new_coinbase(
-            &net,
-            height,
-            &miner_params,
-            zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &net).unwrap(),
-            fee,
-        )
-        .expect("valid coinbase tx")
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, subsidy, fee)
+            .expect("valid coinbase tx")
     };
 
     // A shielded coinbase carries a randomized proof, so two fresh builds differ. Identical bytes
@@ -377,8 +368,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
             )
             .unwrap(),
         ),
-        zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &Network::Mainnet)
-            .unwrap(),
+        subsidy,
         zero_fee,
     )
     .unwrap();
@@ -396,8 +386,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
             )
             .unwrap(),
         ),
-        zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &Network::Mainnet)
-            .unwrap(),
+        subsidy,
         real_fee,
     )
     .unwrap();
@@ -433,8 +422,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
             )
             .unwrap(),
         ),
-        zebra_chain::parameters::subsidy::scheduled_block_subsidy(next_height, &Network::Mainnet)
-            .unwrap(),
+        next_subsidy,
         zero_fee,
     )
     .unwrap();
@@ -475,15 +463,8 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     );
 
     let make_coinbase = |fee: Amount<zebra_chain::amount::NonNegative>| {
-        TransactionTemplate::new_coinbase(
-            &Network::Mainnet,
-            height,
-            &miner_params,
-            zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &Network::Mainnet)
-                .unwrap(),
-            fee,
-        )
-        .unwrap()
+        TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, subsidy, fee)
+            .unwrap()
     };
 
     // Store the zero-fee sizing coinbase first.
