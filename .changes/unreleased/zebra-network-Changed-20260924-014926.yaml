@@ -1,4 +1,4 @@
 project: zebra-network
-kind: Changed
-body: An explicit empty Testnet funding-stream list survives configuration serialization and disables the default streams; omitting the list retains the defaults.
+kind: breaking
+body: Explicitly empty funding-stream lists survive configuration round-trips and disable default streams. Testnet and Regtest now reject combining an empty list with either legacy funding field; remove both legacy fields to disable streams, or omit the empty list to retain legacy payouts. Omitted settings retain network defaults. ([#11514](https://github.com/ZcashFoundation/zebra/pull/11514))
 time: 2026-09-24T01:49:26.071857535+02:00
