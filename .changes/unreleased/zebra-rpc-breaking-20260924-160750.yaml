@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: '`methods::types::get_block_template::constants::MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP` is replaced by `MAX_TIME_SINCE_CHAIN_TIP`, a `chrono::Duration`. Mining freshness checks use tip timestamps rather than estimated block distance, preserving the 125-minute allowance across NU7.'
-time: 2026-09-24T16:07:50.044914228+02:00
