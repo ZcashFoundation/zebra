@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`config::CacheDir::peer_cache_file_path` includes configured Testnet wire magic in peer cache names. Existing unsuffixed custom-network caches are not reused; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
+time: 2026-09-25T16:24:22.277826696+02:00

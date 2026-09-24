@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Custom-network configurations reject out-of-order explicit upgrade heights even when equal heights previously hid the mismatch. Configure upgrades in nondecreasing height order.
+time: 2026-09-24T16:07:52.252545474+02:00

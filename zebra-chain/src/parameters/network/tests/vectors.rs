@@ -168,7 +168,13 @@ fn activates_network_upgrades_correctly() {
 #[test]
 fn check_configured_network_name() {
     // Checks that reserved network names cannot be used for configured testnets.
-    for reserved_network_name in RESERVED_NETWORK_NAMES {
+    for reserved_network_name in RESERVED_NETWORK_NAMES.into_iter().flat_map(|name| {
+        [
+            name.to_string(),
+            name.to_ascii_lowercase(),
+            name.to_ascii_uppercase(),
+        ]
+    }) {
         let err = testnet::Parameters::build()
             .with_network_name(reserved_network_name.to_string())
             .expect_err("should fail when using reserved network name");
@@ -301,6 +307,21 @@ fn check_network_name() {
         expected_name,
         "network must be displayed as configured network name"
     );
+}
+
+/// Duplicate activation heights must not hide an earlier out-of-order upgrade.
+#[test]
+fn activation_order_is_checked_before_coalescing_heights() {
+    let activation_heights = ConfiguredActivationHeights {
+        nu5: Some(10),
+        nu6: Some(9),
+        nu7: Some(10),
+        ..Default::default()
+    };
+    assert!(matches!(
+        testnet::Parameters::build().with_activation_heights(activation_heights),
+        Err(ParametersBuilderError::OutOfOrderUpgrades),
+    ));
 }
 
 #[test]
@@ -768,4 +789,20 @@ fn temporary_orchard_disabling_soft_fork_heights() {
         None,
     );
     assert!(!disabled.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
+}
+
+#[test]
+fn public_testnet_peers_require_matching_orchard_disable_height() {
+    let builder = testnet::Parameters::build();
+    assert!(builder.is_compatible_with_default_parameters());
+    let public_height = Network::new_default_testnet()
+        .temporary_orchard_disabling_soft_fork_height()
+        .unwrap();
+    assert!(!builder
+        .clone()
+        .with_temporary_orchard_disabling_soft_fork_height(public_height.next().unwrap())
+        .is_compatible_with_default_parameters());
+    assert!(!builder
+        .disable_temporary_orchard_disabling_soft_fork()
+        .is_compatible_with_default_parameters());
 }

@@ -176,7 +176,19 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
     fn from(activation_heights: &BTreeMap<Height, NetworkUpgrade>) -> Self {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
 
-        for (height, network_upgrade) in activation_heights {
+        // The map coalesces upgrades at the same height. Restore every implicit
+        // activation so deserialization cannot replace it with a network default.
+        let mut configured = activation_heights.iter().peekable();
+        for network_upgrade in NetworkUpgrade::iter() {
+            while configured
+                .peek()
+                .is_some_and(|(_, upgrade)| **upgrade < network_upgrade)
+            {
+                configured.next();
+            }
+            let Some((height, _)) = configured.peek() else {
+                break;
+            };
             let field = match network_upgrade {
                 NetworkUpgrade::BeforeOverwinter => {
                     &mut configured_activation_heights.before_overwinter
@@ -542,7 +554,10 @@ impl ParametersBuilder {
     ) -> Result<Self, ParametersBuilderError> {
         let network_name = network_name.to_string();
 
-        if RESERVED_NETWORK_NAMES.contains(&network_name.as_str()) {
+        if RESERVED_NETWORK_NAMES
+            .iter()
+            .any(|reserved| network_name.eq_ignore_ascii_case(reserved))
+        {
             return Err(ParametersBuilderError::ReservedNetworkName {
                 network_name,
                 reserved_names: RESERVED_NETWORK_NAMES.to_vec(),
@@ -647,33 +662,22 @@ impl ParametersBuilder {
             let activation_heights =
                 activation_heights.chain(zfuture.into_iter().map(|h| (h, ZFuture)));
 
+            let mut previous_height = Height::MIN;
             activation_heights
                 .map(|(h, nu)| {
-                    let height = h
-                        .try_into()
+                    let height = Height::try_from(h)
                         .map_err(|_| ParametersBuilderError::InvalidActivationHeight)?;
+                    if height == Height::MIN {
+                        return Err(ParametersBuilderError::InvalidHeightZero);
+                    }
+                    if height < previous_height {
+                        return Err(ParametersBuilderError::OutOfOrderUpgrades);
+                    }
+                    previous_height = height;
                     Ok((height, nu))
                 })
                 .collect::<Result<BTreeMap<_, _>, _>>()?
         };
-
-        let network_upgrades: Vec<_> = activation_heights.iter().map(|(_h, &nu)| nu).collect();
-
-        // Check that the provided network upgrade activation heights are in the same order by height as the default testnet activation heights
-        let mut activation_heights_iter = activation_heights.iter();
-        for expected_network_upgrade in NetworkUpgrade::iter() {
-            if !network_upgrades.contains(&expected_network_upgrade) {
-                continue;
-            } else if let Some((&height, &network_upgrade)) = activation_heights_iter.next() {
-                if height == Height(0) {
-                    return Err(ParametersBuilderError::InvalidHeightZero);
-                }
-
-                if network_upgrade != expected_network_upgrade {
-                    return Err(ParametersBuilderError::OutOfOrderUpgrades);
-                }
-            }
-        }
 
         // # Correctness
         //
@@ -926,7 +930,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints: _,
-            temporary_orchard_disabling_soft_fork_height: _,
+            temporary_orchard_disabling_soft_fork_height,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -941,6 +945,8 @@ impl ParametersBuilder {
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
             && self.lockbox_disbursements == lockbox_disbursements
+            && self.temporary_orchard_disabling_soft_fork_height
+                == temporary_orchard_disabling_soft_fork_height
     }
 }
 
