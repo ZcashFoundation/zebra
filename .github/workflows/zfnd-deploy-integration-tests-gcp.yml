@@ -325,6 +325,7 @@ jobs:
           IS_LONG_TEST: ${{ inputs.is_long_test }}
           ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
           LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
           CI_IMAGE_NAME: ${{ vars.CI_IMAGE_NAME }}
         run: |
 
@@ -335,7 +336,7 @@ jobs:
           DOCKER_MOUNTS="-v ${HOST_CACHE_DIR}:${ZEBRA_STATE_DIR}"
 
           # Mount the same disk to the lwd path if needed
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
+          if [[ "${NEEDS_LWD_STATE}" == "true" || "${TEST_ID}" == "lwd-sync-full" ]]; then
             DOCKER_MOUNTS+=" -v ${HOST_CACHE_DIR}:${LWD_STATE_DIR}"
           fi
 
