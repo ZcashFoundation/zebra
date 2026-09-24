@@ -270,10 +270,14 @@ impl Block {
     /// UTXOs, which are ignored.
     ///
     /// `previous_value_pools` must be the exact parent's balances.
-    /// This calculates accounting only; callers must separately validate coinbase payouts.
     /// Genesis transparent outputs are permanently unspendable, so they do not enter the pool.
     /// Custom networks with nonzero genesis outputs must rebuild state created before this rule;
     /// public-network genesis outputs are zero, so their historical balances are unchanged.
+    ///
+    /// This calculation does not validate coinbase payouts or funding outputs. Callers must
+    /// validate them separately with [`subsidy::subsidy_is_valid`] and
+    /// [`subsidy::miner_fees_are_valid`], using the exact parent's reserve-funded subsidy.
+    /// `deferred_pool_balance_change` must also be calculated from that same parent.
     ///
     /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
@@ -303,10 +307,8 @@ impl Block {
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
-    ) -> Result<
-        (ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>),
-        ValueBalanceError,
-    > {
+    ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
+    {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
         // to propagate the first error instead.
@@ -366,7 +368,10 @@ impl Block {
             );
         }
 
-        Ok((chain_value_pool_change, needs_fees.then_some(transaction_fees)))
+        Ok((
+            chain_value_pool_change,
+            needs_fees.then_some(transaction_fees),
+        ))
     }
 
     /// Returns the total transaction fees paid by the non-coinbase transactions in this block,

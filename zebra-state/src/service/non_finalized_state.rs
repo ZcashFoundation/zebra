@@ -620,12 +620,14 @@ impl NonFinalizedState {
             &self.network,
             new_chain.chain_value_pools,
         )
-        .map_err(|value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
-            value_balance_error,
-            height,
-            block_hash,
-            transaction_count,
-            spent_utxo_count,
+        .map_err(|value_balance_error| {
+            ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height,
+                block_hash,
+                transaction_count,
+                spent_utxo_count,
+            }
         })?;
 
         // The semantic verifier defers parent-dependent payouts to this exact-parent check.

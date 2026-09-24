@@ -544,7 +544,9 @@ fn block_info_reads_every_record_layout() {
 
     // Both zero and nonzero balances use the v29 layout.
     assert_eq!(
-        BlockInfo::new(ValueBalance::zero(), size).as_bytes(),
+        BlockInfo::new(ValueBalance::zero(), size)
+            .as_bytes()
+            .as_slice(),
         wide_zero,
         "a zero reserve still occupies its field in the v29 layout",
     );
@@ -552,7 +554,7 @@ fn block_info_reads_every_record_layout() {
     let mut value_pools = ValueBalance::zero();
     value_pools.set_nsm_amount(nsm_reserve);
     assert_eq!(
-        BlockInfo::new(value_pools, size).as_bytes(),
+        BlockInfo::new(value_pools, size).as_bytes().as_slice(),
         wide,
         "NSM follows the unchanged pre-NU7 pool-and-size prefix",
     );

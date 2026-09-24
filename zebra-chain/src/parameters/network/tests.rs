@@ -227,10 +227,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
     // https://z.cash/support/faq/#what-is-slow-start-mining
     assert_eq!(
         Amount::<NonNegative>::try_from(1_250_000_000)?,
-        block_subsidy(
-            (network.slow_start_interval() + 1).unwrap(),
-            network,
-        )?
+        block_subsidy((network.slow_start_interval() + 1).unwrap(), network,)?
     );
     assert_eq!(
         Amount::<NonNegative>::try_from(1_250_000_000)?,

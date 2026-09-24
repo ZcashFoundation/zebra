@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{Amount, NonNegative},
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
@@ -12,6 +12,7 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
+    transparent,
     value_balance::ValueBalance,
 };
 use zebra_test::prelude::*;
@@ -19,7 +20,7 @@ use zebra_test::prelude::*;
 use crate::{
     arbitrary::Prepare,
     service::{
-        finalized_state::FinalizedState,
+        finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
         ReconsiderError,
     },

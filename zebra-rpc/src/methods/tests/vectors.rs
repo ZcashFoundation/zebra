@@ -2621,7 +2621,9 @@ async fn rpc_proposal_rejects_invalid_subsidy_before_verification() {
         proposal::proposal_block_from_template, BlockProposalResponse,
     };
     use zebra_chain::parameters::{
-        subsidy::{scheduled_block_subsidy, subsidy_is_valid, CoinbaseTransactionError, SubsidyError},
+        subsidy::{
+            scheduled_block_subsidy, subsidy_is_valid, CoinbaseTransactionError, SubsidyError,
+        },
         testnet::ConfiguredFundingStreamRecipient,
     };
 
@@ -2980,7 +2982,9 @@ fn getblocktemplate_mutations_preserve_coinbase_balance() {
             deferred,
             &Mainnet
         ),
-        Err(CoinbaseTransactionError::Subsidy(SubsidyError::InvalidMinerFees)),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::InvalidMinerFees
+        )),
     ));
     // A required coinbase cannot be kept valid by changing its fees or parent independently.
     assert!(template.coinbase_txn.required);

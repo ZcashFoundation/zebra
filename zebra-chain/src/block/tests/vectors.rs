@@ -172,8 +172,8 @@ fn genesis_transparent_outputs_are_not_issued_supply() {
                 .add_chain_value_pool_change(change)
                 .unwrap();
             assert!(pools.transparent_amount().is_zero());
-            assert_eq!(pools.nsm_amount(), Amount::zero());
-            assert_eq!(pools.total().unwrap(), Amount::zero());
+            assert!(pools.nsm_amount().is_zero());
+            assert!(pools.total().unwrap().is_zero());
         }
     }
 }
@@ -238,7 +238,7 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
         transactions: vec![Arc::new(coinbase), Arc::new(spend)],
     };
 
-    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000)] {
+    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000), (Some(999), 6_000)] {
         let network = Network::new_regtest(
             ConfiguredActivationHeights {
                 canopy: Some(1),
@@ -272,9 +272,9 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         amount::NegativeAllowed,
         parameters::{
             subsidy::{
-                block_subsidy_with_parent_pools, funding_stream_address,
-                funding_stream_values, scheduled_block_subsidy, subsidy_is_valid,
-                CoinbaseTransactionError, FundingStreamReceiver, SubsidyError,
+                block_subsidy_with_parent_pools, funding_stream_address, funding_stream_values,
+                scheduled_block_subsidy, subsidy_is_valid, CoinbaseTransactionError,
+                FundingStreamReceiver, SubsidyError,
             },
             testnet::{
                 ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
@@ -339,7 +339,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         before_seed,
     )?;
     let parent = before_seed.add_chain_value_pool_change(pre_activation_change)?;
-    assert_eq!(parent.nsm_amount(), Amount::zero());
+    assert!(parent.nsm_amount().is_zero());
 
     let total = block_subsidy_with_parent_pools(height, &network, parent)?;
     assert_eq!(
@@ -364,7 +364,10 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     );
     let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
     let (change, fees) = block.chain_value_pool_change_and_fees(
-        &HashMap::new(), deferred_change, &network, parent,
+        &HashMap::new(),
+        deferred_change,
+        &network,
+        parent,
     )?;
     assert_eq!(fees, Some(Amount::zero()));
     assert_eq!(change.nsm_amount().zatoshis(), 9_999_998_625);
@@ -373,7 +376,10 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     assert_eq!(after.total()?, (parent.total()? + total)?);
     let next = make_block(height.next()?, Vec::new());
     let next_change = next.chain_value_pool_change(
-        &HashMap::new(), DeferredPoolBalanceChange::zero(), &network, after,
+        &HashMap::new(),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        after,
     )?;
     assert_eq!(next_change.nsm_amount().zatoshis(), -1_375);
     assert_eq!(ValueBalance::from_bytes(&after.to_bytes())?, after);
@@ -392,20 +398,26 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
             transparent::Output::new(scheduled_grant, grant_script),
         ],
     );
+    assert_eq!(
+        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, parent)?,
+        change,
+        "ledger accounting does not validate funding payouts",
+    );
     assert!(matches!(
         subsidy_is_valid(&underfunded, &network, total),
         Err(CoinbaseTransactionError::Subsidy(
             SubsidyError::FundingStreamNotFound
         )),
     ));
-    // Accounting does not perform payout checks: the contextual checker owns them.
-    underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, parent)?;
+    assert_eq!(subsidy_is_valid(&block, &network, total)?, deferred_change);
     let mut other_parent = after;
     other_parent.set_nsm_amount((reserve * 2)?);
     let other_total = block_subsidy_with_parent_pools(height.next()?, &network, other_parent)?;
     assert!(matches!(
         subsidy_is_valid(&block, &network, other_total),
-        Err(CoinbaseTransactionError::Subsidy(SubsidyError::FundingStreamNotFound)),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::FundingStreamNotFound
+        )),
     ));
 
     // Both a reissuance reorg and an activation-crossing reorg restore the exact prior pools.
@@ -908,19 +920,24 @@ fn transaction_fees_sum_the_non_coinbase_transactions() {
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
 
-    let network = Network::new_regtest(crate::parameters::testnet::ConfiguredActivationHeights {
-        nu7: Some(height.0),
-        ..Default::default()
-    }.into());
+    let network = Network::new_regtest(
+        crate::parameters::testnet::ConfiguredActivationHeights {
+            nu7: Some(height.0),
+            ..Default::default()
+        }
+        .into(),
+    );
     for (count, fees, contribution) in [(1, 0, 0), (3, 2, 1), (4, 1_002, 601)] {
         block.transactions = transactions[..count].to_vec();
         assert_eq!(block.transaction_fees(&utxos), Ok(amount(fees)));
-        let (change, gross_fees) = block.chain_value_pool_change_and_fees(
-            &utxos,
-            DeferredPoolBalanceChange::zero(),
-            &network,
-            ValueBalance::zero(),
-        ).expect("valid transaction balances");
+        let (change, gross_fees) = block
+            .chain_value_pool_change_and_fees(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+                ValueBalance::zero(),
+            )
+            .expect("valid transaction balances");
         assert_eq!(gross_fees, Some(amount(fees)));
         assert_eq!(change.nsm_amount().zatoshis(), contribution);
         assert_eq!(change.transparent_amount().zatoshis(), 1_000_000 - fees);
@@ -937,12 +954,14 @@ fn transaction_fees_sum_the_non_coinbase_transactions() {
         ),
         Err(crate::value_balance::ValueBalanceError::Total(_)),
     ));
-    let (change, fees) = block.chain_value_pool_change_and_fees(
-        &utxos,
-        DeferredPoolBalanceChange::zero(),
-        &Network::Mainnet,
-        ValueBalance::zero(),
-    ).expect("pre-NU7 accounting leaves fee validation to the verifier");
+    let (change, fees) = block
+        .chain_value_pool_change_and_fees(
+            &utxos,
+            DeferredPoolBalanceChange::zero(),
+            &Network::Mainnet,
+            ValueBalance::zero(),
+        )
+        .expect("pre-NU7 accounting leaves fee validation to the verifier");
     assert_eq!(fees, None);
     assert_eq!(change.transparent_amount().zatoshis(), 999_999);
     assert_eq!(change.nsm_amount().zatoshis(), 0);

@@ -1489,78 +1489,17 @@ async fn nu7_v4_mempool_activation() -> Result<()> {
 /// Real mempool admission, aggregate fees, and parent-dependent NU7 mining survive reorgs and restart.
 #[tokio::test(flavor = "multi_thread")]
 async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
-    use std::collections::HashSet;
-
     use zebra_chain::{
-        amount::{Amount, NonNegative},
+        amount::NonNegative,
         parameters::{
             subsidy::{additional_block_subsidy, scheduled_block_subsidy},
             testnet::RegtestParameters,
-            NetworkUpgrade,
         },
-        transaction::{self, LockTime, Transaction},
     };
     use zebra_rpc::{
         client::{BlockProposalResponse, BlockTemplateResponse, GetBlockSubsidyResponse},
-        methods::SendRawTransactionResponse,
         proposal_block_from_template,
     };
-
-    // A standard P2SH output whose redeem script is OP_TRUE. These spends still pass through the
-    // real UTXO, maturity, standardness, script, fee, and transaction-version checks.
-    fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
-        let input = transparent::Input::PrevOut {
-            outpoint: transparent::OutPoint {
-                hash: previous.hash(),
-                index: 0,
-            },
-            unlock_script: transparent::Script::new(&[0x01, 0x51]),
-            sequence: u32::MAX,
-        };
-        let mut output = previous.outputs()[0].clone();
-        output.value = (output.value - Amount::try_from(fee)?)?;
-        Ok(if nu7 {
-            // These transactions expire after the activation block, so reorgs cannot select
-            // them again in the height-106 templates used to compare the two parent reserves.
-            Transaction::test_v5(
-                NetworkUpgrade::Nu7,
-                vec![input],
-                vec![output],
-                LockTime::unlocked(),
-                Height(105),
-            )
-        } else {
-            Transaction::test_v4(vec![input], vec![output], LockTime::unlocked(), Height(200))
-        })
-    }
-
-    async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
-        let data = hex::encode(tx.zcash_serialize_to_vec()?);
-        let response: SendRawTransactionResponse = client
-            .json_result_from_call("sendrawtransaction", format!(r#"["{data}"]"#))
-            .await
-            .map_err(|err| eyre!(err))?;
-        assert_eq!(response, SendRawTransactionResponse::new(tx.hash()));
-        Ok(())
-    }
-
-    async fn mempool(client: &RpcRequestClient, expected: &[transaction::Hash]) -> Result<()> {
-        let expected: HashSet<_> = expected.iter().map(ToString::to_string).collect();
-        tokio::time::timeout(Duration::from_secs(30), async {
-            loop {
-                let actual: HashSet<String> = client
-                    .json_result_from_call("getrawmempool", "[]")
-                    .await
-                    .map_err(|err| eyre!(err))?;
-                if actual == expected {
-                    return Ok(());
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        })
-        .await
-        .map_err(|_| eyre!("mempool did not reach the expected transaction set: {expected:?}"))?
-    }
 
     async fn template(
         client: &RpcRequestClient,
@@ -1649,12 +1588,12 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
                 .sum::<Result<Amount<NonNegative>, _>>()
         };
 
-        // Mature three real coinbase outputs before approaching the NU7 boundary.
+        // Mature two real coinbase outputs before approaching the NU7 boundary.
         let mut coinbases = Vec::new();
         for expected_height in 1..=102 {
             let (block, height) = client.block_from_template(&network).await?;
             assert_eq!(height, Height(expected_height));
-            if expected_height <= 3 {
+            if expected_height <= 2 {
                 coinbases.push(block.transactions[0].clone());
             }
             client.submit_block(block).await?;
@@ -1683,14 +1622,9 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         client.submit_block(before_block).await?;
         mempool(&client, &[]).await?;
 
-        // Save an empty block before admitting V4, so the boundary transaction remains unmined.
         let (boundary, height) = client.block_from_template(&network).await?;
         assert_eq!(height, Height(104));
-        let v4 = spend(&coinbases[2], false, 10_001)?;
-        send(&client, &v4).await?;
-        mempool(&client, &[v4.hash()]).await?;
         client.submit_block(boundary).await?;
-        // Mempool verification is for the NEXT block: at tip 104 its rules switch to NU7.
         mempool(&client, &[]).await?;
         let empty_activation_template = template(&client, 105, &[]).await?;
         let empty_activation =
@@ -1701,6 +1635,8 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             "seeding and reissuance have distinct configured heights",
         );
 
+        // These spends expire at height 105, so reorgs cannot select them in the height-106
+        // templates used to compare the two parent reserves.
         let fees = [
             spend(&before[0], true, 10_001)?,
             spend(&before[1], true, 10_001)?,
@@ -1728,26 +1664,6 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         client.submit_block(fee_block.clone()).await?;
         mempool(&client, &[]).await?;
 
-        // A fresh transaction avoids a cached rejection. Its input is still unspent, mature,
-        // and its expiry height is well beyond activation: V4 itself must now be rejected.
-        let rejected_v4 = spend(&coinbases[2], false, 10_002)?;
-        let data = hex::encode(rejected_v4.zcash_serialize_to_vec()?);
-        let error = client
-            .json_result_from_call::<SendRawTransactionResponse>(
-                "sendrawtransaction",
-                format!(r#"["{data}"]"#),
-            )
-            .await
-            .expect_err("NU7 must reject V4 mempool admission");
-        assert_eq!(
-            error
-                .downcast_ref::<jsonrpsee_types::ErrorObject>()
-                .expect("transaction rejection must be an RPC error")
-                .code(),
-            i32::from(zebra_rpc::server::error::LegacyCode::Verify),
-        );
-        mempool(&client, &[]).await?;
-
         let fee_reserve = (seed + Amount::try_from(12_001)?)?;
         let first_additional = additional_block_subsidy(Height(106), &network, fee_reserve);
         let expected = (scheduled_block_subsidy(Height(106), &network)? + first_additional)?;
@@ -1763,7 +1679,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .json_result_from_call("getblocksubsidy", "[106]")
             .await
             .map_err(|err| eyre!(err))?;
-        assert_eq!(high_subsidy.total_block_subsidy(), expected.into());
+        assert_eq!(high_subsidy.total_block_subsidy(), expected);
 
         let mut overclaim = high_block.clone();
         let coinbase = Arc::make_mut(&mut overclaim.transactions[0]);
@@ -1808,7 +1724,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .json_result_from_call("getblocksubsidy", "[106]")
             .await
             .map_err(|err| eyre!(err))?;
-        assert_eq!(low_subsidy.total_block_subsidy(), low_expected.into());
+        assert_eq!(low_subsidy.total_block_subsidy(), low_expected);
         let mut stale_payout = low_block.clone();
         stale_payout.transactions[0] = high_block.transactions[0].clone();
         Arc::make_mut(&mut stale_payout.header).merkle_root =
@@ -1818,16 +1734,17 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             "the prior parent's higher payout must not be accepted on the lower-reserve parent",
         );
 
-        let empty_params = serde_json::to_string(&[empty_activation.hash().to_string()])?;
-        let _: () = client
-            .json_result_from_call("invalidateblock", &empty_params)
-            .await
-            .map_err(|err| eyre!(err))?;
+        // Reconsider first: the invalidation cache retains only one branch per height.
         let reconsidered: Vec<zebra_chain::block::Hash> = client
             .json_result_from_call("reconsiderblock", &fee_params)
             .await
             .map_err(|err| eyre!(err))?;
         assert_eq!(reconsidered, [fee_block.hash()]);
+        let empty_params = serde_json::to_string(&[empty_activation.hash().to_string()])?;
+        let _: () = client
+            .json_result_from_call("invalidateblock", &empty_params)
+            .await
+            .map_err(|err| eyre!(err))?;
         let restored_template = template(&client, 106, &[]).await?;
         assert_eq!(restored_template.previous_block_hash(), fee_block.hash());
         let restored = proposal_block_from_template(&restored_template, None, &network)?;
@@ -1857,8 +1774,25 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .map_err(|err| eyre!(err))?;
         assert_eq!(reconsidered, [restored.hash()]);
 
+        // Reconsideration acknowledges before publishing the tip and its synchronous backup.
+        let persisted_template = template(&client, 107, &[]).await?;
+        assert_eq!(persisted_template.previous_block_hash(), restored.hash());
+        #[cfg(unix)]
+        {
+            let pid = child
+                .child
+                .as_ref()
+                .expect("the node is still owned until shutdown")
+                .id();
+            crate::common::zcashd_compat::launch::send_signal(pid, "-TERM")?;
+        }
+        #[cfg(not(unix))]
         child.kill(true)?;
-        child.wait_with_output()?;
+        let output = child.wait_with_output()?;
+        #[cfg(unix)]
+        output.assert_success()?;
+        #[cfg(not(unix))]
+        output.assert_was_killed()?;
         let version = zebra_state::state_database_format_version_on_disk(&config.state, &network)
             .map_err(|err| eyre!(err))?
             .expect("persistent node must create a database version");
@@ -1869,34 +1803,47 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
 
         // Reopen the actual node's state, including its synchronous non-finalized backup.
         // Checking the exact tip prevents a finalized-only read from falsely proving persistence.
-        let (state, read_state, _, _) =
-            zebra_state::init(config.state.clone(), &network, Height(0), 1).await;
-        let zebra_state::ReadResponse::TipPoolValues {
-            tip_height,
-            tip_hash,
-            value_balance,
-        } = read_state
-            .clone()
-            .oneshot(zebra_state::ReadRequest::TipPoolValues)
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            panic!("TipPoolValues must return the restored chain tip and its pools");
-        };
-        assert_eq!((tip_height, tip_hash), (Height(106), restored.hash()));
-        assert_eq!(value_balance.nsm_amount(), reserve);
-        for (height, expected_reserve) in [(104, Amount::zero()), (105, fee_reserve)] {
-            let zebra_state::ReadResponse::BlockInfo(Some(info)) = read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::BlockInfo(Height(height).into()))
-                .await
-                .map_err(|err| eyre!(err))?
-            else {
-                panic!("the node's persisted chain must contain height {height}");
-            };
-            assert_eq!(info.value_pools().nsm_amount(), expected_reserve);
-        }
-        tokio::task::spawn_blocking(move || drop((state, read_state))).await?;
+        // State-owned metrics tasks retain the database until their runtime shuts down.
+        let state_config = config.state.clone();
+        let inspection_network = network.clone();
+        let restored_hash = restored.hash();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(async move {
+                let (state, read_state, _, _) =
+                    zebra_state::init(state_config, &inspection_network, Height(0), 1).await;
+                let zebra_state::ReadResponse::TipPoolValues {
+                    tip_height,
+                    tip_hash,
+                    value_balance,
+                } = read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::TipPoolValues)
+                    .await
+                    .map_err(|err| eyre!(err))?
+                else {
+                    panic!("TipPoolValues must return the restored chain tip and its pools");
+                };
+                assert_eq!((tip_height, tip_hash), (Height(106), restored_hash));
+                assert_eq!(value_balance.nsm_amount(), reserve);
+                for (height, expected_reserve) in [(104, Amount::zero()), (105, fee_reserve)] {
+                    let zebra_state::ReadResponse::BlockInfo(Some(info)) = read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::BlockInfo(Height(height).into()))
+                        .await
+                        .map_err(|err| eyre!(err))?
+                    else {
+                        panic!("the node's persisted chain must contain height {height}");
+                    };
+                    assert_eq!(info.value_pools().nsm_amount(), expected_reserve);
+                }
+                drop((state, read_state));
+                Ok(())
+            })
+        })
+        .await??;
 
         let mut child = test_dir.spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;

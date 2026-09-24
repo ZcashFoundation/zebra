@@ -568,7 +568,9 @@ impl ContextuallyVerifiedBlock {
 
         let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
             &utxos_from_ordered_utxos(
-                spent_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
+                spent_outputs
+                    .iter()
+                    .map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
             ),
             deferred_pool_balance_change,
             network,
@@ -1507,7 +1509,7 @@ pub enum ReadRequest {
 
     /// Looks up the balance of a set of transparent addresses.
     ///
-    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
+    /// Returns an [`Amount`] with the total
     /// balance of the set of addresses.
     AddressBalance(HashSet<transparent::Address>),
 

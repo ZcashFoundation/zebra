@@ -207,10 +207,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
 {
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
-    let mut next_coinbase: Option<(
-        Height,
-        JoinHandle<TransactionTemplate<NegativeOrZero>>,
-    )> = None;
+    let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
@@ -441,10 +438,7 @@ where
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
 /// already built or another coinbase is still being built.
 fn start_precomputing_coinbase(
-    next_coinbase: &mut Option<(
-        Height,
-        JoinHandle<TransactionTemplate<NegativeOrZero>>,
-    )>,
+    next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     network: &Network,
     miner_params: &MinerParams,
     height: Height,
@@ -467,13 +461,8 @@ fn start_precomputing_coinbase(
     *next_coinbase = Some((
         height,
         tokio::task::spawn_blocking(move || {
-            TransactionTemplate::new_coinbase(
-                &network,
-                height,
-                &miner_params,
-                Amount::zero(),
-            )
-            .expect("valid coinbase tx")
+            TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
+                .expect("valid coinbase tx")
         }),
     ));
 }
@@ -483,10 +472,7 @@ fn start_precomputing_coinbase(
 /// A coinbase built for another height has the wrong BIP-34 height and subsidy. Keep tracking it
 /// until it finishes, so a later precomputation cannot detach an unfinished proof.
 async fn store_precomputed_coinbase(
-    next_coinbase: &mut Option<(
-        Height,
-        JoinHandle<TransactionTemplate<NegativeOrZero>>,
-    )>,
+    next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
     height: Height,
     coinbase_cache: &CoinbaseCache,
 ) {

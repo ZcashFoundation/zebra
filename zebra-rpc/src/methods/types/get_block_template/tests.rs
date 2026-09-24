@@ -506,7 +506,11 @@ fn coinbase_cache_discards_late_old_parent_builds() {
     );
     let build = |parent| {
         TransactionTemplate::new_coinbase_with_parent_pools(
-            &network, height, &miner_params, fee, parent,
+            &network,
+            height,
+            &miner_params,
+            fee,
+            parent,
         )
         .unwrap()
     };
@@ -549,8 +553,7 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     );
 
     let make_coinbase = |fee: Amount<zebra_chain::amount::NonNegative>| {
-        TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, fee)
-            .unwrap()
+        TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, fee).unwrap()
     };
 
     // Store the zero-fee sizing coinbase first.
@@ -613,13 +616,8 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
         .expect("hard-coded Unified address is valid"),
     );
 
-    let template = TransactionTemplate::new_coinbase(
-        &net,
-        height,
-        &miner_params,
-        Amount::zero(),
-    )
-    .expect("valid coinbase tx");
+    let template = TransactionTemplate::new_coinbase(&net, height, &miner_params, Amount::zero())
+        .expect("valid coinbase tx");
     let coinbase: Transaction = template.data.as_ref().zcash_deserialize_into().unwrap();
 
     // The coinbase is a v6 transaction with Ironwood shielded data and no Orchard shielded data.

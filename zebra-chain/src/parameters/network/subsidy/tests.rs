@@ -4,18 +4,18 @@
 
 use std::collections::HashMap;
 
-use crate::{
-    amount::{Amount, DeferredPoolBalanceChange},
-    block::Block,
-    transaction::Transaction,
-    transparent::{Address, Output},
-};
 use crate::parameters::NetworkUpgrade::*;
 use crate::parameters::{
     network::error::ParametersBuilderError,
     testnet::{ConfiguredActivationHeights, Parameters, ParametersBuilder, RegtestParameters},
 };
 use crate::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
+use crate::{
+    amount::{Amount, DeferredPoolBalanceChange},
+    block::Block,
+    transaction::Transaction,
+    transparent::{Address, Output},
+};
 use color_eyre::Report;
 
 use super::*;
@@ -99,7 +99,11 @@ fn test_funding_stream_values() -> Result<(), Report> {
         let fsv = funding_stream_values(
             height,
             network,
-            crate::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(height, network, Amount::zero())?,
+            crate::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                height,
+                network,
+                Amount::zero(),
+            )?,
         )
         .unwrap();
 
@@ -467,7 +471,10 @@ fn reissuance_requires_a_positive_integer_coefficient() -> Result<(), Report> {
         })?
         .with_halving_interval(HeightDiff::from(interval))?
         .with_funding_streams(Vec::new());
-    assert_subsidy_error(builder.clone(), ParametersBuilderError::InvalidHalvingInterval);
+    assert_subsidy_error(
+        builder.clone(),
+        ParametersBuilderError::InvalidHalvingInterval,
+    );
     assert_subsidy_error(
         builder.with_zip234_deployment_height(Height(interval + 1)),
         ParametersBuilderError::InvalidHalvingInterval,

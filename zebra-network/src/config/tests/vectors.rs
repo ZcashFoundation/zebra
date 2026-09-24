@@ -289,13 +289,21 @@ fn zip234_deployment_configuration_is_validated() {
     let config: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
     let reserve = zebra_chain::amount::Amount::try_from(100_000_000).unwrap();
     assert_eq!(
-        zebra_chain::parameters::subsidy::additional_block_subsidy(Height(11), &config.network, reserve)
-            .zatoshis(),
+        zebra_chain::parameters::subsidy::additional_block_subsidy(
+            Height(11),
+            &config.network,
+            reserve
+        )
+        .zatoshis(),
         0,
     );
     assert!(
-        zebra_chain::parameters::subsidy::additional_block_subsidy(Height(12), &config.network, reserve)
-            .zatoshis()
+        zebra_chain::parameters::subsidy::additional_block_subsidy(
+            Height(12),
+            &config.network,
+            reserve
+        )
+        .zatoshis()
             > 0
     );
 
@@ -309,7 +317,8 @@ fn zip234_deployment_configuration_is_validated() {
     let config: Config = toml::from_str(
         "network = 'Regtest'\n[testnet_parameters]\ninitial_nsm_value_balance = 100000000\n\
          [testnet_parameters.activation_heights]\nNU7 = 9\n",
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(config.network.zip234_deployment_height(), Some(Height(9)));
     assert_eq!(config.network.initial_nsm_value_balance(), reserve);
     let roundtrip: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();

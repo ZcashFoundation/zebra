@@ -673,7 +673,9 @@ impl CoinbaseCache {
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if *cache.context.get_or_insert((height, parent_nsm_value_balance))
+        if *cache
+            .context
+            .get_or_insert((height, parent_nsm_value_balance))
             != (height, parent_nsm_value_balance)
         {
             return;
