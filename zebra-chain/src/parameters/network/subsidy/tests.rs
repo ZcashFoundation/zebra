@@ -6,6 +6,10 @@ use std::collections::HashMap;
 
 use crate::amount::Amount;
 use crate::parameters::NetworkUpgrade::*;
+use crate::parameters::{
+    network::error::ParametersBuilderError,
+    testnet::{ConfiguredActivationHeights, Parameters, ParametersBuilder, RegtestParameters},
+};
 use crate::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 use color_eyre::Report;
 
@@ -169,8 +173,6 @@ fn test_funding_stream_ranges_dont_overlap() -> Result<(), Report> {
 
 #[test]
 fn cumulative_issuance_matches_the_schedule() -> Result<(), Report> {
-    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
-
     assert_eq!(
         cumulative_scheduled_issuance(Height(2_726_399), &Network::Mainnet)?.zatoshis(),
         15_750_000 * 100_000_000i64,
@@ -198,8 +200,6 @@ fn cumulative_issuance_matches_the_schedule() -> Result<(), Report> {
 
 #[test]
 fn cumulative_issuance_stops_at_the_halving_limit_during_slow_start() -> Result<(), Report> {
-    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
-
     let network = Parameters::build()
         .with_slow_start_interval(Height(200))
         .with_activation_heights(ConfiguredActivationHeights {
@@ -210,11 +210,9 @@ fn cumulative_issuance_stops_at_the_halving_limit_during_slow_start() -> Result<
         .with_halving_interval(1)?
         .with_funding_streams(Vec::new())
         .to_network()?;
-    let scheduled = (0..=200)
-        .map(|height| scheduled_block_subsidy(Height(height), &network))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .sum::<Result<Amount<NonNegative>, _>>()?;
+    let scheduled = (0..=200).try_fold(Amount::zero(), |sum, height| {
+        Ok::<_, SubsidyError>((sum + scheduled_block_subsidy(Height(height), &network)?)?)
+    })?;
     assert_eq!(scheduled.zatoshis(), 83_937_500_000);
     assert_eq!(
         cumulative_scheduled_issuance(Height(200), &network)?,
@@ -225,14 +223,9 @@ fn cumulative_issuance_stops_at_the_halving_limit_during_slow_start() -> Result<
 
 #[test]
 fn reissuance_height_requires_nu7_and_a_valid_height() {
-    use crate::parameters::{
-        network::error::ParametersBuilderError,
-        testnet::{ConfiguredActivationHeights, Parameters},
-    };
-
-    let builder = Parameters::build().with_funding_streams(Vec::new());
     assert_eq!(
-        builder
+        Parameters::build()
+            .with_funding_streams(Vec::new())
             .with_nsm_reissuance_height(Some(Height(1)))
             .to_network()
             .unwrap_err(),
@@ -256,8 +249,6 @@ fn reissuance_height_requires_nu7_and_a_valid_height() {
 
 #[test]
 fn halving_intervals_reject_unserializable_and_unsupported_heights() {
-    use crate::parameters::{network::error::ParametersBuilderError, testnet::Parameters};
-
     for interval in [
         0,
         HeightDiff::from(Height::MAX.0) + 1,
@@ -275,16 +266,10 @@ fn halving_intervals_reject_unserializable_and_unsupported_heights() {
 
 #[test]
 fn funding_streams_require_a_nonzero_address_period() -> Result<(), Report> {
-    use crate::parameters::{network::error::ParametersBuilderError, testnet::Parameters};
-
     let builder = Parameters::build().with_halving_interval(1)?;
 
-    assert_eq!(
-        builder.clone().to_network().unwrap_err(),
-        ParametersBuilderError::InvalidHalvingInterval,
-    );
-    assert_eq!(
-        builder.clone().extend_funding_streams().unwrap_err(),
+    assert_subsidy_error(
+        builder.clone(),
         ParametersBuilderError::InvalidHalvingInterval,
     );
     let streamless = builder
@@ -299,8 +284,6 @@ fn funding_streams_require_a_nonzero_address_period() -> Result<(), Report> {
 
 #[test]
 fn near_maximum_first_halvings_are_rejected() -> Result<(), Report> {
-    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
-
     // Blossom at 1 and NU7 at 2 place the first halving at 6 * interval - 7.
     // Even the representable boundary overissues: representability alone is not sufficient.
     let maximum_interval = (HeightDiff::from(Height::MAX.0) + 7) / 6;
@@ -324,11 +307,6 @@ fn near_maximum_first_halvings_are_rejected() -> Result<(), Report> {
 
 #[test]
 fn scheduled_issuance_must_fit_the_monetary_cap() -> Result<(), Report> {
-    use crate::parameters::{
-        network::error::ParametersBuilderError,
-        testnet::{ConfiguredActivationHeights, Parameters},
-    };
-
     for (slow_start, interval) in [
         // The reviewed case has a representable first halving billions of blocks away.
         (0, HeightDiff::from(Height::MAX.0 / 2)),
@@ -345,25 +323,13 @@ fn scheduled_issuance_must_fit_the_monetary_cap() -> Result<(), Report> {
             })?
             .with_halving_interval(interval)?
             .with_funding_streams(Vec::new());
-        assert_eq!(
-            builder.clone().extend_funding_streams().unwrap_err(),
-            ParametersBuilderError::InvalidSubsidySchedule,
-        );
-        assert_eq!(
-            builder.to_network().unwrap_err(),
-            ParametersBuilderError::InvalidSubsidySchedule,
-        );
+        assert_subsidy_error(builder, ParametersBuilderError::InvalidSubsidySchedule);
     }
     Ok(())
 }
 
 #[test]
 fn reissuance_requires_a_positive_integer_coefficient() -> Result<(), Report> {
-    use crate::parameters::{
-        network::error::ParametersBuilderError,
-        testnet::{ConfiguredActivationHeights, Parameters},
-    };
-
     let interval = 1_155_280_001;
     let builder = Parameters::build()
         .with_slow_start_interval(Height(0))
@@ -375,21 +341,12 @@ fn reissuance_requires_a_positive_integer_coefficient() -> Result<(), Report> {
         .with_halving_interval(HeightDiff::from(interval))?
         .with_nsm_reissuance_height(Some(Height(interval + 1)))
         .with_funding_streams(Vec::new());
-    assert_eq!(
-        builder.clone().extend_funding_streams().unwrap_err(),
-        ParametersBuilderError::InvalidHalvingInterval,
-    );
-    assert_eq!(
-        builder.to_network().unwrap_err(),
-        ParametersBuilderError::InvalidHalvingInterval,
-    );
+    assert_subsidy_error(builder, ParametersBuilderError::InvalidHalvingInterval);
     Ok(())
 }
 
 #[test]
 fn monetary_validation_preserves_valid_schedules() -> Result<(), Report> {
-    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters, RegtestParameters};
-
     let custom = Parameters::build()
         .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
@@ -431,11 +388,6 @@ fn monetary_validation_preserves_valid_schedules() -> Result<(), Report> {
 
 #[test]
 fn negative_halving_indices_are_rejected_before_issuance_validation() -> Result<(), Report> {
-    use crate::parameters::{
-        network::error::ParametersBuilderError,
-        testnet::{ConfiguredActivationHeights, Parameters},
-    };
-
     let builder = Parameters::build()
         .with_slow_start_interval(Height(20))
         .with_activation_heights(ConfiguredActivationHeights {
@@ -445,21 +397,20 @@ fn negative_halving_indices_are_rejected_before_issuance_validation() -> Result<
         })?
         .with_halving_interval(1)?
         .with_funding_streams(Vec::new());
+    assert_subsidy_error(builder, ParametersBuilderError::InvalidHalvingInterval);
+    Ok(())
+}
+/// Both builder entry points must reject invalid subsidy parameters.
+fn assert_subsidy_error(builder: ParametersBuilder, expected: ParametersBuilderError) {
     assert_eq!(
         builder.clone().extend_funding_streams().unwrap_err(),
-        ParametersBuilderError::InvalidHalvingInterval,
+        expected,
     );
-    assert_eq!(
-        builder.to_network().unwrap_err(),
-        ParametersBuilderError::InvalidHalvingInterval,
-    );
-    Ok(())
+    assert_eq!(builder.to_network().unwrap_err(), expected);
 }
 
 #[test]
 fn halving_heights_invert_slow_start_across_spacing_changes() -> Result<(), Report> {
-    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
-
     for (blossom, nu7, first_halving) in [
         (100, None, 60),
         (60, None, 60),
@@ -496,8 +447,8 @@ fn zero_subsidy_still_requires_fixed_lockbox_disbursements() -> Result<(), Repor
     use crate::{
         block::Header,
         parameters::testnet::{
-            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
-            ConfiguredFundingStreams, ConfiguredLockboxDisbursement, Parameters,
+            ConfiguredFundingStreamRecipient, ConfiguredFundingStreams,
+            ConfiguredLockboxDisbursement,
         },
         serialization::ZcashDeserializeInto,
         transaction::LockTime,

@@ -2528,14 +2528,14 @@ async fn rpc_getnetworksolps_uses_the_effective_height() {
             "the fixture must distinguish the two windows"
         );
         for height in [None, Some(-1), Some(120), Some(121), Some(i32::MAX)] {
-            assert_eq!(
-                rpc.get_network_sol_ps(Some(0), height).await.unwrap(),
-                recent
-            );
-            assert_eq!(
-                rpc.get_network_sol_ps(Some(-1), height).await.unwrap(),
-                recent
-            );
+            for num_blocks in [0, -1] {
+                assert_eq!(
+                    rpc.get_network_sol_ps(Some(num_blocks), height)
+                        .await
+                        .unwrap(),
+                    recent
+                );
+            }
         }
         assert_eq!(
             rpc.get_network_sol_ps(Some(102), Some(121)).await.unwrap(),
@@ -2591,6 +2591,33 @@ async fn rpc_getnetworksolps_rejects_unrepresentable_rates() {
     .expect("solution-rate conversion must not stall");
 }
 
+/// Builds the shared NSM activation fixture with the test's required funding recipients.
+fn nsm_test_network(
+    height: Height,
+    recipients: Vec<testnet::ConfiguredFundingStreamRecipient>,
+) -> Network {
+    Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(height.0),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_nsm_reissuance_height(Some(height))
+        .with_funding_streams(vec![testnet::ConfiguredFundingStreams {
+            height_range: Some(height..Height(1_010)),
+            recipients: Some(recipients),
+        }])
+        .to_network()
+        .unwrap()
+}
+
 /// Mandatory payouts must use the proposal parent's reserve before transaction verification.
 #[tokio::test]
 async fn rpc_proposal_rejects_invalid_subsidy_before_verification() {
@@ -2599,36 +2626,18 @@ async fn rpc_proposal_rejects_invalid_subsidy_before_verification() {
     };
     use zebra_chain::parameters::{
         subsidy::{scheduled_block_subsidy, subsidy_is_valid, SubsidyError},
-        testnet::{
-            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient, ConfiguredFundingStreams,
-        },
+        testnet::ConfiguredFundingStreamRecipient,
     };
 
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(10), async {
         let height = Height(1_000);
-        let network = Parameters::build()
-            .with_slow_start_interval(Height::MIN)
-            .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
-                nu5: Some(2),
-                nu6: Some(3),
-                nu6_1: Some(4),
-                nu6_2: Some(5),
-                nu6_3: Some(6),
-                nu7: Some(height.0),
-                ..Default::default()
-            })
-            .unwrap()
-            .with_nsm_reissuance_height(Some(height))
-            .with_funding_streams(vec![ConfiguredFundingStreams {
-                height_range: Some(height..Height(1_010)),
-                recipients: Some(vec![ConfiguredFundingStreamRecipient::new_for(
-                    FundingStreamReceiver::MajorGrants,
-                )]),
-            }])
-            .to_network()
-            .unwrap();
+        let network = nsm_test_network(
+            height,
+            vec![ConfiguredFundingStreamRecipient::new_for(
+                FundingStreamReceiver::MajorGrants,
+            )],
+        );
         let parent_hash = Hash([1; 32]);
         let template = template_extending(&network, height.previous().unwrap(), parent_hash);
         let proposal = proposal_block_from_template(&template, None, &network).unwrap();
@@ -2723,42 +2732,23 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
     use types::get_block_template::{BlockTemplateResponse, MinerParams};
     use types::long_poll::LongPollInput;
     use zebra_chain::parameters::{
-        subsidy::scheduled_block_subsidy,
-        testnet::{
-            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient, ConfiguredFundingStreams,
-        },
+        subsidy::scheduled_block_subsidy, testnet::ConfiguredFundingStreamRecipient,
     };
 
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(60), async {
         let height = Height(1_000);
-        let network = Parameters::build()
-            .with_slow_start_interval(Height::MIN)
-            .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
-                nu5: Some(2),
-                nu6: Some(3),
-                nu6_1: Some(4),
-                nu6_2: Some(5),
-                nu6_3: Some(6),
-                nu7: Some(height.0),
-                ..Default::default()
-            })
-            .unwrap()
-            .with_nsm_reissuance_height(Some(height))
-            .with_funding_streams(vec![ConfiguredFundingStreams {
-                height_range: Some(height..Height(1_010)),
-                recipients: Some(vec![
-                    ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
-                    ConfiguredFundingStreamRecipient {
-                        receiver: FundingStreamReceiver::Deferred,
-                        numerator: 12,
-                        addresses: None,
-                    },
-                ]),
-            }])
-            .to_network()
-            .unwrap();
+        let network = nsm_test_network(
+            height,
+            vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ],
+        );
         let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -2783,7 +2773,6 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
         let scheduled = scheduled_block_subsidy(height, &network)
             .unwrap()
             .zatoshis();
-        let mut previous_coinbase = None;
         for (reserve, additional, parent_hash) in [
             (10_000_000_000u64, 1_375, Hash([1; 32])),
             (20_000_000_000u64, 2_750, Hash([2; 32])),
@@ -2840,25 +2829,9 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                     None,
                 )
             };
-            let template = make_template(0);
-            let coinbase: Transaction = template
-                .coinbase_txn
-                .data
-                .as_ref()
-                .zcash_deserialize_into()
-                .unwrap();
-            let mut values: Vec<_> = coinbase
-                .outputs()
-                .iter()
-                .map(|o| o.value.zatoshis())
-                .collect();
-            values.sort();
-            assert_eq!(values, vec![funding, miner_reward]);
-            assert_eq!(values.iter().sum::<i64>() + deferred, total);
-
             // Three and four zatoshis have the same miner share. Returning to three exercises
             // a cached response without confusing the gross fee with the coinbase payout.
-            for fees in [3, 4, 3] {
+            for fees in [0, 3, 4, 3] {
                 let template = make_template(fees);
                 let coinbase: Transaction = template
                     .coinbase_txn
@@ -2866,12 +2839,13 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                     .as_ref()
                     .zcash_deserialize_into()
                     .unwrap();
-                let paid = coinbase
+                let mut values: Vec<_> = coinbase
                     .outputs()
                     .iter()
                     .map(|output| output.value.zatoshis())
-                    .sum::<i64>();
-                assert_eq!(paid + deferred, total + fees - fees * 60 / 100);
+                    .collect();
+                values.sort();
+                assert_eq!(values, vec![funding, miner_reward + fees - fees * 60 / 100]);
                 let reported_fees = template
                     .transactions
                     .iter()
@@ -2880,13 +2854,6 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                 assert_eq!(template.coinbase_txn.fee.zatoshis(), -reported_fees);
                 assert_eq!(template.mutable, ["time"]);
             }
-            if let Some(previous) = previous_coinbase {
-                assert_ne!(
-                    template.coinbase_txn, previous,
-                    "same-height reorg must replace rewards"
-                );
-            }
-            previous_coinbase = Some(template.coinbase_txn);
         }
 
         let missing_parent = async {

@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Calculate the 102-block NU7 difficulty mean without overflowing on Testnet targets, preserving integer rounding and the proof-of-work limit through the initial averaging-window boundary.
+body: 'NU7 difficulty calculations preserve integer rounding and the proof-of-work limit over 102 blocks without overflowing on Testnet targets, including the initial averaging-window boundary. Mining-template minimum-difficulty timestamps follow the candidate upgrade, including the 150-second Testnet threshold at NU7 activation.'
 time: 2026-09-23T14:46:08.768169462+02:00

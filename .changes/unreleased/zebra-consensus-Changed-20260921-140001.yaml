@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Changed
-body: 'From NU7 activation, the coinbase transaction is balanced using `MinerFees` rather than the whole of the block''s transaction fees, so a coinbase that claims all of the fees is rejected. The withheld 60% accrues to the NSM reserve.'
-time: 2026-09-21T14:00:01.000000000Z

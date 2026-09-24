@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Changed
-body: '`ReadRequest::GetBlockTemplateChainInfo` bounds template timestamps by network-specific median-time rules and the local two-hour future limit, returning an error for an empty range. Testnet templates retain standard difficulty when the minimum-difficulty threshold exceeds the timestamp representation. ([#11514](https://github.com/ZcashFoundation/zebra/pull/11514))'
+body: '`ReadRequest::GetBlockTemplateChainInfo` bounds timestamps by network-specific median-time rules and the local two-hour future limit, rejecting empty ranges. Testnet minimum-difficulty timestamps follow the candidate upgrade, including the 150-second NU7 threshold; templates retain standard difficulty when the threshold exceeds the timestamp representation. ([#11514](https://github.com/ZcashFoundation/zebra/pull/11514))'
 time: 2026-09-24T01:49:36.621706512+02:00

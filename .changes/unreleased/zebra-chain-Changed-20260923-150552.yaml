@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: Custom-network `ParametersBuilder::with_halving_interval` rejects nonpositive intervals and intervals greater than `HeightDiff::MAX / 6`, preventing overflow when deriving the post-NU7 interval.
-time: 2026-09-23T15:05:52.481407072+02:00
