@@ -300,3 +300,95 @@ async fn inv_registry_limit_for(status: InventoryMarker) {
         }
     }
 }
+
+/// Check that failed peers are recorded, aren't cleared by advertisements, and expire after two
+/// rotations.
+#[tokio::test]
+async fn inv_registry_failed_peers_ok() {
+    let test_hash = InventoryHash::Block(block::Hash([0; 32]));
+    let test_peer = "1.1.1.1:1"
+        .parse()
+        .expect("unexpected invalid peer address");
+
+    let (mut inv_registry, inv_stream_tx) = new_inv_registry();
+
+    inv_registry.register_failed(test_hash, test_peer);
+    assert_eq!(
+        inv_registry.failed_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+
+    // Advertising the inventory again doesn't clear the failure.
+    inv_stream_tx
+        .send(InventoryStatus::new_available(test_hash, test_peer))
+        .expect("unexpected failed inventory status send");
+    inv_registry
+        .update()
+        .await
+        .expect("unexpected dropped registry sender channel");
+
+    assert_eq!(
+        inv_registry.failed_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+    assert_eq!(inv_registry.missing_peers(test_hash).count(), 0);
+
+    // Failures expire after two rotations.
+    inv_registry.rotate();
+    assert_eq!(
+        inv_registry.failed_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+
+    inv_registry.rotate();
+    assert_eq!(inv_registry.failed_peers(test_hash).count(), 0);
+}
+
+/// Check that failed peers are limited to [`MAX_PEERS_PER_INV`] per hash, and
+/// [`MAX_INV_PER_MAP`] hashes, keeping the newest entries.
+#[tokio::test]
+async fn inv_registry_failed_peers_limit() {
+    let (mut inv_registry, _inv_stream_tx) = new_inv_registry();
+
+    let test_hash = InventoryHash::Block(block::Hash([0; 32]));
+    let test_peers: Vec<PeerSocketAddr> = (1..=MAX_PEERS_PER_INV + 1)
+        .map(|port| {
+            SocketAddr::new(
+                [1, 1, 1, 1].into(),
+                port.try_into().expect("port fits in u16"),
+            )
+            .into()
+        })
+        .collect();
+
+    for &peer in &test_peers {
+        inv_registry.register_failed(test_hash, peer);
+    }
+
+    assert_eq!(
+        inv_registry.failed_peers(test_hash).count(),
+        MAX_PEERS_PER_INV
+    );
+    assert!(
+        !inv_registry
+            .failed_peers(test_hash)
+            .any(|peer| *peer == test_peers[0]),
+        "the oldest failed peer should be removed",
+    );
+
+    let test_peer = test_peers[0];
+    for index in 0..=MAX_INV_PER_MAP {
+        let index = u32::try_from(index).expect("index fits in u32");
+        let mut hash = [0; 32];
+        hash[..4].copy_from_slice(&index.to_le_bytes());
+
+        inv_registry.register_failed(InventoryHash::Block(block::Hash(hash)), test_peer);
+    }
+
+    assert_eq!(inv_registry.failed_current.len(), MAX_INV_PER_MAP);
+    assert_eq!(
+        inv_registry.failed_peers(test_hash).count(),
+        0,
+        "the oldest failed hash should be removed",
+    );
+}
