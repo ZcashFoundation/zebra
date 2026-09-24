@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Chain-tip height estimates correctly cross block-spacing upgrades when estimating earlier or later timestamps, including fractional times before the known tip.
+time: 2026-09-24T01:49:35.567338912+02:00

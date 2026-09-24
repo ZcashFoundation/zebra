@@ -134,8 +134,8 @@ impl TemplateCache {
         self.0.send_replace(Some(Arc::new(template)));
     }
 
-    /// Returns a template for `tip_hash`, unless Testnet's time-dependent difficulty may have
-    /// become easier since it was built.
+    /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
+    /// bound, unless Testnet's time-dependent difficulty may have become easier since it was built.
     pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
@@ -150,6 +150,12 @@ impl TemplateCache {
             return None;
         }
 
+        // Recheck the whole advertised range: the clock can move backwards between refreshes,
+        // and a failed refresh leaves the previous template cached.
+        if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
+            return None;
+        }
+
         // Only an abbreviated standard-difficulty Testnet time range can become unprofitable.
         // At the full 90-minute median-time cap, even a fresh build clamps to the same max_time.
         // Regtest deliberately uses historical chain time rather than the wall clock.
@@ -157,15 +163,16 @@ impl TemplateCache {
             && !network.is_regtest()
             && NetworkUpgrade::minimum_difficulty_spacing_for_height(
                 network,
-                Height(template.height.saturating_sub(1)),
+                Height(template.height),
             )
             .is_some()
             && template.bits != network.target_difficulty_limit().to_compact()
-            && template
-                .max_time
-                .saturating_duration_since(template.min_time)
-                .seconds()
-                < Duration32::from_minutes(90).seconds() - 1
+            && (!network.is_max_block_time_enforced(Height(template.height))
+                || template
+                    .max_time
+                    .saturating_duration_since(template.min_time)
+                    .seconds()
+                    < Duration32::from_minutes(90).seconds() - 1)
         {
             return None;
         }

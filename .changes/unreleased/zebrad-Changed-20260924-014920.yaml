@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Invalid custom subsidy schedules, funding address periods, and insufficient funding-recipient addresses return configuration errors instead of panicking. Schedules must remain within the monetary cap; valid streamless networks can still use short halving intervals. Supply enough addresses or explicitly enable funding-address extension when changing upgrade heights. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+time: 2026-09-24T01:49:20.792268864+02:00

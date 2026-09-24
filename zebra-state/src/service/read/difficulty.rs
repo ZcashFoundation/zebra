@@ -18,7 +18,7 @@ use crate::{
         block_iter::any_chain_ancestor_iter,
         check::{
             difficulty::{
-                BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
+                pow_adjustment_block_span, BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN,
             },
             AdjustedDifficulty,
         },
@@ -43,7 +43,7 @@ pub fn get_block_template_chain_info(
     network: &Network,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let mut best_relevant_chain_and_history_tree_result =
-        best_relevant_chain_and_history_tree(non_finalized_state, db);
+        best_relevant_chain_and_history_tree(non_finalized_state, db, network);
 
     // Retry the finalized state query if it was interrupted by a finalizing block.
     //
@@ -54,7 +54,7 @@ pub fn get_block_template_chain_info(
         }
 
         best_relevant_chain_and_history_tree_result =
-            best_relevant_chain_and_history_tree(non_finalized_state, db);
+            best_relevant_chain_and_history_tree(non_finalized_state, db, network);
     }
 
     let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
@@ -75,7 +75,7 @@ pub fn get_block_template_chain_info(
         chain_value_pools
     };
 
-    Ok(difficulty_time_and_history_tree(
+    difficulty_time_and_history_tree(
         best_relevant_chain,
         best_tip_height,
         best_tip_hash,
@@ -83,7 +83,8 @@ pub fn get_block_template_chain_info(
         best_tip_history_tree,
         #[cfg(zcash_unstable = "zip234")]
         chain_value_pools,
-    ))
+        DateTime32::now(),
+    )
 }
 
 /// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
@@ -165,17 +166,20 @@ pub fn solution_rate(
 fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
+    network: &Network,
 ) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
+    // The candidate block is the one after the tip, and ZIP 218 makes the span depend on its
+    // height, so only fetch as many blocks as that height actually needs.
+    let candidate_height = state_tip_before_queries.0.next()?;
+    let block_span = pow_adjustment_block_span(network, candidate_height);
+
     let best_relevant_chain =
         any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
-    let best_relevant_chain: Vec<_> = best_relevant_chain
-        .into_iter()
-        .take(POW_ADJUSTMENT_BLOCK_SPAN)
-        .collect();
+    let best_relevant_chain: Vec<_> = best_relevant_chain.into_iter().take(block_span).collect();
 
     if best_relevant_chain.is_empty() {
         return Err("missing genesis block, wait until it is committed".into());
@@ -206,7 +210,7 @@ fn best_relevant_chain_and_history_tree(
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_chain`, tip, `network`,
-/// and `history_tree`.
+/// `history_tree`, and captured local time `now`, or an error if no valid timestamp is available.
 ///
 /// The `relevant_chain` has recent blocks in reverse height order from the tip.
 ///
@@ -220,13 +224,12 @@ fn difficulty_time_and_history_tree(
     #[cfg(zcash_unstable = "zip234")] chain_value_pools: zebra_chain::value_balance::ValueBalance<
         zebra_chain::amount::NonNegative,
     >,
-) -> GetBlockTemplateChainInfo {
+    now: DateTime32,
+) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
         .iter()
         .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
-
-    let cur_time = DateTime32::now();
 
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
@@ -241,27 +244,30 @@ fn difficulty_time_and_history_tree(
 
     let min_time = median_time_past
         .checked_add(Duration32::from_seconds(1))
-        .expect("a valid block time plus a small constant is in-range");
+        .ok_or("median-time-past leaves no representable block timestamp")?;
 
-    // > For each block at block height 2 or greater on Mainnet, or block height 653606 or greater on Testnet, nTime
-    // > MUST be less than or equal to the median-time-past of that block plus 90 * 60 seconds.
-    //
-    // We ignore the height as we are checkpointing on Canopy or higher in Mainnet and Testnet.
-    let max_time = median_time_past
-        .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
-        .expect("a valid block time plus a small constant is in-range");
+    // The context-free local-clock bound applies independently of the network's MTP rule.
+    let max_time = now.saturating_add(Duration32::from_hours(2));
+    let candidate_height = (tip_height + 1).ok_or("next block height is out of range")?;
+    let max_time = if network.is_max_block_time_enforced(candidate_height) {
+        max_time.min(
+            median_time_past.saturating_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN)),
+        )
+    } else {
+        max_time
+    };
 
-    // On Regtest, real time is far ahead of the chain's median-time-past (a fresh
-    // chain starts from the 2011-era genesis), so clamping `now()` to the valid
-    // range pins every mined block to `max_time` (median-time-past + 90 minutes),
-    // making chain time race ~90 minutes per block. That quickly outruns a
-    // following zcashd sidecar's acceptable block-time window and stalls its sync.
-    // Match zcashd's regtest behaviour by advancing block time minimally instead,
-    // keeping mined timestamps tightly clustered just above the median-time-past.
+    if min_time > max_time {
+        return Err("median-time-past is too far ahead of the local clock".into());
+    }
+
+    // Match zcashd's Regtest behavior by advancing time minimally rather than jumping
+    // from the historical genesis timestamp to the wall clock. This keeps mined
+    // timestamps tightly clustered just above the median-time-past.
     let cur_time = if network.is_regtest() {
         min_time
     } else {
-        cur_time.clamp(min_time, max_time)
+        now.clamp(min_time, max_time)
     };
 
     // Now that we have a valid time, get the difficulty for that time.
@@ -287,7 +293,7 @@ fn difficulty_time_and_history_tree(
 
     adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);
 
-    result
+    Ok(result)
 }
 
 /// Adjust the difficulty and time for the testnet minimum difficulty rule.
@@ -303,17 +309,10 @@ fn adjust_difficulty_and_time_for_testnet(
         return;
     }
 
-    // On testnet, changing the block time can also change the difficulty,
-    // due to the minimum difficulty consensus rule:
-    // > if the block time of a block at height `height ≥ 299188`
-    // > is greater than 6 * PoWTargetSpacing(height) seconds after that of the preceding block,
-    // > then the block is a minimum-difficulty block.
-    //
-    // The max time is always a minimum difficulty block, because the minimum difficulty
-    // gap is 7.5 minutes, but the maximum gap is 90 minutes. This means that testnet blocks
-    // have two valid time ranges with different difficulties:
-    // * 1s - 7m30s: standard difficulty
-    // * 7m31s - 90m: minimum difficulty
+    // On testnet, changing the block time can also change the difficulty.
+    // From height 299188, a block is minimum-difficulty only when its time is strictly more than
+    // six target spacings after its parent before NU7, or eighteen target spacings from NU7.
+    // The threshold is 900 seconds before Blossom and remains 450 seconds from Blossom onward.
     //
     // In rare cases, this could make some testnet miners produce invalid blocks,
     // if they use the full 90 minute time gap in the consensus rules.
@@ -330,8 +329,9 @@ fn adjust_difficulty_and_time_for_testnet(
         .try_into()
         .expect("valid blocks have in-range times");
 
+    let candidate_height = (previous_block_height + 1).expect("next block height is valid");
     let Some(minimum_difficulty_spacing) =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, candidate_height)
     else {
         // Returns early if the testnet minimum difficulty consensus rule is not active
         return;
@@ -342,21 +342,18 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("small positive values are in-range");
 
     // The first minimum difficulty time is strictly greater than the spacing.
-    let std_difficulty_max_time = previous_block_time
-        .checked_add(minimum_difficulty_spacing)
-        .expect("a valid block time plus a small constant is in-range");
-    let min_difficulty_min_time = std_difficulty_max_time
-        .checked_add(Duration32::from_seconds(1))
-        .expect("a valid block time plus a small constant is in-range");
+    // If that threshold is beyond DateTime32, every representable time uses standard difficulty.
+    let std_difficulty_max_time = previous_block_time.saturating_add(minimum_difficulty_spacing);
+    let min_difficulty_min_time =
+        std_difficulty_max_time.saturating_add(Duration32::from_seconds(1));
 
     // Offer a minimum-difficulty template only once `cur_time` is strictly past
-    // `previous_block_time + 6 * PoWTargetSpacing` (the latest time a standard-difficulty
+    // `previous_block_time + minimum_difficulty_spacing` (the latest time a standard-difficulty
     // block may use; a minimum-difficulty block's time must be strictly greater).
     //
-    // A minimum-difficulty block is only consensus-valid if its time is more than
-    // `6 * PoWTargetSpacing` after the previous block. Switching to a minimum-difficulty template
-    // before `cur_time` has reached that point would require clamping `cur_time` up to `min_time`,
-    // i.e. future-dating the block timestamp ahead of real time purely to obtain minimum difficulty.
+    // Switching to a minimum-difficulty template before `cur_time` has reached that point would
+    // require clamping `cur_time` up to `min_time`, i.e. future-dating the block timestamp ahead
+    // of real time purely to obtain minimum difficulty.
     //
     // Zebra used to do this, switching 150 seconds early (`2 * PoWTargetSpacing` after Blossom),
     // via a former `EXTRA_TIME_TO_MINE_A_BLOCK` constant. On a chain with any sustained hashrate,
@@ -365,8 +362,8 @@ fn adjust_difficulty_and_time_for_testnet(
     // minimum-difficulty blocks), depressing the difficulty far below equilibrium. See
     // <https://github.com/zcash/zips/issues/1321>.
     //
-    // This does not change the underlying difficulty averaging: a genuine gap of more than
-    // `6 * PoWTargetSpacing` still yields a minimum-difficulty block that reduces the difficulty.
+    // This does not change the underlying difficulty averaging: a genuine gap greater than
+    // the threshold still yields a minimum-difficulty block that reduces the difficulty.
     // It only stops Zebra from proactively generating such blocks by future-dating timestamps.
     //
     // `cur_time` was already clamped into `[min_time, max_time]` by the caller
@@ -414,7 +411,10 @@ mod tests {
     //! `adjust_difficulty_and_time_for_testnet` deterministically without reading the real
     //! clock (the `DateTime32::now()` call lives only in its caller).
 
+    mod vectors;
+
     use super::*;
+    use crate::service::check::difficulty::MAX_POW_ADJUSTMENT_BLOCK_SPAN;
     use zebra_chain::work::difficulty::ParameterDifficulty as _;
 
     // A Testnet height at which the minimum-difficulty rule is active (>= 299188) and the
@@ -428,7 +428,9 @@ mod tests {
     /// to the minimum-difficulty rule under test.
     fn recent_block_data(network: &Network) -> Vec<(CompactDifficulty, DateTime<Utc>)> {
         let threshold = network.target_difficulty_limit().to_compact();
-        (0..POW_ADJUSTMENT_BLOCK_SPAN)
+        // Enough blocks for the largest span any height could need, so the test data is never
+        // the limiting factor.
+        (0..MAX_POW_ADJUSTMENT_BLOCK_SPAN)
             .map(|i| (threshold, DateTime32::from(PREV - i as u32).into()))
             .collect()
     }

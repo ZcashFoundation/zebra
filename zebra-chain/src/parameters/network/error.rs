@@ -47,6 +47,14 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidHeightZero,
 
+    #[error("halving interval must be positive, give supported halving indices and heights, a nonzero funding stream address period")]
+    #[non_exhaustive]
+    InvalidHalvingInterval,
+
+    #[error("scheduled issuance through the maximum supported height must not exceed MAX_MONEY, excluding the unspendable genesis subsidy")]
+    #[non_exhaustive]
+    InvalidSubsidySchedule,
+
     #[error("network upgrades must be activated in order specified by the protocol")]
     #[non_exhaustive]
     OutOfOrderUpgrades,
@@ -58,6 +66,18 @@ pub enum ParametersBuilderError {
     #[error("halving interval on ParametersBuilder must not be set after setting funding streams")]
     #[non_exhaustive]
     HalvingIntervalAfterFundingStreams,
+
+    /// A funding stream recipient does not cover the configured address periods.
+    #[error("funding stream recipient {receiver:?} requires {required} addresses, but only {provided} were provided")]
+    #[non_exhaustive]
+    InsufficientFundingStreamAddresses {
+        /// The recipient whose address list is too short.
+        receiver: super::subsidy::FundingStreamReceiver,
+        /// The minimum number of addresses needed for the configured height range.
+        required: usize,
+        /// The number of configured addresses.
+        provided: usize,
+    },
 
     #[error("checkpoints file format must be valid")]
     #[non_exhaustive]

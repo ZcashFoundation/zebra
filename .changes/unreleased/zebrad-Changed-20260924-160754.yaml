@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Mining and peer freshness checks retain their elapsed-time allowances across NU7, rather than becoming three times stricter with 25-second blocks.
+time: 2026-09-24T16:07:54.46211495+02:00

@@ -7,7 +7,8 @@ use crate::parameters::{
     network::{Amount, Height, NonNegative},
     subsidy::{
         constants::POST_NU6_FUNDING_STREAM_NUM_BLOCKS, funding_stream_address_period,
-        FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
+        nu7_funding_stream_end_height, FundingStreamReceiver, FundingStreamRecipient,
+        FundingStreams,
     },
     Network, NetworkUpgrade,
 };
@@ -246,7 +247,11 @@ lazy_static! {
         },
 
         FundingStreams {
-            height_range: activation_heights::mainnet::NU6_1..Height(4_406_400),
+            height_range: activation_heights::mainnet::NU6_1
+                ..nu7_funding_stream_end_height(
+                    Height(4_406_400),
+                    NetworkUpgrade::Nu7.activation_height(&Network::Mainnet),
+                ),
             recipients: [
                 (
                     FundingStreamReceiver::Deferred,

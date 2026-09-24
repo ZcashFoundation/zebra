@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: '[ZIP 218](https://zips.z.cash/zip-0218) shielded action limits, enforced from NU7 activation before coinbase output recovery: at most 330 actions per Orchard or Ironwood pool, 300 Sapling inputs plus outputs, and zero Sprout JoinSplits per block. The shared budget requires Orchard actions + Ironwood actions + Sapling inputs and outputs + twice the JoinSplit count to be at most 330. Adds `block::check::shielded_action_limits_are_valid`, `block::{ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT, SPROUT_BLOCK_JOIN_SPLIT_LIMIT, GLOBAL_SHIELDED_BUDGET}`, and shared `block::ShieldedActionCounts` accounting for template builders. Struct literals must include the public `ironwood_actions` field; exhaustive error matches must handle `BlockError::TooManyShieldedActions`. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))'
+time: 2026-09-21T13:00:01.000000000Z

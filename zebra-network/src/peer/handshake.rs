@@ -652,10 +652,10 @@ where
         .expect("in-range number of seconds and valid nanosecond");
 
     // Whether this node is still syncing, used below to decide whether outbound peers must
-    // advertise `NODE_NETWORK`. Read before the match below, which can move `config.network`.
+    // advertise `NODE_NETWORK`.
     let is_syncing = !minimum_peer_version
         .chain_tip()
-        .is_at_or_near_network_tip(&config.network);
+        .is_at_or_near_network_tip(Utc::now());
 
     let network = config.network.clone();
     let (their_addr, our_services, our_listen_addr) = match connected_addr {

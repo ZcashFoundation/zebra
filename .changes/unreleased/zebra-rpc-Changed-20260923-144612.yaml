@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getnetworksolps` selects the 17- or 102-block averaging window for nonpositive block counts using the effective height in the same state snapshot, including requests above the current tip.'
+time: 2026-09-23T14:46:12.089361682+02:00
