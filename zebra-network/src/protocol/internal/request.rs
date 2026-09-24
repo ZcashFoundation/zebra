@@ -217,6 +217,17 @@ pub enum Request {
     ///
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
+
+    /// Polls the peer set, so it routes requests that are waiting for a busy peer to become ready.
+    ///
+    /// The peer set is only polled when it has a request to route. It sends itself this request
+    /// from a background task when a busy peer might have become ready. It is never sent to peers.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil).
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    PollPeerSet,
 }
 
 impl fmt::Display for Request {
@@ -249,6 +260,7 @@ impl fmt::Display for Request {
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Request::PollPeerSet => "PollPeerSet".to_string(),
         })
     }
 }
@@ -271,6 +283,7 @@ impl Request {
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+            Request::PollPeerSet => "PollPeerSet",
         }
     }
 
