@@ -17,20 +17,22 @@ pub(crate) mod constants;
 #[cfg(test)]
 mod tests;
 
+use mset::MultiSet;
 use std::collections::HashMap;
 
 use crate::{
-    amount::{self, Amount, NonNegative},
-    block::{Height, HeightDiff},
+    amount::{self, Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
+    block::{Block, Height, HeightDiff},
     parameters::{Network, NetworkUpgrade},
-    transparent,
+    transaction::Transaction,
+    transparent::{self, Address, Output},
 };
 
 use constants::{
     BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
-    FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY,
-    NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL, POST_NU7_HALVING_INTERVAL,
-    PRE_BLOSSOM_HALVING_INTERVAL,
+    FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY, NSM_FEE_DENOMINATOR,
+    NSM_FEE_NUMERATOR, NSM_LN2_SCALED, NSM_SUBSIDY_DENOMINATOR, NU7_POW_TARGET_SPACING_RATIO,
+    POST_BLOSSOM_HALVING_INTERVAL, POST_NU7_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
 };
 
 /// The funding stream receiver categories.
@@ -316,6 +318,49 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(
     (height_after_first_halving + network.post_blossom_halving_interval())
         .div_euclid(network.funding_stream_address_change_interval())
 }
+/// Returns the position in the address slice for each funding stream
+/// as described in [protocol specification §7.10][7.10]
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+fn funding_stream_address_index(
+    height: Height,
+    network: &Network,
+    receiver: FundingStreamReceiver,
+) -> Option<usize> {
+    if receiver == FundingStreamReceiver::Deferred {
+        return None;
+    }
+
+    let funding_streams = network.funding_streams(height)?;
+    let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
+
+    // The two periods are only meaningful relative to each other, so the subtraction is done in
+    // signed arithmetic: see `funding_stream_address_period()`.
+    let index = usize::try_from(
+        1 + funding_stream_address_period(height, network)
+            - funding_stream_address_period(funding_streams.height_range().start, network),
+    )
+    .ok()?;
+
+    assert!(index > 0 && index <= num_addresses);
+    // spec formula will output an index starting at 1 but
+    // Zebra indices for addresses start at zero, return converted.
+    Some(index - 1)
+}
+
+/// Return the address corresponding to given height, network and funding stream receiver.
+///
+/// This function only returns transparent addresses, because the current Zcash funding streams
+/// only use transparent addresses,
+pub fn funding_stream_address(
+    height: Height,
+    network: &Network,
+    receiver: FundingStreamReceiver,
+) -> Option<&transparent::Address> {
+    let index = funding_stream_address_index(height, network, receiver)?;
+    let funding_streams = network.funding_streams(height)?;
+    funding_streams.recipient(receiver)?.addresses().get(index)
+}
 
 /// The first block height of the halving at the provided halving index for a network.
 ///
@@ -424,6 +469,9 @@ pub enum SubsidyError {
     #[error("unsupported height")]
     UnsupportedHeight,
 
+    #[error("{0}")]
+    Other(String),
+
     #[error("invalid amount")]
     InvalidAmount(#[from] amount::Error),
 }
@@ -492,10 +540,20 @@ pub fn halving(height: Height, network: &Network) -> u32 {
         .expect("already checked for negatives")
 }
 
-/// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
-///
-/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative>, SubsidyError> {
+/// Total scheduled and reserve-funded block subsidy, using the exact parent's NSM reserve.
+pub fn block_subsidy(
+    height: Height,
+    net: &Network,
+    previous_nsm_reserve: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    Ok((scheduled_block_subsidy(height, net)? + nsm_subsidy(height, net, previous_nsm_reserve)?)?)
+}
+
+/// Scheduled issuance, excluding NSM reissuance.
+pub fn scheduled_block_subsidy(
+    height: Height,
+    net: &Network,
+) -> Result<Amount<NonNegative>, SubsidyError> {
     let Some(halving_div) = halving_divisor(height, net) else {
         return Ok(Amount::zero());
     };
@@ -548,7 +606,7 @@ pub fn cumulative_scheduled_issuance(
 }
 
 /// Sums the schedule before applying the monetary cap, so builder validation can exclude the
-/// unspendable genesis subsidy.
+/// unspendable genesis subsidy on networks without NU7's historical reserve seed.
 pub(super) fn cumulative_scheduled_issuance_zatoshis(
     height: Height,
     network: &Network,
@@ -589,7 +647,7 @@ pub(super) fn cumulative_scheduled_issuance_zatoshis(
     let mut start = slow_end;
     while start < end {
         let height = Height(u32::try_from(start).map_err(|_| SubsidyError::Overflow)?);
-        let subsidy = u64::from(block_subsidy(height, network)?);
+        let subsidy = u64::from(scheduled_block_subsidy(height, network)?);
         if subsidy == 0 {
             break;
         }
@@ -688,10 +746,340 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // inconsistency in the definition of the founders reward, which should occur only before
     // Canopy, so we check if Canopy is active as well.
     if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
-        block_subsidy(height, net)
+        scheduled_block_subsidy(height, net)
             .map(|subsidy| subsidy.div_exact(5))
             .expect("block subsidy must be valid for founders rewards")
     } else {
         Amount::zero()
     }
+}
+
+/// The contribution that a block's transaction fees make to the NSM reserve.
+///
+/// # Consensus
+///
+/// > $\mathsf{NSMFeeContribution}(\mathsf{height}) :=
+/// > \mathsf{floor}(6 \cdot \mathsf{TransactionFees}(\mathsf{height}) / 10)$
+///
+/// This calculation is performed on the aggregate fees for the block, so rounding favours the
+/// miner. It is zero before NU7 activates.
+///
+/// The rule is specified in the NU7 deployment ZIP (`zcash/zips#1363`), which takes precedence
+/// over [ZIP 235] for NU7: NU7 does not deploy the [ZIP 233] voluntary-removal bundle, so the fee
+/// contribution is a block-level calculation and needs no new coinbase field.
+///
+/// [ZIP 233]: https://zips.z.cash/zip-0233
+/// [ZIP 235]: https://zips.z.cash/zip-0235
+pub fn nsm_fee_contribution(
+    height: Height,
+    network: &Network,
+    transaction_fees: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, amount::Error> {
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
+        return Ok(Amount::zero());
+    }
+
+    // A `NonNegative` amount is never negative, and `transaction_fees` is at most `MAX_MONEY`,
+    // which is under 2^53, so multiplying it by 6 can not overflow a `u64`. The `floor()` in the
+    // spec is implicit in Rust's integer division.
+    let fees = u64::from(transaction_fees);
+
+    Amount::try_from(fees * NSM_FEE_NUMERATOR / NSM_FEE_DENOMINATOR)
+}
+
+/// The part of a block's transaction fees that its miner may claim.
+///
+/// # Consensus
+///
+/// > $\mathsf{MinerFees}(\mathsf{height}) := \mathsf{TransactionFees}(\mathsf{height}) -
+/// > \mathsf{NSMFeeContribution}(\mathsf{height})$
+///
+/// This is the whole of the transaction fees before NU7 activates.
+///
+/// See [`nsm_fee_contribution`] for the specification this comes from.
+pub fn miner_fees(
+    height: Height,
+    network: &Network,
+    transaction_fees: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, amount::Error> {
+    transaction_fees - nsm_fee_contribution(height, network, transaction_fees)?
+}
+
+/// The part of the NSM reserve that is reissued in the block at `height`.
+///
+/// # Consensus
+///
+/// > $\mathsf{NSMSubsidy}(\mathsf{height}) := 0$, if
+/// > $\mathsf{height} < \mathsf{NSMReissuanceHeight}$, otherwise
+/// > $\mathsf{ceiling}(\mathsf{NSM\_SUBSIDY\_FRACTION} \cdot
+/// > \mathsf{NSMReserveAfter}(\mathsf{height} - 1))$
+///
+/// `reserve_before` is the NSM reserve balance after the previous block was applied.
+///
+/// Rounding upward ensures that any positive reserve balance is eventually reissued.
+///
+/// The reissuance height and halving-preserving release rate are network parameters.
+pub fn nsm_subsidy(
+    height: Height,
+    network: &Network,
+    reserve_before: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, amount::Error> {
+    if network
+        .nsm_reissuance_height()
+        .is_none_or(|reissuance_height| height < reissuance_height)
+    {
+        return Ok(Amount::zero());
+    }
+
+    // Widen before multiplying: custom networks can have much shorter halving intervals.
+    let reserve = u128::from(u64::from(reserve_before));
+    // Network parameters validate a positive i64 interval, which fits u128.
+    let interval = network.post_nu7_halving_interval() as u128;
+    let numerator = u128::from(NSM_LN2_SCALED) / interval;
+    let subsidy = (reserve * numerator).div_ceil(u128::from(NSM_SUBSIDY_DENOMINATOR));
+    // MAX_MONEY times NSM_LN2_SCALED fits i128 even before division.
+    Amount::try_from(subsidy as i128)
+}
+/// Returns `Ok()` with the deferred pool balance change of the coinbase transaction if the block
+/// subsidy in `block` is valid for `network`
+///
+/// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
+pub fn subsidy_is_valid(
+    block: &Block,
+    net: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
+) -> Result<DeferredPoolBalanceChange, SubsidyError> {
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+
+    // A zero subsidy removes proportional payouts, but not fixed lockbox disbursements.
+    if expected_block_subsidy.is_zero()
+        && Some(height) != NetworkUpgrade::Nu6_1.activation_height(net)
+    {
+        return Ok(DeferredPoolBalanceChange::zero());
+    }
+
+    let mut coinbase_outputs: MultiSet<Output> = block
+        .transactions
+        .first()
+        .ok_or(SubsidyError::NoCoinbase)?
+        .outputs()
+        .iter()
+        .cloned()
+        .collect();
+
+    let mut has_amount = |addr: &Address, amount| {
+        assert!(addr.is_script_hash(), "address must be P2SH");
+
+        coinbase_outputs.remove(&Output::new(amount, addr.script()))
+    };
+
+    // # Note
+    //
+    // Canopy activation is at the first halving on Mainnet, but not on Testnet. [ZIP-1014] only
+    // applies to Mainnet; [ZIP-214] contains the specific rules for Testnet funding stream amount
+    // values.
+    //
+    // [ZIP-1014]: <https://zips.z.cash/zip-1014>
+    // [ZIP-214]: <https://zips.z.cash/zip-0214
+    if NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
+        // # Consensus
+        //
+        // > [Pre-Canopy] A coinbase transaction at `height ∈ {1 .. FoundersRewardLastBlockHeight}`
+        // > MUST include at least one output that pays exactly `FoundersReward(height)` zatoshi
+        // > with a standard P2SH script of the form `OP_HASH160 FounderRedeemScriptHash(height)
+        // > OP_EQUAL` as its `scriptPubKey`.
+        //
+        // ## Notes
+        //
+        // - `FoundersRewardLastBlockHeight := max({height : N | Halving(height) < 1})`
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#foundersreward>
+
+        if Height::MIN < height && height < net.height_for_first_halving() {
+            let addr = founders_reward_address(net, height).ok_or(SubsidyError::Other(format!(
+                "founders reward address must be defined for height: {height:?}"
+            )))?;
+
+            if !has_amount(&addr, founders_reward(net, height)) {
+                Err(SubsidyError::FoundersRewardNotFound)?;
+            }
+        }
+
+        Ok(DeferredPoolBalanceChange::zero())
+    } else {
+        // # Consensus
+        //
+        // > [Canopy onward] In each block with coinbase transaction `cb` at block height `height`,
+        // > `cb` MUST contain at least the given number of distinct outputs for each of the
+        // > following:
+        //
+        // > • for each funding stream `fs` active at that block height with a recipient identifier
+        // > other than `DEFERRED_POOL` given by `fs.Recipient(height)`, one output that pays
+        // > `fs.Value(height)` zatoshi in the prescribed way to the address represented by that
+        // > recipient identifier;
+        //
+        // > • [NU6.1 onward] if the block height is `ZIP271ActivationHeight`,
+        // > `ZIP271DisbursementChunks` equal outputs paying a total of `ZIP271DisbursementAmount`
+        // > zatoshi in the prescribed way to the Key-Holder Organizations’ P2SH multisig address
+        // > represented by `ZIP271DisbursementAddress`, as specified by [ZIP-271].
+        //
+        // > The term “prescribed way” is defined as follows:
+        //
+        // > The prescribed way to pay a transparent P2SH address is to use a standard P2SH script
+        // > of the form `OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL` as the `scriptPubKey`.
+        // > Here `fs.RedeemScriptHash(height)` is the standard redeem script hash for the recipient
+        // > address for `fs.Recipient(height)` in _Base58Check_ form. Standard redeem script hashes
+        // > are defined in [ZIP-48] for P2SH multisig addresses, or [Bitcoin-P2SH] for other P2SH
+        // > addresses.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+        //
+        // [ZIP-271]: <https://zips.z.cash/zip-0271>
+        // [ZIP-48]: <https://zips.z.cash/zip-0048>
+        // [Bitcoin-P2SH]: <https://developer.bitcoin.org/devguide/transactions.html#pay-to-script-hash-p2sh>
+
+        let mut funding_streams = funding_stream_values(height, net, expected_block_subsidy)?;
+
+        // The deferred pool contribution is checked in `miner_fees_are_valid()` according to
+        // [ZIP-1015](https://zips.z.cash/zip-1015).
+        let mut deferred_pool_balance_change = funding_streams
+            .remove(&FundingStreamReceiver::Deferred)
+            .unwrap_or_default()
+            .constrain::<NegativeAllowed>()?;
+
+        // Check the one-time lockbox disbursements in the NU6.1 activation block's coinbase tx
+        // according to [ZIP-271] and [ZIP-1016].
+        //
+        // [ZIP-271]: <https://zips.z.cash/zip-0271>
+        // [ZIP-1016]: <https://zips.z.cash/zip-101>
+        if Some(height) == NetworkUpgrade::Nu6_1.activation_height(net) {
+            let lockbox_disbursements = net.lockbox_disbursements(height);
+
+            // The Mainnet and default Testnet disbursement lists are hardcoded and must be
+            // non-empty. Custom testnets and Regtest may configure no disbursements, in which
+            // case the NU6.1 activation block is not required to contain any disbursement
+            // outputs.
+            let must_have_disbursements =
+                matches!(net, Network::Mainnet) || net.is_default_testnet();
+            if lockbox_disbursements.is_empty() && must_have_disbursements {
+                Err(SubsidyError::Other(
+                    "missing lockbox disbursements for NU6.1 activation block".to_string(),
+                ))?;
+            }
+
+            deferred_pool_balance_change = lockbox_disbursements.into_iter().try_fold(
+                deferred_pool_balance_change,
+                |balance, (addr, expected_amount)| {
+                    if !has_amount(&addr, expected_amount) {
+                        Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
+                    }
+
+                    balance
+                        .checked_sub(expected_amount)
+                        .ok_or(SubsidyError::Underflow)
+                },
+            )?;
+        };
+
+        // Check each funding stream output.
+        funding_streams.into_iter().try_for_each(
+            |(receiver, expected_amount)| -> Result<(), SubsidyError> {
+                let addr =
+                    funding_stream_address(height, net, receiver).ok_or(SubsidyError::Other(
+                        "A funding stream other than the deferred pool must have an address"
+                            .to_string(),
+                    ))?;
+
+                if !has_amount(addr, expected_amount) {
+                    Err(SubsidyError::FundingStreamNotFound)?;
+                }
+
+                Ok(())
+            },
+        )?;
+
+        Ok(DeferredPoolBalanceChange::new(deferred_pool_balance_change))
+    }
+}
+
+/// Returns `Ok(())` if the miner fees consensus rule is valid.
+///
+/// From NU7, only part of the block's transaction fees may be claimed by the miner: the rest is
+/// removed from circulation into the NSM reserve. See [`nsm_fee_contribution`].
+///
+/// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+pub fn miner_fees_are_valid(
+    coinbase_tx: &Transaction,
+    height: Height,
+    block_miner_fees: Amount<NonNegative>,
+    expected_block_subsidy: Amount<NonNegative>,
+    expected_deferred_pool_balance_change: DeferredPoolBalanceChange,
+    network: &Network,
+) -> Result<(), SubsidyError> {
+    let transparent_value_balance = coinbase_tx
+        .outputs()
+        .iter()
+        .map(|output| output.value())
+        .sum::<Result<Amount<NonNegative>, amount::Error>>()
+        .map_err(|_| SubsidyError::Overflow)?
+        .constrain()
+        .map_err(|e| SubsidyError::Other(format!("invalid transparent value balance: {e}")))?;
+    let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
+    let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
+    // [NU6.3 onward] The Ironwood pool is shielded too, so its value balance affects the coinbase
+    // output value exactly like Sapling and Orchard. This is zero for pre-v6 coinbase transactions
+    // (no Ironwood bundle), so it is a no-op before NU6.3.
+    let ironwood_value_balance = coinbase_tx.ironwood_value_balance().ironwood_amount();
+
+    // # Consensus
+    //
+    // > - define the total output value of its coinbase transaction to be the total value in zatoshi of its transparent
+    // >   outputs, minus vbalanceSapling, minus vbalanceOrchard, minus vbalanceIronwood, plus totalDeferredOutput(height);
+    // > – define the total input value of its coinbase transaction to be the value in zatoshi of the block subsidy,
+    // >   plus the transaction fees paid by transactions in the block.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    //
+    // The expected lockbox funding stream output of the coinbase transaction is also subtracted
+    // from the block subsidy value plus the transaction fees paid by transactions in this block.
+    let total_output_value = (transparent_value_balance
+        - sapling_value_balance
+        - orchard_value_balance
+        - ironwood_value_balance
+        + expected_deferred_pool_balance_change.value())
+    .map_err(|_| SubsidyError::Overflow)?;
+
+    // # Consensus
+    //
+    // > For every block from NU7 activation onward, the coinbase transaction MUST be balanced
+    // > using MinerFees in place of TransactionFees, and the NSM reserve balance MUST increase by
+    // > NSMFeeContribution.
+    //
+    // > In particular, the total input value of the coinbase transaction defined in
+    // > § 7.1.2 'Transaction Consensus Rules' MUST be calculated as:
+    // > BlockSubsidy(height) + MinerFees(height) + totalDeferredInput(height).
+    //
+    // This is the NU7 deployment ZIP (`zcash/zips#1363`), which takes precedence over ZIP 235 for
+    // NU7. `miner_fees()` returns the whole of the fees before NU7, so this is a no-op until then.
+    let block_miner_fees =
+        miner_fees(height, network, block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
+
+    let total_input_value =
+        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
+
+    // # Consensus
+    //
+    // > [Pre-NU6] The total output of a coinbase transaction MUST NOT be greater than its total
+    // input.
+    //
+    // > [NU6 onward] The total output of a coinbase transaction MUST be equal to its total input.
+    if if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu6 {
+        total_output_value > total_input_value
+    } else {
+        total_output_value != total_input_value
+    } {
+        Err(SubsidyError::InvalidMinerFees)?
+    };
+
+    Ok(())
 }

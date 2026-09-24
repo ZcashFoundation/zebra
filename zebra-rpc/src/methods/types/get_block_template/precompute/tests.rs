@@ -35,6 +35,7 @@ fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateR
 
     let chain_info = GetBlockTemplateChainInfo {
         expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        expected_block_subsidy: scheduled_block_subsidy(tip_height.next().unwrap(), net).unwrap(),
         tip_height,
         tip_hash: block::Hash([0xab; 32]),
         cur_time: DateTime32::from(1654008617),
@@ -283,6 +284,7 @@ async fn in_flight_coinbase_is_retained_across_height_changes() {
     );
     let template = template();
     let height = Height(template.height);
+    let subsidy = scheduled_block_subsidy(height, &net).unwrap();
     let other_height = height.next().expect("test height is below the maximum");
     let coinbase = template.coinbase_txn;
     let expected_coinbase = coinbase.clone();
@@ -290,6 +292,7 @@ async fn in_flight_coinbase_is_retained_across_height_changes() {
     let (release_proof, proof_released) = tokio::sync::oneshot::channel();
     let mut next_coinbase = Some((
         height,
+        subsidy,
         tokio::task::spawn_blocking(move || {
             proof_released
                 .blocking_recv()
@@ -308,12 +311,12 @@ async fn in_flight_coinbase_is_retained_across_height_changes() {
         store_precomputed_coinbase(&mut next_coinbase, height, &cache).await;
 
         assert_eq!(
-            cache.get(height, Amount::zero()),
+            cache.get(height, subsidy, Amount::zero()),
             Some(expected_coinbase),
             "returning to the original height must reuse the tracked proof"
         );
         assert!(
-            cache.get(other_height, Amount::zero()).is_none(),
+            cache.get(other_height, subsidy, Amount::zero()).is_none(),
             "a proof must not be stored under a different height"
         );
     })
@@ -334,7 +337,9 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
         .expect("hard-coded transparent address is valid"),
     );
     let height = Height(template().height);
+    let subsidy = scheduled_block_subsidy(height, &net).unwrap();
     let other_height = height.next().expect("test height is below the maximum");
+    let other_subsidy = scheduled_block_subsidy(other_height, &net).unwrap();
     let cache = CoinbaseCache::default();
     let mut next_coinbase = None;
     start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, height);
@@ -343,25 +348,28 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
         while !next_coinbase
             .as_ref()
             .expect("a proof was started")
-            .1
+            .2
             .is_finished()
         {
             tokio::task::yield_now().await;
         }
 
         store_precomputed_coinbase(&mut next_coinbase, other_height, &cache).await;
-        assert!(cache.get(height, Amount::zero()).is_none());
-        assert!(cache.get(other_height, Amount::zero()).is_none());
+        assert!(cache.get(height, subsidy, Amount::zero()).is_none());
+        assert!(cache
+            .get(other_height, other_subsidy, Amount::zero())
+            .is_none());
 
         start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, other_height);
         store_precomputed_coinbase(&mut next_coinbase, other_height, &cache).await;
         assert_eq!(
-            cache.get(other_height, Amount::zero()),
+            cache.get(other_height, other_subsidy, Amount::zero()),
             Some(
                 TransactionTemplate::new_coinbase(
                     &net,
                     other_height,
                     &miner_params,
+                    other_subsidy,
                     Amount::zero()
                 )
                 .expect("test parameters produce a valid coinbase")

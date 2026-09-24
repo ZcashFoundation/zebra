@@ -34,7 +34,6 @@ use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
 pub mod request;
-pub mod subsidy;
 
 pub use request::Request;
 
@@ -394,12 +393,23 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
-
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let deferred_pool_balance_change =
-                check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+            // Reserve-funded rewards depend on a committed parent. The same pure checks run
+            // at the contextual boundary once reissuance starts, including block proposals.
+            let monetary_context = if network
+                .nsm_reissuance_height()
+                .is_some_and(|start| height >= start)
+            {
+                None
+            } else {
+                let total = zebra_chain::parameters::subsidy::block_subsidy(
+                    height,
+                    &network,
+                    Amount::zero(),
+                )?;
+                let deferred =
+                    zebra_chain::parameters::subsidy::subsidy_is_valid(&block, &network, total)?;
+                Some((total, deferred))
+            };
 
             // Bound shielded work before output recovery or proof verification.
             check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
@@ -474,14 +484,16 @@ where
                     source: amount_error,
                 })?;
 
-            check::miner_fees_are_valid(
-                &coinbase_tx,
-                height,
-                block_miner_fees,
-                expected_block_subsidy,
-                deferred_pool_balance_change,
-                &network,
-            )?;
+            if let Some((total, deferred)) = monetary_context {
+                zebra_chain::parameters::subsidy::miner_fees_are_valid(
+                    &coinbase_tx,
+                    height,
+                    block_miner_fees,
+                    total,
+                    deferred,
+                    &network,
+                )?;
+            }
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)

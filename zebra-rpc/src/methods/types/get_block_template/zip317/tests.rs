@@ -37,6 +37,8 @@ fn excludes_tx_with_unselected_dependencies() {
         select_mempool_transactions(
             &network,
             Height(1_000_000),
+            zebra_chain::parameters::subsidy::scheduled_block_subsidy(Height(1_000_000), &network)
+                .unwrap(),
             &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
             vec![unmined_tx],
             mempool_tx_deps,
@@ -77,6 +79,8 @@ fn includes_tx_with_selected_dependencies() {
     let selected_txs = select_mempool_transactions(
         &network,
         Height(1_000_000),
+        zebra_chain::parameters::subsidy::scheduled_block_subsidy(Height(1_000_000), &network)
+            .unwrap(),
         &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
@@ -122,12 +126,17 @@ fn reserves_space_for_block_header_and_transaction_count() {
     let miner_params =
         MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
 
-    let coinbase_tx_size =
-        TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
-            .expect("valid coinbase transaction template")
-            .data
-            .as_ref()
-            .len();
+    let coinbase_tx_size = TransactionTemplate::new_coinbase(
+        &network,
+        height,
+        &miner_params,
+        zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &network).unwrap(),
+        Amount::zero(),
+    )
+    .expect("valid coinbase transaction template")
+    .data
+    .as_ref()
+    .len();
 
     let safe_budget = usize::try_from(MAX_BLOCK_BYTES).expect("fits in memory")
         - Header::serialized_size(&network)
@@ -145,6 +154,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
         select_mempool_transactions(
             &network,
             height,
+            zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &network).unwrap(),
             &miner_params,
             vec![unmined_tx.clone()],
             TransactionDependencies::default(),
@@ -161,6 +171,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
         select_mempool_transactions(
             &network,
             height,
+            zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &network).unwrap(),
             &miner_params,
             vec![unmined_tx],
             TransactionDependencies::default(),
@@ -178,7 +189,7 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
     use crate::config::mining::{default_miner_address, MinerAddressType};
     use std::sync::Arc;
     use zebra_chain::{
-        parameters::testnet::ConfiguredActivationHeights,
+        parameters::{subsidy::scheduled_block_subsidy, testnet::ConfiguredActivationHeights},
         serialization::{ZcashDeserializeInto, ZcashSerialize},
         transaction::{arbitrary::v5_transactions, Transaction, VerifiedUnminedTx},
     };
@@ -199,6 +210,7 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         .into(),
     );
     let height = Height(1_000);
+    let subsidy = scheduled_block_subsidy(height, &network).unwrap();
     let miner = MinerParams::from(
         Address::decode(
             &network,
@@ -208,11 +220,12 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
     );
     let cache = CoinbaseCache::default();
     let sizing =
-        TransactionTemplate::new_coinbase(&network, height, &miner, Amount::zero()).unwrap();
+        TransactionTemplate::new_coinbase(&network, height, &miner, subsidy, Amount::zero())
+            .unwrap();
     let sizing_tx: Transaction = sizing.data.as_ref().zcash_deserialize_into().unwrap();
     let coinbase_counts = ShieldedActionCounts::from_transaction(&sizing_tx);
     assert!(sizing_tx.sapling_outputs().count() > 0);
-    cache.store(height, Amount::zero(), sizing);
+    cache.store(height, subsidy, Amount::zero(), sizing);
 
     let orchard = v5_transactions(Network::Mainnet.block_iter())
         .find(|tx| {
@@ -237,6 +250,7 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
     let selected = select_mempool_transactions(
         &network,
         height,
+        subsidy,
         &miner,
         candidates,
         TransactionDependencies::default(),
@@ -258,7 +272,8 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         .map(|(_, tx)| tx.miner_fee)
         .sum::<zebra_chain::amount::Result<Amount<_>>>()
         .unwrap();
-    let actual = TransactionTemplate::new_coinbase(&network, height, &miner, fees).unwrap();
+    let actual =
+        TransactionTemplate::new_coinbase(&network, height, &miner, subsidy, fees).unwrap();
     let actual_tx: Transaction = actual.data.as_ref().zcash_deserialize_into().unwrap();
     assert_eq!(
         ShieldedActionCounts::from_transaction(&actual_tx),

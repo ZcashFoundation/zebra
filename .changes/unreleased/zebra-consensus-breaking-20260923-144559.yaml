@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: 'Move `block::check::{miner_fees_are_valid, subsidy_is_valid}` and `funding_stream_address` to `zebra_chain::parameters::subsidy`; remove `block::subsidy`. Under [NU7](https://zips.z.cash/zip-0259), monetary checks use contextual total subsidy and `MinerFees`, withholding 60% of fees for the NSM reserve. They return `SubsidyError`; contextual subsidy errors retain misbehavior score 100 through block verification and the verifier router. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-23T14:45:59.9186327+02:00

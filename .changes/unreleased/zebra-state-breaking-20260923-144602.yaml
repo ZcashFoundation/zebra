@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ContextuallyVerifiedBlock::with_block_and_spent_utxos` requires the network and parent value pools. `GetBlockTemplateChainInfo` adds `expected_block_subsidy`, and `ValidateContextError` adds `Subsidy` with a conversion from `subsidy::SubsidyError`, so callers must account for contextual NSM issuance. `<ValueBalance<NonNegative> as IntoDisk>::Bytes` changes from `[u8; 48]` to `Vec<u8>`; callers must accept variable-length encodings. `CommitBlockError::misbehavior_score` returns 100 for these errors, including nested value-pool errors; unrelated scores are unchanged. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-23T14:46:02.131629644+02:00

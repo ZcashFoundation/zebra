@@ -11,7 +11,7 @@ use bincode::Options;
 use serde_big_array::BigArray;
 
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{Amount, NonNegative},
     block::Height,
     block_info::BlockInfo,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
@@ -22,11 +22,24 @@ use zebra_chain::{
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
+/// The width of a serialized [`ValueBalance<NonNegative>`] before NU7 added the `nsm_reserve`
+/// balance: six pool balances at 8 bytes each.
+const V28_VALUE_POOL_BYTES: usize = 48;
+
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 48];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.to_bytes()
+        let bytes = self.to_bytes();
+
+        // The `nsm_reserve` balance is the last 8 bytes of the 56-byte form, so truncating it
+        // yields the v28.0 record exactly. Height-aware writers omit the derived seed before
+        // NU7, and zero reserves continue to use the narrow layout afterwards.
+        if self.nsm_reserve_amount().is_zero() {
+            bytes[..V28_VALUE_POOL_BYTES].to_vec()
+        } else {
+            bytes.to_vec()
+        }
     }
 }
 
@@ -165,38 +178,59 @@ impl IntoDisk for BlockInfo {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.value_pools()
-            .as_bytes()
-            .iter()
-            .copied()
-            .chain(self.size().to_le_bytes().iter().copied())
-            .collect()
+        // The v28.0 fields stay at their v28.0 offsets — the 48-byte value pool prefix (without
+        // the NU7 NSM reserve), then the block size — and the reserve is appended after them, so
+        // v28.0 code reading a wide record still reads the correct size and treats the reserve
+        // as zero. The record only widens once the reserve is non-zero, which can not happen
+        // before NU7 activation.
+        let value_pools = self.value_pools();
+        let mut bytes = value_pools.to_bytes()[..V28_VALUE_POOL_BYTES].to_vec();
+        bytes.extend(self.size().to_le_bytes());
+        if !value_pools.nsm_reserve_amount().is_zero() {
+            bytes.extend(value_pools.nsm_reserve_amount().to_bytes());
+        }
+        bytes
     }
 }
 
 impl FromDisk for BlockInfo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        // Records are exactly 52 bytes from NU6.3 onward (48-byte value pool incl. the ironwood
-        // pool, plus the 4-byte block size) and exactly 44 bytes for records written by earlier
-        // Zebra versions (40-byte value pool plus 4-byte size). We discriminate the two layouts by
-        // length, and stay forward-compatible by reading the known prefix
-        // and ignoring any unexpected trailing bytes.
-        match bytes.as_ref().len() {
-            // NU6.3 onward (and any forward-compatible larger record): 48-byte pool + 4-byte size.
-            52.. => {
-                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..48])
+        let bytes = bytes.as_ref();
+
+        // Records are exactly 52 bytes while the NU7 NSM reserve is zero (the v28.0 layout: a
+        // 48-byte value pool, then the 4-byte block size), exactly 60 bytes once the reserve is
+        // non-zero (the reserve appended after the size, so the size stays at its v28.0 offset),
+        // and exactly 44 bytes for records written before NU6.3 (a 40-byte value pool, then the
+        // size). Layouts are discriminated by length, longest first, staying forward-compatible
+        // by reading the known fields and ignoring any unexpected trailing bytes.
+        match bytes.len() {
+            // Wide records (and any forward-compatible larger record): v28.0 fields, then the
+            // 8-byte NSM reserve.
+            60.. => {
+                let mut value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes[0..48])
                     .expect("must work for 48 bytes");
-                let size =
-                    u32::from_le_bytes(bytes.as_ref()[48..52].try_into().expect("must be 4 bytes"));
+                let size = u32::from_le_bytes(bytes[48..52].try_into().expect("must be 4 bytes"));
+                let nsm_reserve = Amount::<NonNegative>::from_bytes(
+                    bytes[52..60].try_into().expect("must be 8 bytes"),
+                )
+                .expect("NSM reserve amount must be parsable");
+                value_pools.set_nsm_reserve_amount(nsm_reserve);
                 BlockInfo::new(value_pools, size)
             }
-            // Pre-NU6.3 records (exactly 44 bytes; the open range stays forward-compatible, and the
-            // 52.. arm above already took every NU6.3 record).
+            // v28.0 records (exactly 52 bytes; the `60..` arm above already took every wide
+            // record): 48-byte pool + 4-byte size.
+            52.. => {
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes[0..48])
+                    .expect("must work for 48 bytes");
+                let size = u32::from_le_bytes(bytes[48..52].try_into().expect("must be 4 bytes"));
+                BlockInfo::new(value_pools, size)
+            }
+            // Pre-NU6.3 records (exactly 44 bytes; the arms above already took every NU6.3 and
+            // NU7 record).
             44.. => {
-                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..40])
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes[0..40])
                     .expect("must work for 40 bytes");
-                let size =
-                    u32::from_le_bytes(bytes.as_ref()[40..44].try_into().expect("must be 4 bytes"));
+                let size = u32::from_le_bytes(bytes[40..44].try_into().expect("must be 4 bytes"));
                 BlockInfo::new(value_pools, size)
             }
             _ => panic!("invalid format"),

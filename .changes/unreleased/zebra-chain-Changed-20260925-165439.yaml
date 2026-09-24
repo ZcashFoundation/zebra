@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`Block::chain_value_pool_change` excludes permanently unspendable genesis transparent outputs from issued supply and historical NSM seeding for [NU7](https://zips.z.cash/zip-0259). Existing custom-network state with nonzero genesis outputs must be rebuilt; public-network balances are unchanged. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-25T16:54:39.356862107+02:00

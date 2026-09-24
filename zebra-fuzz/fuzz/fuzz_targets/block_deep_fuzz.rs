@@ -178,7 +178,12 @@ fuzz_target!(|data: &[u8]| {
             // Zero means "no deferred change", which is exactly how the
             // repository's own vector test drives it
             // (zebra-chain/src/block/tests/vectors.rs).
-            let _ = block.chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero());
+            let _ = block.chain_value_pool_change(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &Network::Mainnet,
+                zebra_chain::value_balance::ValueBalance::zero(),
+            );
         }));
     }
 
@@ -337,7 +342,11 @@ fuzz_target!(|data: &[u8]| {
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let height = block.coinbase_height().unwrap_or(Height(0));
         for net in [Network::Mainnet, default_testnet().clone()] {
-            if let Ok(subsidy) = zebra_chain::parameters::subsidy::block_subsidy(height, &net) {
+            if let Ok(subsidy) = zebra_chain::parameters::subsidy::block_subsidy(
+                height,
+                &net,
+                zebra_chain::amount::Amount::zero(),
+            ) {
                 let _ = zebra_chain::parameters::subsidy::miner_subsidy(height, &net, subsidy);
                 let _ =
                     zebra_chain::parameters::subsidy::funding_stream_values(height, &net, subsidy);
@@ -560,7 +569,11 @@ fuzz_target!(|data: &[u8]| {
         for &(h, _name) in NU_FORK_HEIGHTS {
             let height = Height(h);
             for net in [&Network::Mainnet, &nu_network] {
-                if let Ok(subsidy) = zebra_chain::parameters::subsidy::block_subsidy(height, net) {
+                if let Ok(subsidy) = zebra_chain::parameters::subsidy::block_subsidy(
+                    height,
+                    net,
+                    zebra_chain::amount::Amount::zero(),
+                ) {
                     let _ = zebra_chain::parameters::subsidy::miner_subsidy(height, net, subsidy);
                     let _ = zebra_chain::parameters::subsidy::funding_stream_values(
                         height, net, subsidy,

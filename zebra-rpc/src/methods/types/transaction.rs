@@ -20,7 +20,7 @@ use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
+        subsidy::{funding_stream_address, funding_stream_values, miner_fees, miner_subsidy},
         Network, NetworkUpgrade,
     },
     primitives::ed25519,
@@ -29,7 +29,7 @@ use zebra_chain::{
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::{error::TransactionError, funding_stream_address};
+use zebra_consensus::error::TransactionError;
 use zebra_script::Sigops;
 
 use super::zec::Zec;
@@ -60,7 +60,7 @@ where
     /// The transactions in this block template that this transaction depends upon.
     /// These are 1-based indexes in the `transactions` list.
     ///
-    /// Zebra's mempool does not support transaction dependencies, so this list is always empty.
+    /// Populated when the selected transactions are assembled into a block template.
     ///
     /// We use `u16` because 2 MB blocks are limited to around 39,000 transactions.
     pub(crate) depends: Vec<u16>,
@@ -99,7 +99,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
                 .auth_digest()
                 .unwrap_or(AUTH_DIGEST_PLACEHOLDER),
 
-            // Always empty, not supported by Zebra's mempool.
+            // Indexes require the final selected transaction order.
             depends: Vec::new(),
 
             fee: tx.miner_fee,
@@ -121,15 +121,19 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
-    /// Constructs a transaction template for a coinbase transaction.
+    /// Constructs a coinbase using the supplied total subsidy, including contextual NSM reissuance.
+    ///
+    /// `txs_fee` is the gross transaction fee total. The payout claims only the miner's share,
+    /// while the template's negative `fee` reports the full total required by getblocktemplate.
     pub fn new_coinbase(
         net: &Network,
         height: Height,
         miner_params: &MinerParams,
+        block_subsidy: Amount<NonNegative>,
         txs_fee: Amount<NonNegative>,
     ) -> Result<Self, TransactionError> {
-        let block_subsidy = block_subsidy(height, net)?;
-        let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
+        let miner_reward =
+            miner_subsidy(height, net, block_subsidy)? + miner_fees(height, net, txs_fee)?;
         let miner_reward = Zatoshis::try_from(miner_reward?)?;
 
         let mut builder = Builder::new(

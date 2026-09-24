@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`client::TransactionTemplate::new_coinbase` now requires the total block subsidy before the transaction-fee argument. Pass the subsidy calculated from the candidate block parent, including NSM reissuance, and the gross transaction fees. The constructor calculates the claimable miner share itself; do not subtract the NSM fee contribution first.'
+time: 2026-09-23T14:46:01.024758164+02:00

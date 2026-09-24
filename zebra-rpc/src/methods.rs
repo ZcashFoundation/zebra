@@ -66,8 +66,8 @@ use zebra_chain::{
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
         subsidy::{
-            block_subsidy, founders_reward, funding_stream_values, miner_subsidy,
-            FundingStreamReceiver,
+            block_subsidy, founders_reward, funding_stream_address, funding_stream_values,
+            miner_subsidy, FundingStreamReceiver,
         },
         ConsensusBranchId, Network, NetworkUpgrade,
     },
@@ -84,9 +84,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
-};
+use zebra_consensus::{router::service_trait::BlockVerifierService, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
@@ -692,6 +690,7 @@ pub trait Rpc {
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
+    /// Once NSM reissuance starts, the preceding block must exist: future reserves cannot be forecast.
     ///
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
     /// method: post
@@ -699,7 +698,8 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `height`: (numeric, optional, example=1) Can be any valid current or future height.
+    /// - `height`: (numeric, optional, example=1) A valid height; future heights are supported only
+    ///   when their subsidy does not depend on an unknown parent reserve.
     ///
     /// # Notes
     ///
@@ -2617,6 +2617,7 @@ where
         {
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
+                read_state,
                 block_proposal_bytes,
                 &self.network,
                 latest_chain_tip,
@@ -2834,6 +2835,7 @@ where
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
+            chain_info.expected_block_subsidy,
             miner_params,
             mempool_txs,
             mempool_tx_deps,
@@ -3126,11 +3128,40 @@ where
         let net = self.network.clone();
 
         let height = match height {
-            Some(h) => Height(h),
+            Some(h) => {
+                Height::try_from(h).map_error(server::error::LegacyCode::InvalidParameter)?
+            }
             None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
-        let subsidy = block_subsidy(height, &net).map_misc_error()?;
+        let previous_reserve = if net
+            .nsm_reissuance_height()
+            .is_some_and(|start| height >= start)
+        {
+            let parent_height = height.previous().map_misc_error()?;
+            let ReadResponse::BlockInfo(parent) = self
+                .read_state
+                .clone()
+                .oneshot(ReadRequest::BlockInfo(parent_height.into()))
+                .await
+                .map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockInfo request");
+            };
+            parent
+                .ok_or_else(|| {
+                    ErrorObject::owned(
+                server::error::LegacyCode::InvalidParameter.into(),
+                "subsidy requires the preceding block's NSM reserve; future reserves are unknown",
+                None::<()>,
+            )
+                })?
+                .value_pools()
+                .nsm_reserve_amount()
+        } else {
+            Amount::zero()
+        };
+        let subsidy = block_subsidy(height, &net, previous_reserve).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
             funding_stream_values(height, &net, subsidy)

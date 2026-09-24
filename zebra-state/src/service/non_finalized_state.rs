@@ -603,7 +603,13 @@ impl NonFinalizedState {
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(prepared.height, &self.network),
+            calculate_deferred_pool_balance_change(
+                prepared.height,
+                &self.network,
+                new_chain.chain_value_pools.nsm_reserve_amount(),
+            )?,
+            &self.network,
+            new_chain.chain_value_pools,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

@@ -5,9 +5,10 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy::block_subsidy, Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
@@ -57,8 +58,13 @@ pub fn get_block_template_chain_info(
             best_relevant_chain_and_history_tree(non_finalized_state, db, network);
     }
 
-    let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
-        best_relevant_chain_and_history_tree_result?;
+    let (
+        best_tip_height,
+        best_tip_hash,
+        best_relevant_chain,
+        best_tip_history_tree,
+        expected_block_subsidy,
+    ) = best_relevant_chain_and_history_tree_result?;
 
     difficulty_time_and_history_tree(
         best_relevant_chain,
@@ -66,6 +72,7 @@ pub fn get_block_template_chain_info(
         best_tip_hash,
         network,
         best_tip_history_tree,
+        expected_block_subsidy,
         DateTime32::now(),
     )
 }
@@ -150,7 +157,16 @@ fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     network: &Network,
-) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
+) -> Result<
+    (
+        Height,
+        block::Hash,
+        Vec<Arc<Block>>,
+        Arc<HistoryTree>,
+        Amount<NonNegative>,
+    ),
+    BoxError,
+> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
@@ -175,6 +191,23 @@ fn best_relevant_chain_and_history_tree(
     )
     .expect("tip hash should exist in the chain");
 
+    let previous_nsm_reserve = if network
+        .nsm_reissuance_height()
+        .is_some_and(|height| candidate_height >= height)
+    {
+        read::block_info(
+            non_finalized_state.best_chain(),
+            db,
+            state_tip_before_queries.into(),
+        )
+        .ok_or("missing parent value pools for the next block subsidy")?
+        .value_pools()
+        .nsm_reserve_amount()
+    } else {
+        Amount::zero()
+    };
+    let expected_block_subsidy = block_subsidy(candidate_height, network, previous_nsm_reserve)?;
+
     let state_tip_after_queries =
         read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
 
@@ -189,6 +222,7 @@ fn best_relevant_chain_and_history_tree(
         state_tip_before_queries.1,
         best_relevant_chain,
         history_tree,
+        expected_block_subsidy,
     ))
 }
 
@@ -204,6 +238,7 @@ fn difficulty_time_and_history_tree(
     tip_hash: block::Hash,
     network: &Network,
     history_tree: Arc<HistoryTree>,
+    expected_block_subsidy: Amount<NonNegative>,
     now: DateTime32,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
@@ -264,6 +299,7 @@ fn difficulty_time_and_history_tree(
         tip_height,
         chain_history_root: history_tree.hash(),
         expected_difficulty,
+        expected_block_subsidy,
         cur_time,
         min_time,
         max_time,
@@ -427,6 +463,7 @@ mod tests {
             tip_height: Height(0),
             chain_history_root: None,
             expected_difficulty: CompactDifficulty::default(),
+            expected_block_subsidy: Amount::zero(),
             cur_time: DateTime32::from(cur_time),
             min_time: DateTime32::from(PREV - 100),
             max_time: DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN),

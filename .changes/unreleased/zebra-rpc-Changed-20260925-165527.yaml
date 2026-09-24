@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getblocksubsidy` rejects heights above the consensus limit before reading state or computing subsidy. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-25T16:55:27.216412356+02:00
