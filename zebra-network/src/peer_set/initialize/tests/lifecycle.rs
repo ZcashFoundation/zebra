@@ -64,12 +64,7 @@ async fn check_response_owner(cancel_response: bool) {
         .with_discover(stream::iter(peers).chain(stream::pending()))
         .with_minimum_peer_version(minimum_version)
         .build();
-    let (buffer, worker) = Buffer::pair(
-        BoxService::new(peer_set),
-        crate::constants::PEERSET_BUFFER_SIZE,
-    );
-    let worker = tokio::spawn(worker);
-    let network = NetworkService::new(buffer, vec![worker.abort_handle()]);
+    let (network, poller) = peer_set.into_buffer(crate::constants::PEERSET_BUFFER_SIZE);
     let background = network.background_service();
     let mut response = Some(Box::pin(network.oneshot(Request::Peers)));
 
@@ -109,7 +104,7 @@ async fn check_response_owner(cancel_response: bool) {
 
     // Keep the completed future allocated: completion itself must release shutdown ownership.
     timeout(SHUTDOWN_BOUND, async {
-        assert!(worker.await.unwrap_err().is_cancelled());
+        assert!(poller.await.unwrap_err().is_cancelled());
         assert!(background.oneshot(Request::Peers).await.is_err());
         while !client_harness
             .try_to_receive_outbound_client_request()
