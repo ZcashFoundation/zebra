@@ -1055,7 +1055,7 @@ where
                 !self
                     .minimum_peer_version
                     .chain_tip()
-                    .is_at_or_near_network_tip(&self.network)
+                    .is_at_or_near_network_tip(chrono::Utc::now())
             };
             // zcashd-compat sidecars are exempt: they sync *from* this node,
             // so they can legitimately trail it without being stalled peers.

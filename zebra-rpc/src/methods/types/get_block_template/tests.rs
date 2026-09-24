@@ -26,6 +26,142 @@ use crate::config::mining::{default_miner_address, MinerAddressType};
 
 use super::MinerParams;
 
+/// Dependency metadata uses the final template order and lists each parent only once.
+#[test]
+fn template_reports_selected_transaction_dependencies() {
+    use zebra_chain::{
+        block,
+        serialization::DateTime32,
+        transaction::{self, LockTime, VerifiedUnminedTx},
+        transparent::{Input, OutPoint, Output, Script},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    };
+    use zebra_node_services::mempool::TransactionDependencies;
+    use zebra_state::GetBlockTemplateChainInfo;
+
+    use super::{zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache};
+    use crate::methods::types::long_poll::LongPollInput;
+
+    let net = Network::new_regtest(testnet::RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let transaction = |outpoints: Vec<OutPoint>, output_value: u64| {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu7,
+            outpoints
+                .into_iter()
+                .map(|outpoint| Input::PrevOut {
+                    outpoint,
+                    unlock_script: Script::new(&[]),
+                    sequence: u32::MAX,
+                })
+                .collect(),
+            vec![
+                Output {
+                    value: output_value.try_into().unwrap(),
+                    lock_script: Script::new(&[0x51]),
+                };
+                2
+            ],
+            LockTime::unlocked(),
+            Height(100),
+        );
+        VerifiedUnminedTx::new(
+            std::sync::Arc::new(tx).into(),
+            10_000u64.try_into().unwrap(),
+            0,
+            0,
+            Default::default(),
+        )
+        .unwrap()
+    };
+    let parent = transaction(
+        vec![OutPoint::from_usize(transaction::Hash([1; 32]), 0)],
+        50_000,
+    );
+    let unrelated = transaction(
+        vec![OutPoint::from_usize(transaction::Hash([2; 32]), 0)],
+        50_000,
+    );
+    let parent_hash = parent.transaction.id.mined_id();
+    let parent_outputs = vec![
+        OutPoint::from_usize(parent_hash, 0),
+        OutPoint::from_usize(parent_hash, 1),
+    ];
+    let child = transaction(parent_outputs.clone(), 45_000);
+    let child_hash = child.transaction.id.mined_id();
+    let mut dependencies = TransactionDependencies::default();
+    dependencies.add(child_hash, parent_outputs);
+    let height = Height(11);
+    let subsidy = scheduled_block_subsidy(height, &net).unwrap();
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+    let selected = select_mempool_transactions(
+        &net,
+        height,
+        subsidy,
+        &miner_params,
+        vec![child, unrelated, parent],
+        dependencies,
+        None,
+    );
+    let chain_info = GetBlockTemplateChainInfo {
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        expected_block_subsidy: subsidy,
+        tip_height: Height(10),
+        tip_hash: block::Hash([3; 32]),
+        cur_time: DateTime32::from(1_700_000_000),
+        min_time: DateTime32::from(1_699_999_999),
+        max_time: DateTime32::from(1_700_000_001),
+        chain_history_root: Some([4; 32].into()),
+    };
+    let long_poll_id = LongPollInput::new(
+        chain_info.tip_height,
+        chain_info.tip_hash,
+        chain_info.max_time,
+        iter::empty(),
+    )
+    .generate_id();
+    let template = BlockTemplateResponse::new_internal(
+        &net,
+        &CoinbaseCache::default(),
+        &miner_params,
+        &chain_info,
+        long_poll_id,
+        selected,
+        None,
+    );
+    let parent_index = template
+        .transactions
+        .iter()
+        .position(|tx| tx.hash == parent_hash)
+        .unwrap();
+    let child_index = template
+        .transactions
+        .iter()
+        .position(|tx| tx.hash == child_hash)
+        .unwrap();
+    let json = serde_json::to_value(&template).unwrap();
+    assert!(parent_index < child_index);
+    assert_eq!(
+        json["transactions"][parent_index]["depends"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        json["transactions"][child_index]["depends"],
+        serde_json::json!([parent_index + 1])
+    );
+}
+
 /// Tests that coinbase transactions can be generated.
 ///
 /// This test needs to be run with the `--release` flag so that it runs for ~ 30 seconds instead of

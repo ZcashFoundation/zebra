@@ -304,6 +304,21 @@ fn check_network_name() {
     );
 }
 
+/// Duplicate activation heights must not hide an earlier out-of-order upgrade.
+#[test]
+fn activation_order_is_checked_before_coalescing_heights() {
+    let activation_heights = ConfiguredActivationHeights {
+        nu5: Some(10),
+        nu6: Some(9),
+        nu7: Some(10),
+        ..Default::default()
+    };
+    assert!(matches!(
+        testnet::Parameters::build().with_activation_heights(activation_heights),
+        Err(ParametersBuilderError::OutOfOrderUpgrades),
+    ));
+}
+
 #[test]
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblocktemplate.transactions[].depends` reports each selected parent transaction once, using its 1-based position in the returned template.'
+time: 2026-09-24T16:07:55.568497648+02:00

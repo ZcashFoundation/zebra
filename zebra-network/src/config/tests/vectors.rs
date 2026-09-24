@@ -7,7 +7,7 @@ use zebra_chain::{
         constants::magics,
         subsidy::FundingStreamReceiver,
         testnet::{self, ConfiguredFundingStreams},
-        Magic, Network,
+        Magic, Network, NetworkUpgrade,
     },
 };
 
@@ -197,6 +197,32 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
         params.temporary_orchard_disabling_soft_fork_height(),
         Some(soft_fork_height),
     );
+}
+
+/// Coalesced upgrades must not acquire earlier Regtest defaults after serialization.
+#[test]
+fn coincident_regtest_upgrades_preserve_activation_on_roundtrip() {
+    let _init_guard = zebra_test::init();
+    let config: Config = toml::from_str(
+        "network = 'Regtest'\n\
+         [testnet_parameters.activation_heights]\n\
+         Overwinter = 10\n\
+         NU7 = 10\n",
+    )
+    .unwrap();
+    let restored: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+
+    for network in [&config.network, &restored.network] {
+        assert_eq!(
+            NetworkUpgrade::current(network, Height(9)),
+            NetworkUpgrade::Genesis
+        );
+        assert_eq!(
+            NetworkUpgrade::current(network, Height(10)),
+            NetworkUpgrade::Nu7
+        );
+    }
+    assert_eq!(config, restored);
 }
 
 /// Checks that a Regtest configured to forbid unshielded coinbase spends survives a
