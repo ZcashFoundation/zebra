@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: '`constants::INVENTORY_BUSY_PEER_REFUSAL_DELAY` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515))'
+time: 2026-10-08T00:20:00.260937965+02:00

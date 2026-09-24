@@ -15,7 +15,10 @@ use tower::{
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
     peer::{Client, ConnectedAddr, ConnectionInfo},
-    protocol::external::{canonical_socket_addr, types::Version},
+    protocol::external::{
+        canonical_socket_addr,
+        types::{PeerServices, Version},
+    },
 };
 
 /// A client service wrapper that keeps track of its load.
@@ -53,6 +56,11 @@ impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
+    }
+
+    /// Retrieve the services the peer advertised in its `version` message.
+    pub fn remote_services(&self) -> PeerServices {
+        self.connection_info.remote.services
     }
 
     /// Returns true if this peer connected directly to us from `ip`.
