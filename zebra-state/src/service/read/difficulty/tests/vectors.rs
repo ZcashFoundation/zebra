@@ -22,6 +22,7 @@ fn nu7_template_times_match_difficulty_across_activation() {
         })
         .expect("activation heights are valid")
         .with_funding_streams(Vec::new())
+        .with_slow_start_interval(Height(0))
         .to_network()
         .expect("configured Testnet parameters are valid");
     assert!(!network.is_regtest());
@@ -104,6 +105,7 @@ fn template_max_time_respects_network_height_gate() {
         })
         .expect("activation heights are valid")
         .with_funding_streams(Vec::new())
+        .with_slow_start_interval(Height(0))
         .to_network()
         .expect("configured Testnet parameters are valid");
     let now = DateTime32::from(PREV + 24 * 60 * 60);
@@ -206,6 +208,60 @@ fn template_times_respect_local_clock_bound() {
                     .time_is_valid_at(now.into(), &candidate_height, &Hash([0; 32]))
                     .expect("every advertised timestamp must pass context-free time validation");
             }
+        }
+    }
+}
+
+/// An unrepresentable minimum-difficulty threshold leaves the entire valid range standard.
+#[test]
+fn template_times_near_timestamp_ceiling_stay_standard_difficulty() {
+    let _init_guard = zebra_test::init();
+    let network = Network::new_default_testnet();
+    let median_offset = u32::try_from(POW_MEDIAN_BLOCK_SPAN / 2).unwrap() * 75;
+
+    // Overflow the parent-plus-gap sum, then isolate overflow of its strict successor.
+    for previous_time in [u32::MAX - 100, u32::MAX - GAP] {
+        let context = template_block_context(&network, previous_time);
+        let difficulty_at = |time: DateTime32| {
+            AdjustedDifficulty::new_from_header_time(
+                time.into(),
+                ACTIVE_HEIGHT,
+                &network,
+                context
+                    .iter()
+                    .map(|block| (block.header.difficulty_threshold, block.header.time)),
+            )
+            .expected_difficulty_threshold()
+        };
+        let now = DateTime32::from(previous_time);
+        let standard = difficulty_at(now);
+        assert_ne!(standard, network.target_difficulty_limit().to_compact());
+
+        let result = difficulty_time_and_history_tree(
+            context.clone(),
+            ACTIVE_HEIGHT,
+            Hash([0; 32]),
+            &network,
+            Arc::new(HistoryTree::default()),
+            Amount::zero(),
+            now,
+        )
+        .expect("standard-difficulty timestamps remain representable");
+
+        assert_eq!(
+            result.min_time,
+            DateTime32::from(previous_time - median_offset + 1),
+        );
+        assert_eq!(result.cur_time, now);
+        assert_eq!(result.max_time, DateTime32::from(u32::MAX));
+        assert_eq!(result.expected_difficulty, standard);
+
+        for time in [result.min_time, result.cur_time, result.max_time] {
+            assert_eq!(
+                difficulty_at(time),
+                result.expected_difficulty,
+                "parent time {previous_time}, advertised time {time:?}",
+            );
         }
     }
 }

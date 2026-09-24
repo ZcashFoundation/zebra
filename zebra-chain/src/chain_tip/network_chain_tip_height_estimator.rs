@@ -26,7 +26,7 @@ pub struct NetworkChainTipHeightEstimator {
     current_block_time: DateTime<Utc>,
     current_height: block::Height,
     current_target_spacing: Duration,
-    next_target_spacings: vec::IntoIter<(block::Height, Duration)>,
+    target_spacings: vec::IntoIter<(block::Height, Duration)>,
 }
 
 impl NetworkChainTipHeightEstimator {
@@ -38,16 +38,13 @@ impl NetworkChainTipHeightEstimator {
     ///
     /// # Implementation details
     ///
-    /// The current height determines the initial target spacing; only future spacing changes
-    /// are retained.
+    /// The current height determines the initial target spacing. Past and future spacing changes
+    /// are retained so estimates can cross transitions in either direction.
     pub fn new(
         current_block_time: DateTime<Utc>,
         current_height: block::Height,
         network: &Network,
     ) -> Self {
-        let target_spacings =
-            NetworkUpgrade::target_spacings(network).filter(|(height, _)| *height > current_height);
-
         NetworkChainTipHeightEstimator {
             current_block_time,
             current_height,
@@ -56,7 +53,9 @@ impl NetworkChainTipHeightEstimator {
                 current_height,
             ),
             // TODO: Remove the `Vec` allocation once existential `impl Trait`s are available.
-            next_target_spacings: target_spacings.collect::<Vec<_>>().into_iter(),
+            target_spacings: NetworkUpgrade::target_spacings(network)
+                .collect::<Vec<_>>()
+                .into_iter(),
         }
     }
 
@@ -64,42 +63,50 @@ impl NetworkChainTipHeightEstimator {
     ///
     /// # Implementation details
     ///
-    /// The `current_block_time` and the `current_height` is advanced to the end of each section
-    /// that has a different target spacing time. Once the `current_block_time` passes the
-    /// `target_time`, the last active target spacing time is used to calculate the final height
-    /// estimation.
+    /// The reference time and height move through each spacing era towards `target_time`.
+    /// The interval ending at an activation block uses that upgrade's spacing in both directions.
+    /// Once the target era is reached, its spacing is used to calculate the final height.
     pub fn estimate_height_at(mut self, target_time: DateTime<Utc>) -> block::Height {
-        while let Some((change_height, next_target_spacing)) = self.next_target_spacings.next() {
-            // The interval ending at the activation block uses the new spacing.
-            self.estimate_up_to(
-                (change_height - 1).expect("future spacing changes are after genesis"),
-            );
+        if target_time < self.current_block_time {
+            while let Some((change_height, target_spacing)) = self.target_spacings.next_back() {
+                if change_height > self.current_height {
+                    continue;
+                }
 
-            if self.current_block_time >= target_time {
-                break;
+                self.current_target_spacing = target_spacing;
+                self.estimate_at((change_height - 1).unwrap_or(block::Height(0)));
+
+                if self.current_block_time <= target_time {
+                    break;
+                }
             }
+        } else {
+            while let Some((change_height, next_target_spacing)) = self.target_spacings.next() {
+                if change_height <= self.current_height {
+                    continue;
+                }
 
-            self.current_target_spacing = next_target_spacing;
+                self.estimate_at(
+                    (change_height - 1).expect("future spacing changes are after genesis"),
+                );
+
+                if self.current_block_time >= target_time {
+                    break;
+                }
+
+                self.current_target_spacing = next_target_spacing;
+            }
         }
 
         self.estimate_height_at_with_current_target_spacing(target_time)
     }
 
-    /// Advance the `current_block_time` and `current_height` to the next change in target spacing
-    /// time.
-    ///
-    /// The `current_height` is advanced to `max_height` (if it's not already past that height).
-    /// The amount of blocks advanced is then used to extrapolate the amount to advance the
-    /// `current_block_time`.
-    fn estimate_up_to(&mut self, max_height: block::Height) {
-        let remaining_blocks = max_height - self.current_height;
-
-        if remaining_blocks > 0 {
-            let target_spacing_seconds = self.current_target_spacing.num_seconds();
-            let time_to_activation = Duration::seconds(remaining_blocks * target_spacing_seconds);
-            self.current_block_time += time_to_activation;
-            self.current_height = max_height;
-        }
+    /// Move the reference time and height to an era boundary using the current target spacing.
+    fn estimate_at(&mut self, height: block::Height) {
+        let remaining_blocks = height - self.current_height;
+        let target_spacing_seconds = self.current_target_spacing.num_seconds();
+        self.current_block_time += Duration::seconds(remaining_blocks * target_spacing_seconds);
+        self.current_height = height;
     }
 
     /// Calculate an estimate for the chain height using the `current_target_spacing`.
