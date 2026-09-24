@@ -220,15 +220,14 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         parameters::{
             subsidy::{
                 block_subsidy, cumulative_scheduled_issuance, funding_stream_address,
-                funding_stream_values, scheduled_block_subsidy, FundingStreamReceiver,
-                SubsidyError,
+                funding_stream_values, scheduled_block_subsidy, subsidy_is_valid,
+                FundingStreamReceiver, SubsidyError,
             },
             testnet::{
                 ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams, Parameters,
             },
         },
-        value_balance::ValueBalanceError,
     };
     use std::ops::Neg;
 
@@ -349,16 +348,16 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         ],
     );
     assert!(matches!(
-        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, seeded),
-        Err(ValueBalanceError::Subsidy(
-            SubsidyError::FundingStreamNotFound
-        )),
+        subsidy_is_valid(&underfunded, &network, total),
+        Err(SubsidyError::FundingStreamNotFound),
     ));
-    let mut other_parent = seeded;
-    other_parent.set_nsm_reserve_amount((reserve * 2)?);
-    assert!(block
-        .chain_value_pool_change(&HashMap::new(), deferred_change, &network, other_parent)
-        .is_err());
+    assert_eq!(
+        subsidy_is_valid(&block, &network, total)?,
+        deferred_change,
+        "the contextual check and the state derive the same deferred amount",
+    );
+    let other_parent_total = block_subsidy(height, &network, (reserve * 2)?)?;
+    assert!(subsidy_is_valid(&block, &network, other_parent_total).is_err());
 
     // Both a reissuance reorg and an activation-crossing reorg restore the exact prior pools.
     assert_eq!(after.add_chain_value_pool_change(change.neg())?, seeded);

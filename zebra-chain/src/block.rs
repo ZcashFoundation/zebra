@@ -269,8 +269,8 @@ impl Block {
     /// including UTXOs created by earlier transactions in this block. It can also contain unrelated
     /// UTXOs, which are ignored.
     ///
-    /// `previous_value_pools` must be the exact parent's balances. Reserve-funded coinbase and
-    /// funding outputs are validated against that context once NSM reissuance starts.
+    /// `previous_value_pools` must be the exact parent's balances, because NSM reissuance and the
+    /// reserve seed depend on the parent's reserve.
     ///
     /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
@@ -280,6 +280,28 @@ impl Block {
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.chain_value_pool_change_and_fees(
+            utxos,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+        .map(|(chain_value_pool_change, _transaction_fees)| chain_value_pool_change)
+    }
+
+    /// Returns the [`Self::chain_value_pool_change`] of this block, and its total transaction
+    /// fees.
+    ///
+    /// The fees are `None` before NU7, where they are not summed. From NU7, the contextual
+    /// subsidy checks use them, and summing them here avoids walking every input's UTXO again.
+    pub fn chain_value_pool_change_and_fees(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
+    {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
         // to propagate the first error instead.
@@ -333,35 +355,6 @@ impl Block {
             .checked_sub(additional)
             .expect("the difference of two nonnegative amounts fits a signed amount");
 
-        // These checks need the exact parent, not a best-tip estimate. Running them here uses
-        // the existing ordered contextual commit/proposal path, without waiting for a parent
-        // inside semantic verification or blocking the state writer.
-        if network
-            .nsm_reissuance_height()
-            .is_some_and(|start| height >= start)
-        {
-            let total = subsidy::block_subsidy(height, network, previous_reserve)
-                .map_err(ValueBalanceError::Subsidy)?;
-            let deferred = subsidy::subsidy_is_valid(self, network, total)
-                .map_err(ValueBalanceError::Subsidy)?;
-            subsidy::miner_fees_are_valid(
-                self.transactions.first().ok_or(ValueBalanceError::Subsidy(
-                    subsidy::SubsidyError::NoCoinbase,
-                ))?,
-                height,
-                transaction_fees,
-                total,
-                deferred,
-                network,
-            )
-            .map_err(ValueBalanceError::Subsidy)?;
-            if deferred != deferred_pool_balance_change {
-                return Err(ValueBalanceError::Subsidy(
-                    subsidy::SubsidyError::InvalidMinerFees,
-                ));
-            }
-        }
-
         let mut chain_value_pool_change = tx_pool_sum.neg();
         chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
         chain_value_pool_change.set_nsm_reserve_amount(nsm_reserve_change);
@@ -381,7 +374,10 @@ impl Block {
             );
         }
 
-        Ok(chain_value_pool_change)
+        Ok((
+            chain_value_pool_change,
+            needs_fees.then_some(transaction_fees),
+        ))
     }
 
     /// Compute the root of the authorizing data Merkle tree,
