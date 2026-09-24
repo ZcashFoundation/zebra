@@ -105,6 +105,7 @@ fn check_parameters_impl() {
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             nu7: Some(expected_activation_height),
             ..Default::default()
@@ -306,6 +307,7 @@ fn check_network_name() {
 #[test]
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             // Update this to be the latest network upgrade in Zebra, and update
             // the code below to expect the latest number of network upgrades.

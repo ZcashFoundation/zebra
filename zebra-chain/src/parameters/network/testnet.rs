@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use crate::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NonNegative, MAX_MONEY},
     block::{self, Height, HeightDiff},
     parameters::{
         checkpoint::list::{CheckpointList, TESTNET_CHECKPOINT_LIST},
@@ -15,9 +15,11 @@ use crate::{
             constants::testnet,
             constants::{
                 BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
-                POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
+                NSM_LN2_SCALED, NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
+                PRE_BLOSSOM_HALVING_INTERVAL,
             },
-            funding_stream_address_period, height_for_halving, FundingStreamReceiver,
+            cumulative_scheduled_issuance_zatoshis, funding_stream_address_period,
+            height_for_halving, scheduled_block_subsidy, FundingStreamReceiver,
             FundingStreamRecipient, FundingStreams, ParameterSubsidy,
         },
         Network, NetworkKind, NetworkUpgrade,
@@ -725,9 +727,9 @@ impl ParametersBuilder {
     /// height ranges by repeating the recipients that have been configured.
     ///
     /// This should be called after configuring the desired network upgrade activation heights.
-    /// Returns an error if the first halving height is unsupported, or configured funding
-    /// streams would have a zero address-change interval.
+    /// Validates the subsidy schedule as in [`Self::to_network`] before extending addresses.
     pub fn extend_funding_streams(mut self) -> Result<Self, ParametersBuilderError> {
+        self.validate_nsm_reissuance_height()?;
         let network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
 
@@ -776,8 +778,8 @@ impl ParametersBuilder {
     /// Sets the pre- and post-Blossom halving intervals for the [`Parameters`] being built.
     ///
     /// Returns an error if the interval is nonpositive, exceeds [`Height::MAX`], or funding
-    /// streams already lock it. The first halving height and funding stream address period
-    /// are validated by [`Self::to_network`] and [`Self::extend_funding_streams`].
+    /// streams already lock it. [`Self::to_network`] and [`Self::extend_funding_streams`] also
+    /// validate the full subsidy schedule, funding stream address period, and NSM coefficient.
     pub fn with_halving_interval(
         mut self,
         pre_blossom_halving_interval: HeightDiff,
@@ -886,8 +888,50 @@ impl ParametersBuilder {
         if height_for_halving(1, network).is_none()
             || (!self.funding_streams.is_empty()
                 && network.funding_stream_address_change_interval() == 0)
+            || (self.nsm_reissuance_height.is_some()
+                && u64::try_from(network.post_nu7_halving_interval())
+                    .map_or(true, |interval| interval > NSM_LN2_SCALED))
         {
             return Err(ParametersBuilderError::InvalidHalvingInterval);
+        }
+
+        // The signed halving numerator is smallest at the slow-start shift. Reject schedules
+        // where it would produce a negative index, rather than panicking in the subsidy helpers.
+        let shift = network.slow_start_shift();
+        let blossom = NetworkUpgrade::Blossom
+            .activation_height(network)
+            .ok_or(ParametersBuilderError::InvalidHalvingInterval)?;
+        let mut numerator = 0;
+        let mut interval = self.pre_blossom_halving_interval;
+        if shift >= blossom {
+            numerator = blossom - shift;
+            interval = self.post_blossom_halving_interval;
+        }
+        if let Some(nu7) = NetworkUpgrade::Nu7
+            .activation_height(network)
+            .filter(|&height| height <= shift)
+        {
+            let ratio = HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
+            numerator = numerator * ratio + (nu7 - shift) * (ratio - 1);
+            interval = network.post_nu7_halving_interval();
+        }
+        if numerator / interval < 0 {
+            return Err(ParametersBuilderError::InvalidHalvingInterval);
+        }
+
+        let mut total = cumulative_scheduled_issuance_zatoshis(Height::MAX, network)
+            .map_err(|_| ParametersBuilderError::InvalidSubsidySchedule)?;
+        // Genesis is unspendable, but NU7's historical reserve seed includes its scheduled
+        // subsidy even when no reissuance height has been configured yet.
+        if NetworkUpgrade::Nu7.activation_height(network).is_none() {
+            let genesis = scheduled_block_subsidy(Height::MIN, network)
+                .map_err(|_| ParametersBuilderError::InvalidSubsidySchedule)?;
+            total = total
+                .checked_sub(u64::from(genesis))
+                .ok_or(ParametersBuilderError::InvalidSubsidySchedule)?;
+        }
+        if i128::from(total) > i128::from(MAX_MONEY) {
+            return Err(ParametersBuilderError::InvalidSubsidySchedule);
         }
         Ok(())
     }
@@ -937,7 +981,12 @@ impl ParametersBuilder {
         Network::new_configured_testnet(self.clone().finish())
     }
 
-    /// Checks funding streams and converts the builder to a configured [`Network::Testnet`]
+    /// Checks subsidy, funding stream, and checkpoint parameters and builds a configured Testnet.
+    ///
+    /// Scheduled issuance through [`Height::MAX`] must not exceed [`MAX_MONEY`]. The scheduled
+    /// genesis subsidy is excluded only without NU7, which otherwise includes it in the NSM seed.
+    /// Reissuance also requires a post-NU7 halving interval no greater than `NSM_LN2_SCALED`,
+    /// so its integer coefficient is nonzero.
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
         self.validate_nsm_reissuance_height()?;
         let network = self.to_network_unchecked();
@@ -1125,6 +1174,8 @@ impl Parameters {
         if Some(true) == extend_funding_stream_addresses_as_required {
             parameters = parameters.extend_funding_streams()?;
         }
+        // Regtest fixes slow start at zero and its pre-Blossom interval at 144, so every
+        // activation schedule stays below MAX_MONEY and has a positive NSM coefficient.
         parameters.validate_nsm_reissuance_height()?;
 
         Ok(Self {

@@ -1,4 +1,4 @@
 project: zebra-chain
 kind: breaking
-body: '`parameters::testnet::ParametersBuilder::extend_funding_streams` now returns `Result<Self, ParametersBuilderError>`. Builder methods reject unsupported halving intervals and first-halving heights, and zero address periods when funding streams are configured.'
+body: '`parameters::testnet::ParametersBuilder::extend_funding_streams` now returns `Result<Self, ParametersBuilderError>`. Builder validation rejects unsupported halving schedules, issuance above the monetary cap, configured NSM reissuance with a zero coefficient, and zero address periods when funding streams are configured. ([#11514](https://github.com/ZcashFoundation/zebra/pull/11514))'
 time: 2026-09-24T01:49:19.73688302+02:00

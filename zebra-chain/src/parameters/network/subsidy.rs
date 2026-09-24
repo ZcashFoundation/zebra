@@ -600,6 +600,17 @@ pub fn cumulative_scheduled_issuance(
     height: Height,
     network: &Network,
 ) -> Result<Amount<NonNegative>, SubsidyError> {
+    Ok(Amount::try_from(cumulative_scheduled_issuance_zatoshis(
+        height, network,
+    )?)?)
+}
+
+/// Sums the schedule before applying the monetary cap, so builder validation can exclude the
+/// unspendable genesis subsidy on networks without NU7's historical reserve seed.
+pub(super) fn cumulative_scheduled_issuance_zatoshis(
+    height: Height,
+    network: &Network,
+) -> Result<u64, SubsidyError> {
     let end = u64::from(height) + 1;
     let mut slow_end = u64::from(network.slow_start_interval()).min(end);
     // The schedule stops after 64 halvings, even during slow start on custom networks.
@@ -667,7 +678,7 @@ pub fn cumulative_scheduled_issuance(
             .ok_or(SubsidyError::Overflow)?;
         start = low;
     }
-    Ok(Amount::try_from(total)?)
+    Ok(total)
 }
 
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
