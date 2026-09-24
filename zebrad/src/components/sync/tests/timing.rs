@@ -15,7 +15,7 @@ use zebra_chain::{
     parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_network::constants::{
-    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_BUSY_PEER_REFUSAL_DELAY,
+    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
     INVENTORY_ROTATION_INTERVAL, REQUEST_TIMEOUT,
 };
 use zebra_state::ChainTipSender;
@@ -97,18 +97,18 @@ fn ensure_timeouts_consistent() {
          before we expire all inventory"
     );
 
-    // Model the all-local-refusal case, not mixed immediate peer misses.
-    // The retry limit is the constant 3, so conversion to u32 is lossless.
+    // A busy peer can take up to `REQUEST_TIMEOUT` to become ready again, and each block request
+    // only waits for a busy peer that might have the block for a limited time.
     let missing_block_attempts =
         (BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1) * (u32::from(MAX_BLOCK_REOBTAIN_RETRIES) + 1);
     assert!(
-        INVENTORY_BUSY_PEER_REFUSAL_DELAY * missing_block_attempts > REQUEST_TIMEOUT,
-        "the all-local-refusal schedule should outlast one peer request timeout"
+        INVENTORY_BUSY_PEER_WAIT_TIMEOUT * missing_block_attempts > REQUEST_TIMEOUT,
+        "the syncer should keep retrying a missing block until a busy peer could be ready again"
     );
     assert!(
-        INVENTORY_BUSY_PEER_REFUSAL_DELAY < BLOCK_DOWNLOAD_TIMEOUT / 4,
-        "refusals should leave response time within each attempt; inner retries include timeouts, \
-         but exhausted timeouts do not use the hash-level NotFound reobtain path"
+        INVENTORY_BUSY_PEER_WAIT_TIMEOUT < BLOCK_DOWNLOAD_TIMEOUT / 4,
+        "waiting for a busy peer should be much faster than block download timeouts, \
+         because timed out downloads are not re-requested"
     );
 
     // The default peer crawler interval should be at least
