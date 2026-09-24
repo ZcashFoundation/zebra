@@ -782,11 +782,7 @@ pub fn nsm_fee_contribution(
     // A `NonNegative` amount is never negative, and `transaction_fees` is at most `MAX_MONEY`,
     // which is under 2^53, so multiplying it by 6 can not overflow a `u64`. The `floor()` in the
     // spec is implicit in Rust's integer division.
-    let fees =
-        u64::try_from(transaction_fees.zatoshis()).map_err(|source| amount::Error::Convert {
-            value: i128::from(transaction_fees.zatoshis()),
-            source,
-        })?;
+    let fees = u64::from(transaction_fees);
 
     Amount::try_from(fees * NSM_FEE_NUMERATOR / NSM_FEE_DENOMINATOR)
 }
@@ -828,11 +824,10 @@ pub fn nsm_subsidy(
     network: &Network,
     reserve_before: Amount<NonNegative>,
 ) -> Result<Amount<NonNegative>, amount::Error> {
-    let Some(reissuance_height) = network.nsm_reissuance_height() else {
-        return Ok(Amount::zero());
-    };
-
-    if height < reissuance_height {
+    if network
+        .nsm_reissuance_height()
+        .is_none_or(|reissuance_height| height < reissuance_height)
+    {
         return Ok(Amount::zero());
     }
 

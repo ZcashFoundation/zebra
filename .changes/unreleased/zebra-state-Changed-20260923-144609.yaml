@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: Mining-template minimum-difficulty timestamps use the candidate block upgrade, including the 150-second Testnet threshold at NU7 activation.
-time: 2026-09-23T14:46:09.8786459+02:00

@@ -360,48 +360,28 @@ fn nu7_network(nu7_height: u32) -> Network {
 fn zip_218_target_spacing_and_averaging_window() {
     let _init_guard = zebra_test::init();
 
-    assert_eq!(
-        NetworkUpgrade::Nu6_3.target_spacing(),
-        chrono::Duration::seconds(75)
-    );
-    assert_eq!(
-        NetworkUpgrade::Nu7.target_spacing(),
-        chrono::Duration::seconds(25)
-    );
-
-    assert_eq!(NetworkUpgrade::Nu6_3.averaging_window(), 17);
-    assert_eq!(NetworkUpgrade::Nu7.averaging_window(), 102);
-
-    // The wall-clock smoothing window is preserved across the transition: 17 * 75 == 1275 and
-    // 102 * 25 == 2550. ZIP 218 deliberately doubles it, to halve the difficulty noise that the
-    // 3x faster blocks would otherwise add.
-    assert_eq!(
-        NetworkUpgrade::Nu6_3.averaging_window_timespan(),
-        chrono::Duration::seconds(1275)
-    );
-    assert_eq!(
-        NetworkUpgrade::Nu7.averaging_window_timespan(),
-        chrono::Duration::seconds(2550)
-    );
-
-    // The spacing change is visible through the height-dependent accessors too.
     let network = nu7_network(1_000);
-    assert_eq!(
-        NetworkUpgrade::target_spacing_for_height(&network, Height(999)),
-        chrono::Duration::seconds(75)
-    );
-    assert_eq!(
-        NetworkUpgrade::target_spacing_for_height(&network, Height(1_000)),
-        chrono::Duration::seconds(25)
-    );
-    assert_eq!(
-        NetworkUpgrade::averaging_window_for_height(&network, Height(999)),
-        17
-    );
-    assert_eq!(
-        NetworkUpgrade::averaging_window_for_height(&network, Height(1_000)),
-        102
-    );
+    // ZIP 218 triples the block rate and doubles the wall-clock smoothing window.
+    for (upgrade, height, spacing, window, timespan) in [
+        (NetworkUpgrade::Nu6_3, Height(999), 75, 17, 1275),
+        (NetworkUpgrade::Nu7, Height(1_000), 25, 102, 2550),
+    ] {
+        let spacing = chrono::Duration::seconds(spacing);
+        assert_eq!(upgrade.target_spacing(), spacing);
+        assert_eq!(upgrade.averaging_window(), window);
+        assert_eq!(
+            upgrade.averaging_window_timespan(),
+            chrono::Duration::seconds(timespan)
+        );
+        assert_eq!(
+            NetworkUpgrade::target_spacing_for_height(&network, height),
+            spacing
+        );
+        assert_eq!(
+            NetworkUpgrade::averaging_window_for_height(&network, height),
+            window
+        );
+    }
 }
 
 /// ZIP 218 divides the block subsidy by a further factor of 3 from NU7, so that issuance per unit
@@ -417,14 +397,9 @@ fn zip_218_block_subsidy() -> Result<(), Report> {
     let pre_nu7_subsidy = block_subsidy(pre_nu7, &network, Amount::zero())?;
     let nu7_subsidy = block_subsidy(nu7, &network, Amount::zero())?;
 
-    // NU7 activates well before the first halving on this network, so both heights are in the
-    // same halving and the only difference is the ZIP 218 divisor.
+    // Both heights are in the same halving, so only the ZIP 218 divisor changes.
     assert_eq!(halving(pre_nu7, &network), halving(nu7, &network));
     assert_eq!(nu7_subsidy, (pre_nu7_subsidy / 3)?);
-
-    // Three post-NU7 blocks issue at most as much as one pre-NU7 block, so the issuance rate per
-    // unit of wall clock time does not increase.
-    assert!((nu7_subsidy * 3)? <= pre_nu7_subsidy);
 
     Ok(())
 }
@@ -475,42 +450,29 @@ fn nsm_fee_contribution_and_miner_fees() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = nu7_network(1_000);
-    let pre_nu7 = Height(999);
-    let nu7 = Height(1_000);
-
-    // Before NU7, the miner keeps the whole of the fees.
-    let fees = Amount::<NonNegative>::try_from(100_003)?;
-    assert_eq!(
-        nsm_fee_contribution(pre_nu7, &network, fees)?,
-        Amount::<NonNegative>::zero(),
-    );
-    assert_eq!(miner_fees(pre_nu7, &network, fees)?, fees);
-
-    // From NU7, 60% is removed, rounded down, so the miner keeps the rounding.
-    assert_eq!(
-        nsm_fee_contribution(nu7, &network, fees)?,
-        Amount::<NonNegative>::try_from(60_001)?,
-    );
-    assert_eq!(
-        miner_fees(nu7, &network, fees)?,
-        Amount::<NonNegative>::try_from(40_002)?,
-    );
-
-    // The contribution and the miner's fees always add back up to the whole of the fees.
-    for fees in [0, 1, 9, 10, 11, 999, 1_000_000_007] {
+    // Before NU7 all fees go to the miner; afterward 60% goes to the reserve, rounded down.
+    for (height, fees, contribution) in [
+        (999, 100_003, 0),
+        (1_000, 100_003, 60_001),
+        (1_000, 0, 0),
+        (1_000, 1, 0),
+        (1_000, 9, 5),
+        (1_000, 10, 6),
+        (1_000, 11, 6),
+        (1_000, 999, 599),
+        (1_000, 1_000_000_007, 600_000_004),
+    ] {
         let fees = Amount::<NonNegative>::try_from(fees)?;
+        let contribution = Amount::<NonNegative>::try_from(contribution)?;
         assert_eq!(
-            (nsm_fee_contribution(nu7, &network, fees)? + miner_fees(nu7, &network, fees)?)?,
-            fees,
-            "the NSM contribution and the miner's fees must partition the fees",
+            nsm_fee_contribution(Height(height), &network, fees)?,
+            contribution
+        );
+        assert_eq!(
+            miner_fees(Height(height), &network, fees)?,
+            (fees - contribution)?
         );
     }
-
-    // A block with no fees contributes nothing.
-    assert_eq!(
-        nsm_fee_contribution(nu7, &network, Amount::<NonNegative>::zero())?,
-        Amount::<NonNegative>::zero(),
-    );
 
     Ok(())
 }
@@ -544,32 +506,18 @@ fn nsm_subsidy_reissuance() -> Result<(), Report> {
         .with_funding_streams(Vec::new())
         .to_network()?;
 
-    // Nothing is reissued below the reissuance height.
-    assert_eq!(
-        nsm_subsidy(Height(999_999), &network, reserve)?,
-        Amount::<NonNegative>::zero(),
-    );
-
-    // At and above it, the subsidy is `NSM_SUBSIDY_FRACTION` of the reserve: a reserve of
-    // 10^10 zatoshi reissues exactly 1375 zatoshi per block.
-    assert_eq!(
-        nsm_subsidy(Height(1_000_000), &network, reserve)?,
-        Amount::<NonNegative>::try_from(1375)?,
-    );
-
-    // Rounding is upward, so any positive reserve is eventually reissued, however small.
-    assert_eq!(
-        nsm_subsidy(
-            Height(1_000_000),
-            &network,
-            Amount::<NonNegative>::try_from(1)?
-        )?,
-        Amount::<NonNegative>::try_from(1)?,
-    );
-    assert_eq!(
-        nsm_subsidy(Height(1_000_000), &network, Amount::<NonNegative>::zero())?,
-        Amount::<NonNegative>::zero(),
-    );
+    // Reissuance starts at the configured height and rounds up, even for a one-zatoshi reserve.
+    for (height, reserve, expected) in [
+        (999_999, 10_000_000_000_i64, 0),
+        (1_000_000, 10_000_000_000, 1375),
+        (1_000_000, 1, 1),
+        (1_000_000, 0, 0),
+    ] {
+        assert_eq!(
+            nsm_subsidy(Height(height), &network, Amount::try_from(reserve)?)?,
+            Amount::<NonNegative>::try_from(expected)?,
+        );
+    }
 
     Ok(())
 }
@@ -617,51 +565,22 @@ fn funding_stream_address_period_floors_negative_heights() {
     let period_zero_start =
         (first_halving - post_blossom).expect("the zero point is a valid height");
 
-    assert_eq!(
-        funding_stream_address_period(period_zero_start, &network),
-        0,
-        "the height with a zero numerator is in period 0",
-    );
-    assert_eq!(
-        funding_stream_address_period(
-            ((period_zero_start + interval).expect("valid height") - 1).expect("valid height"),
-            &network
-        ),
-        0,
-        "the last height of period 0 is still in period 0",
-    );
-    assert_eq!(
-        funding_stream_address_period(
-            (period_zero_start + interval).expect("valid height"),
-            &network
-        ),
-        1,
-        "the next height starts period 1",
-    );
-
-    // Truncating division would put these heights in period 0 as well, merging them with the
-    // period above and shifting every later difference down by one.
-    assert_eq!(
-        funding_stream_address_period((period_zero_start - 1).expect("valid height"), &network),
-        -1,
-        "the height just below the zero point is in period -1, not period 0",
-    );
-    assert_eq!(
-        funding_stream_address_period(
-            (period_zero_start - interval).expect("valid height"),
-            &network
-        ),
-        -1,
-        "the first height of period -1 is in period -1",
-    );
-    assert_eq!(
-        funding_stream_address_period(
-            ((period_zero_start - interval).expect("valid height") - 1).expect("valid height"),
-            &network
-        ),
-        -2,
-        "the height below period -1 is in period -2",
-    );
+    // Include both ends of periods -1 and 0: truncation would merge them at zero.
+    for (offset, expected) in [
+        (0, 0),
+        (interval - 1, 0),
+        (interval, 1),
+        (-1, -1),
+        (-interval, -1),
+        (-interval - 1, -2),
+    ] {
+        let height = (period_zero_start + offset).expect("valid height");
+        assert_eq!(
+            funding_stream_address_period(height, &network),
+            expected,
+            "incorrect funding stream period at {height:?}",
+        );
+    }
 }
 
 /// `height_for_first_halving()` derives the height from `height_for_halving(1)` rather than
