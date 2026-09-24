@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Fixed
-body: '`PeerSet` now routes single-hash `BlocksByHash` requests to ready peers that advertised `NODE_NETWORK` before other peers, and delays its synthetic `NotFoundRegistry` error by `INVENTORY_BUSY_PEER_REFUSAL_DELAY` (1.5 seconds) while a busy peer might still have the block. Refusals are counted in the `zcash.net.peer_set.inventory_refusal` metric.'
+body: '`PeerSet` now routes single-hash `BlocksByHash` requests to ready peers that advertised `NODE_NETWORK` before other peers, and queues them while no ready peer can serve the block but a busy peer might have it. A queued request is routed to the first of those busy peers that becomes ready, or refused with a synthetic `NotFoundRegistry` error after `INVENTORY_BUSY_PEER_WAIT_TIMEOUT` (1.5 seconds). Queued requests are counted in the `zcash.net.peer_set.inventory_queued` metric, and refusals in the `zcash.net.peer_set.inventory_refusal` metric.'
 time: 2026-09-24T00:38:27.544666125Z

@@ -26,7 +26,7 @@ use zebra_chain::{
 use crate::{
     constants::{
         CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
-        INVENTORY_BUSY_PEER_REFUSAL_DELAY, REQUEST_TIMEOUT,
+        INVENTORY_BUSY_PEER_WAIT_TIMEOUT, REQUEST_TIMEOUT,
     },
     peer::{
         ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
@@ -1291,13 +1291,13 @@ fn peer_set_route_block_prefers_serving_peer_order(serving_first: bool) {
 }
 
 /// Check that when the only block-serving peer is busy, block requests wait for it, instead of
-/// going to a ready non-serving peer, or being refused instantly. After the delayed refusal, a
-/// retry reaches the serving peer once it is ready again.
+/// going to a ready non-serving peer, or being refused instantly. The waiting request is routed to
+/// the serving peer as soon as it is ready again, without a retry.
 ///
 /// This is the mainnet stall from Zebra 6.4.1: while all serving peers were busy, the syncer used
 /// up its retries on instant local refusals, and dropped the block after the chain tip.
 #[test]
-fn peer_set_delays_block_refusal_while_serving_peer_busy() {
+fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
@@ -1326,7 +1326,7 @@ fn peer_set_delays_block_refusal_while_serving_peer_busy() {
             "only the non-serving peer should be ready"
         );
 
-        let mut refused_fut = peer_ready.call(block_request(2));
+        let mut queued_fut = peer_ready.call(block_request(2));
 
         assert_eq!(
             received_request(&mut handles[1]),
@@ -1334,25 +1334,85 @@ fn peer_set_delays_block_refusal_while_serving_peer_busy() {
             "block request should not be routed to the non-serving peer while a serving peer is busy",
         );
         assert!(
-            timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, &mut refused_fut)
+            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
                 .await
                 .is_err(),
-            "refusal should be delayed while a serving peer is busy",
+            "block request should wait while a serving peer is busy",
         );
-        assert_not_found_registry(refused_fut.await);
 
         // Let the serving peer take its queued requests, so it becomes ready again.
         assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
         assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
 
-        let peer_ready = peer_set.ready().await.expect("peer set service is always ready");
-        let _retry_fut = peer_ready.call(block_request(2));
+        // Polling the peer set routes the waiting request to the newly ready serving peer.
+        peer_set.ready().await.expect("peer set service is always ready");
 
-        assert_eq!(
-            received_request(&mut handles[0]),
-            Some(block_request(2)),
-            "the retried block request should be routed to the now-ready serving peer",
+        let ClientRequest { request, tx, .. } = handles[0]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("the waiting block request should be routed to the now-ready serving peer");
+        assert_eq!(request, block_request(2));
+        assert_eq!(received_request(&mut handles[1]), None);
+
+        let _ = tx.send(Ok(Response::Nil));
+        let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+            .await
+            .expect("the waiting request should resolve to the serving peer's response");
+        assert!(
+            matches!(response, Ok(Response::Nil)),
+            "unexpected response: {response:?}"
         );
+    });
+}
+
+/// Check that a waiting block request is refused after [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] if the
+/// busy serving peer doesn't become ready, and that it isn't routed to that peer afterwards.
+#[test]
+fn peer_set_refuses_queued_block_request_after_wait_timeout() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let mut queued_fut = peer_ready.call(block_request(2));
+
+        assert!(
+            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, &mut queued_fut)
+                .await
+                .is_err(),
+            "refusal should wait while a serving peer is busy",
+        );
+        assert_not_found_registry(queued_fut.await);
+
+        // Once the serving peer is ready again, the refused request isn't routed to it.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        assert_eq!(received_request(&mut handles[0]), None);
+        assert_eq!(received_request(&mut handles[1]), None);
     });
 }
 
@@ -1445,8 +1505,8 @@ fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
     });
 }
 
-/// Check that delayed refusals give a busy serving peer time to recover, even if it only recovers
-/// just before its request would time out.
+/// Check that the syncer's retries give a busy serving peer time to recover, even if it only
+/// recovers just before its request would time out, and while the peer set is idle between retries.
 #[test]
 fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
     let (runtime, _init_guard) = zebra_test::init_async();
@@ -1507,13 +1567,13 @@ fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
     });
 }
 
-/// Check that a busy non-serving peer only delays the refusal of a block that was advertised.
+/// Check that block requests only wait for a busy non-serving peer if the block was advertised.
 ///
 /// Non-serving peers usually can't serve historic blocks, so waiting for one to finish its current
 /// request would only slow down the refusal. But peers advertise recent blocks, which non-serving
 /// peers can usually serve.
 #[test]
-fn peer_set_only_delays_block_refusal_for_busy_non_serving_peer_if_advertised() {
+fn peer_set_only_waits_for_busy_non_serving_peer_if_block_advertised() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
@@ -1575,13 +1635,13 @@ fn peer_set_only_delays_block_refusal_for_busy_non_serving_peer_if_advertised() 
         );
 
         let refused_fut = peer_ready.call(block_request(2));
-        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+        let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, refused_fut)
             .await
-            .expect("a busy non-serving peer should not delay the refusal of a historic block");
+            .expect("a historic block request should not wait for a busy non-serving peer");
         assert_not_found_registry(response);
 
-        // A recent block that the busy non-serving peer advertised: the refusal is delayed, so a
-        // retry can reach that peer once it is ready.
+        // A recent block that the busy non-serving peer advertised: the request waits for that
+        // peer to become ready.
         let advertised_hash = block::Hash([3; 32]);
         send_inventory_change(InventoryStatus::new_missing(
             InventoryHash::Block(advertised_hash),
@@ -1602,10 +1662,10 @@ fn peer_set_only_delays_block_refusal_for_busy_non_serving_peer_if_advertised() 
 
         let mut refused_fut = peer_ready.call(block_request(3));
         assert!(
-            timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, &mut refused_fut)
+            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, &mut refused_fut)
                 .await
                 .is_err(),
-            "a busy non-serving peer should delay the refusal of a block it advertised",
+            "a block request should wait for a busy non-serving peer that advertised it",
         );
         assert_not_found_registry(refused_fut.await);
     });
@@ -1658,7 +1718,7 @@ fn peer_set_refuses_block_instantly_if_all_peers_missing() {
             .expect("peer set service is always ready");
         let refused_fut = peer_ready.call(block_request(2));
 
-        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+        let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, refused_fut)
             .await
             .expect("refusal should be instant when every peer is missing the block");
         assert_not_found_registry(response);
@@ -1710,7 +1770,7 @@ fn peer_set_refuses_transaction_instantly_while_serving_peer_busy() {
             .expect("peer set service is always ready");
         let refused_fut = peer_ready.call(Request::TransactionsById(iter::once(tx_id).collect()));
 
-        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+        let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 2, refused_fut)
             .await
             .expect("transaction refusals should not be delayed");
         assert_not_found_registry(response);

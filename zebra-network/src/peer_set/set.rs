@@ -94,7 +94,7 @@
 //! [ZIP-201]: https://zips.z.cash/zip-0201
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     convert,
     fmt::Debug,
     marker::PhantomData,
@@ -128,7 +128,7 @@ use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
-    constants::{INVENTORY_BUSY_PEER_REFUSAL_DELAY, MIN_PEER_SET_LOG_INTERVAL},
+    constants::{INVENTORY_BUSY_PEER_WAIT_TIMEOUT, MIN_PEER_SET_LOG_INTERVAL},
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
@@ -161,6 +161,21 @@ pub struct MorePeers;
 pub struct CancelClientWork;
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
+
+/// A block request that no ready peer could serve, waiting for a busy peer that might have the
+/// block to become ready.
+struct QueuedInvRequest {
+    /// The request to route.
+    request: Request,
+
+    /// The requested inventory.
+    hash: InventoryHash,
+
+    /// Receives the response future of the peer the request is routed to.
+    ///
+    /// Dropping the sender refuses the request.
+    response_sender: oneshot::Sender<ResponseFuture>,
+}
 
 /// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
 /// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
@@ -260,6 +275,13 @@ where
     /// whether a busy peer can serve blocks. Stale keys of disconnected peers are pruned by
     /// [`Self::prune_disconnected_serving_keys`].
     serving_peer_keys: HashSet<D::Key>,
+
+    /// Block requests that are waiting for a busy peer that might have the block, in the order
+    /// they were made.
+    ///
+    /// Each request is routed to the first of those peers that becomes ready, or refused once
+    /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] expires, or once no busy peer might have the block.
+    queued_inv_requests: VecDeque<QueuedInvRequest>,
 
     /// The most recent sidecar broadcast (a block advert or a pushed
     /// transaction) that has not been delivered to all connected zcashd-compat
@@ -399,6 +421,7 @@ where
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
+            queued_inv_requests: VecDeque::new(),
             queued_sidecar_broadcast: None,
 
             // Busy peers
@@ -507,6 +530,9 @@ where
             let _ = handle.send(CancelClientWork);
         }
         self.unready_services = FuturesUnordered::new();
+
+        // Refuse queued requests, because there are no peers left to route them to.
+        self.queued_inv_requests.clear();
 
         // Close the MorePeers channel for all senders,
         // so we don't add more peers to a shut down peer set.
@@ -1058,18 +1084,41 @@ where
             .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
     }
 
-    /// Returns true if a busy peer that isn't in `missing_peer_list` might have some inventory.
+    /// Returns true if a busy peer might be able to serve the block `hash`.
     ///
-    /// If `serving_only` is true, only considers peers that can serve historic blocks.
-    fn busy_peer_might_have(
-        &self,
-        missing_peer_list: &HashSet<PeerSocketAddr>,
-        serving_only: bool,
-    ) -> bool {
+    /// Only busy peers that can serve historic blocks count, unless some peer advertised the block.
+    /// Peers only advertise recent blocks, which non-serving peers can usually serve.
+    ///
+    /// Always returns false for transactions: transaction downloads don't retry, so waiting for a
+    /// busy peer would only slow them down.
+    fn busy_peer_might_have(&self, hash: InventoryHash) -> bool {
+        if !matches!(hash, InventoryHash::Block(_)) {
+            return false;
+        }
+
+        let missing_peer_list = self.missing_peer_list(hash);
+        let serving_only = !self.is_advertised(hash);
+
         self.cancel_handles.keys().any(|key| {
             !missing_peer_list.contains(key)
                 && (!serving_only || self.serving_peer_keys.contains(key))
         })
+    }
+
+    /// Returns the peers that recently answered `notfound` for `hash`.
+    fn missing_peer_list(&self, hash: InventoryHash) -> HashSet<PeerSocketAddr> {
+        self.inventory_registry
+            .missing_peers(hash)
+            .copied()
+            .collect()
+    }
+
+    /// Returns true if any peer recently advertised `hash`.
+    fn is_advertised(&self, hash: InventoryHash) -> bool {
+        self.inventory_registry
+            .advertising_peers(hash)
+            .next()
+            .is_some()
     }
 
     /// Accesses a ready endpoint by `key` and returns its current load.
@@ -1144,17 +1193,51 @@ where
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
     ///
-    /// If no ready peer can be used, returns a synthetic
-    /// [`NotFoundRegistry`](PeerError::NotFoundRegistry) error. For blocks, the error is delayed by
-    /// [`INVENTORY_BUSY_PEER_REFUSAL_DELAY`] while a busy peer might still have the block, so
-    /// retries can reach that peer once it is ready.
+    /// If no ready peer can be used, but a busy peer might have the block, queues the request
+    /// until one of those busy peers becomes ready. See [`Self::route_queued_inv_requests`].
     ///
-    /// Uses P2C to route requests to the least loaded peer in each list.
+    /// Otherwise, returns a synthetic [`NotFoundRegistry`](PeerError::NotFoundRegistry) error.
     fn route_inv(
         &mut self,
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
+        if let Some(peer) = self.select_inv_peer(hash) {
+            return self.call_ready_peer(peer, req);
+        }
+
+        if self.busy_peer_might_have(hash) {
+            return self.queue_inv_request(req, hash);
+        }
+
+        tracing::debug!(
+            ?hash,
+            "no ready or busy peer can serve the inventory, failing request"
+        );
+        metrics::counter!("zcash.net.peer_set.inventory_refusal", "kind" => "instant").increment(1);
+
+        async move {
+            // Let other tasks run, so a retry request might get different ready peers.
+            tokio::task::yield_now().await;
+
+            // # Security
+            //
+            // Avoid routing requests to peers that are missing inventory.
+            // If we kept trying doomed requests, peers that are missing our requested inventory
+            // could take up a large amount of our bandwidth and retry limits.
+            Err(SharedPeerError::from(PeerError::NotFoundRegistry(vec![
+                hash,
+            ])))
+        }
+        .map_err(Into::into)
+        .boxed()
+    }
+
+    /// Returns a ready peer to route an inventory request for `hash` to, using the rules in
+    /// [`Self::route_inv`], or `None` if no ready peer can be used.
+    ///
+    /// Uses P2C to choose the least loaded peer in each list.
+    fn select_inv_peer(&self, hash: InventoryHash) -> Option<D::Key> {
         let advertising_peer_list = self
             .inventory_registry
             .advertising_peers(hash)
@@ -1170,21 +1253,12 @@ where
         // peers would be able to influence our choice by switching addresses.
         // But we need the choice to be random,
         // so that a peer can't provide all our inventory responses.
-        let peer = self.select_p2c_peer_from_list(&advertising_peer_list);
-
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
+        if let Some(peer) = self.select_p2c_peer_from_list(&advertising_peer_list) {
             tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+            return Some(peer);
         }
 
-        let missing_peer_list: HashSet<PeerSocketAddr> = self
-            .inventory_registry
-            .missing_peers(hash)
-            .copied()
-            .collect();
+        let missing_peer_list = self.missing_peer_list(hash);
         let maybe_peer_list: HashSet<PeerSocketAddr> = self
             .ready_services
             .keys()
@@ -1213,61 +1287,113 @@ where
         // The inventory registry is best-effort, and can drop advertisements under load. Then a
         // recent block waits for a serving peer, and the block is fetched again when it is
         // advertised again, or by the syncer.
-        let is_advertised = self
-            .inventory_registry
-            .advertising_peers(hash)
-            .next()
-            .is_some();
+        //
+        // An advertised block makes `busy_peer_might_have()` count busy non-serving peers too, so
+        // check it first.
         if peer.is_none()
             && is_block
-            && (is_advertised || !self.busy_peer_might_have(&missing_peer_list, true))
+            && (self.is_advertised(hash) || !self.busy_peer_might_have(hash))
         {
             peer = self.select_p2c_peer_from_list(&fallback_peer_list);
         }
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
+        if peer.is_some() {
             tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
         }
 
-        // Only wait for busy peers that could serve the block, like the fallback above: any busy
-        // peer for an advertised block, but only busy serving peers for a historic block.
-        // Transaction downloads don't retry, so delaying their refusal would only slow them down.
-        let delay_refusal =
-            is_block && self.busy_peer_might_have(&missing_peer_list, !is_advertised);
-        let kind = if delay_refusal { "delayed" } else { "instant" };
+        peer
+    }
 
+    /// Sends `req` to the ready peer `key`, and returns its response future.
+    fn call_ready_peer(
+        &mut self,
+        key: D::Key,
+        req: Request,
+    ) -> <Self as tower::Service<Request>>::Future {
+        let mut svc = self
+            .take_ready_service(&key)
+            .expect("selected peer must be ready");
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+
+        fut.map_err(Into::into).boxed()
+    }
+
+    /// Queues an inventory request until a busy peer that might have `hash` becomes ready.
+    ///
+    /// The returned future resolves to that peer's response, or to a synthetic
+    /// [`NotFoundRegistry`](PeerError::NotFoundRegistry) error if the request is refused.
+    fn queue_inv_request(
+        &mut self,
+        request: Request,
+        hash: InventoryHash,
+    ) -> <Self as tower::Service<Request>>::Future {
         tracing::debug!(
             ?hash,
-            kind,
-            "no ready peer can serve the inventory, failing request"
+            "no ready peer can serve the inventory, waiting for a busy peer"
         );
-        metrics::counter!("zcash.net.peer_set.inventory_refusal", "kind" => kind).increment(1);
+        metrics::counter!("zcash.net.peer_set.inventory_queued").increment(1);
+
+        let (response_sender, response_receiver) = oneshot::channel();
+        self.queued_inv_requests.push_back(QueuedInvRequest {
+            request,
+            hash,
+            response_sender,
+        });
 
         async move {
-            if delay_refusal {
-                // A busy peer might have the block. Wait for it to finish its current request, so
-                // a retry request can be routed to it.
-                tokio::time::sleep(INVENTORY_BUSY_PEER_REFUSAL_DELAY).await;
-            } else {
-                // Let other tasks run, so a retry request might get different ready peers.
-                tokio::task::yield_now().await;
+            match tokio::time::timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, response_receiver).await {
+                Ok(Ok(response_fut)) => response_fut.await,
+
+                // The wait timed out, or the peer set refused the request, because no busy peer
+                // might have the inventory any more.
+                Ok(Err(oneshot::Canceled)) | Err(_) => {
+                    tracing::debug!(
+                        ?hash,
+                        "no busy peer that might have the inventory became ready, failing request"
+                    );
+                    metrics::counter!("zcash.net.peer_set.inventory_refusal", "kind" => "waited")
+                        .increment(1);
+
+                    // # Security
+                    //
+                    // See `route_inv()`.
+                    Err(SharedPeerError::from(PeerError::NotFoundRegistry(vec![hash])).into())
+                }
+            }
+        }
+        .boxed()
+    }
+
+    /// Routes queued inventory requests to ready peers that might have their inventory, in the
+    /// order they were queued. Refuses queued requests once no busy peer might have their
+    /// inventory.
+    ///
+    /// Queued requests are only routed when the peer set is polled, so the wait timeout in
+    /// [`Self::queue_inv_request`] refuses them if the peer set is idle.
+    fn route_queued_inv_requests(&mut self) {
+        // A queued request can only be routed to a ready peer. Requests that are waiting for peers
+        // that have disconnected are refused by the wait timeout.
+        if self.ready_services.is_empty() {
+            return;
+        }
+
+        for queued in std::mem::take(&mut self.queued_inv_requests) {
+            // The wait timed out, or the caller dropped the request.
+            if queued.response_sender.is_canceled() {
+                continue;
             }
 
-            // # Security
-            //
-            // Avoid routing requests to peers that are missing inventory.
-            // If we kept trying doomed requests, peers that are missing our requested inventory
-            // could take up a large amount of our bandwidth and retry limits.
-            Err(SharedPeerError::from(PeerError::NotFoundRegistry(vec![
-                hash,
-            ])))
+            if let Some(peer) = self.select_inv_peer(queued.hash) {
+                let response_fut = self.call_ready_peer(peer, queued.request);
+                // If the receiver was dropped since the check above, dropping the response
+                // future cancels the peer's request.
+                let _ = queued.response_sender.send(response_fut);
+            } else if self.busy_peer_might_have(queued.hash) {
+                self.queued_inv_requests.push_back(queued);
+            }
+            // Otherwise, dropping the sender refuses the request.
         }
-        .map_err(Into::into)
-        .boxed()
     }
 
     /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
@@ -1674,6 +1800,8 @@ where
 
         self.prune_disconnected_sidecar_keys();
         self.prune_disconnected_serving_keys();
+        // Route waiting block requests first: their callers are waiting for a response.
+        self.route_queued_inv_requests();
         self.broadcast_all_queued();
         self.send_queued_sidecar_broadcast();
 
