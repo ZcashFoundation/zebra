@@ -1283,7 +1283,7 @@ where
             InvRoute::Refuse => {
                 tracing::debug!(
                     ?hash,
-                    "no ready or busy peer can serve the inventory, failing request"
+                    "no peer that might have the inventory can take the request, failing request"
                 );
                 metrics::counter!("zcash.net.peer_set.inventory_refusal", "kind" => "instant")
                     .increment(1);
@@ -1311,10 +1311,14 @@ where
     ///
     /// Uses P2C to choose the least loaded peer in each list.
     fn select_inv_route(&self, hash: InventoryHash) -> InvRoute<D::Key> {
-        let advertising_peer_list = self
+        let advertising_peers: Vec<PeerSocketAddr> = self
             .inventory_registry
             .advertising_peers(hash)
-            .filter(|&addr| self.ready_services.contains_key(addr))
+            .copied()
+            .collect();
+        let advertising_peer_list = advertising_peers
+            .iter()
+            .filter(|addr| self.ready_services.contains_key(addr))
             .copied()
             .collect();
 
@@ -1340,11 +1344,17 @@ where
         // Only block routing depends on peer services: non-serving peers can still serve
         // mempool transactions.
         let is_block = matches!(hash, InventoryHash::Block(_));
-        let (preferred_peer_list, fallback_peer_list): (HashSet<_>, HashSet<_>) = self
-            .ready_services
-            .keys()
-            .filter(|addr| !missing_peer_list.contains(addr))
-            .partition(|key| !is_block || self.serving_peer_keys.contains(key));
+        let ready_peers_with_services = |serving: bool| -> HashSet<PeerSocketAddr> {
+            self.ready_services
+                .keys()
+                .filter(|addr| {
+                    !missing_peer_list.contains(addr)
+                        && (!is_block || self.serving_peer_keys.contains(addr) == serving)
+                })
+                .copied()
+                .collect()
+        };
+        let preferred_peer_list = ready_peers_with_services(true);
 
         // Security: choose a random, less-loaded peer that might have the inventory.
         if let Some(peer) = self.select_p2c_peer_from_list(&preferred_peer_list) {
@@ -1363,11 +1373,7 @@ where
         // The inventory registry is best-effort, and can drop advertisements under load. Then a
         // recent block waits for a serving peer, and the block is fetched again when it is
         // advertised again, or by the syncer.
-        let is_advertised = self
-            .inventory_registry
-            .advertising_peers(hash)
-            .next()
-            .is_some();
+        let is_advertised = !advertising_peers.is_empty();
         let busy_peer_might_have = self.cancel_handles.keys().any(|key| {
             !missing_peer_list.contains(key)
                 && (is_advertised || self.serving_peer_keys.contains(key))
@@ -1376,7 +1382,7 @@ where
         // Waiting for a busy serving peer is better than asking a non-serving peer, which would
         // most likely answer `notfound` for a historic block, and get marked as missing it.
         if is_advertised || !busy_peer_might_have {
-            if let Some(peer) = self.select_p2c_peer_from_list(&fallback_peer_list) {
+            if let Some(peer) = self.select_p2c_peer_from_list(&ready_peers_with_services(false)) {
                 tracing::trace!(?hash, ?peer, "routing to a non-serving peer");
                 return InvRoute::Peer(peer);
             }

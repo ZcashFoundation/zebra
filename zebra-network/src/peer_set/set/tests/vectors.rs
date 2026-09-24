@@ -1297,11 +1297,10 @@ fn peer_set_route_block_prefers_serving_peer() {
 }
 
 fn peer_set_route_block_prefers_serving_peer_order(serving_first: bool) {
-    let services = if serving_first {
-        [PeerServices::NODE_NETWORK, PeerServices::empty()]
-    } else {
-        [PeerServices::empty(), PeerServices::NODE_NETWORK]
-    };
+    let mut services = SERVING_AND_NON_SERVING;
+    if !serving_first {
+        services.reverse();
+    }
     let (serving, non_serving) = if serving_first { (0, 1) } else { (1, 0) };
 
     let (runtime, _init_guard) = zebra_test::init_async();
