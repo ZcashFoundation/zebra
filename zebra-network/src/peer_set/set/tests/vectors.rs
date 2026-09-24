@@ -11,7 +11,9 @@ use std::{
 use futures::{stream, FutureExt as _, Stream, StreamExt};
 use tokio::time::timeout;
 use tower::{
+    buffer::Buffer,
     discover::{Change, Discover},
+    util::BoxService,
     Service, ServiceExt,
 };
 
@@ -42,7 +44,7 @@ use crate::{
 };
 use tokio::sync::watch;
 
-use super::{PeerSetBuilder, PeerVersions};
+use super::{super::poll_peer_set_on_notify, PeerSetBuilder, PeerVersions};
 
 #[test]
 fn peer_set_ready_single_connection() {
@@ -1358,6 +1360,82 @@ fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
         let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
             .await
             .expect("the waiting request should resolve to the serving peer's response");
+        assert!(
+            matches!(response, Ok(Response::Nil)),
+            "unexpected response: {response:?}"
+        );
+    });
+}
+
+/// Check that a queued block request is routed to the busy serving peer as soon as it becomes
+/// ready, even if the peer set gets no other requests.
+///
+/// In zebrad, the peer set is behind a [`Buffer`], which only polls it when it has a request. So
+/// [`poll_peer_set_on_notify`] has to poll it when the busy peer becomes ready.
+#[test]
+fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, _addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let queued_request_notify = peer_set.queued_request_notify();
+        let mut peer_set = Buffer::new(BoxService::new(peer_set), 10);
+        let _poll_task = tokio::spawn(poll_peer_set_on_notify(
+            peer_set.clone(),
+            queued_request_notify,
+        ));
+
+        // Make the serving peer busy, then queue a block request for it. The mock peer channel
+        // holds 2 requests.
+        let mut futs = Vec::new();
+        for byte in [1, 9, 2] {
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            futs.push(peer_ready.call(block_request(byte)));
+        }
+        let queued_fut = futs.pop().expect("just pushed the queued request");
+
+        // Let the buffer route the requests.
+        tokio::time::sleep(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "block request should not be routed to the non-serving peer while a serving peer is busy",
+        );
+
+        // Receiving the serving peer's requests makes it ready. The test doesn't send any other
+        // requests to the peer set, so only the poll task can route the queued request.
+        tokio::time::sleep(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+
+        let ClientRequest { request, tx, .. } = handles[0]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("the queued block request should be routed to the now-ready serving peer");
+        assert_eq!(request, block_request(2));
+        assert_eq!(received_request(&mut handles[1]), None);
+
+        let _ = tx.send(Ok(Response::Nil));
+        let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+            .await
+            .expect("the queued request should resolve to the serving peer's response");
         assert!(
             matches!(response, Ok(Response::Nil)),
             "unexpected response: {response:?}"

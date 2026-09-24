@@ -100,7 +100,8 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
-    task::{Context, Poll},
+    sync::Arc,
+    task::{Context, Poll, Waker},
     time::Instant,
 };
 
@@ -109,18 +110,18 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
-    task::noop_waker,
+    task::{noop_waker, ArcWake},
 };
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
-    sync::{broadcast, mpsc as tokio_mpsc, watch},
+    sync::{broadcast, mpsc as tokio_mpsc, watch, Notify},
     task::JoinHandle,
 };
 use tower::{
     discover::{Change, Discover},
     load::Load,
-    Service,
+    Service, ServiceExt,
 };
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
@@ -175,6 +176,52 @@ struct QueuedInvRequest {
     ///
     /// Dropping the sender refuses the request.
     response_sender: oneshot::Sender<ResponseFuture>,
+}
+
+/// A waker for peer events, used while requests are queued in the peer set.
+///
+/// Wakes the task that polls the peer set, and notifies the task that runs
+/// [`poll_peer_set_on_notify`]. The peer set is behind a [`tower::buffer::Buffer`], which only
+/// polls it when it has a request, so otherwise a busy peer that becomes ready wouldn't get the
+/// requests that are waiting for it.
+struct QueuedRequestWaker {
+    /// The waker of the task that polls the peer set.
+    peer_set_waker: Waker,
+
+    /// Notifies the task that polls the peer set on behalf of queued requests.
+    queued_request_notify: Arc<Notify>,
+}
+
+impl ArcWake for QueuedRequestWaker {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.peer_set_waker.wake_by_ref();
+        arc_self.queued_request_notify.notify_one();
+    }
+}
+
+/// Polls `peer_set` with a [`Request::PollPeerSet`] each time `queued_request_notify` is notified,
+/// so the peer set routes queued requests to busy peers as soon as they become ready.
+///
+/// `peer_set` must be the service that wraps the [`PeerSet`] that owns `queued_request_notify`.
+///
+/// Only returns if the peer set fails.
+pub(crate) async fn poll_peer_set_on_notify<S>(
+    mut peer_set: S,
+    queued_request_notify: Arc<Notify>,
+) -> Result<(), BoxError>
+where
+    S: Service<Request, Response = Response, Error = BoxError>,
+{
+    loop {
+        // Notifications while the peer set is being polled are combined into one poll, because
+        // `Notify` stores at most one permit.
+        //
+        // This wait has no timeout, because the peer set only notifies while requests are queued.
+        // The poll request can also wait a long time, while all peers are busy: then it is only
+        // routed once a peer becomes ready, which is exactly when queued requests can be routed.
+        queued_request_notify.notified().await;
+        peer_set.ready().await?.call(Request::PollPeerSet).await?;
+    }
 }
 
 /// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
@@ -282,6 +329,11 @@ where
     /// Each request is routed to the first of those peers that becomes ready, or refused once
     /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] expires, or once no busy peer might have the block.
     queued_inv_requests: VecDeque<QueuedInvRequest>,
+
+    /// Notified when a request is queued, or when a peer event happens while requests are queued.
+    ///
+    /// See [`poll_peer_set_on_notify`].
+    queued_request_notify: Arc<Notify>,
 
     /// The most recent sidecar broadcast (a block advert or a pushed
     /// transaction) that has not been delivered to all connected zcashd-compat
@@ -422,6 +474,7 @@ where
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
             queued_inv_requests: VecDeque::new(),
+            queued_request_notify: Arc::new(Notify::new()),
             queued_sidecar_broadcast: None,
 
             // Busy peers
@@ -444,6 +497,25 @@ where
 
             network: config.network.clone(),
         }
+    }
+
+    /// Returns the notifier for [`poll_peer_set_on_notify`], which must run for queued requests to
+    /// be routed promptly.
+    pub(crate) fn queued_request_notify(&self) -> Arc<Notify> {
+        self.queued_request_notify.clone()
+    }
+
+    /// Returns a waker for peer events, which also notifies [`poll_peer_set_on_notify`] while
+    /// requests are queued.
+    fn peer_event_waker(&self, cx: &Context<'_>) -> Waker {
+        if self.queued_inv_requests.is_empty() {
+            return cx.waker().clone();
+        }
+
+        futures::task::waker(Arc::new(QueuedRequestWaker {
+            peer_set_waker: cx.waker().clone(),
+            queued_request_notify: self.queued_request_notify.clone(),
+        }))
     }
 
     /// Check background task handles to make sure they're still running.
@@ -1341,6 +1413,10 @@ where
             response_sender,
         });
 
+        // Poll the peer set again, so peer events wake `poll_peer_set_on_notify()` while this
+        // request is queued.
+        self.queued_request_notify.notify_one();
+
         async move {
             match tokio::time::timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, response_receiver).await {
                 Ok(Ok(response_fut)) => response_fut.await,
@@ -1369,8 +1445,8 @@ where
     /// order they were queued. Refuses queued requests once no busy peer might have their
     /// inventory.
     ///
-    /// Queued requests are only routed when the peer set is polled, so the wait timeout in
-    /// [`Self::queue_inv_request`] refuses them if the peer set is idle.
+    /// Queued requests are only routed when the peer set is polled. While requests are queued,
+    /// peer events notify [`poll_peer_set_on_notify`], which polls the peer set.
     fn route_queued_inv_requests(&mut self) {
         // A queued request can only be routed to a ready peer. Requests that are waiting for peers
         // that have disconnected are refused by the wait timeout.
@@ -1759,16 +1835,21 @@ where
         // `poll_discover` can fill in the same poll cycle.
         self.drain_stall_events(cx);
 
+        // While requests are queued, new or newly ready peers also notify the queued request task,
+        // so the peer set gets polled to route those requests.
+        let peer_event_waker = self.peer_event_waker(cx);
+        let mut peer_cx = Context::from_waker(&peer_event_waker);
+
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
         // available/useful peers.
-        let _poll_pending_or_ready: Poll<()> = self.poll_discover(cx)?;
+        let _poll_pending_or_ready: Poll<()> = self.poll_discover(&mut peer_cx)?;
 
         // These tasks don't provide new peers or newly ready peers.
         let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
         let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
-        let ready_peers = self.poll_peers(cx)?;
+        let ready_peers = self.poll_peers(&mut peer_cx)?;
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
@@ -1806,7 +1887,7 @@ where
         self.send_queued_sidecar_broadcast();
 
         if self.ready_services.is_empty() {
-            self.poll_peers(cx)
+            self.poll_peers(&mut peer_cx)
         } else {
             Poll::Ready(Ok(()))
         }
@@ -1832,6 +1913,9 @@ where
             Request::AdvertiseBlock(_, _) | Request::PushTransaction(_, _) => {
                 self.route_sidecar_broadcast(req)
             }
+
+            // Queued requests were already routed by `poll_ready()`.
+            Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
 
             // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),
