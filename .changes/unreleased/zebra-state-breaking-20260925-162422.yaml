@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`Config::{db_path, non_finalized_state_backup_dir}` include configured Testnet wire magic in storage namespaces. Resynchronize existing custom Testnets; Mainnet, public Testnet, and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
+time: 2026-09-25T16:24:22.280507527+02:00
