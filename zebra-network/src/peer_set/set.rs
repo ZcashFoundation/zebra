@@ -119,10 +119,13 @@ use tokio::{
     task::JoinHandle,
 };
 use tower::{
+    buffer::Buffer,
     discover::{Change, Discover},
     load::Load,
+    util::BoxService,
     Service, ServiceExt,
 };
+use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
@@ -226,9 +229,10 @@ impl ArcWake for QueuedRequestWaker {
 /// so the peer set routes queued requests to busy peers as soon as they become ready.
 ///
 /// `peer_set` must be the service that wraps the [`PeerSet`] that owns `queued_request_notify`.
+/// See [`PeerSet::into_buffer`].
 ///
 /// Only returns if the peer set fails.
-pub(crate) async fn poll_peer_set_on_notify<S>(
+async fn poll_peer_set_on_notify<S>(
     mut peer_set: S,
     queued_request_notify: Arc<Notify>,
 ) -> Result<(), BoxError>
@@ -532,12 +536,6 @@ where
 
             network: config.network.clone(),
         }
-    }
-
-    /// Returns the notifier for [`poll_peer_set_on_notify`], which must run for queued requests to
-    /// be routed promptly.
-    pub(crate) fn queued_request_notify(&self) -> Arc<Notify> {
-        self.queued_request_notify.clone()
     }
 
     /// Returns a waker for peer events, which also notifies [`poll_peer_set_on_notify`] while
@@ -1474,7 +1472,15 @@ where
             return;
         }
 
-        for queued in std::mem::take(&mut self.queued_inv_requests) {
+        let mut queued_requests = std::mem::take(&mut self.queued_inv_requests);
+        while let Some(queued) = queued_requests.pop_front() {
+            // The remaining requests can't be routed until another peer becomes ready.
+            if self.ready_services.is_empty() {
+                queued_requests.push_front(queued);
+                self.queued_inv_requests.append(&mut queued_requests);
+                break;
+            }
+
             match self.select_inv_route(queued.hash) {
                 InvRoute::Peer(peer) => {
                     let response_fut = self.call_ready_peer(peer, queued.request);
@@ -1828,6 +1834,35 @@ where
     }
 }
 
+impl<D, C> PeerSet<D, C>
+where
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin + Send + 'static,
+    D::Error: Into<BoxError>,
+    C: ChainTip + Send + 'static,
+{
+    /// Wraps the peer set in a [`Buffer`] with capacity `bound`, and spawns the task that polls
+    /// it while requests are queued. See [`poll_peer_set_on_notify`].
+    ///
+    /// Returns the buffered peer set, and the task's join handle.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn into_buffer(
+        self,
+        bound: usize,
+    ) -> (
+        Buffer<BoxService<Request, Response, BoxError>, Request>,
+        JoinHandle<Result<(), BoxError>>,
+    ) {
+        let queued_request_notify = self.queued_request_notify.clone();
+        let peer_set = Buffer::new(BoxService::new(self), bound);
+
+        let poll_task = tokio::spawn(
+            poll_peer_set_on_notify(peer_set.clone(), queued_request_notify).in_current_span(),
+        );
+
+        (peer_set, poll_task)
+    }
+}
+
 impl<D, C> Service<Request> for PeerSet<D, C>
 where
     D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
@@ -1898,8 +1933,7 @@ where
         }
 
         self.prune_disconnected_sidecar_keys();
-        // A stale key could otherwise make the peer set wait for a busy serving peer that no
-        // longer exists.
+        // Serving peer keys are only checked for connected peers, so this only bounds memory.
         Self::retain_connected_keys(
             &mut self.serving_peer_keys,
             &self.ready_services,

@@ -11,9 +11,7 @@ use std::{
 use futures::{stream, FutureExt as _, Stream, StreamExt};
 use tokio::time::timeout;
 use tower::{
-    buffer::Buffer,
     discover::{Change, Discover},
-    util::BoxService,
     Service, ServiceExt,
 };
 
@@ -48,7 +46,7 @@ use crate::{
 };
 use tokio::sync::watch;
 
-use super::{super::poll_peer_set_on_notify, PeerSetBuilder, PeerSetGuard, PeerVersions};
+use super::{PeerSetBuilder, PeerSetGuard, PeerVersions};
 
 #[test]
 fn peer_set_ready_single_connection() {
@@ -1183,12 +1181,18 @@ fn mock_peers_with_services(
     )
 }
 
-/// Returns a peer set with a peer that serves historic blocks (`NODE_NETWORK`), then a peer that
-/// doesn't, their addresses and handles, and the chain tip sender for the peer set.
+/// The services of a peer that serves historic blocks, then a peer that doesn't.
+const SERVING_AND_NON_SERVING: [PeerServices; 2] =
+    [PeerServices::NODE_NETWORK, PeerServices::empty()];
+
+/// Returns a peer set with mock peers that advertised `services`, their addresses and handles, and
+/// the chain tip sender for the peer set.
 ///
 /// Must be called from inside a Tokio runtime.
 #[allow(clippy::type_complexity)]
-fn serving_and_non_serving_peer_set() -> (
+fn peer_set_with_services(
+    services: &[PeerServices],
+) -> (
     PeerSet<
         impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> + Unpin,
         MockChainTip,
@@ -1198,15 +1202,15 @@ fn serving_and_non_serving_peer_set() -> (
     Vec<ClientTestHarness>,
     MockChainTipSender,
 ) {
-    let (discovered_peers, addrs, handles) =
-        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (discovered_peers, addrs, handles) = mock_peers_with_services(services);
     let (minimum_peer_version, best_tip) =
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
+    // All mock peers use the same IP.
     let (peer_set, peer_set_guard) = PeerSetBuilder::new()
         .with_discover(discovered_peers)
         .with_minimum_peer_version(minimum_peer_version)
-        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .max_conns_per_ip(max(services.len(), DEFAULT_MAX_CONNS_PER_IP))
         .build();
 
     (peer_set, peer_set_guard, addrs, handles, best_tip)
@@ -1306,16 +1310,9 @@ fn peer_set_route_block_prefers_serving_peer_order(serving_first: bool) {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, _addrs, mut handles) = mock_peers_with_services(&services);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&services);
 
         let peer_ready = peer_set
             .ready()
@@ -1354,7 +1351,7 @@ fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
 
     runtime.block_on(async move {
         let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
         // Make the serving peer busy: its request stays queued until the test receives it.
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
@@ -1408,8 +1405,8 @@ fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
 /// Check that a queued block request is routed to the busy serving peer as soon as it becomes
 /// ready, even if the peer set gets no other requests.
 ///
-/// In zebrad, the peer set is behind a [`Buffer`], which only polls it when it has a request. So
-/// [`poll_peer_set_on_notify`] has to poll it when the busy peer becomes ready.
+/// In zebrad, the peer set is behind a `Buffer`, which only polls it when it has a request. So the
+/// task spawned by [`PeerSet::into_buffer`] has to poll it when the busy peer becomes ready.
 #[test]
 fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
     let (runtime, _init_guard) = zebra_test::init_async();
@@ -1420,14 +1417,9 @@ fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
 
     runtime.block_on(async move {
         let (peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
-        let queued_request_notify = peer_set.queued_request_notify();
-        let mut peer_set = Buffer::new(BoxService::new(peer_set), 10);
-        let _poll_task = tokio::spawn(poll_peer_set_on_notify(
-            peer_set.clone(),
-            queued_request_notify,
-        ));
+        let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
 
         // Make the serving peer busy, then queue a block request for it. The mock peer channel
         // holds 2 requests.
@@ -1485,7 +1477,7 @@ fn peer_set_refuses_queued_block_request_after_wait_timeout() {
 
     runtime.block_on(async move {
         let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
@@ -1529,7 +1521,7 @@ fn peer_set_routes_advertised_block_to_non_serving_peer_while_serving_peer_busy(
 
     runtime.block_on(async move {
         let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
@@ -1563,17 +1555,9 @@ fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
     // CORRECTNESS: This test does not depend on external resources that could really timeout.
     tokio::time::pause();
 
-    let (discovered_peers, _addrs, mut handles) =
-        mock_peers_with_services(&[PeerServices::empty(), PeerServices::empty()]);
-    let (minimum_peer_version, _best_tip) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
-            .build();
+        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&[PeerServices::empty(), PeerServices::empty()]);
 
         // The mock peer channels hold 2 requests each, so after 3 requests one peer is busy. Then
         // check the other peer still gets the 4th request immediately.
@@ -1598,7 +1582,7 @@ fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
 /// Check that the syncer's retries give a busy serving peer time to recover, even if it only
 /// recovers just before its request would time out, and while the peer set is idle between retries.
 #[test]
-fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
+fn peer_set_wait_budget_outlasts_busy_serving_peer() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
@@ -1607,7 +1591,7 @@ fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
 
     runtime.block_on(async move {
         let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
@@ -1664,7 +1648,7 @@ fn peer_set_only_waits_for_busy_non_serving_peer_if_block_advertised() {
 
     runtime.block_on(async move {
         let (mut peer_set, mut peer_set_guard, addrs, _handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
         let (serving_addr, non_serving_addr) = (addrs[0], addrs[1]);
 
         // Make the non-serving peer busy, by marking the serving peer as missing the requested
@@ -1749,7 +1733,7 @@ fn peer_set_refuses_block_instantly_if_all_peers_missing() {
 
     runtime.block_on(async move {
         let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
         // Make the serving peer busy.
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
@@ -1795,7 +1779,7 @@ fn peer_set_refuses_transaction_instantly_while_serving_peer_busy() {
 
     runtime.block_on(async move {
         let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
-            serving_and_non_serving_peer_set();
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
         // Make the serving peer busy.
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;

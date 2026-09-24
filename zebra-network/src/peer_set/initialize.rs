@@ -49,8 +49,7 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{
-        crawl_once, crawler_services, next_reconnect_peer, ready_peer_count,
-        set::{poll_peer_set_on_notify, MorePeers},
+        crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
@@ -272,13 +271,8 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
-    let queued_request_notify = peer_set.queued_request_notify();
-    let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
-
-    // Route queued peer set requests as soon as a peer that might serve them is ready.
-    let poll_peer_set_guard = tokio::spawn(
-        poll_peer_set_on_notify(peer_set.clone(), queued_request_notify).in_current_span(),
-    );
+    // Also route queued peer set requests as soon as a peer that might serve them is ready.
+    let (peer_set, poll_peer_set_guard) = peer_set.into_buffer(constants::PEERSET_BUFFER_SIZE);
 
     // Connect peerset_tx to the 3 peer sources:
     //
