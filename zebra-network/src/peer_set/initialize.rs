@@ -49,8 +49,9 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{
-        crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
-        ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
+        crawl_once, crawler_services, inventory_retry::retry_busy_inventory, next_reconnect_peer,
+        ready_peer_count, set::MorePeers, ActiveConnectionCounter, ConnectionTracker, CrawlService,
+        NextPeerService, PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     AddressBook, BanList, BoxError, Config, PeerSocketAddr, Request, Response,
@@ -272,6 +273,12 @@ where
         None,
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
+
+    // Re-enqueue busy block requests internally, retaining the public buffered service API.
+    let peer_set = Buffer::new(
+        retry_busy_inventory(peer_set),
+        constants::PEERSET_BUFFER_SIZE,
+    );
 
     // Connect peerset_tx to the 3 peer sources:
     //

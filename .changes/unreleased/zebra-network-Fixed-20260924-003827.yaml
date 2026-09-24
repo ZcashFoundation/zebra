@@ -1,4 +1,4 @@
 project: zebra-network
-kind: Fixed
-body: '`PeerSet` now routes single-hash `BlocksByHash` requests to ready peers that advertised `NODE_NETWORK` before other peers, and delays its synthetic `NotFoundRegistry` error by `INVENTORY_BUSY_PEER_REFUSAL_DELAY` (1.5 seconds) while a busy peer might still have the block. Refusals are counted in the `zcash.net.peer_set.inventory_refusal` metric.'
+kind: Changed
+body: '`PeerSet` prefers ready block advertisers, then responsive `NODE_NETWORK` peers, without excluding ready pruned peers when advertisements are lost. The network service retries busy single-hash `Request::BlocksByHash` requests internally within `constants::REQUEST_TIMEOUT`, preserving caller retries. Busy waits ignore banned or outdated peers and include pruned peers only if some peer advertised the block. Fallback routing deprioritizes peers after failed or cancelled block requests until a block request succeeds. Immediate refusals are counted in the `zcash.net.peer_set.inventory_refusal` metric.'
 time: 2026-09-24T00:38:27.544666125Z

@@ -1236,6 +1236,7 @@ where
 
             let client = Client {
                 connection_info,
+                last_block_request_failed: Default::default(),
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 inv_collector,

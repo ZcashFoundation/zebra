@@ -351,6 +351,7 @@ where
 
         let client = Client {
             connection_info,
+            last_block_request_failed: Default::default(),
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
             inv_collector: inv_sender,

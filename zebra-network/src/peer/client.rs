@@ -5,13 +5,16 @@ use std::{
     future::Future,
     iter,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
 use futures::{
     channel::{mpsc, oneshot},
-    future, ready,
+    ready,
     stream::{Stream, StreamExt},
     FutureExt,
 };
@@ -41,6 +44,9 @@ pub struct Client {
     /// The metadata for the connected peer `service`.
     pub connection_info: Arc<ConnectionInfo>,
 
+    /// Whether the most recently completed or cancelled block request failed.
+    pub(super) last_block_request_failed: Arc<AtomicBool>,
+
     /// Used to shut down the corresponding heartbeat.
     /// This is always Some except when we take it on drop.
     pub(crate) shutdown_tx: Option<oneshot::Sender<CancelHeartbeatTask>>,
@@ -62,6 +68,19 @@ pub struct Client {
 
     /// A handle to the task responsible for sending periodic heartbeats.
     pub(crate) heartbeat_task: JoinHandle<Result<(), BoxError>>,
+}
+
+/// Records block request failures even if the response future is never polled or is cancelled.
+struct BlockRequestGuard {
+    last_block_request_failed: Arc<AtomicBool>,
+    failed: bool,
+}
+
+impl Drop for BlockRequestGuard {
+    fn drop(&mut self) {
+        self.last_block_request_failed
+            .store(self.failed, Ordering::Relaxed);
+    }
 }
 
 /// A signal sent by the [`Client`] half of a peer connection,
@@ -633,6 +652,12 @@ impl Service<Request> for Client {
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        let mut block_request =
+            matches!(&request, Request::BlocksByHash(_)).then(|| BlockRequestGuard {
+                last_block_request_failed: self.last_block_request_failed.clone(),
+                failed: true,
+            });
+
         let (tx, rx) = oneshot::channel();
         // get the current Span to propagate it to the peer connection task.
         // this allows the peer connection to enter the correct tracing context
@@ -640,44 +665,43 @@ impl Service<Request> for Client {
         // request.
         let span = tracing::Span::current();
 
-        match self.server_tx.try_send(ClientRequest {
+        if let Err(e) = self.server_tx.try_send(ClientRequest {
             request,
             tx,
             inv_collector: Some(self.inv_collector.clone()),
             transient_addr: self.connection_info.connected_addr.get_transient_addr(),
             span,
         }) {
-            Err(e) => {
-                if e.is_disconnected() {
-                    let peer_error = self
-                        .error_slot
-                        .try_get_error()
-                        .unwrap_or_else(|| PeerError::ConnectionTaskExited.into());
+            if e.is_disconnected() {
+                let peer_error = self
+                    .error_slot
+                    .try_get_error()
+                    .unwrap_or_else(|| PeerError::ConnectionTaskExited.into());
 
-                    let ClientRequest { tx, .. } = e.into_inner();
-                    let _ = tx.send(Err(peer_error.clone()));
-
-                    future::ready(Err(peer_error)).boxed()
-                } else {
-                    // sending fails when there's not enough
-                    // channel space, but we called poll_ready
-                    panic!("called call without poll_ready");
-                }
-            }
-            Ok(()) => {
-                // The receiver end of the oneshot is itself a future.
-                rx.map(|oneshot_recv_result| {
-                    // The ClientRequest oneshot sender should not be dropped before sending a
-                    // response. But sometimes that happens during process or connection shutdown.
-                    // So we just return a generic error here.
-                    match oneshot_recv_result {
-                        Ok(result) => result,
-                        Err(oneshot::Canceled) => Err(PeerError::ConnectionDropped.into()),
-                    }
-                })
-                .boxed()
+                let ClientRequest { tx, .. } = e.into_inner();
+                let _ = tx.send(Err(peer_error));
+            } else {
+                // sending fails when there's not enough
+                // channel space, but we called poll_ready
+                panic!("called call without poll_ready");
             }
         }
+
+        // The receiver end of the oneshot is itself a future.
+        rx.map(move |oneshot_recv_result| {
+            // The ClientRequest oneshot sender should not be dropped before sending a
+            // response. But sometimes that happens during process or connection shutdown.
+            // So we just return a generic error here.
+            let result = match oneshot_recv_result {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(PeerError::ConnectionDropped.into()),
+            };
+            if let Some(block_request) = &mut block_request {
+                block_request.failed = result.is_err();
+            }
+            result
+        })
+        .boxed()
     }
 }
 

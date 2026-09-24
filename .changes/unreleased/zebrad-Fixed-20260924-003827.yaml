@@ -1,4 +1,4 @@
 project: zebrad
-kind: Fixed
-body: 'Block downloads no longer stall near the chain tip while every peer that serves historic blocks is busy. Previously Zebra either sent the request to a peer that could not serve it or refused it instantly, so the syncer dropped the next block and waited 8 minutes before restarting the sync. Zebra now prefers peers that serve historic blocks, waits briefly for a busy one before refusing, and reports refusals in the `zcash.net.peer_set.inventory_refusal` metric.'
+kind: Changed
+body: 'Single-block downloads now wait for eligible busy peers within the request timeout without exhausting missing-block retries. Zebra prefers responsive peers that serve historic blocks, still tries ready pruned peers when advertisements are lost, and waits for busy pruned peers only if some peer advertised the block. Immediate refusals are counted in the `zcash.net.peer_set.inventory_refusal` metric.'
 time: 2026-09-24T00:38:27.544659485Z
