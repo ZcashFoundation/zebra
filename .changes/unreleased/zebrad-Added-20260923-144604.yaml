@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: "`initial_nsm_value_balance` and `zip234_deployment_height` are available under `[network.testnet_parameters]` for Regtest and configured Testnets without experimental flags. The initial balance, in zatoshis, is seeded at NU7 activation rather than derived from historical supply. Omitting the deployment height starts reissuance at NU7 activation; setting a later height delays it without delaying fee contributions ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
+time: 2026-09-23T14:46:04.344494175+02:00

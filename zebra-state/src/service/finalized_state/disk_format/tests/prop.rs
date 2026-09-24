@@ -5,6 +5,7 @@ use proptest::prelude::*;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Height},
+    block_info::BlockInfo,
     orchard, sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
@@ -20,7 +21,7 @@ use crate::service::finalized_state::{
             AddressBalanceLocation, AddressLocation, AddressTransaction, AddressUnspentOutput,
             OutputLocation,
         },
-        IntoDisk, TransactionLocation,
+        FromDisk, IntoDisk, TransactionLocation,
     },
 };
 
@@ -487,4 +488,72 @@ fn roundtrip_value_balance() {
     let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<ValueBalance::<NonNegative>>())| assert_value_properties(val));
+}
+
+#[test]
+fn roundtrip_block_info() {
+    let _init_guard = zebra_test::init();
+
+    proptest!(
+        |(value_pools in any::<ValueBalance<NonNegative>>(), size in any::<u32>())| {
+            assert_value_properties(BlockInfo::new(value_pools, size))
+        }
+    );
+}
+
+/// Read legacy records and preserve the v28 prefix when appending the NSM reserve.
+#[test]
+fn block_info_reads_every_record_layout() {
+    let _init_guard = zebra_test::init();
+
+    let size = 0x0000_069c_u32;
+    let size_bytes = size.to_le_bytes();
+    let nsm_reserve = Amount::<NonNegative>::try_from(60_001).expect("valid amount");
+    let nsm_bytes = nsm_reserve.to_bytes();
+
+    // A pre-NU6.3 record: a 40-byte value pool, then the size.
+    let legacy_40 = [[0; 40].as_slice(), &size_bytes].concat();
+    // A pre-NU7 record: a 48-byte value pool, then the size.
+    let narrow = [[0; 48].as_slice(), &size_bytes].concat();
+    // NSM follows the complete pre-NU7 record, preserving the block-size offset.
+    let wide_zero = [narrow.as_slice(), &[0; 8]].concat();
+    let wide = [narrow.as_slice(), &nsm_bytes].concat();
+
+    for (bytes, layout, expected_nsm_reserve) in [
+        (legacy_40, "pre-NU6.3", Amount::zero()),
+        (narrow, "pre-NU7", Amount::zero()),
+        (wide_zero.clone(), "zero NSM reserve", Amount::zero()),
+        (wide.clone(), "non-zero NSM reserve", nsm_reserve),
+    ] {
+        let block_info = <BlockInfo as FromDisk>::from_bytes(&bytes);
+
+        assert_eq!(
+            block_info.size(),
+            size,
+            "the block size must be read from the right offset in a {layout} record",
+        );
+
+        let mut expected_pools = ValueBalance::zero();
+        expected_pools.set_nsm_amount(expected_nsm_reserve);
+        assert_eq!(
+            *block_info.value_pools(),
+            expected_pools,
+            "the pools of a zeroed {layout} record must be zero apart from its NSM reserve",
+        );
+    }
+
+    // Both zero and nonzero balances use the v29 layout.
+    assert_eq!(
+        BlockInfo::new(ValueBalance::zero(), size).as_bytes(),
+        wide_zero,
+        "a zero reserve still occupies its field in the v29 layout",
+    );
+
+    let mut value_pools = ValueBalance::zero();
+    value_pools.set_nsm_amount(nsm_reserve);
+    assert_eq!(
+        BlockInfo::new(value_pools, size).as_bytes(),
+        wide,
+        "NSM follows the unchanged pre-NU7 pool-and-size prefix",
+    );
 }

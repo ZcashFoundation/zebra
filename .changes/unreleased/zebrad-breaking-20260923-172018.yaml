@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: "Ordinary builds now use database format v29.0.0 with the NSM value-pool field and a separate `state/v29` directory. Existing v28 databases are not upgraded in place: resynchronize or restore a compatible v29 database ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
+time: 2026-09-23T17:20:18.220400746+02:00

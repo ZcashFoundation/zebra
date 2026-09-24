@@ -116,7 +116,6 @@ fn contextual_header_ancestry_preserves_parent_height_and_error_order() {
 /// active.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 mod zip234 {
     use std::collections::HashMap;
 
@@ -125,8 +124,8 @@ mod zip234 {
         block::Height,
         parameters::{
             subsidy::{
-                additional_block_subsidy, nsm_fee_contribution, nsm_value_balance_change,
-                scheduled_block_subsidy, CoinbaseTransactionError, SubsidyError,
+                additional_block_subsidy, nsm_fee_contribution, scheduled_block_subsidy,
+                CoinbaseTransactionError, SubsidyError,
             },
             testnet::{ConfiguredActivationHeights, RegtestParameters},
         },
@@ -149,8 +148,7 @@ mod zip234 {
         zatoshis.try_into().expect("valid amount")
     }
 
-    /// Returns the part of `FEE` the coinbase transaction at `height` can claim: all of it, or what
-    /// ZIP 235 leaves in builds with the `zip235` cfg.
+    /// Returns all of `FEE` before NU7, or the miner's share after fee contributions activate.
     fn miner_fees(height: Height, network: &Network) -> Amount<NonNegative> {
         (amount(FEE) - nsm_fee_contribution(height, network, amount(FEE))).unwrap()
     }
@@ -231,18 +229,14 @@ mod zip234 {
             transparent::OrderedUtxo::new(spent_output, Height(1), 1),
         )]);
 
-        let mut contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             Arc::new(block).prepare(),
             spent_outputs,
             DeferredPoolBalanceChange::zero(),
+            network,
+            parent_pools,
         )
-        .expect("valid value balances");
-        contextual.chain_value_pool_change.set_nsm_amount(
-            nsm_value_balance_change(height, network, parent_pools, amount(FEE))
-                .expect("valid NSM value balance change"),
-        );
-
-        contextual
+        .expect("valid value balances")
     }
 
     fn subsidy_error(result: Result<(), ValidateContextError>) -> SubsidyError {
@@ -363,7 +357,6 @@ mod zip234 {
 
     /// From NU7 activation the coinbase can only claim the fees ZIP 235 leaves to the miner, and the
     /// rest is credited to the NSM value balance.
-    #[cfg(zcash_unstable = "zip235")]
     #[test]
     fn fee_contribution_is_removed_from_the_coinbase() {
         let _init_guard = zebra_test::init();

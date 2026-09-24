@@ -581,7 +581,6 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     ///
     /// [zip]: https://github.com/zcash/zips/pull/1354
-    #[cfg(zcash_unstable = "zip234")]
     pub chain_value_pools:
         zebra_chain::value_balance::ValueBalance<zebra_chain::amount::NonNegative>,
 }

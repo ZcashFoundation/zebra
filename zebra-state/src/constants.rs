@@ -34,14 +34,6 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-#[cfg(not(zcash_unstable = "zip234"))]
-const DATABASE_FORMAT_VERSION: u64 = 28;
-
-/// The `nsm` chain value pool widens the `ValueBalance` serialization from 48 to 56 bytes, so
-/// `zcash_unstable = "zip234"` builds use their own `state/v29` directory instead of upgrading a
-/// v28 database in place. Read code still accepts the narrower records, see
-/// [`ValueBalance::from_bytes`](zebra_chain::value_balance::ValueBalance::from_bytes).
-#[cfg(zcash_unstable = "zip234")]
 const DATABASE_FORMAT_VERSION: u64 = 29;
 
 /// The database format minor version, incremented each time the on-disk database format has a
@@ -53,6 +45,9 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens `ValueBalance` from
+///   48 to 56 bytes and `BlockInfo` from 52 to 60 bytes. Uses a separate `state/v29`
+///   directory rather than upgrading v28 in place.
 /// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
 ///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
 ///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree

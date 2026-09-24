@@ -34,7 +34,6 @@ use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
 pub mod request;
-pub mod subsidy;
 
 pub use request::Request;
 
@@ -404,11 +403,8 @@ where
             // blocks are verified concurrently. The state checks the subsidy, funding streams,
             // and miner fees during contextual validation instead, where the parent's chain value
             // pools are known.
-            #[cfg(zcash_unstable = "zip234")]
             let zip234_reissuance_is_active =
                 zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &network);
-            #[cfg(not(zcash_unstable = "zip234"))]
-            let zip234_reissuance_is_active = false;
 
             let expected_subsidy_and_deferred_pool_balance_change = if zip234_reissuance_is_active {
                 None

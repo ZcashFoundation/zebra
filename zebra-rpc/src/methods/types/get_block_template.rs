@@ -33,7 +33,7 @@ use zebra_chain::{
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{subsidy::subsidy_is_valid, Network},
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
@@ -54,7 +54,7 @@ use crate::{
     methods::types::{
         default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
-    server::error::OkOrError,
+    server::error::{MapError, OkOrError},
     SubmitBlockChannel,
 };
 
@@ -289,8 +289,10 @@ impl BlockTemplateResponse {
 
         // Convert transactions into TransactionTemplates.
         #[cfg(not(test))]
-        let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) =
-            mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
+        let (mut mempool_tx_templates, mempool_txs): (
+            Vec<TransactionTemplate<NonNegative>>,
+            Vec<_>,
+        ) = mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
 
         // Transaction selection returns transactions in an arbitrary order,
         // but Zebra's snapshot tests expect the same order every time.
@@ -300,7 +302,7 @@ impl BlockTemplateResponse {
         // Transactions that spend outputs created in the same block must appear
         // after the transactions that create those outputs.
         #[cfg(test)]
-        let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) = {
+        let (mut mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) = {
             let mut mempool_txs_with_templates: Vec<(
                 InBlockTxDependenciesDepth,
                 TransactionTemplate<amount::NonNegative>,
@@ -322,6 +324,30 @@ impl BlockTemplateResponse {
                 .map(|(_, template, tx)| (template, tx))
                 .unzip()
         };
+
+        // BIP 22 dependencies refer to the final, 1-based template order, not mempool order.
+        let mut transaction_indices = HashMap::with_capacity(mempool_txs.len());
+        for (index, (template, tx)) in mempool_tx_templates
+            .iter_mut()
+            .zip(&mempool_txs)
+            .enumerate()
+        {
+            template.depends = tx
+                .transaction
+                .transaction
+                .transparent_bundle()
+                .into_iter()
+                .flat_map(|bundle| &bundle.vin)
+                .filter_map(|input| transaction_indices.get(input.prevout().hash()).copied())
+                .collect();
+            template.depends.sort_unstable();
+            template.depends.dedup();
+            transaction_indices.insert(
+                template.hash.0,
+                u16::try_from(index + 1)
+                    .expect("a 2 MB block has fewer than 65536 valid transactions"),
+            );
+        }
 
         let txs_fee = mempool_txs
             .iter()
@@ -578,77 +604,64 @@ impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
     }
 }
 
-/// Returns the NSM value balance after the chain tip in `chain_info`, if the subsidy of the
-/// next block depends on it.
+/// Returns the parent NSM balance when the next block's subsidy depends on it.
 ///
-/// From the ZIP 234 deployment height, the coinbase can't be built or cached without the
-/// balance. Before it, the coinbase pays the scheduled subsidy, so a coinbase built ahead of time
-/// without the balance is cached under `None` and reused.
+/// Before deployment, a coinbase built ahead of time without the balance is cached under `None`.
 pub(crate) fn nsm_value_balance_for_next_block(
     network: &Network,
     chain_info: &GetBlockTemplateChainInfo,
 ) -> Option<Amount<NonNegative>> {
-    #[cfg(zcash_unstable = "zip234")]
-    {
-        let height = chain_info.tip_height.next().ok()?;
-
-        zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network)
-            .then(|| chain_info.chain_value_pools.nsm_amount())
-    }
-
-    #[cfg(not(zcash_unstable = "zip234"))]
-    {
-        let _ = (network, chain_info);
-        None
-    }
+    let height = chain_info.tip_height.next().ok()?;
+    zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network)
+        .then(|| chain_info.chain_value_pools.nsm_amount())
 }
 
-/// Caches recently built coinbase transactions for the next block, keyed on
-/// `(height, fee, parent_nsm_value_balance)`.
+/// Caches coinbases by height, parent NSM balance, and gross transaction fees.
 ///
-/// `getblocktemplate` clients commonly short-poll (re-request without long polling), and building
-/// the coinbase to a shielded address re-runs an expensive Sapling/Orchard proof. The coinbase only
-/// depends on `(height, fees)` for a given miner configuration, plus the parent block's NSM value
-/// balance from the ZIP 234 deployment height, so repeated requests within the same block can reuse
-/// the cached transaction instead of re-proving it on every call.
-///
-/// Each `getblocktemplate` call needs two coinbase transactions at the same height: a zero-fee
-/// "fake" coinbase for ZIP-317 weight estimation, and the real coinbase with actual fees. Entries
-/// from previous heights are cleared on insert to bound memory.
+/// Shielded coinbases require expensive proofs. Keep zero-fee sizing and real-fee coinbases for
+/// the selected context, discarding old proof completions rather than evicting newer work.
+/// Gross fees remain distinct even when they round to the same miner payout.
 #[derive(Clone, Default)]
-pub(crate) struct CoinbaseCache(
-    Arc<
-        Mutex<
-            HashMap<
-                (
-                    block::Height,
-                    Amount<NonNegative>,
-                    Option<Amount<NonNegative>>,
-                ),
-                TransactionTemplate<amount::NegativeOrZero>,
-            >,
-        >,
-    >,
-);
+pub(crate) struct CoinbaseCache(Arc<Mutex<CachedCoinbases>>);
+
+/// The context selected by the latest request and its bounded fee variants.
+#[derive(Default)]
+struct CachedCoinbases {
+    context: Option<(block::Height, Option<Amount<NonNegative>>)>,
+    transactions: HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+}
 
 impl CoinbaseCache {
-    /// Returns the cached coinbase transaction if it was built for `height`, `fee`, and
-    /// `parent_nsm_value_balance`.
+    /// Selects the context before a template starts constructing either coinbase.
+    fn select(&self, height: block::Height, parent_nsm_value_balance: Option<Amount<NonNegative>>) {
+        let mut cache = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.context != Some((height, parent_nsm_value_balance)) {
+            cache.context = Some((height, parent_nsm_value_balance));
+            cache.transactions.clear();
+        }
+    }
+
+    /// Returns a built fee variant without reviving a superseded template's context.
     fn get(
         &self,
         height: block::Height,
         fee: Amount<NonNegative>,
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
-        self.0
+        let cache = self
+            .0
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&(height, fee, parent_nsm_value_balance))
-            .cloned()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.context != Some((height, parent_nsm_value_balance)) {
+            return None;
+        }
+        cache.transactions.get(&fee).cloned()
     }
 
-    /// Stores `coinbase` as the cached transaction for `height`, `fee`, and
-    /// `parent_nsm_value_balance`.
+    /// Stores a completed build only if its height and parent balance are still selected.
     fn store(
         &self,
         height: block::Height,
@@ -656,28 +669,27 @@ impl CoinbaseCache {
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
-        let mut map = self
+        let mut cache = self
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        // Evict entries from previous heights so the map stays bounded.
-        map.retain(|&(h, _, _), _| h == height);
-        // Only 2 entries are ever useful (zero-fee fake + current real-fee coinbase), but mempool
-        // fee churn can accumulate stale entries within a block. Cap at 4 to stay well above the
-        // useful set while preventing unbounded growth. When evicting, preserve the zero-fee sizing
-        // coinbase — losing it recreates the churn this cache exists to prevent.
-        let key = (height, fee, parent_nsm_value_balance);
-        if !map.contains_key(&key) && map.len() >= 4 {
+        if *cache.context.get_or_insert((height, parent_nsm_value_balance))
+            != (height, parent_nsm_value_balance)
+        {
+            return;
+        }
+        let map = &mut cache.transactions;
+        // Fee churn must not evict the zero-fee sizing coinbase or grow the cache without bound.
+        if !map.contains_key(&fee) && map.len() >= 4 {
             let evict_key = map
                 .keys()
                 .copied()
-                .find(|&(_, f, _)| f != Amount::<NonNegative>::zero());
+                .find(|&f| f != Amount::<NonNegative>::zero());
             if let Some(key) = evict_key {
                 map.remove(&key);
             }
         }
-        map.insert(key, coinbase);
+        map.insert(fee, coinbase);
     }
 }
 
@@ -865,9 +877,16 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
-/// Returns a [`GetBlockTemplateResponse`].
-pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
+/// Returns a [`GetBlockTemplateResponse`], rejecting invalid proposals before verification
+/// when their mandatory payouts do not match the current parent's contextual subsidy.
+///
+/// # Errors
+///
+/// Returns an RPC error if Zebra is not synced, the contextual state query fails or times out,
+/// or the verifier cannot accept the request.
+pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
+    read_state: ReadState,
     block_proposal_bytes: Vec<u8>,
     net: &Network,
     latest_chain_tip: Tip,
@@ -879,6 +898,16 @@ where
         + Send
         + Sync
         + 'static,
+    BlockVerifierRouter::Future: Send,
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
@@ -899,6 +928,40 @@ where
             .into());
         }
     };
+
+    let height = block.coinbase_height();
+    // A caller-controlled pre-reissuance height must not bypass the parent/height preflight.
+    if net.zip234_deployment_height().is_some() {
+        let chain_info = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            fetch_chain_info(read_state),
+        )
+        .await
+        .map_misc_error()??;
+
+        // The reserve and scheduled subsidy both belong to this exact parent and next height.
+        if block.header.previous_block_hash != chain_info.tip_hash
+            || chain_info.tip_height.next().ok() != height
+        {
+            return Ok(BlockProposalResponse::rejected(
+                "invalid proposal",
+                "proposal does not extend the current chain tip".into(),
+            )
+            .into());
+        }
+
+        let subsidy = zebra_chain::parameters::subsidy::block_subsidy_with_parent_pools(
+            chain_info.tip_height.next().map_misc_error()?,
+            net,
+            chain_info.chain_value_pools,
+        )
+        .map_misc_error()?;
+        if let Err(error) = subsidy_is_valid(&block, net, subsidy) {
+            return Ok(BlockProposalResponse::rejected("invalid proposal", error.into()).into());
+        }
+        // Contextual verification still checks payouts and total fees after transaction
+        // verification, including when the chain reorganizes after this snapshot.
+    }
 
     let block_verifier_router_response = block_verifier_router
         .ready()

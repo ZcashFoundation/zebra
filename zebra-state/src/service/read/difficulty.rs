@@ -59,7 +59,6 @@ pub fn get_block_template_chain_info(
     let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
         best_relevant_chain_and_history_tree_result?;
 
-    #[cfg(zcash_unstable = "zip234")]
     let chain_value_pools = {
         let (_, tip_hash, chain_value_pools) =
             read::find::tip_with_value_balance(non_finalized_state.best_chain(), db)?
@@ -80,7 +79,6 @@ pub fn get_block_template_chain_info(
         best_tip_hash,
         network,
         best_tip_history_tree,
-        #[cfg(zcash_unstable = "zip234")]
         chain_value_pools,
         DateTime32::now(),
     )
@@ -233,9 +231,7 @@ fn difficulty_time_and_history_tree(
     tip_hash: block::Hash,
     network: &Network,
     history_tree: Arc<HistoryTree>,
-    #[cfg(zcash_unstable = "zip234")] chain_value_pools: zebra_chain::value_balance::ValueBalance<
-        zebra_chain::amount::NonNegative,
-    >,
+    chain_value_pools: zebra_chain::value_balance::ValueBalance<zebra_chain::amount::NonNegative>,
     now: DateTime32,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
     // > For each block other than the genesis block , nTime MUST be strictly greater than
@@ -294,7 +290,6 @@ fn difficulty_time_and_history_tree(
         cur_time,
         min_time,
         max_time,
-        #[cfg(zcash_unstable = "zip234")]
         chain_value_pools,
     };
 
@@ -454,7 +449,6 @@ mod tests {
             cur_time: DateTime32::from(cur_time),
             min_time: DateTime32::from(PREV - 100),
             max_time: DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN),
-            #[cfg(zcash_unstable = "zip234")]
             chain_value_pools: Default::default(),
         }
     }

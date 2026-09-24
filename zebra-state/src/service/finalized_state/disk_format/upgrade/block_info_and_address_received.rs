@@ -163,8 +163,7 @@ impl DiskFormatUpgrade for Upgrade {
             // Get the data loaded from the parallel iterator
             let (block, size, utxos, address_balance_changes) = match load_result {
                 LoadResult::HasInfo(prev_value_pool) => {
-                    // BlockInfo already stored; we just need the its value pool
-                    // then skip the block
+                    // BlockInfo already stored; reuse its value pool and skip the block.
                     value_pool = prev_value_pool;
                     continue;
                 }
@@ -177,19 +176,12 @@ impl DiskFormatUpgrade for Upgrade {
             };
 
             let deferred_pool_balance_change =
-                calculate_deferred_pool_balance_change(height, &network, value_pool);
+                calculate_deferred_pool_balance_change(height, &network, value_pool)
+                    .expect("the finalized block has a valid subsidy and lockbox disbursement");
 
-            #[cfg_attr(not(zcash_unstable = "zip234"), allow(unused_mut))]
-            let mut block_value_pool_change = block
-                .chain_value_pool_change(&utxos, deferred_pool_balance_change)
-                .unwrap_or_default();
-
-            #[cfg(zcash_unstable = "zip234")]
-            block_value_pool_change.set_nsm_amount(
-                block
-                    .nsm_value_balance_change(height, &network, &utxos, value_pool)
-                    .unwrap_or_default(),
-            );
+            let block_value_pool_change = block
+                .chain_value_pool_change(&utxos, deferred_pool_balance_change, &network, value_pool)
+                .expect("the finalized block has valid transaction and NSM balance changes");
 
             // Add this block's value pool changes to the total value pool.
             value_pool = value_pool

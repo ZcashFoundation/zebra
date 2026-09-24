@@ -613,11 +613,16 @@ struct DTestnetParameters {
     disable_pow: Option<bool>,
     genesis_hash: Option<String>,
     activation_heights: Option<ConfiguredActivationHeights>,
+    /// First height that reissues the NSM value balance; defaults to NU7 activation.
+    zip234_deployment_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     /// Omission retains the default streams; an explicitly empty list disables them.
     /// An empty list cannot be combined with either legacy funding stream field.
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Must yield a supported first halving height and a schedule within the monetary cap.
+    /// Configured reissuance needs a positive coefficient; funding streams need a nonzero
+    /// address-change interval.
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     #[serde(default)]
@@ -635,7 +640,6 @@ struct DTestnetParameters {
 
     /// Regtest and configured Testnets only: the NSM value balance seeded at NU7 activation
     /// under the halving-preserving issuance ZIP.
-    #[cfg(zcash_unstable = "zip234")]
     initial_nsm_value_balance:
         Option<zebra_chain::amount::Amount<zebra_chain::amount::NonNegative>>,
 }
@@ -708,9 +712,9 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
+            zip234_deployment_height: params.configured_zip234_deployment_height(),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
-            #[cfg(zcash_unstable = "zip234")]
             initial_nsm_value_balance: Some(params.initial_nsm_value_balance()),
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
@@ -920,6 +924,7 @@ where
         disable_pow,
         genesis_hash,
         activation_heights,
+        zip234_deployment_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -929,7 +934,6 @@ where
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
         should_allow_unshielded_coinbase_spends,
-        #[cfg(zcash_unstable = "zip234")]
         initial_nsm_value_balance,
     } = params;
 
@@ -942,7 +946,6 @@ where
 
     let mut params_builder = testnet::Parameters::build();
 
-    #[cfg(zcash_unstable = "zip234")]
     if let Some(initial_nsm_value_balance) = initial_nsm_value_balance {
         params_builder = params_builder.with_initial_nsm_value_balance(initial_nsm_value_balance);
     }
@@ -989,6 +992,10 @@ where
         params_builder = params_builder
             .with_activation_heights(activation_heights)
             .map_err(de::Error::custom)?
+    }
+
+    if let Some(height) = zip234_deployment_height {
+        params_builder = params_builder.with_zip234_deployment_height(height);
     }
 
     if let Some(halving_interval) = pre_blossom_halving_interval {
@@ -1060,6 +1067,7 @@ where
 fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters, &'static str> {
     let DTestnetParameters {
         activation_heights,
+        zip234_deployment_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -1067,13 +1075,13 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         checkpoints,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
-        #[cfg(zcash_unstable = "zip234")]
         initial_nsm_value_balance,
         ..
     } = params;
 
     Ok(RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
+        zip234_deployment_height,
         funding_streams: merge_funding_streams(
             funding_streams,
             pre_nu6_funding_streams,
@@ -1083,11 +1091,7 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         checkpoints: Some(checkpoints),
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
-        #[cfg(zcash_unstable = "zip234")]
         initial_nsm_value_balance,
-        // Reissuance starts at NU7 activation on Regtest; tests set a later height in code.
-        #[cfg(zcash_unstable = "zip234")]
-        zip234_deployment_height: None,
     })
 }
 

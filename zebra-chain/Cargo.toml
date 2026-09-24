@@ -54,6 +54,7 @@ bench = ["zebra-test"]
 
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 lazy_static = { workspace = true }
+mset.workspace = true
 tempfile = { workspace = true }
 bitvec = { workspace = true }
 bitflags = { workspace = true }
@@ -70,7 +71,6 @@ incrementalmerkletree.workspace = true
 jubjub = { workspace = true }
 dirs = { workspace = true }
 num-integer = { workspace = true }
-mset = { workspace = true }
 primitive-types = { workspace = true }
 rand_core = { workspace = true }
 ripemd = { workspace = true }

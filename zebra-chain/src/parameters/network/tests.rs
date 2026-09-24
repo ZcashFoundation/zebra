@@ -227,7 +227,10 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
     // https://z.cash/support/faq/#what-is-slow-start-mining
     assert_eq!(
         Amount::<NonNegative>::try_from(1_250_000_000)?,
-        block_subsidy((network.slow_start_interval() + 1).unwrap(), network)?
+        block_subsidy(
+            (network.slow_start_interval() + 1).unwrap(),
+            network,
+        )?
     );
     assert_eq!(
         Amount::<NonNegative>::try_from(1_250_000_000)?,
@@ -254,7 +257,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(156_250_000)?,
         block_subsidy(
             (first_halving_height + POST_BLOSSOM_HALVING_INTERVAL).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -264,7 +267,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(4_882_812)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 6)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -274,7 +277,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(1)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 28)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -284,7 +287,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -292,7 +295,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 39)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -300,7 +303,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 49)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -308,7 +311,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 59)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -317,7 +320,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -326,7 +329,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 63)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -334,7 +337,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 64)).unwrap(),
-            network
+            network,
         )?
     );
 
@@ -385,14 +388,12 @@ fn check_height_for_num_halvings() {
 
 /// A Testnet with Mainnet's activation heights, NU7 at `nu7`, and no funding streams or lockbox
 /// disbursements, so its scheduled block subsidies match Mainnet's.
-#[cfg(zcash_unstable = "zip234")]
 fn zip234_mainnet_like_testnet(nu7: u32) -> Network {
     zip234_mainnet_like_testnet_with_initial_balance(nu7, 35_080_000_000)
 }
 
 /// A Testnet like [`zip234_mainnet_like_testnet`], seeding the NSM value balance with
 /// `initial_nsm_value_balance` zatoshis at its NU7 activation height.
-#[cfg(zcash_unstable = "zip234")]
 fn zip234_mainnet_like_testnet_with_initial_balance(
     nu7: u32,
     initial_nsm_value_balance: i64,
@@ -413,7 +414,6 @@ fn zip234_mainnet_like_testnet_with_initial_balance(
 }
 
 /// Chain value pools whose NSM value balance holds `nsm` zatoshis.
-#[cfg(zcash_unstable = "zip234")]
 fn zip234_pools_with_nsm_balance(nsm: i64) -> crate::value_balance::ValueBalance<NonNegative> {
     let mut pools = crate::value_balance::ValueBalance::<NonNegative>::zero();
     pools.set_nsm_amount(nsm.try_into().expect("valid amount"));
@@ -423,7 +423,7 @@ fn zip234_pools_with_nsm_balance(nsm: i64) -> crate::value_balance::ValueBalance
 /// `BLOCK_SUBSIDY_FRACTION` is `LN2_SCALED / PostBlossomHalvingInterval`, which is 4126 / 10^10 on
 /// Mainnet, and 1375 / 10^10 at ZIP 218's 25-second target spacing, where the halving interval
 /// triples.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_block_subsidy_fraction_follows_halving_interval() -> Result<(), Report> {
     use crate::parameters::subsidy::{
@@ -467,7 +467,7 @@ fn check_zip234_block_subsidy_fraction_follows_halving_interval() -> Result<(), 
 }
 
 /// The additional block subsidy is `ceiling(BLOCK_SUBSIDY_FRACTION * NSMValueBalance)`.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_additional_block_subsidy_rounds_up() -> Result<(), Report> {
     use crate::{
@@ -522,7 +522,7 @@ fn check_zip234_additional_block_subsidy_rounds_up() -> Result<(), Report> {
 /// From activation, `BlockSubsidy(height)` is `ScheduledBlockSubsidy(height)` plus the additional
 /// subsidy for `NSMValueBalance(height - 1)`, and the activation block reissues from
 /// `INITIAL_NSM_VALUE_BALANCE`.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_block_subsidy_with_parent_pools() -> Result<(), Report> {
     use crate::{
@@ -618,7 +618,7 @@ fn check_zip234_block_subsidy_with_parent_pools() -> Result<(), Report> {
 /// The NSM value balance change debits the additional block subsidy, and credits
 /// `INITIAL_NSM_VALUE_BALANCE` at the activation block, so that reissuance is a transfer between
 /// chain value pools.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
     use std::ops::Neg;
@@ -701,7 +701,7 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
 /// With a deployment height after NU7 activation, the NSM value balance is seeded at NU7
 /// activation but nothing is reissued until the deployment height, where reissuance starts from
 /// the full balance.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
     use std::ops::Neg;
@@ -798,7 +798,7 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
 }
 
 /// A deployment height before NU7 activation, or without one, is rejected.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_deployment_height_must_follow_nu7() -> Result<(), Report> {
     use crate::parameters::{
@@ -847,7 +847,7 @@ fn check_zip234_deployment_height_must_follow_nu7() -> Result<(), Report> {
 }
 
 /// The NSM value balance halves about once per halving period, and drains to zero without new removals.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_pool_halves_over_a_halving_period() -> Result<(), Report> {
     use crate::parameters::subsidy::{additional_block_subsidy, ParameterSubsidy};
@@ -893,7 +893,7 @@ fn check_zip234_pool_halves_over_a_halving_period() -> Result<(), Report> {
 /// Mainnet and the default Testnet have no `DEPLOYMENT_BLOCK_HEIGHT` until the NU7 deployment ZIP
 /// assigns one, so they never reissue, while a configured Testnet defaults to its NU7 activation
 /// height.
-#[cfg(zcash_unstable = "zip234")]
+
 #[test]
 fn check_zip234_deployment_height_is_unassigned_on_public_networks() -> Result<(), Report> {
     use crate::parameters::{
@@ -925,7 +925,7 @@ fn check_zip234_deployment_height_is_unassigned_on_public_networks() -> Result<(
 
 /// `NSMFeeContribution` is `floor(fees * 6 / 10)` of the block's total fees from NU7 activation,
 /// so rounding favors the miner, and zero before it.
-#[cfg(zcash_unstable = "zip235")]
+
 #[test]
 fn check_zip235_nsm_fee_contribution() -> Result<(), Report> {
     use crate::{
@@ -975,7 +975,7 @@ fn check_zip235_nsm_fee_contribution() -> Result<(), Report> {
 
 /// The NSM value balance change is an error, rather than a panic, when the seed and the fees
 /// removed from circulation don't fit in an amount together.
-#[cfg(zcash_unstable = "zip235")]
+
 #[test]
 fn check_zip235_nsm_value_balance_change_overflow() -> Result<(), Report> {
     use crate::{

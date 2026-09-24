@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
-    amount::{Amount, DeferredPoolBalanceChange, NonNegative},
+    amount::NonNegative,
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
@@ -12,21 +12,19 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtree,
-    transparent,
     value_balance::ValueBalance,
 };
 use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    request::ContextuallyVerifiedBlock,
     service::{
-        finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
+        finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
         ReconsiderError,
     },
     tests::FakeChainHelper,
-    Config, SemanticallyVerifiedBlock,
+    Config,
 };
 
 #[test]
@@ -1102,92 +1100,9 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
     Ok(())
 }
 
-/// Check that the `deferred_pool_balance_change` passed to `with_block_and_spent_utxos`
-/// flows through to the resulting block's `chain_value_pool_change`.
-#[test]
-fn with_block_and_spent_utxos_preserves_deferred_pool_balance_change() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let block: Arc<Block> =
-        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
-    let prepared = SemanticallyVerifiedBlock::from(block);
-
-    let zero_output = transparent::Output {
-        value: Amount::zero(),
-        lock_script: transparent::Script::new(&[]),
-    };
-    let zero_utxo = transparent::OrderedUtxo::new(zero_output, Height(1), 1);
-    let spent_utxos = prepared
-        .block
-        .transactions
-        .iter()
-        .map(AsRef::as_ref)
-        // `inputs()` returns an owned Vec under the newtype transaction.
-        .flat_map(|tx| tx.inputs())
-        .filter_map(|input| input.outpoint())
-        .map(|outpoint| (outpoint, zero_utxo.clone()))
-        .collect();
-
-    let expected_deferred = Amount::try_from(123_456_789)?;
-    let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-        prepared,
-        spent_utxos,
-        DeferredPoolBalanceChange::new(expected_deferred),
-    )?;
-
-    assert_eq!(
-        contextual.chain_value_pool_change.deferred_amount(),
-        expected_deferred,
-    );
-
-    Ok(())
-}
-
-/// Check that after committing a block via `commit_new_chain`, the non-finalized chain's
-/// deferred pool amount matches what `calculate_deferred_pool_balance_change` returns for
-/// the block's height and network.
-#[test]
-fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let network = Network::Mainnet;
-
-    let block: Arc<Block> = Arc::new(network.test_block(653_599, 583_999).unwrap());
-    let height = block.coinbase_height().expect("coinbase height");
-    assert!(
-        height > network.slow_start_interval(),
-        "test block must be past slow_start_interval to exercise the non-trivial branch \
-         of calculate_deferred_pool_balance_change",
-    );
-
-    let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
-
-    state.commit_new_chain(block.prepare(), &finalized_state.db)?;
-
-    let chain = state.best_chain().expect("chain was just committed");
-    let expected = calculate_deferred_pool_balance_change(
-        height,
-        &network,
-        ValueBalance::<NonNegative>::fake_populated_pool(),
-    )
-    .value()
-    .constrain::<NonNegative>()?;
-
-    assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
-
-    Ok(())
-}
-
 /// From the ZIP 234 deployment height, the deferred (lockbox) funding stream is a
 /// fraction of the whole block subsidy, including the additional subsidy that depends on the parent
 /// block's chain value pools.
-#[cfg(zcash_unstable = "zip234")]
 #[test]
 fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
     use zebra_chain::parameters::{
@@ -1241,15 +1156,15 @@ fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
     );
 
     assert_eq!(
-        calculate_deferred_pool_balance_change(height, &network, parent_pools).value(),
+        calculate_deferred_pool_balance_change(height, &network, parent_pools)?.value(),
         expected.constrain::<zebra_chain::amount::NegativeAllowed>()?,
     );
 
     // Before activation the parent's chain value pools don't matter.
     let height = Height(9);
     assert_eq!(
-        calculate_deferred_pool_balance_change(height, &network, parent_pools),
-        calculate_deferred_pool_balance_change(height, &network, ValueBalance::zero()),
+        calculate_deferred_pool_balance_change(height, &network, parent_pools)?,
+        calculate_deferred_pool_balance_change(height, &network, ValueBalance::zero())?,
     );
 
     Ok(())
@@ -1260,10 +1175,8 @@ fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
 /// reissues from the balance after its parent. A block paying the scheduled subsidy instead is
 /// rejected from the deployment height.
 ///
-/// The blocks after activation contain transactions that pay fees. With the `zip235` cfg each block
-/// credits the balance with the fees it removes from circulation, and from the deployment height a
-/// block whose coinbase claims those fees is rejected.
-#[cfg(zcash_unstable = "zip234")]
+/// Each block after activation credits the balance with the fees it removes from circulation.
+/// From the deployment height a block whose coinbase claims those fees is rejected.
 #[test]
 fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
     use chrono::Duration;
@@ -1505,7 +1418,6 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         let reissued = additional_block_subsidy(height, &network, parent_pools.nsm_amount());
         let contributed = nsm_fee_contribution(height, &network, fees);
         let miner_fees = (fees - contributed)?;
-        #[cfg(zcash_unstable = "zip235")]
         assert_eq!(contributed, zats(601));
 
         if height < Height(DEPLOYMENT_HEIGHT) {

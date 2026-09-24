@@ -21,14 +21,12 @@ use crate::{
     BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
-#[cfg(zcash_unstable = "zip234")]
 use zebra_chain::{
     amount::{Amount, NonNegative},
     parameters::subsidy::{self, CoinbaseTransactionError, SubsidyError},
     value_balance::ValueBalance,
 };
 
-#[cfg(zcash_unstable = "zip234")]
 use crate::ContextuallyVerifiedBlock;
 
 // use self as check
@@ -427,7 +425,6 @@ pub(crate) fn initial_contextual_validity(
 /// which is only known during contextual validation, so the checks run here instead.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub(crate) fn zip234_subsidy_is_valid(
     contextual: &ContextuallyVerifiedBlock,
     network: &Network,

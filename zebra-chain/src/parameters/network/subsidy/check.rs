@@ -53,11 +53,14 @@ pub fn subsidy_is_valid(
     net: &Network,
     expected_block_subsidy: Amount<NonNegative>,
 ) -> Result<DeferredPoolBalanceChange, CoinbaseTransactionError> {
-    if expected_block_subsidy.is_zero() {
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+
+    // A zero subsidy removes proportional payouts, but not fixed lockbox disbursements.
+    if expected_block_subsidy.is_zero()
+        && Some(height) != NetworkUpgrade::Nu6_1.activation_height(net)
+    {
         return Ok(DeferredPoolBalanceChange::zero());
     }
-
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
 
     let mut coinbase_outputs: MultiSet<Output> = block
         .transactions

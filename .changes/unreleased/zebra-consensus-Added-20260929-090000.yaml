@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Added
-body: "A test for the ZIP 235 coinbase rule in the block verifier, behind `--cfg zcash_unstable=\"zip235\"` ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487))."
-time: 2026-09-29T09:00:00.000000000-06:00

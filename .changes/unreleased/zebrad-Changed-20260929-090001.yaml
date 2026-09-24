@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: "Add `zip235` to the expected `zcash_unstable` cfg values ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487))."
-time: 2026-09-29T09:00:01.000000000-06:00

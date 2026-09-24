@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Changed
-body: "With `--cfg zcash_unstable=\"zip235\"`, each block from NU7 activation credits the NSM value balance with the transaction fees ZIP 235 removes from circulation, and from the ZIP 234 deployment height contextual validation rejects a coinbase transaction that claims them ([zips#1363](https://github.com/zcash/zips/pull/1363)) ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487))."
+body: "From NU7 activation, ordinary builds credit the NSM with 60% of aggregate transaction fees, rounded down. From the configured ZIP 234 deployment height, contextual payout validation uses the exact parent reserve and rejects coinbases that claim the withheld fees ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
 time: 2026-09-18T13:00:02.000000000-06:00

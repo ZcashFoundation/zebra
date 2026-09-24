@@ -124,12 +124,16 @@ fn reserves_space_for_block_header_and_transaction_count() {
     let miner_params =
         MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
 
-    let coinbase_tx_size =
-        TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
-            .expect("valid coinbase transaction template")
-            .data
-            .as_ref()
-            .len();
+    let coinbase_tx_size = TransactionTemplate::new_coinbase(
+        &network,
+        height,
+        &miner_params,
+        Amount::zero(),
+    )
+    .expect("valid coinbase transaction template")
+    .data
+    .as_ref()
+    .len();
 
     let safe_budget = usize::try_from(MAX_BLOCK_BYTES).expect("fits in memory")
         - Header::serialized_size(&network)

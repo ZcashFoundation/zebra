@@ -65,6 +65,10 @@ pub fn select_mempool_transactions(
     coinbase_cache: Option<&CoinbaseCache>,
     parent_nsm_value_balance: Option<Amount<NonNegative>>,
 ) -> Vec<SelectedMempoolTx> {
+    if let Some(cache) = coinbase_cache {
+        cache.select(height, parent_nsm_value_balance);
+    }
+
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
     //

@@ -21,15 +21,12 @@ mod tests;
 use std::collections::HashMap;
 
 use crate::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{Height, HeightDiff},
     parameters::{Network, NetworkUpgrade},
     transparent,
     value_balance::ValueBalance,
 };
-
-#[cfg(zcash_unstable = "zip234")]
-use crate::amount::NegativeAllowed;
 
 pub use check::{miner_fees_are_valid, subsidy_is_valid, CoinbaseTransactionError};
 
@@ -358,7 +355,6 @@ pub(super) fn nu7_funding_stream_end_height(original_end: Height, nu7: Option<He
         None => original_end,
     }
 }
-
 /// Returns the position in the address slice for each funding stream
 /// as described in [protocol specification §7.10][7.10]
 ///
@@ -375,7 +371,8 @@ fn funding_stream_address_index(
     let funding_streams = network.funding_streams(height)?;
     let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
 
-    // Signed periods can be negative, but their relative address index is nonnegative.
+    // The two periods are only meaningful relative to each other, so the subtraction is done in
+    // signed arithmetic: see `funding_stream_address_period()`.
     let index = usize::try_from(
         1 + funding_stream_address_period(height, network)
             - funding_stream_address_period(funding_streams.height_range().start, network),
@@ -509,10 +506,12 @@ pub enum SubsidyError {
     #[error("unsupported height")]
     UnsupportedHeight,
 
+    #[error("{0}")]
+    Other(String),
+
     #[error("invalid amount")]
     InvalidAmount(#[from] amount::Error),
 
-    #[cfg(zcash_unstable = "zip234")]
     #[error(
         "the block subsidy at height {0:?} depends on the chain value pools after its parent block"
     )]
@@ -531,7 +530,6 @@ pub enum SubsidyError {
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
 /// [ZIP 236]: https://zips.z.cash/zip-0236
-#[cfg(zcash_unstable = "zip234")]
 pub const MAINNET_INITIAL_NSM_VALUE_BALANCE: u64 = 35_080_000_000;
 
 impl Network {
@@ -545,7 +543,6 @@ impl Network {
     /// last pre-NU6 height (2,975,999), and is not known yet, so it is zero for now.
     ///
     /// [zip]: https://github.com/zcash/zips/pull/1354
-    #[cfg(zcash_unstable = "zip234")]
     pub fn initial_nsm_value_balance(&self) -> Amount<NonNegative> {
         match self {
             Network::Mainnet => Amount::try_from(MAINNET_INITIAL_NSM_VALUE_BALANCE)
@@ -562,7 +559,6 @@ impl Network {
     /// `zip234_deployment_height`, or their NU7 activation height if none is configured.
     ///
     /// [zip]: https://github.com/zcash/zips/pull/1354
-    #[cfg(zcash_unstable = "zip234")]
     pub fn zip234_deployment_height(&self) -> Option<Height> {
         match self {
             Network::Mainnet => None,
@@ -645,13 +641,11 @@ pub fn halving(height: Height, network: &Network) -> u32 {
 /// 1375, with no separate constant.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub const LN2_SCALED: u64 = 6_931_680_000;
 
 /// The denominator of `BLOCK_SUBSIDY_FRACTION` in the [halving-preserving issuance ZIP][zip].
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub const BLOCK_SUBSIDY_FRACTION_DENOMINATOR: u64 = 10_000_000_000;
 
 /// `HalvingInterval(height)`: the number of blocks in the halving period containing `height`.
@@ -660,7 +654,6 @@ pub const BLOCK_SUBSIDY_FRACTION_DENOMINATOR: u64 = 10_000_000_000;
 /// ZIP 218's 25-second blocks are active, and `PostBlossomHalvingInterval` otherwise.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub fn halving_interval(height: Height, network: &Network) -> HeightDiff {
     if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu7 {
         network.post_nu7_halving_interval()
@@ -676,19 +669,12 @@ pub fn halving_interval(height: Height, network: &Network) -> HeightDiff {
 /// `(1 - ln 2 / n)^n` approaches `1/2` for large `n`.
 ///
 /// The result is non-zero for any halving interval up to `Height::MAX`.
-#[cfg(zcash_unstable = "zip234")]
 pub fn block_subsidy_fraction_numerator(height: Height, network: &Network) -> u64 {
     let halving_interval =
         u64::try_from(halving_interval(height, network)).expect("halving intervals are positive");
 
     LN2_SCALED / halving_interval
 }
-
-#[cfg(all(zcash_unstable = "zip235", not(zcash_unstable = "zip234")))]
-compile_error!(
-    "`--cfg zcash_unstable=\"zip235\"` requires `--cfg zcash_unstable=\"zip234\"`: the fees ZIP 235 \
-     removes from circulation are credited to the NSM value balance"
-);
 
 /// `NSMFeeContribution(height)`: the transaction fees the block at `height` removes from
 /// circulation, `floor(block_miner_fees * 6 / 10)` from NU7 activation, and zero before it. This
@@ -698,9 +684,6 @@ compile_error!(
 /// coinbase transaction can only claim the remaining fees, and the contribution needs no
 /// transaction field.
 ///
-/// Always zero without `--cfg zcash_unstable="zip235"`, which requires the `zip234` cfg, because
-/// the contribution is credited to the NSM value balance.
-///
 /// [ZIP 235]: https://zips.z.cash/zip-0235
 /// [nu7]: https://github.com/zcash/zips/pull/1363
 pub fn nsm_fee_contribution(
@@ -708,7 +691,7 @@ pub fn nsm_fee_contribution(
     network: &Network,
     block_miner_fees: Amount<NonNegative>,
 ) -> Amount<NonNegative> {
-    if !cfg!(zcash_unstable = "zip235") || !nsm_value_balance_is_tracked(height, network) {
+    if !nsm_value_balance_is_tracked(height, network) {
         return Amount::zero();
     }
 
@@ -734,7 +717,6 @@ pub fn nsm_value_balance_is_tracked(height: Height, network: &Network) -> bool {
 /// `height`: from `DEPLOYMENT_BLOCK_HEIGHT`, which is at or after NU7 activation.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub fn zip234_reissuance_is_active(height: Height, network: &Network) -> bool {
     network
         .zip234_deployment_height()
@@ -743,7 +725,6 @@ pub fn zip234_reissuance_is_active(height: Height, network: &Network) -> bool {
 
 /// The value the block at `height` seeds into the NSM value balance: `INITIAL_NSM_VALUE_BALANCE`
 /// at the NU7 activation block, and zero otherwise.
-#[cfg(zcash_unstable = "zip234")]
 fn nsm_seed(height: Height, network: &Network) -> Amount<NonNegative> {
     if Some(height) == NetworkUpgrade::Nu7.activation_height(network) {
         network.initial_nsm_value_balance()
@@ -760,7 +741,6 @@ fn nsm_seed(height: Height, network: &Network) -> Amount<NonNegative> {
 /// left unclaimed before NU6, so the NU7 activation block reissues from that seed.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub fn nsm_value_balance_before(
     height: Height,
     network: &Network,
@@ -779,7 +759,6 @@ pub fn nsm_value_balance_before(
 ///
 /// It is also credited with [`nsm_fee_contribution`], the part of `block_miner_fees` that ZIP 235
 /// removes from circulation.
-#[cfg(zcash_unstable = "zip234")]
 pub fn nsm_value_balance_change(
     height: Height,
     network: &Network,
@@ -809,7 +788,6 @@ pub fn nsm_value_balance_change(
 /// from `DEPLOYMENT_BLOCK_HEIGHT`, and zero before it.
 ///
 /// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
 pub fn additional_block_subsidy(
     height: Height,
     network: &Network,
@@ -842,23 +820,11 @@ pub fn block_subsidy_with_parent_pools(
     net: &Network,
     parent_chain_value_pools: ValueBalance<NonNegative>,
 ) -> Result<Amount<NonNegative>, SubsidyError> {
-    #[cfg(zcash_unstable = "zip234")]
-    return block_subsidy_with_parent_nsm_value_balance(
-        height,
-        net,
-        parent_chain_value_pools.nsm_amount(),
-    );
-
-    #[cfg(not(zcash_unstable = "zip234"))]
-    {
-        let _ = parent_chain_value_pools;
-        scheduled_block_subsidy(height, net)
-    }
+    block_subsidy_with_parent_nsm_value_balance(height, net, parent_chain_value_pools.nsm_amount())
 }
 
 /// `BlockSubsidy(height)` for a block whose parent block leaves `parent_nsm_value_balance` in the
 /// NSM value balance. See [`block_subsidy_with_parent_pools`].
-#[cfg(zcash_unstable = "zip234")]
 pub fn block_subsidy_with_parent_nsm_value_balance(
     height: Height,
     net: &Network,
@@ -877,14 +843,13 @@ pub fn block_subsidy_with_parent_nsm_value_balance(
 
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
-/// With `zcash_unstable = "zip234"`, this returns `SubsidyError::ParentChainValuePoolsRequired`
-/// once the [halving-preserving issuance ZIP][zip] reissues, because the subsidy then depends on
+/// This returns [`SubsidyError::ParentChainValuePoolsRequired`] once the
+/// [halving-preserving issuance ZIP][zip] reissues, because the subsidy then depends on
 /// the parent block's NSM value balance. Use [`block_subsidy_with_parent_pools`] there.
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 /// [zip]: https://github.com/zcash/zips/pull/1354
 pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative>, SubsidyError> {
-    #[cfg(zcash_unstable = "zip234")]
     if zip234_reissuance_is_active(height, net) {
         return Err(SubsidyError::ParentChainValuePoolsRequired(height));
     }
@@ -1092,7 +1057,7 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // inconsistency in the definition of the founders reward, which should occur only before
     // Canopy, so we check if Canopy is active as well.
     if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
-        block_subsidy(height, net)
+        scheduled_block_subsidy(height, net)
             .map(|subsidy| subsidy.div_exact(5))
             .expect("block subsidy must be valid for founders rewards")
     } else {

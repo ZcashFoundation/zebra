@@ -41,7 +41,6 @@ fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateR
         min_time: DateTime32::from(1654008606),
         max_time,
         chain_history_root: fake_history_tree(net).hash(),
-        #[cfg(zcash_unstable = "zip234")]
         chain_value_pools: Default::default(),
     };
 

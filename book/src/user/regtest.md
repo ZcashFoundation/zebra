@@ -43,6 +43,39 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
+### Testing NU7 reissuance
+
+Use a fresh test chain and replace the activation-height section above with:
+
+```toml
+[network.testnet_parameters]
+initial_nsm_value_balance = 100000000
+zip234_deployment_height = 12
+
+[network.testnet_parameters.activation_heights]
+Canopy = 1
+NU5 = 2
+NU7 = 9
+```
+
+The deployment height must be at least 1, no earlier than NU7 activation, and less
+than 2^31. Omitting it starts reissuance at NU7 activation. These are example
+consensus parameters, not public Mainnet or Testnet activation heights.
+
+At NU7 activation, the NSM reserve receives the explicitly configured initial
+balance in zatoshis; it is not derived from historical issued supply. From that
+block onward, 60% of aggregate transaction fees, rounded down, also enters the
+reserve. The reserve is excluded from issued supply.
+
+Starting at the configured deployment height, mining templates and
+`getblocksubsidy` include the additional subsidy calculated from the parent
+block's reserve. `getblocksubsidy` rejects a future reissuance height whose parent
+block is not yet in the best chain.
+
+Ordinary builds use database format v29.0.0, including the NSM balance in each
+stored value-pool record. A v28 database is not upgraded in place: resynchronize
+or restore a compatible v29 database.
+
 ### Using Zebra's Internal Miner
 
 Zebra can mine blocks on the Regtest network when compiled with the experimental `internal-miner` compilation feature and configured to enable to internal miner.

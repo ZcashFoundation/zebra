@@ -207,7 +207,10 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
 {
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
-    let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
+    let mut next_coinbase: Option<(
+        Height,
+        JoinHandle<TransactionTemplate<NegativeOrZero>>,
+    )> = None;
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
@@ -438,11 +441,18 @@ where
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
 /// already built or another coinbase is still being built.
 fn start_precomputing_coinbase(
-    next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
+    next_coinbase: &mut Option<(
+        Height,
+        JoinHandle<TransactionTemplate<NegativeOrZero>>,
+    )>,
     network: &Network,
     miner_params: &MinerParams,
     height: Height,
 ) {
+    // The future parent does not exist yet, so its NSM balance is unknown.
+    if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network) {
+        return;
+    }
     if next_coinbase
         .as_ref()
         .is_some_and(|(precomputed_height, task)| {
@@ -452,20 +462,18 @@ fn start_precomputing_coinbase(
         return;
     }
 
-    // From the ZIP 234 deployment height, the coinbase depends on the NSM value balance after the
-    // next block, which isn't known until that block arrives.
-    #[cfg(zcash_unstable = "zip234")]
-    if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network) {
-        return;
-    }
-
     let (network, miner_params) = (network.clone(), miner_params.clone());
 
     *next_coinbase = Some((
         height,
         tokio::task::spawn_blocking(move || {
-            TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
-                .expect("valid coinbase tx")
+            TransactionTemplate::new_coinbase(
+                &network,
+                height,
+                &miner_params,
+                Amount::zero(),
+            )
+            .expect("valid coinbase tx")
         }),
     ));
 }
@@ -475,7 +483,10 @@ fn start_precomputing_coinbase(
 /// A coinbase built for another height has the wrong BIP-34 height and subsidy. Keep tracking it
 /// until it finishes, so a later precomputation cannot detach an unfinished proof.
 async fn store_precomputed_coinbase(
-    next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
+    next_coinbase: &mut Option<(
+        Height,
+        JoinHandle<TransactionTemplate<NegativeOrZero>>,
+    )>,
     height: Height,
     coinbase_cache: &CoinbaseCache,
 ) {
@@ -489,6 +500,7 @@ async fn store_precomputed_coinbase(
     let (_, coinbase) = next_coinbase
         .take()
         .expect("the precomputed height was checked above");
+    coinbase_cache.select(height, None);
 
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that
