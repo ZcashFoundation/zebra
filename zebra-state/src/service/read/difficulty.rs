@@ -66,14 +66,15 @@ pub fn get_block_template_chain_info(
         expected_block_subsidy,
     ) = best_relevant_chain_and_history_tree_result?;
 
-    Ok(difficulty_time_and_history_tree(
+    difficulty_time_and_history_tree(
         best_relevant_chain,
         best_tip_height,
         best_tip_hash,
         network,
         best_tip_history_tree,
         expected_block_subsidy,
-    ))
+        DateTime32::now(),
+    )
 }
 
 /// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
@@ -226,7 +227,7 @@ fn best_relevant_chain_and_history_tree(
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_chain`, tip, `network`,
-/// and `history_tree`.
+/// `history_tree`, and captured local time `now`, or an error if no valid timestamp is available.
 ///
 /// The `relevant_chain` has recent blocks in reverse height order from the tip.
 ///
@@ -238,13 +239,12 @@ fn difficulty_time_and_history_tree(
     network: &Network,
     history_tree: Arc<HistoryTree>,
     expected_block_subsidy: Amount<NonNegative>,
-) -> GetBlockTemplateChainInfo {
+    now: DateTime32,
+) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
         .iter()
         .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
-
-    let cur_time = DateTime32::now();
 
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
@@ -259,27 +259,30 @@ fn difficulty_time_and_history_tree(
 
     let min_time = median_time_past
         .checked_add(Duration32::from_seconds(1))
-        .expect("a valid block time plus a small constant is in-range");
+        .ok_or("median-time-past leaves no representable block timestamp")?;
 
-    // > For each block at block height 2 or greater on Mainnet, or block height 653606 or greater on Testnet, nTime
-    // > MUST be less than or equal to the median-time-past of that block plus 90 * 60 seconds.
-    //
-    // We ignore the height as we are checkpointing on Canopy or higher in Mainnet and Testnet.
-    let max_time = median_time_past
-        .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
-        .expect("a valid block time plus a small constant is in-range");
+    // The context-free local-clock bound applies independently of the network's MTP rule.
+    let max_time = now.saturating_add(Duration32::from_hours(2));
+    let candidate_height = (tip_height + 1).ok_or("next block height is out of range")?;
+    let max_time = if network.is_max_block_time_enforced(candidate_height) {
+        max_time.min(
+            median_time_past.saturating_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN)),
+        )
+    } else {
+        max_time
+    };
 
-    // On Regtest, real time is far ahead of the chain's median-time-past (a fresh
-    // chain starts from the 2011-era genesis), so clamping `now()` to the valid
-    // range pins every mined block to `max_time` (median-time-past + 90 minutes),
-    // making chain time race ~90 minutes per block. That quickly outruns a
-    // following zcashd sidecar's acceptable block-time window and stalls its sync.
-    // Match zcashd's regtest behaviour by advancing block time minimally instead,
-    // keeping mined timestamps tightly clustered just above the median-time-past.
+    if min_time > max_time {
+        return Err("median-time-past is too far ahead of the local clock".into());
+    }
+
+    // Match zcashd's Regtest behavior by advancing time minimally rather than jumping
+    // from the historical genesis timestamp to the wall clock. This keeps mined
+    // timestamps tightly clustered just above the median-time-past.
     let cur_time = if network.is_regtest() {
         min_time
     } else {
-        cur_time.clamp(min_time, max_time)
+        now.clamp(min_time, max_time)
     };
 
     // Now that we have a valid time, get the difficulty for that time.
@@ -304,7 +307,7 @@ fn difficulty_time_and_history_tree(
 
     adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);
 
-    result
+    Ok(result)
 }
 
 /// Adjust the difficulty and time for the testnet minimum difficulty rule.
@@ -357,12 +360,10 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("small positive values are in-range");
 
     // The first minimum difficulty time is strictly greater than the spacing.
-    let std_difficulty_max_time = previous_block_time
-        .checked_add(minimum_difficulty_spacing)
-        .expect("a valid block time plus a small constant is in-range");
-    let min_difficulty_min_time = std_difficulty_max_time
-        .checked_add(Duration32::from_seconds(1))
-        .expect("a valid block time plus a small constant is in-range");
+    // If that threshold is beyond DateTime32, every representable time uses standard difficulty.
+    let std_difficulty_max_time = previous_block_time.saturating_add(minimum_difficulty_spacing);
+    let min_difficulty_min_time =
+        std_difficulty_max_time.saturating_add(Duration32::from_seconds(1));
 
     // Offer a minimum-difficulty template only once `cur_time` is strictly past
     // `previous_block_time + 6 * PoWTargetSpacing` (the latest time a standard-difficulty

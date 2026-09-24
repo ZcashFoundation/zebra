@@ -114,6 +114,7 @@ async fn test_z_get_treestate() {
     const SAPLING_ACTIVATION_HEIGHT: u32 = 2;
 
     let custom_testnet = Parameters::build()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             sapling: Some(SAPLING_ACTIVATION_HEIGHT),
             // We need to set the NU5 activation height higher than the height of the last block for

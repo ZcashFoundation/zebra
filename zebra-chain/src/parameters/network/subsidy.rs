@@ -377,18 +377,17 @@ pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
     let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
     let halving_index = i64::from(halving);
 
-    let unscaled_height = halving_index.checked_mul(pre_blossom_halving_interval)?;
-
-    let pre_blossom_height = unscaled_height
-        .min(blossom_height)
+    let unscaled_height = halving_index
+        .checked_mul(pre_blossom_halving_interval)?
         .checked_add(slow_start_shift)?;
 
-    let post_blossom_height = 0
-        .max(unscaled_height - blossom_height)
-        .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))?
-        .checked_add(slow_start_shift)?;
-
-    let height = pre_blossom_height.checked_add(post_blossom_height)?;
+    let height = if unscaled_height > blossom_height {
+        (unscaled_height - blossom_height)
+            .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))?
+            .checked_add(blossom_height)?
+    } else {
+        unscaled_height
+    };
 
     // ZIP 218: once NU7 is active, the blocks after its activation height are three times as
     // frequent, so the remaining blocks of this halving are stretched by the same ratio.
@@ -601,6 +600,17 @@ pub fn cumulative_scheduled_issuance(
     height: Height,
     network: &Network,
 ) -> Result<Amount<NonNegative>, SubsidyError> {
+    Ok(Amount::try_from(cumulative_scheduled_issuance_zatoshis(
+        height, network,
+    )?)?)
+}
+
+/// Sums the schedule before applying the monetary cap, so builder validation can exclude the
+/// unspendable genesis subsidy on networks without NU7's historical reserve seed.
+pub(super) fn cumulative_scheduled_issuance_zatoshis(
+    height: Height,
+    network: &Network,
+) -> Result<u64, SubsidyError> {
     let end = u64::from(height) + 1;
     let mut slow_end = u64::from(network.slow_start_interval()).min(end);
     // The schedule stops after 64 halvings, even during slow start on custom networks.
@@ -668,7 +678,7 @@ pub fn cumulative_scheduled_issuance(
             .ok_or(SubsidyError::Overflow)?;
         start = low;
     }
-    Ok(Amount::try_from(total)?)
+    Ok(total)
 }
 
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
@@ -844,11 +854,14 @@ pub fn subsidy_is_valid(
     net: &Network,
     expected_block_subsidy: Amount<NonNegative>,
 ) -> Result<DeferredPoolBalanceChange, SubsidyError> {
-    if expected_block_subsidy.is_zero() {
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+
+    // A zero subsidy removes proportional payouts, but not fixed lockbox disbursements.
+    if expected_block_subsidy.is_zero()
+        && Some(height) != NetworkUpgrade::Nu6_1.activation_height(net)
+    {
         return Ok(DeferredPoolBalanceChange::zero());
     }
-
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
 
     let mut coinbase_outputs: MultiSet<Output> = block
         .transactions

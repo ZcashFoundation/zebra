@@ -105,6 +105,7 @@ fn check_parameters_impl() {
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             nu7: Some(expected_activation_height),
             ..Default::default()
@@ -306,6 +307,7 @@ fn check_network_name() {
 #[test]
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             // Update this to be the latest network upgrade in Zebra, and update
             // the code below to expect the latest number of network upgrades.
@@ -768,4 +770,20 @@ fn temporary_orchard_disabling_soft_fork_heights() {
         None,
     );
     assert!(!disabled.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
+}
+
+#[test]
+fn public_testnet_peers_require_matching_orchard_disable_height() {
+    let builder = testnet::Parameters::build();
+    assert!(builder.is_compatible_with_default_parameters());
+    let public_height = Network::new_default_testnet()
+        .temporary_orchard_disabling_soft_fork_height()
+        .unwrap();
+    assert!(!builder
+        .clone()
+        .with_temporary_orchard_disabling_soft_fork_height(public_height.next().unwrap())
+        .is_compatible_with_default_parameters());
+    assert!(!builder
+        .disable_temporary_orchard_disabling_soft_fork()
+        .is_compatible_with_default_parameters());
 }
