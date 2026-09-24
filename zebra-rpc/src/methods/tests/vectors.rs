@@ -2461,6 +2461,7 @@ async fn rpc_getnetworksolps_uses_the_effective_height() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(60), async {
         let network = testnet::Parameters::build()
+            .with_slow_start_interval(zebra_chain::block::Height::MIN)
             .with_activation_heights(testnet::ConfiguredActivationHeights {
                 before_overwinter: Some(1),
                 nu7: Some(121),

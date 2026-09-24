@@ -9,6 +9,7 @@ const PREVIOUS_TIME: i64 = 1_600_000_000;
 
 fn testnet(nu7_height: u32) -> Network {
     Parameters::build()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             blossom: Some(1),
             nu7: Some(nu7_height),

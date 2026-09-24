@@ -593,6 +593,7 @@ fn funding_stream_address_period_floors_negative_heights() {
     // of that halving and pushes `height_for_first_halving()` far above the post-Blossom halving
     // interval. Funding streams are left empty, so no address period is ever used in anger here.
     let network = Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             canopy: Some(30),
             nu5: Some(35),
