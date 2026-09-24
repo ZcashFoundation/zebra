@@ -128,7 +128,7 @@ use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
-    constants::MIN_PEER_SET_LOG_INTERVAL,
+    constants::{INVENTORY_BUSY_PEER_REFUSAL_DELAY, MIN_PEER_SET_LOG_INTERVAL},
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
@@ -136,7 +136,7 @@ use crate::{
         InventoryChange, InventoryRegistry,
     },
     protocol::{
-        external::{connection_limit_key, InventoryHash},
+        external::{connection_limit_key, types::PeerServices, InventoryHash},
         internal::{Request, Response},
     },
     BanList, BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
@@ -252,6 +252,14 @@ where
     /// Stale keys of disconnected peers are pruned by
     /// [`Self::prune_disconnected_sidecar_keys`].
     zcashd_compat_peer_keys: HashSet<D::Key>,
+
+    /// The keys of connected peers that advertised [`PeerServices::NODE_NETWORK`],
+    /// so they can serve historic blocks.
+    ///
+    /// Busy peers' services are not otherwise accessible, but block routing needs to know
+    /// whether a busy peer can serve blocks. Stale keys of disconnected peers are pruned by
+    /// [`Self::prune_disconnected_serving_keys`].
+    serving_peer_keys: HashSet<D::Key>,
 
     /// The most recent sidecar broadcast (a block advert or a pushed
     /// transaction) that has not been delivered to all connected zcashd-compat
@@ -390,6 +398,7 @@ where
             queued_broadcast_all: None,
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
             zcashd_compat_peer_keys: HashSet::new(),
+            serving_peer_keys: HashSet::new(),
             queued_sidecar_broadcast: None,
 
             // Busy peers
@@ -787,6 +796,14 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
+                    // Also clear any stale key, in case a disconnected serving peer's address was
+                    // reused before it was pruned.
+                    if svc.remote_services().contains(PeerServices::NODE_NETWORK) {
+                        self.serving_peer_keys.insert(key);
+                    } else {
+                        self.serving_peer_keys.remove(&key);
+                    }
+
                     self.push_unready(key, svc);
                 }
             }
@@ -846,6 +863,7 @@ where
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
         self.zcashd_compat_peer_keys.remove(key);
+        self.serving_peer_keys.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
             remaining_sidecars.remove(key);
             if remaining_sidecars.is_empty() {
@@ -1028,6 +1046,32 @@ where
             .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
     }
 
+    /// Forgets block-serving peer keys whose peer has disconnected.
+    ///
+    /// Services are dropped on many paths that don't call [`Self::remove`], so this runs every poll
+    /// cycle, like [`Self::prune_disconnected_sidecar_keys`]. A stale key could otherwise make the
+    /// peer set wait for a busy serving peer that no longer exists.
+    fn prune_disconnected_serving_keys(&mut self) {
+        let ready_services = &self.ready_services;
+        let cancel_handles = &self.cancel_handles;
+        self.serving_peer_keys
+            .retain(|key| ready_services.contains_key(key) || cancel_handles.contains_key(key));
+    }
+
+    /// Returns true if a busy peer that isn't in `missing_peer_list` might have some inventory.
+    ///
+    /// If `serving_only` is true, only considers peers that can serve historic blocks.
+    fn busy_peer_might_have(
+        &self,
+        missing_peer_list: &HashSet<PeerSocketAddr>,
+        serving_only: bool,
+    ) -> bool {
+        self.cancel_handles.keys().any(|key| {
+            !missing_peer_list.contains(key)
+                && (!serving_only || self.serving_peer_keys.contains(key))
+        })
+    }
+
     /// Accesses a ready endpoint by `key` and returns its current load.
     ///
     /// Returns `None` if the service is not in the ready service list.
@@ -1096,8 +1140,14 @@ where
     /// Tries to route a request to a ready peer that advertised that inventory,
     /// falling back to a ready peer that isn't missing the inventory.
     ///
-    /// If all ready peers are missing the inventory,
-    /// returns a synthetic [`NotFoundRegistry`](PeerError::NotFoundRegistry) error.
+    /// For blocks, the fallback prefers peers that advertised [`PeerServices::NODE_NETWORK`].
+    /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
+    /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
+    ///
+    /// If no ready peer can be used, returns a synthetic
+    /// [`NotFoundRegistry`](PeerError::NotFoundRegistry) error. For blocks, the error is delayed by
+    /// [`INVENTORY_BUSY_PEER_REFUSAL_DELAY`] while a busy peer might still have the block, so
+    /// retries can reach that peer once it is ready.
     ///
     /// Uses P2C to route requests to the least loaded peer in each list.
     fn route_inv(
@@ -1135,15 +1185,41 @@ where
             .missing_peers(hash)
             .copied()
             .collect();
-        let maybe_peer_list = self
+        let maybe_peer_list: HashSet<PeerSocketAddr> = self
             .ready_services
             .keys()
             .filter(|addr| !missing_peer_list.contains(addr))
             .copied()
             .collect();
 
+        // Only block routing depends on peer services: non-serving peers can still serve
+        // mempool transactions.
+        let is_block = matches!(hash, InventoryHash::Block(_));
+        let (preferred_peer_list, fallback_peer_list): (HashSet<_>, HashSet<_>) = if is_block {
+            maybe_peer_list
+                .into_iter()
+                .partition(|key| self.serving_peer_keys.contains(key))
+        } else {
+            (maybe_peer_list, HashSet::new())
+        };
+
         // Security: choose a random, less-loaded peer that might have the inventory.
-        let peer = self.select_p2c_peer_from_list(&maybe_peer_list);
+        let mut peer = self.select_p2c_peer_from_list(&preferred_peer_list);
+
+        // Waiting for a busy serving peer is better than asking a non-serving peer, which would
+        // most likely answer `notfound` for a historic block, and get marked as missing it. But
+        // peers only advertise recent blocks, which non-serving peers can usually serve.
+        let is_advertised = self
+            .inventory_registry
+            .advertising_peers(hash)
+            .next()
+            .is_some();
+        if peer.is_none()
+            && is_block
+            && (is_advertised || !self.busy_peer_might_have(&missing_peer_list, true))
+        {
+            peer = self.select_p2c_peer_from_list(&fallback_peer_list);
+        }
 
         if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
             let peer = peer.expect("just checked peer is Some");
@@ -1153,14 +1229,26 @@ where
             return fut.map_err(Into::into).boxed();
         }
 
+        // Transaction downloads don't retry, so delaying their refusal would only slow them down.
+        let delay_refusal = is_block && self.busy_peer_might_have(&missing_peer_list, false);
+        let kind = if delay_refusal { "delayed" } else { "instant" };
+
         tracing::debug!(
             ?hash,
-            "all ready peers are missing inventory, failing request"
+            kind,
+            "no ready peer can serve the inventory, failing request"
         );
+        metrics::counter!("zcash.net.peer_set.inventory_refusal", "kind" => kind).increment(1);
 
         async move {
-            // Let other tasks run, so a retry request might get different ready peers.
-            tokio::task::yield_now().await;
+            if delay_refusal {
+                // A busy peer might have the block. Wait for it to finish its current request, so
+                // a retry request can be routed to it.
+                tokio::time::sleep(INVENTORY_BUSY_PEER_REFUSAL_DELAY).await;
+            } else {
+                // Let other tasks run, so a retry request might get different ready peers.
+                tokio::task::yield_now().await;
+            }
 
             // # Security
             //
@@ -1578,6 +1666,7 @@ where
         }
 
         self.prune_disconnected_sidecar_keys();
+        self.prune_disconnected_serving_keys();
         self.broadcast_all_queued();
         self.send_queued_sidecar_broadcast();
 
