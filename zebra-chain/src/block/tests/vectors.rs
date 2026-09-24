@@ -246,7 +246,7 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
         transactions: vec![Arc::new(coinbase), Arc::new(spend)],
     };
 
-    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000)] {
+    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000), (Some(999), 6_000)] {
         let network = Network::new_regtest(
             ConfiguredActivationHeights {
                 canopy: Some(1),
@@ -260,19 +260,16 @@ fn chain_value_pool_change_accrues_the_nsm_reserve() {
             }
             .into(),
         );
-        assert_eq!(
-            block
-                .chain_value_pool_change(
-                    &utxos,
-                    DeferredPoolBalanceChange::zero(),
-                    &network,
-                    ValueBalance::zero(),
-                )
-                .expect("chain value pool change should be calculable")
-                .nsm_reserve_amount()
-                .zatoshis(),
-            expected_reserve,
-        );
+        let (change, fees) = block
+            .chain_value_pool_change_and_fees(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+                ValueBalance::zero(),
+            )
+            .expect("chain value pool change should be calculable");
+        assert_eq!(change.nsm_reserve_amount().zatoshis(), expected_reserve);
+        assert_eq!(fees.map(|fees| fees.zatoshis()), nu7.map(|_| 10_000));
     }
 }
 
@@ -284,15 +281,14 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         parameters::{
             subsidy::{
                 block_subsidy, cumulative_scheduled_issuance, funding_stream_address,
-                funding_stream_values, scheduled_block_subsidy, FundingStreamReceiver,
-                SubsidyError,
+                funding_stream_values, scheduled_block_subsidy, subsidy_is_valid,
+                FundingStreamReceiver, SubsidyError,
             },
             testnet::{
                 ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams, Parameters,
             },
         },
-        value_balance::ValueBalanceError,
     };
     use std::ops::Neg;
 
@@ -387,8 +383,13 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         ],
     );
     let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
-    let change =
-        block.chain_value_pool_change(&HashMap::new(), deferred_change, &network, seeded)?;
+    let (change, fees) = block.chain_value_pool_change_and_fees(
+        &HashMap::new(),
+        deferred_change,
+        &network,
+        seeded,
+    )?;
+    assert_eq!(fees, Some(Amount::zero()));
     assert_eq!(change.nsm_reserve_amount().zatoshis(), -1_375);
     let after = seeded.add_chain_value_pool_change(change)?;
     assert_eq!(after.nsm_reserve_amount().zatoshis(), 9_999_998_625);
@@ -412,17 +413,22 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
             transparent::Output::new(scheduled_grant, grant_script),
         ],
     );
+    assert_eq!(
+        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, seeded)?,
+        change,
+        "ledger accounting does not validate funding payouts",
+    );
     assert!(matches!(
-        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, seeded),
-        Err(ValueBalanceError::Subsidy(
-            SubsidyError::FundingStreamNotFound
-        )),
+        subsidy_is_valid(&underfunded, &network, total),
+        Err(SubsidyError::FundingStreamNotFound),
     ));
-    let mut other_parent = seeded;
-    other_parent.set_nsm_reserve_amount((reserve * 2)?);
-    assert!(block
-        .chain_value_pool_change(&HashMap::new(), deferred_change, &network, other_parent)
-        .is_err());
+    assert_eq!(
+        subsidy_is_valid(&block, &network, total)?,
+        deferred_change,
+        "the contextual check and the state derive the same deferred amount",
+    );
+    let other_parent_total = block_subsidy(height, &network, (reserve * 2)?)?;
+    assert!(subsidy_is_valid(&block, &network, other_parent_total).is_err());
 
     // Both a reissuance reorg and an activation-crossing reorg restore the exact prior pools.
     assert_eq!(after.add_chain_value_pool_change(change.neg())?, seeded);

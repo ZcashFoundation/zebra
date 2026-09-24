@@ -10,7 +10,7 @@ use std::{
 
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::{self, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
@@ -517,15 +517,40 @@ impl ContextuallyVerifiedBlock {
     /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
-    /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
-    /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) returns success.
+    /// `previous_value_pools` and `deferred_pool_balance_change` must use the exact parent.
+    /// This constructor calculates ledger changes, but does not validate coinbase payouts or
+    /// funding outputs. The state service checks reserve-funded subsidy and miner fees before
+    /// pushing the block onto the non-finalized chain.
+    ///
+    /// A [`ContextuallyVerifiedBlock`] is only contextually valid after all state service
+    /// validation succeeds; construction or
+    /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) alone is not sufficient.
     pub fn with_block_and_spent_utxos(
+        semantically_verified: SemanticallyVerifiedBlock,
+        spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<Self, ValueBalanceError> {
+        Self::with_block_spent_utxos_and_fees(
+            semantically_verified,
+            spent_outputs,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+        .map(|(contextually_verified, _transaction_fees)| contextually_verified)
+    }
+
+    /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's transaction fees,
+    /// as returned by [`Block::chain_value_pool_change_and_fees`].
+    pub(crate) fn with_block_spent_utxos_and_fees(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
-    ) -> Result<Self, ValueBalanceError> {
+    ) -> Result<(Self, Option<Amount<NonNegative>>), ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
             hash,
@@ -541,21 +566,26 @@ impl ContextuallyVerifiedBlock {
         // TODO: fix the tests, and stop adding unrelated outputs.
         spent_outputs.extend(new_outputs.clone());
 
-        Ok(Self {
-            block: block.clone(),
-            hash,
-            height,
-            new_outputs,
-            spent_outputs: spent_outputs.clone(),
-            transaction_hashes,
-            chain_value_pool_change: block.chain_value_pool_change(
-                &utxos_from_ordered_utxos(spent_outputs),
-                deferred_pool_balance_change,
-                network,
-                previous_value_pools,
-            )?,
-            received_time,
-        })
+        let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
+            &utxos_from_ordered_utxos(spent_outputs.clone()),
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )?;
+
+        Ok((
+            Self {
+                block,
+                hash,
+                height,
+                new_outputs,
+                spent_outputs,
+                transaction_hashes,
+                chain_value_pool_change,
+                received_time,
+            },
+            transaction_fees,
+        ))
     }
 }
 
@@ -1475,7 +1505,7 @@ pub enum ReadRequest {
 
     /// Looks up the balance of a set of transparent addresses.
     ///
-    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
+    /// Returns an [`Amount`] with the total
     /// balance of the set of addresses.
     AddressBalance(HashSet<transparent::Address>),
 
