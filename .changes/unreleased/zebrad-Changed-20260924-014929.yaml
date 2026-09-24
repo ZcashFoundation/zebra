@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: During NSM reissuance, block proposals must match the current parent and its required subsidy payouts before transaction verification begins.
+time: 2026-09-24T01:49:29.238296175+02:00

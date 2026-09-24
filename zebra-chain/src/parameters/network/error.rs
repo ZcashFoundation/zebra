@@ -51,9 +51,13 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidNsmReissuanceHeight,
 
-    #[error("halving interval must be positive and fit after the Blossom and NU7 scaling")]
+    #[error("halving interval must be positive, give supported halving indices and heights, a nonzero funding stream address period, and a positive NSM coefficient when reissuance is configured")]
     #[non_exhaustive]
     InvalidHalvingInterval,
+
+    #[error("scheduled issuance through the maximum supported height must not exceed MAX_MONEY, including the scheduled genesis subsidy when NU7 seeds the NSM reserve")]
+    #[non_exhaustive]
+    InvalidSubsidySchedule,
 
     #[error("network upgrades must be activated in order specified by the protocol")]
     #[non_exhaustive]

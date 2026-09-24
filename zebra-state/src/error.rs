@@ -154,6 +154,9 @@ impl CommitBlockError {
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
+    ///
+    /// Consensus-invalid subsidies and authorizing-data commitments score 100.
+    /// Duplicate requests, shutdowns, and rejected-ancestor descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
@@ -611,6 +614,11 @@ impl ValidateContextError {
             ValidateContextError::InvalidBlockCommitment(
                 block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
             ) => 100,
+            ValidateContextError::Subsidy(_)
+            | ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error: ValueBalanceError::Subsidy(_),
+                ..
+            } => 100,
             _other => 0,
         }
     }
@@ -665,73 +673,4 @@ impl DuplicateNullifierError for ironwood::Nullifier {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use zebra_chain::block::Height;
-
-    #[test]
-    fn commit_block_error_misbehavior_scores() {
-        let context_err = CommitBlockError::ValidateContextError(Box::new(
-            ValidateContextError::NonSequentialBlock {
-                candidate_height: Height(5),
-                parent_height: Height(3),
-            },
-        ));
-        assert_eq!(context_err.misbehavior_score(), 0);
-
-        let dup_err = CommitBlockError::Duplicate {
-            hash_or_height: None,
-            location: KnownBlock::BestChain,
-        };
-        assert_eq!(dup_err.misbehavior_score(), 0);
-
-        // A mismatched authorizing data commitment means the served body doesn't
-        // belong to its header, so the serving peer must be scored.
-        let auth_commitment_err = CommitBlockError::ValidateContextError(Box::new(
-            ValidateContextError::InvalidBlockCommitment(
-                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
-                    expected: [1; 32],
-                    actual: [2; 32],
-                },
-            ),
-        ));
-        assert_eq!(auth_commitment_err.misbehavior_score(), 100);
-    }
-
-    /// The state rejects queued descendants along with a failed block, but the peers that
-    /// served them didn't serve the failed block, so they must not inherit its score or
-    /// classification.
-    #[test]
-    fn descendant_errors_are_not_scored() {
-        let auth_commitment_err = ValidateContextError::InvalidBlockCommitment(
-            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
-                expected: [1; 32],
-                actual: [2; 32],
-            },
-        );
-        let forged_hash = block::Hash([1; 32]);
-
-        let child_err = auth_commitment_err.for_descendant(forged_hash);
-        assert_eq!(child_err.misbehavior_score(), 0);
-        assert!(!child_err.is_auth_commitment_mismatch());
-        assert!(child_err.is_descendant_of_auth_commitment_mismatch());
-
-        // Deeper descendants keep pointing at the block that actually failed.
-        let grandchild_err = child_err.for_descendant(block::Hash([2; 32]));
-        assert_eq!(grandchild_err, child_err);
-
-        let commit_err = CommitBlockError::ValidateContextError(Box::new(child_err));
-        assert_eq!(commit_err.misbehavior_score(), 0);
-        assert!(!commit_err.is_auth_commitment_mismatch());
-        assert!(commit_err.is_descendant_of_auth_commitment_mismatch());
-
-        // Descendants of other contextual failures aren't re-requested.
-        let other_child_err = ValidateContextError::NonSequentialBlock {
-            candidate_height: Height(5),
-            parent_height: Height(3),
-        }
-        .for_descendant(forged_hash);
-        assert_eq!(other_child_err.misbehavior_score(), 0);
-        assert!(!other_child_err.is_descendant_of_auth_commitment_mismatch());
-    }
-}
+mod tests;

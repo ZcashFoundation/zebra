@@ -33,7 +33,7 @@ use zebra_chain::{
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{subsidy::subsidy_is_valid, Network},
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
@@ -54,7 +54,7 @@ use crate::{
     methods::types::{
         default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
-    server::error::OkOrError,
+    server::error::{MapError, OkOrError},
     SubmitBlockChannel,
 };
 
@@ -828,9 +828,16 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
-/// Returns a [`GetBlockTemplateResponse`].
-pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
+/// Returns a [`GetBlockTemplateResponse`], rejecting invalid proposals before verification
+/// when their mandatory payouts do not match the current parent's contextual subsidy.
+///
+/// # Errors
+///
+/// Returns an RPC error if Zebra is not synced, the contextual state query fails or times out,
+/// or the verifier cannot accept the request.
+pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
+    read_state: ReadState,
     block_proposal_bytes: Vec<u8>,
     net: &Network,
     latest_chain_tip: Tip,
@@ -842,6 +849,16 @@ where
         + Send
         + Sync
         + 'static,
+    BlockVerifierRouter::Future: Send,
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
@@ -862,6 +879,36 @@ where
             .into());
         }
     };
+
+    let height = block.coinbase_height();
+    if net
+        .nsm_reissuance_height()
+        .is_some_and(|start| height.is_some_and(|height| height >= start))
+    {
+        let chain_info = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            fetch_chain_info(read_state),
+        )
+        .await
+        .map_misc_error()??;
+
+        // The reserve and scheduled subsidy both belong to this exact parent and next height.
+        if block.header.previous_block_hash != chain_info.tip_hash
+            || chain_info.tip_height.next().ok() != height
+        {
+            return Ok(BlockProposalResponse::rejected(
+                "invalid proposal",
+                "proposal does not extend the current chain tip".into(),
+            )
+            .into());
+        }
+
+        if let Err(error) = subsidy_is_valid(&block, net, chain_info.expected_block_subsidy) {
+            return Ok(BlockProposalResponse::rejected("invalid proposal", error.into()).into());
+        }
+        // Contextual verification still checks payouts and total fees after transaction
+        // verification, including when the chain reorganizes after this snapshot.
+    }
 
     let block_verifier_router_response = block_verifier_router
         .ready()

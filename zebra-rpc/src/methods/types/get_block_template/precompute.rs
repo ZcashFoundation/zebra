@@ -134,8 +134,8 @@ impl TemplateCache {
         self.0.send_replace(Some(Arc::new(template)));
     }
 
-    /// Returns a template for `tip_hash`, unless Testnet's time-dependent difficulty may have
-    /// become easier since it was built.
+    /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
+    /// bound, unless Testnet's time-dependent difficulty may have become easier since it was built.
     pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
@@ -147,6 +147,12 @@ impl TemplateCache {
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.
         if template.previous_block_hash != tip_hash {
+            return None;
+        }
+
+        // Recheck the whole advertised range: the clock can move backwards between refreshes,
+        // and a failed refresh leaves the previous template cached.
+        if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
             return None;
         }
 
