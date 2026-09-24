@@ -110,7 +110,7 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
-    task::{noop_waker, ArcWake},
+    task::{noop_waker, AtomicWaker},
 };
 use itertools::Itertools;
 use num_integer::div_ceil;
@@ -210,31 +210,36 @@ fn not_found_registry_error(hash: InventoryHash) -> BoxError {
 /// [`poll_peer_set_on_notify`]. The peer set is behind a [`tower::buffer::Buffer`], which only
 /// polls it when it has a request, so otherwise a busy peer that becomes ready wouldn't get the
 /// requests that are waiting for it.
+#[derive(Default)]
 struct QueuedRequestWaker {
-    /// The waker of the task that polls the peer set.
-    peer_set_waker: Waker,
+    /// Notified when a request is queued, or when a peer event happens while requests are queued.
+    notify: Notify,
 
-    /// Notifies the task that polls the peer set on behalf of queued requests.
-    queued_request_notify: Arc<Notify>,
+    /// The waker of the task that polls the peer set.
+    peer_set_waker: AtomicWaker,
 }
 
-impl ArcWake for QueuedRequestWaker {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        arc_self.peer_set_waker.wake_by_ref();
-        arc_self.queued_request_notify.notify_one();
+impl std::task::Wake for QueuedRequestWaker {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.notify.notify_one();
+        self.peer_set_waker.wake();
     }
 }
 
-/// Polls `peer_set` with a [`Request::PollPeerSet`] each time `queued_request_notify` is notified,
+/// Polls `peer_set` with a [`Request::PollPeerSet`] each time `queued_request_waker` is notified,
 /// so the peer set routes queued requests to busy peers as soon as they become ready.
 ///
-/// `peer_set` must be the service that wraps the [`PeerSet`] that owns `queued_request_notify`.
+/// `peer_set` must be the service that wraps the [`PeerSet`] that owns `queued_request_waker`.
 /// See [`PeerSet::into_buffer`].
 ///
 /// Only returns if the peer set fails.
 async fn poll_peer_set_on_notify<S>(
     mut peer_set: S,
-    queued_request_notify: Arc<Notify>,
+    queued_request_waker: Arc<QueuedRequestWaker>,
 ) -> Result<(), BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
@@ -246,7 +251,7 @@ where
         // This wait has no timeout, because the peer set only notifies while requests are queued.
         // The poll request can also wait a long time, while all peers are busy: then it is only
         // routed once a peer becomes ready, which is exactly when queued requests can be routed.
-        queued_request_notify.notified().await;
+        queued_request_waker.notify.notified().await;
         peer_set.ready().await?.call(Request::PollPeerSet).await?;
     }
 }
@@ -357,14 +362,9 @@ where
     /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] expires, or once no busy peer might have the block.
     queued_inv_requests: VecDeque<QueuedInvRequest>,
 
-    /// Notified when a request is queued, or when a peer event happens while requests are queued.
-    ///
-    /// See [`poll_peer_set_on_notify`].
-    queued_request_notify: Arc<Notify>,
-
-    /// The waker last returned by [`Self::peer_event_waker`], reused while the task that polls
-    /// the peer set stays the same.
-    queued_request_waker: Option<Arc<QueuedRequestWaker>>,
+    /// Wakes the task that polls the peer set, and the task that runs
+    /// [`poll_peer_set_on_notify`], while requests are queued.
+    queued_request_waker: Arc<QueuedRequestWaker>,
 
     /// True if a busy peer has become ready since queued requests were last routed.
     ///
@@ -511,8 +511,7 @@ where
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
             queued_inv_requests: VecDeque::new(),
-            queued_request_notify: Arc::new(Notify::new()),
-            queued_request_waker: None,
+            queued_request_waker: Arc::default(),
             peers_became_ready: false,
             queued_sidecar_broadcast: None,
 
@@ -540,24 +539,15 @@ where
 
     /// Returns a waker for peer events, which also notifies [`poll_peer_set_on_notify`] while
     /// requests are queued.
-    fn peer_event_waker(&mut self, cx: &Context<'_>) -> Waker {
+    fn peer_event_waker(&self, cx: &Context<'_>) -> Waker {
         if self.queued_inv_requests.is_empty() {
             return cx.waker().clone();
         }
 
-        let waker = match &self.queued_request_waker {
-            Some(waker) if waker.peer_set_waker.will_wake(cx.waker()) => waker.clone(),
-            _ => {
-                let waker = Arc::new(QueuedRequestWaker {
-                    peer_set_waker: cx.waker().clone(),
-                    queued_request_notify: self.queued_request_notify.clone(),
-                });
-                self.queued_request_waker = Some(waker.clone());
-                waker
-            }
-        };
-
-        futures::task::waker(waker)
+        self.queued_request_waker
+            .peer_set_waker
+            .register(cx.waker());
+        Waker::from(self.queued_request_waker.clone())
     }
 
     /// Check background task handles to make sure they're still running.
@@ -1434,7 +1424,7 @@ where
 
         // Poll the peer set again, so peer events wake `poll_peer_set_on_notify()` while this
         // request is queued.
-        self.queued_request_notify.notify_one();
+        self.queued_request_waker.notify.notify_one();
 
         async move {
             match tokio::time::timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, response_receiver).await {
@@ -1858,11 +1848,11 @@ where
         Buffer<BoxService<Request, Response, BoxError>, Request>,
         JoinHandle<Result<(), BoxError>>,
     ) {
-        let queued_request_notify = self.queued_request_notify.clone();
+        let queued_request_waker = self.queued_request_waker.clone();
         let peer_set = Buffer::new(BoxService::new(self), bound);
 
         let poll_task = tokio::spawn(
-            poll_peer_set_on_notify(peer_set.clone(), queued_request_notify).in_current_span(),
+            poll_peer_set_on_notify(peer_set.clone(), queued_request_waker).in_current_span(),
         );
 
         (peer_set, poll_task)
