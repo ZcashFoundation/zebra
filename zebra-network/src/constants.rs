@@ -160,11 +160,12 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// only re-requested after the sync restarts). Block downloads typically finish in under a second,
 /// so after this delay a retry usually finds a block-serving peer ready.
 ///
-/// The syncer retries each request, and re-requests missing blocks, so a block that no connected
-/// peer ends up serving costs it about 16 seconds with zebrad's `BLOCK_DOWNLOAD_RETRY_LIMIT` and
-/// `MAX_BLOCK_REOBTAIN_RETRIES`. A malicious list of fake block hashes drains more slowly for the
-/// same reason, bounded by the download concurrency limit.
-pub const INVENTORY_BUSY_PEER_REFUSAL_DELAY: Duration = Duration::from_secs(1);
+/// A busy peer can take up to [`REQUEST_TIMEOUT`] to become ready again, so the syncer's retries
+/// must keep waiting for longer than that. It makes 16 attempts for a missing block, with
+/// zebrad's `BLOCK_DOWNLOAD_RETRY_LIMIT` and `MAX_BLOCK_REOBTAIN_RETRIES`, so this delay gives it
+/// about 24 seconds. zebrad's timing tests check this. A malicious list of fake block hashes
+/// drains more slowly for the same reason, bounded by the download concurrency limit.
+pub const INVENTORY_BUSY_PEER_REFUSAL_DELAY: Duration = Duration::from_millis(1500);
 
 /// The default peer address crawler interval.
 ///

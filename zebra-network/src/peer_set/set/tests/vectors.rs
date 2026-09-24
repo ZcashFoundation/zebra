@@ -26,7 +26,7 @@ use zebra_chain::{
 use crate::{
     constants::{
         CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
-        INVENTORY_BUSY_PEER_REFUSAL_DELAY,
+        INVENTORY_BUSY_PEER_REFUSAL_DELAY, REQUEST_TIMEOUT,
     },
     peer::{
         ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
@@ -1442,6 +1442,68 @@ fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
             received, 4,
             "block requests should still be routed to non-serving peers if no serving peer is connected",
         );
+    });
+}
+
+/// Check that delayed refusals give a busy serving peer time to recover, even if it only recovers
+/// just before its request would time out.
+#[test]
+fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        let recovery = REQUEST_TIMEOUT - Duration::from_secs(2);
+        let started = tokio::time::Instant::now();
+        let mut drained = false;
+        let mut routed = false;
+
+        // zebrad makes up to 16 attempts for a missing block, see its `ensure_timeouts_consistent`
+        // test. The serving peer recovers just before its request would time out.
+        for _attempt in 0..16 {
+            if !drained && started.elapsed() >= recovery {
+                assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+                assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+                drained = true;
+            }
+
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            let fut = peer_ready.call(block_request(2));
+
+            // Only check the serving peer after it recovers: receiving its queued requests would
+            // make it ready.
+            if drained && received_request(&mut handles[0]) == Some(block_request(2)) {
+                routed = true;
+                break;
+            }
+            assert_not_found_registry(fut.await);
+        }
+
+        assert!(
+            routed,
+            "the block request should reach the serving peer within the syncer's 16 attempts, elapsed: {:?}",
+            started.elapsed(),
+        );
+        assert_eq!(received_request(&mut handles[1]), None);
     });
 }
 

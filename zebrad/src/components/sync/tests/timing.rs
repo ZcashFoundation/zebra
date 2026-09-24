@@ -15,14 +15,15 @@ use zebra_chain::{
     parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_network::constants::{
-    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
+    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_BUSY_PEER_REFUSAL_DELAY,
+    INVENTORY_ROTATION_INTERVAL, REQUEST_TIMEOUT,
 };
 use zebra_state::ChainTipSender;
 
 use crate::{
     components::sync::{
         ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
-        GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
+        GENESIS_TIMEOUT_RETRY, MAX_BLOCK_REOBTAIN_RETRIES, SYNC_RESTART_DELAY,
     },
     config::ZebradConfig,
 };
@@ -94,6 +95,20 @@ fn ensure_timeouts_consistent() {
         SYNC_RESTART_DELAY < 2 * INVENTORY_ROTATION_INTERVAL,
         "we should give the syncer at least one retry attempt, \
          before we expire all inventory"
+    );
+
+    // A busy peer can take up to `REQUEST_TIMEOUT` to become ready again, and the peer set delays
+    // each refused block request while a busy peer might have the block.
+    let missing_block_attempts =
+        (BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1) * (u32::from(MAX_BLOCK_REOBTAIN_RETRIES) + 1);
+    assert!(
+        INVENTORY_BUSY_PEER_REFUSAL_DELAY * missing_block_attempts > REQUEST_TIMEOUT,
+        "the syncer should keep retrying a missing block until a busy peer could be ready again"
+    );
+    assert!(
+        INVENTORY_BUSY_PEER_REFUSAL_DELAY < BLOCK_DOWNLOAD_TIMEOUT / 4,
+        "refusals should be much faster than block download timeouts, \
+         because timed out downloads are not re-requested"
     );
 
     // The default peer crawler interval should be at least
