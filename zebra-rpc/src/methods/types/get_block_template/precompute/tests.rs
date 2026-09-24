@@ -146,6 +146,40 @@ fn only_current_work_is_served() {
     }
 }
 
+/// A clock rollback must invalidate any template advertising timestamps beyond the new bound.
+#[test]
+fn clock_rollback_invalidates_cached_timestamp_range() {
+    let _init_guard = zebra_test::init();
+    let regtest = Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    for network in [Network::Mainnet, Network::new_default_testnet(), regtest] {
+        let cache = TemplateCache::default();
+        let current = template_with_max_time(&network, DateTime32::from(1654008719));
+        let tip_hash = current.previous_block_hash;
+        let boundary = current.max_time.saturating_sub(Duration32::from_hours(2));
+        let rollback = boundary.saturating_sub(Duration32::from_seconds(1));
+        // Checking only cur_time would miss the invalid advertised maximum.
+        assert!(current.cur_time <= rollback.saturating_add(Duration32::from_hours(2)));
+        cache.publish(current);
+
+        assert!(cache
+            .template_for_tip(tip_hash, &network, boundary)
+            .is_some());
+        assert!(
+            cache
+                .template_for_tip(tip_hash, &network, rollback)
+                .is_none(),
+            "every advertised timestamp must remain inside the local-clock bound on {network:?}",
+        );
+    }
+}
+
 /// Checks that a subscription taken before a template is published still reports it.
 ///
 /// `getblocktemplate` reads the cache, decides the client already has that template, and only then

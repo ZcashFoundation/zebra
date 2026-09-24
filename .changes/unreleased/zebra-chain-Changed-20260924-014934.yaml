@@ -1,4 +1,4 @@
 project: zebra-chain
 kind: Changed
-body: '`chain_tip::NetworkChainTipHeightEstimator` applies new block spacing to the activation interval and floors negative fractional timestamps without shifting exact past intervals.'
+body: Chain-tip height estimates use the candidate block spacing across upgrade boundaries in both directions and floor negative fractional time offsets. ([#11514](https://github.com/ZcashFoundation/zebra/pull/11514))
 time: 2026-09-24T01:49:34.513193989+02:00

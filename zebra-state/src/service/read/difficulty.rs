@@ -360,12 +360,10 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("small positive values are in-range");
 
     // The first minimum difficulty time is strictly greater than the spacing.
-    let std_difficulty_max_time = previous_block_time
-        .checked_add(minimum_difficulty_spacing)
-        .expect("a valid block time plus a small constant is in-range");
-    let min_difficulty_min_time = std_difficulty_max_time
-        .checked_add(Duration32::from_seconds(1))
-        .expect("a valid block time plus a small constant is in-range");
+    // If that threshold is beyond DateTime32, every representable time uses standard difficulty.
+    let std_difficulty_max_time = previous_block_time.saturating_add(minimum_difficulty_spacing);
+    let min_difficulty_min_time =
+        std_difficulty_max_time.saturating_add(Duration32::from_seconds(1));
 
     // Offer a minimum-difficulty template only once `cur_time` is strictly past
     // `previous_block_time + 6 * PoWTargetSpacing` (the latest time a standard-difficulty

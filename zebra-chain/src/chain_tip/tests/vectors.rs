@@ -39,6 +39,7 @@ fn spacing_transition_intervals_use_candidate_height() {
         })
         .expect("activation heights are valid")
         .with_funding_streams(Vec::new())
+        .with_slow_start_interval(block::Height(0))
         .to_network()
         .expect("configured Testnet parameters are valid");
     let start_time = Utc.timestamp_opt(1_600_000_000, 0).unwrap();
@@ -63,6 +64,19 @@ fn spacing_transition_intervals_use_candidate_height() {
             (parent, 3 * new_spacing, (activation + 2).unwrap()),
             (activation, 0, activation),
             (activation, new_spacing, (activation + 1).unwrap()),
+            (activation, -1, parent),
+            (activation, -new_spacing, parent),
+            (activation, -new_spacing - 1, (parent - 1).unwrap()),
+            (
+                activation,
+                -new_spacing - old_spacing,
+                (parent - 1).unwrap(),
+            ),
+            (
+                (activation + 2).unwrap(),
+                -3 * new_spacing - old_spacing,
+                (parent - 1).unwrap(),
+            ),
         ] {
             assert_eq!(
                 NetworkChainTipHeightEstimator::new(start_time, start_height, &network)
@@ -71,6 +85,41 @@ fn spacing_transition_intervals_use_candidate_height() {
                 "{upgrade:?}, starting at {start_height:?}, after {elapsed} seconds",
             );
         }
+
+        // Fractional timestamps on either side of the first old-spacing block must floor
+        // consistently after crossing the activation interval backwards.
+        for (nanoseconds, expected_height) in [
+            (-1, (parent - 2).unwrap()),
+            (0, (parent - 1).unwrap()),
+            (1, (parent - 1).unwrap()),
+        ] {
+            assert_eq!(
+                NetworkChainTipHeightEstimator::new(start_time, activation, &network)
+                    .estimate_height_at(
+                        start_time - Duration::seconds(new_spacing + old_spacing)
+                            + Duration::nanoseconds(nanoseconds),
+                    ),
+                expected_height,
+                "{upgrade:?}, fractional offset {nanoseconds}ns",
+            );
+        }
+    }
+
+    // From NU7 at height 200, cross its 25-second interval, 100 Blossom intervals,
+    // and one 150-second pre-Blossom interval to reach height 98.
+    for (elapsed, expected_height) in [
+        (Duration::seconds(-7_675), block::Height(98)),
+        (
+            Duration::seconds(-7_675) - Duration::nanoseconds(1),
+            block::Height(97),
+        ),
+        (Duration::days(-1), block::Height(0)),
+    ] {
+        assert_eq!(
+            NetworkChainTipHeightEstimator::new(start_time, block::Height(200), &network)
+                .estimate_height_at(start_time + elapsed),
+            expected_height,
+        );
     }
 }
 
