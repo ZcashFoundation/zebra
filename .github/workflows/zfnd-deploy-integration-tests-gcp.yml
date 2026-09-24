@@ -323,17 +323,20 @@ jobs:
           # 5-day timeout - see DELETE_LONG_TEST_INSTANCE_DAYS in
           # zfnd-delete-gcp-resources.yml.
           IS_LONG_TEST: ${{ inputs.is_long_test }}
+          ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          CI_IMAGE_NAME: ${{ vars.CI_IMAGE_NAME }}
         run: |
 
           # The cache disk is mounted once on the host (HOST_CACHE_DIR) and bind-mounted
           # into the container at each path the tests expect. konlet did this with
           # repeated --container-mount-disk; cloud-init needs docker -v flags instead.
           HOST_CACHE_DIR=/mnt/disks/zebracache
-          DOCKER_MOUNTS="-v ${HOST_CACHE_DIR}:${{ inputs.zebra_state_dir }}"
+          DOCKER_MOUNTS="-v ${HOST_CACHE_DIR}:${ZEBRA_STATE_DIR}"
 
           # Mount the same disk to the lwd path if needed
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            DOCKER_MOUNTS+=" -v ${HOST_CACHE_DIR}:${{ inputs.lwd_state_dir }}"
+            DOCKER_MOUNTS+=" -v ${HOST_CACHE_DIR}:${LWD_STATE_DIR}"
           fi
 
           # Environment variables for the container
@@ -455,7 +458,7 @@ jobs:
                 --network host \\
                 --env-file /etc/zebrad-test.env \\
                 ${DOCKER_MOUNTS} \\
-                ${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+                ${GAR_BASE_TRIMMED}/${CI_IMAGE_NAME}:sha-${GITHUB_SHA_SHORT}
               ExecStop=/usr/bin/docker stop -t 170 ${CONTAINER_NAME}
 
               [Install]
