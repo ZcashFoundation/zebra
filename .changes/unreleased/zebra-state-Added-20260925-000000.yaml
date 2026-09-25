@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Added
-body: 'Added a `ReadRequest::SpentOutputs` variant that returns the transparent outputs spent by a block''s non-coinbase inputs in the best chain, keyed by spending outpoint. Used by the `getblock` RPC at verbosity 3.'
-time: 2026-09-25T00:00:00.000000000Z
