@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 6.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.2) - 2026-09-25
+
+### Security
+
+- Fix a remotely triggerable denial of service when processing malformed V6 transactions ([GHSA-h5rr-8pqv-grp9](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h5rr-8pqv-grp9)).
+
 ## [Zebra 6.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.1) - 2026-09-23
 
 ### Fixed

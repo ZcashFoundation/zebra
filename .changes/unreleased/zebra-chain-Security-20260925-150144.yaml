@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Security
-body: 'Reject malformed V6 transactions during deserialization to prevent a remotely triggerable denial of service ([GHSA-h5rr-8pqv-grp9](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h5rr-8pqv-grp9)).'
-time: 2026-09-25T15:01:44.888795623Z
