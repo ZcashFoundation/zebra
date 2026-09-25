@@ -1597,6 +1597,27 @@ where
             // and label such transactions as not in the active chain.
             let in_active_chain = confirmations >= 0;
 
+            // Verbosity 3 adds each input's prevout and the transaction fee, resolved from the
+            // outputs spent by this block in the best chain. Fetch them before the `futs` batch
+            // below: issuing this read while those requests are in flight would contend with them
+            // for a bounded `read_state` buffer's slot and deadlock, because `futs` is not polled
+            // while this future is awaited. A spent output not found in the best chain is absent
+            // from the map, so its input gets no `prevout` and its transaction gets no `fee`.
+            let spent_outputs = if verbosity == 3 {
+                let response = self
+                    .read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::SpentOutputs(hash_or_height))
+                    .await
+                    .map_misc_error()?;
+                let zebra_state::ReadResponse::SpentOutputs(spent_outputs) = response else {
+                    unreachable!("unmatched response to a SpentOutputs request");
+                };
+                spent_outputs.unwrap_or_default()
+            } else {
+                HashMap::new()
+            };
+
             let requests = vec![
                 // Get transaction IDs from the transaction index by block hash
                 //
@@ -1634,27 +1655,6 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
-
-                    // Verbosity 3 adds each input's prevout and the transaction fee. The outputs
-                    // spent by every transaction in the block are resolved in a single best-chain
-                    // state read, then applied per transaction by `add_prevouts`. A spent output
-                    // that is not found in the best chain is simply absent from the map, so its
-                    // input gets no `prevout` and its transaction gets no `fee`.
-                    let spent_outputs = if verbosity == 3 {
-                        let response = self
-                            .read_state
-                            .clone()
-                            .oneshot(zebra_state::ReadRequest::SpentOutputs(hash_or_height))
-                            .await
-                            .map_misc_error()?;
-                        let zebra_state::ReadResponse::SpentOutputs(spent_outputs) = response
-                        else {
-                            unreachable!("unmatched response to a SpentOutputs request");
-                        };
-                        spent_outputs.unwrap_or_default()
-                    } else {
-                        HashMap::new()
-                    };
 
                     let mut transactions = Vec::with_capacity(block.transactions.len());
                     for tx in block.transactions.iter() {
