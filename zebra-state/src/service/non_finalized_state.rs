@@ -599,27 +599,37 @@ impl NonFinalizedState {
             &prepared,
         );
 
-        // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-            prepared.clone(),
-            spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(
-                prepared.height,
+        // Quick checks that don't read from disk
+        let previous_nsm_reserve = new_chain.chain_value_pools.nsm_reserve_amount();
+        let (contextual, transaction_fees) =
+            ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+                prepared.clone(),
+                spent_utxos.clone(),
+                calculate_deferred_pool_balance_change(
+                    prepared.height,
+                    &self.network,
+                    previous_nsm_reserve,
+                )?,
                 &self.network,
-                new_chain.chain_value_pools.nsm_reserve_amount(),
-            )?,
+                new_chain.chain_value_pools,
+            )
+            .map_err(|value_balance_error| {
+                ValidateContextError::CalculateBlockChainValueChange {
+                    value_balance_error,
+                    height: prepared.height,
+                    block_hash: prepared.hash,
+                    transaction_count: prepared.block.transactions.len(),
+                    spent_utxo_count: spent_utxos.len(),
+                }
+            })?;
+
+        check::reserve_funded_subsidy_is_valid(
+            &contextual.block,
+            contextual.height,
             &self.network,
-            new_chain.chain_value_pools,
-        )
-        .map_err(|value_balance_error| {
-            ValidateContextError::CalculateBlockChainValueChange {
-                value_balance_error,
-                height: prepared.height,
-                block_hash: prepared.hash,
-                transaction_count: prepared.block.transactions.len(),
-                spent_utxo_count: spent_utxos.len(),
-            }
-        })?;
+            previous_nsm_reserve,
+            transaction_fees,
+        )?;
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }

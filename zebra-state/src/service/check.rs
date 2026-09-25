@@ -5,9 +5,13 @@ use std::{borrow::Borrow, sync::Arc};
 use chrono::Duration;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError},
     history_tree::HistoryTree,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{
+        subsidy::{self, SubsidyError},
+        Network, NetworkUpgrade,
+    },
     work::difficulty::CompactDifficulty,
 };
 
@@ -413,6 +417,38 @@ pub(crate) fn initial_contextual_validity(
     )?;
 
     check::nullifier::no_duplicates_in_finalized_chain(semantically_verified, finalized_state)?;
+
+    Ok(())
+}
+
+/// Check the block subsidy and miner fees of `block`, once NSM reissuance has started.
+///
+/// From the reissuance height, the block subsidy includes part of the exact parent's NSM reserve,
+/// so the semantic block verifier skips these checks, and they are done here instead.
+///
+/// `transaction_fees` must be the fees from [`Block::chain_value_pool_change_and_fees`].
+pub(crate) fn reserve_funded_subsidy_is_valid(
+    block: &Block,
+    height: block::Height,
+    network: &Network,
+    previous_nsm_reserve: Amount<NonNegative>,
+    transaction_fees: Option<Amount<NonNegative>>,
+) -> Result<(), ValidateContextError> {
+    if network
+        .nsm_reissuance_height()
+        .is_none_or(|start| height < start)
+    {
+        return Ok(());
+    }
+
+    let transaction_fees = transaction_fees.expect(
+        "fees are summed from NU7, and network validation rejects reissuance heights before NU7",
+    );
+    let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
+
+    let total = subsidy::block_subsidy(height, network, previous_nsm_reserve)?;
+    let deferred = subsidy::subsidy_is_valid(block, network, total)?;
+    subsidy::miner_fees_are_valid(coinbase, height, transaction_fees, total, deferred, network)?;
 
     Ok(())
 }

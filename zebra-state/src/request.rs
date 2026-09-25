@@ -10,7 +10,7 @@ use std::{
 
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::{self, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
@@ -521,11 +521,30 @@ impl ContextuallyVerifiedBlock {
     /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) returns success.
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
-        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<Self, ValueBalanceError> {
+        Self::with_block_spent_utxos_and_fees(
+            semantically_verified,
+            spent_outputs,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+        .map(|(contextually_verified, _transaction_fees)| contextually_verified)
+    }
+
+    /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's transaction fees,
+    /// as returned by [`Block::chain_value_pool_change_and_fees`].
+    pub(crate) fn with_block_spent_utxos_and_fees(
+        semantically_verified: SemanticallyVerifiedBlock,
+        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(Self, Option<Amount<NonNegative>>), ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
             hash,
@@ -541,21 +560,26 @@ impl ContextuallyVerifiedBlock {
         // TODO: fix the tests, and stop adding unrelated outputs.
         spent_outputs.extend(new_outputs.clone());
 
-        Ok(Self {
-            block: block.clone(),
-            hash,
-            height,
-            new_outputs,
-            spent_outputs: spent_outputs.clone(),
-            transaction_hashes,
-            chain_value_pool_change: block.chain_value_pool_change(
-                &utxos_from_ordered_utxos(spent_outputs),
-                deferred_pool_balance_change,
-                network,
-                previous_value_pools,
-            )?,
-            received_time,
-        })
+        let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
+            &utxos_from_ordered_utxos(spent_outputs.clone()),
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )?;
+
+        Ok((
+            Self {
+                block,
+                hash,
+                height,
+                new_outputs,
+                spent_outputs,
+                transaction_hashes,
+                chain_value_pool_change,
+                received_time,
+            },
+            transaction_fees,
+        ))
     }
 }
 
