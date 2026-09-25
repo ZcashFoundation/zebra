@@ -1,7 +1,7 @@
 //! State [`tower::Service`] response types.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -406,6 +406,14 @@ pub enum ReadResponse {
     /// serialized size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
+    /// non-coinbase inputs of the specified block, keyed by the spending
+    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found.
+    ///
+    /// An outpoint whose spent output could not be found in the best chain is
+    /// omitted from the map.
+    SpentOutputs(Option<HashMap<transparent::OutPoint, transparent::Utxo>>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -623,6 +631,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

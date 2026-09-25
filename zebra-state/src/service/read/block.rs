@@ -12,7 +12,7 @@
 //! - the cached [`Chain`] or [`NonFinalizedState`], and
 //! - the shared finalized [`ZebraDb`] reference.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
@@ -157,6 +157,87 @@ where
     let confirmations = 1 + tip_height.0 - height.0;
 
     Some(MinedTx::new(tx, height, confirmations, time, tip_hash))
+}
+
+/// Returns the transparent outputs spent by the non-coinbase inputs of the block with
+/// `hash_or_height`, keyed by the [`OutPoint`](transparent::OutPoint) that spends them, if the
+/// block exists in the non-finalized `chain` or finalized `db`.
+///
+/// Used by the `getblock` RPC at verbosity 3 to fill in each input's prevout and the
+/// transaction fee.
+///
+/// # Correctness
+///
+/// The block and all of its spent outputs are read from the same `chain`/`db` snapshot, so the
+/// prevouts are consistent with the block.
+///
+/// A spent output that cannot be found (for example, an input of a side-chain block that spends
+/// an output not in the best chain) is omitted from the map. Callers must treat a missing
+/// outpoint as "prevout unknown", not as an error.
+///
+/// Coinbase transactions spend no outputs, so they contribute nothing to the map.
+///
+/// # Performance
+///
+/// Spent outputs are deleted from the finalized UTXO set, so an output already spent in the
+/// finalized chain is recovered by reading its whole parent transaction. Each distinct parent
+/// transaction is read at most once, so this is `O(distinct spent parent transactions)` reads —
+/// the same cost as resolving the prevouts individually, but in a single state request under one
+/// snapshot.
+pub fn spent_outputs_for_block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<HashMap<transparent::OutPoint, Utxo>>
+where
+    C: AsRef<Chain>,
+{
+    let chain = chain.as_ref();
+    let block = block(chain, db, hash_or_height)?;
+
+    let mut spent_outputs = HashMap::new();
+
+    // Parent transactions recovered from the transaction index, read at most once each. `None`
+    // records a parent that was looked up and not found, so it is not read again.
+    let mut parent_txs: HashMap<transaction::Hash, Option<(Arc<Transaction>, Height)>> =
+        HashMap::new();
+
+    for tx in block.transactions.iter() {
+        // Coinbase transactions spend no outputs.
+        if tx.is_coinbase() {
+            continue;
+        }
+
+        for outpoint in tx.spent_outpoints() {
+            // The live UTXO set (non-finalized created outputs and unspent finalized outputs) is
+            // the cheapest source, and already carries the correct height and coinbase flag.
+            if let Some(utxo) = utxo(chain, db, outpoint) {
+                spent_outputs.insert(outpoint, utxo);
+                continue;
+            }
+
+            // The output has already been spent in the finalized chain, so it is no longer in the
+            // UTXO set. Recover it from its parent transaction, reading each distinct parent once.
+            let parent_tx = parent_txs.entry(outpoint.hash).or_insert_with(|| {
+                transaction(chain, db, outpoint.hash).map(|(tx, height, _)| (tx, height))
+            });
+
+            let Some((parent_tx, height)) = parent_tx else {
+                continue;
+            };
+
+            // `outpoint.index` is a `u32` output index; widening it to `usize` is lossless on
+            // every platform Zebra supports.
+            if let Some(output) = parent_tx.outputs().get(outpoint.index as usize) {
+                spent_outputs.insert(
+                    outpoint,
+                    Utxo::new(output.clone(), *height, parent_tx.is_coinbase()),
+                );
+            }
+        }
+    }
+
+    Some(spent_outputs)
 }
 
 /// Returns a [`AnyTx`] for a [`Transaction`] with [`transaction::Hash`],

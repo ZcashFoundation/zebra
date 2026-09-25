@@ -940,105 +940,6 @@ where
     BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    /// Looks up the output each transparent input of `tx` spends in the best chain, then fills in
-    /// the `prevout` objects and `fee` on `object`, for `getblock` verbosity 3.
-    ///
-    /// Coinbase transactions spend no outputs and have no fee, so they are left unchanged. A spent
-    /// output that cannot be found (for example, a side-chain block's input that is not in the
-    /// best chain) is skipped: its input gets no `prevout`, and its transaction gets no `fee`.
-    ///
-    /// Each parent transaction is fetched once, even when several inputs spend the same parent.
-    ///
-    /// # Performance
-    ///
-    /// This is deliberately behind an explicit verbosity level: it does one best-chain state read
-    /// per distinct parent transaction, and each read loads the whole parent transaction to take a
-    /// single output. In the common case inputs spend distinct parents, so the cost is
-    /// `O(distinct parent transactions)` per call, uncached and repeatable. This is heavier than
-    /// Bitcoin Core's verbosity 3, which recovers prevouts from compact per-block undo data. A
-    /// batched or output-by-outpoint state request would remove the per-input reads, but it belongs
-    /// with the wider `getblock` redesign (ZcashFoundation/zebra#11416) rather than this method.
-    ///
-    /// # Concurrency
-    ///
-    /// The prevout reads are not pinned to the same chain snapshot as the block. The spent value
-    /// and `scriptPubKey` are unaffected, because a transaction ID commits to its outputs, so any
-    /// transaction found for a given ID has the same outputs. Only `prevout.height`/`generated`
-    /// could momentarily reflect a different best chain if a reorg lands between the block read and
-    /// these reads; the next call reflects the new chain.
-    async fn add_transaction_prevouts(
-        &self,
-        object: &mut TransactionObject,
-        tx: &Arc<Transaction>,
-        network: &Network,
-    ) -> Result<()> {
-        // Coinbase transactions spend no outputs.
-        if tx.is_coinbase() {
-            return Ok(());
-        }
-
-        let outpoints: Vec<_> = tx.spent_outpoints().collect();
-
-        // Fetch each parent transaction once, even when several inputs spend outputs of the same
-        // parent, preserving first-seen order so responses line up with the requests.
-        let mut seen = HashSet::new();
-        let distinct_hashes: Vec<_> = outpoints
-            .iter()
-            .map(|outpoint| outpoint.hash)
-            .filter(|hash| seen.insert(*hash))
-            .collect();
-
-        let mut futs = FuturesOrdered::new();
-        for hash in &distinct_hashes {
-            futs.push_back(
-                self.read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::Transaction(*hash)),
-            );
-        }
-
-        // The parent transactions found in the best chain, keyed by transaction hash.
-        let mut parent_txs = HashMap::with_capacity(distinct_hashes.len());
-        for hash in &distinct_hashes {
-            let response = futs
-                .next()
-                .await
-                .expect("one response per distinct parent transaction")
-                .map_misc_error()?;
-            let zebra_state::ReadResponse::Transaction(mined_tx) = response else {
-                unreachable!("unmatched response to a Transaction request");
-            };
-
-            if let Some(mined_tx) = mined_tx {
-                parent_txs.insert(*hash, mined_tx);
-            }
-        }
-
-        // Build the spent-output map for every input from the fetched parent transactions.
-        let mut spent_utxos = HashMap::with_capacity(outpoints.len());
-        for outpoint in &outpoints {
-            let Some(mined_tx) = parent_txs.get(&outpoint.hash) else {
-                continue;
-            };
-            // `outpoint.index` is a `u32` output index; widening it to `usize` is lossless on
-            // every platform Zebra supports.
-            if let Some(output) = mined_tx.tx.outputs().get(outpoint.index as usize) {
-                spent_utxos.insert(
-                    *outpoint,
-                    zebra_chain::transparent::Utxo::new(
-                        output.clone(),
-                        mined_tx.height,
-                        mined_tx.tx.is_coinbase(),
-                    ),
-                );
-            }
-        }
-
-        object.add_prevouts(tx, &spent_utxos, network);
-
-        Ok(())
-    }
-
     /// Create a new instance of the RPC handler.
     //
     // TODO:
@@ -1733,6 +1634,28 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
+
+                    // Verbosity 3 adds each input's prevout and the transaction fee. The outputs
+                    // spent by every transaction in the block are resolved in a single best-chain
+                    // state read, then applied per transaction by `add_prevouts`. A spent output
+                    // that is not found in the best chain is simply absent from the map, so its
+                    // input gets no `prevout` and its transaction gets no `fee`.
+                    let spent_outputs = if verbosity == 3 {
+                        let response = self
+                            .read_state
+                            .clone()
+                            .oneshot(zebra_state::ReadRequest::SpentOutputs(hash_or_height))
+                            .await
+                            .map_misc_error()?;
+                        let zebra_state::ReadResponse::SpentOutputs(spent_outputs) = response
+                        else {
+                            unreachable!("unmatched response to a SpentOutputs request");
+                        };
+                        spent_outputs.unwrap_or_default()
+                    } else {
+                        HashMap::new()
+                    };
+
                     let mut transactions = Vec::with_capacity(block.transactions.len());
                     for tx in block.transactions.iter() {
                         let mut object = TransactionObject::from_transaction(
@@ -1746,10 +1669,8 @@ where
                             tx.hash(),
                         );
 
-                        // Verbosity 3 adds each input's prevout and the transaction fee.
                         if verbosity == 3 {
-                            self.add_transaction_prevouts(&mut object, tx, &network)
-                                .await?;
+                            object.add_prevouts(tx, &spent_outputs, &network);
                         }
 
                         transactions.push(GetBlockTransaction::Object(Box::new(object)));

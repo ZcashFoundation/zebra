@@ -1208,6 +1208,22 @@ pub enum ReadRequest {
     /// [`block::Height`] using `.into()`.
     BlockHeader(HashOrHeight),
 
+    /// Looks up the transparent outputs spent by the non-coinbase inputs of a
+    /// block, using a block hash or height, in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SpentOutputs(Some(_))`](ReadResponse::SpentOutputs) with the spent
+    ///   outputs keyed by the spending [`OutPoint`](transparent::OutPoint) if the block is in
+    ///   the best chain;
+    /// * [`ReadResponse::SpentOutputs(None)`](ReadResponse::SpentOutputs) otherwise.
+    ///
+    /// An outpoint whose spent output cannot be found in the best chain is omitted from the
+    /// map, so callers must treat a missing outpoint as "prevout unknown", not an error.
+    ///
+    /// Used by the `getblock` RPC at verbosity 3.
+    SpentOutputs(HashOrHeight),
+
     /// Looks up a transaction by hash in the current best chain.
     ///
     /// Returns
@@ -1595,6 +1611,7 @@ impl ReadRequest {
             ReadRequest::Block(_) => "block",
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
+            ReadRequest::SpentOutputs(_) => "spent_outputs",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
