@@ -240,6 +240,9 @@ jobs:
       instance_zone: ${{ steps.create-instance.outputs.instance_zone }}
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
+      # The `secrets` context is unavailable in a step `if:`, so the presence of the
+      # key is resolved here.
+      HAS_GCP_SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY != '' }}
     permissions:
       contents: read
       id-token: write
@@ -264,6 +267,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
+        if: env.HAS_GCP_SSH_KEY == 'true'
         uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
@@ -272,6 +276,10 @@ jobs:
 
       - name: Generate public SSH key
         run: |
+          if [ "${HAS_GCP_SSH_KEY}" != "true" ]; then
+            echo "::error::Set the GCP_SSH_PRIVATE_KEY secret: this job reaches the test instance over SSH."
+            exit 1
+          fi
           .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
@@ -610,6 +618,7 @@ jobs:
       TEST_ID: ${{ inputs.test_id }}
       GCP_ZONE: ${{ needs.test-result.outputs.instance_zone }}
       INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
+      HAS_GCP_SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY != '' }}
     permissions:
       contents: read
       id-token: write
@@ -617,13 +626,19 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
+      - name: Install private SSH key
+        if: env.HAS_GCP_SSH_KEY == 'true'
+        uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
           known_hosts: unnecessary
       - name: Generate public SSH key
         run: |
+          if [ "${HAS_GCP_SSH_KEY}" != "true" ]; then
+            echo "::error::Set the GCP_SSH_PRIVATE_KEY secret: this job reaches the test instance over SSH."
+            exit 1
+          fi
           .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
       - name: Authenticate to Google Cloud
@@ -676,6 +691,7 @@ jobs:
     env:
       STATE_VERSION: ${{ needs.test-result.outputs.state_version }}
       CACHED_DISK_NAME: ${{ needs.test-result.outputs.cached_disk_name }}
+      HAS_GCP_SSH_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY != '' }}
     permissions:
       contents: read
       id-token: write
@@ -696,20 +712,23 @@ jobs:
       # Disk images in GCP are required to be in lowercase, but the blockchain network
       # uses sentence case, so we need to downcase ${{ inputs.network }}.
       #
-      # Disk image names in GCP are limited to 63 characters, so we need to limit
-      # branch names to 12 characters.
+      # Disk image names in GCP are limited to 63 characters, so the ref segment is
+      # limited to 12.
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
-      - name: Format network name and branch name for disks
+      # Passes the cache image ref segment to subsequent steps using $REF_SEGMENT.
+      - name: Format network name and ref segment for disks
+        env:
+          NETWORK_INPUT: ${{ inputs.network }}
+          REF_SLUG: ${{ env.GITHUB_REF_POINT_SLUG_URL }}
         run: |
-          NETWORK_CAPS="${{ inputs.network }}"
-          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
-          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
+          echo "NETWORK=${NETWORK_INPUT,,}" >> "$GITHUB_ENV"
+          REF_SEGMENT="$(./.github/workflows/scripts/gcp-cache-image-ref-segment.sh)"
+          echo "REF_SEGMENT=${REF_SEGMENT}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
       - name: Install private SSH key
+        if: env.HAS_GCP_SSH_KEY == 'true'
         uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
@@ -718,6 +737,10 @@ jobs:
 
       - name: Generate public SSH key
         run: |
+          if [ "${HAS_GCP_SSH_KEY}" != "true" ]; then
+            echo "::error::Set the GCP_SSH_PRIVATE_KEY secret: this job reaches the test instance over SSH."
+            exit 1
+          fi
           .github/scripts/apt-install.sh openssh-client
           ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
@@ -1013,7 +1036,7 @@ jobs:
 
              # Create image from the test disk
              gcloud compute images create \
-              "${DISK_PREFIX}-${SHORT_GITHUB_REF}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              "${DISK_PREFIX}-${REF_SEGMENT}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk="${DISK_NAME}" \
               --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
