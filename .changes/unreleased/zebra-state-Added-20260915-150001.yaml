@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: "Behind `--cfg zcash_unstable=\"zip234\"`, the NSM value balance is seeded at NU7 activation and stored with each block's chain value pools in a `state/v29` database, and from the ZIP 234 deployment height contextual validation checks the block subsidy, funding streams and miner fees against the parent block's balance ([zips#1354](https://github.com/zcash/zips/pull/1354)); an invalid subsidy gives the sending peer a misbehavior score of 100 ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
+time: 2026-09-15T15:00:01.000000000-06:00

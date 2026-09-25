@@ -60,12 +60,29 @@ pub fn get_block_template_chain_info(
     let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
         best_relevant_chain_and_history_tree_result?;
 
+    #[cfg(zcash_unstable = "zip234")]
+    let chain_value_pools = {
+        let (_, tip_hash, chain_value_pools) =
+            read::find::tip_with_value_balance(non_finalized_state.best_chain(), db)?
+                .ok_or("Zebra's state is empty, wait until it syncs to the chain tip")?;
+
+        if tip_hash != best_tip_hash {
+            return Err("Zebra is committing too many blocks to the state, \
+                        wait until it syncs to the chain tip"
+                .into());
+        }
+
+        chain_value_pools
+    };
+
     Ok(difficulty_time_and_history_tree(
         best_relevant_chain,
         best_tip_height,
         best_tip_hash,
         network,
         best_tip_history_tree,
+        #[cfg(zcash_unstable = "zip234")]
+        chain_value_pools,
     ))
 }
 
@@ -200,6 +217,9 @@ fn difficulty_time_and_history_tree(
     tip_hash: block::Hash,
     network: &Network,
     history_tree: Arc<HistoryTree>,
+    #[cfg(zcash_unstable = "zip234")] chain_value_pools: zebra_chain::value_balance::ValueBalance<
+        zebra_chain::amount::NonNegative,
+    >,
 ) -> GetBlockTemplateChainInfo {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
         .iter()
@@ -261,6 +281,8 @@ fn difficulty_time_and_history_tree(
         cur_time,
         min_time,
         max_time,
+        #[cfg(zcash_unstable = "zip234")]
+        chain_value_pools,
     };
 
     adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);
@@ -423,6 +445,8 @@ mod tests {
             cur_time: DateTime32::from(cur_time),
             min_time: DateTime32::from(PREV - 100),
             max_time: DateTime32::from(PREV + BLOCK_MAX_TIME_SINCE_MEDIAN),
+            #[cfg(zcash_unstable = "zip234")]
+            chain_value_pools: Default::default(),
         }
     }
 

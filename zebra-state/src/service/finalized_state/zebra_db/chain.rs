@@ -253,7 +253,8 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), ValidateContextError> {
-        let block_value_pool_change = finalized
+        #[cfg_attr(not(zcash_unstable = "zip234"), allow(unused_mut))]
+        let mut block_value_pool_change = finalized
             .block
             .chain_value_pool_change(
                 &utxos_spent_by_block,
@@ -268,6 +269,18 @@ impl DiskWriteBatch {
                     spent_utxo_count: utxos_spent_by_block.len(),
                 }
             })?;
+
+        // The NSM value balance is credited at NU7 activation and debited by this block's
+        // additional subsidy, calculated from the chain value pools after its parent block, which
+        // are `value_pool` here.
+        #[cfg(zcash_unstable = "zip234")]
+        block_value_pool_change.set_nsm_amount(
+            zebra_chain::parameters::subsidy::nsm_value_balance_change(
+                finalized.height,
+                &db.network(),
+                value_pool,
+            ),
+        );
 
         let new_value_pool = value_pool
             .add_chain_value_pool_change(block_value_pool_change)

@@ -77,3 +77,30 @@ fn ironwood_included_in_remaining_transaction_value() {
         Amount::<NonNegative>::try_from(50).expect("valid amount"),
     );
 }
+
+/// The NSM value balance is tracked with the chain value pools, but it is not one of them: it is
+/// excluded from the issued supply, so it doesn't count towards the `MAX_MONEY` cap.
+#[cfg(zcash_unstable = "zip234")]
+#[test]
+fn nsm_value_balance_is_not_part_of_the_issued_supply() {
+    let _init_guard = zebra_test::init();
+
+    let max_money = Amount::<NonNegative>::try_from(MAX_MONEY).expect("valid amount");
+
+    let mut pools = ValueBalance::<NonNegative>::zero();
+    pools.set_transparent_value_balance(ValueBalance::from_transparent_amount(max_money));
+    pools.set_nsm_amount(Amount::<NonNegative>::try_from(100).expect("valid amount"));
+
+    assert_eq!(pools.total().expect("total excludes nsm"), max_money);
+
+    // Adding to the NSM value balance never trips the issued supply cap.
+    let mut change = ValueBalance::<NegativeAllowed>::zero();
+    change.set_nsm_amount(Amount::<NegativeAllowed>::try_from(1).expect("valid amount"));
+    let pools = pools
+        .add_chain_value_pool_change(change)
+        .expect("the NSM value balance is not capped by MAX_MONEY");
+    assert_eq!(
+        pools.nsm_amount(),
+        Amount::<NonNegative>::try_from(101).expect("valid amount")
+    );
+}

@@ -14,7 +14,7 @@ use rand::{
 };
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, NonNegative},
     block::{Header, Height, MAX_BLOCK_BYTES},
     parameters::Network,
     serialization::{CompactSizeMessage, ZcashSerialize},
@@ -62,20 +62,28 @@ pub fn select_mempool_transactions(
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
     coinbase_cache: Option<&CoinbaseCache>,
+    parent_nsm_value_balance: Option<Amount<NonNegative>>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
     //
-    // The fake coinbase only depends on the height and miner parameters (its fee is always zero),
-    // so it's constant per block. Reuse the same per-block cache as the real coinbase to avoid
-    // re-proving a shielded coinbase on every `getblocktemplate` call just to read its size.
+    // The fake coinbase only depends on the height, miner parameters, and parent NSM value
+    // balance (its fee is always zero), so it's constant per block. Reuse the same per-block cache
+    // as the real coinbase to avoid re-proving a shielded coinbase on every `getblocktemplate`
+    // call just to read its size.
     let fake_coinbase_tx = coinbase_cache
-        .and_then(|cache| cache.get(height, Amount::zero()))
+        .and_then(|cache| cache.get(height, Amount::zero(), parent_nsm_value_balance))
         .unwrap_or_else(|| {
-            let cb = TransactionTemplate::new_coinbase(net, height, miner_params, Amount::zero())
-                .expect("valid coinbase transaction template");
+            let cb = TransactionTemplate::new_coinbase_with_parent_pools(
+                net,
+                height,
+                miner_params,
+                Amount::zero(),
+                parent_nsm_value_balance,
+            )
+            .expect("valid coinbase transaction template");
             if let Some(cache) = coinbase_cache {
-                cache.store(height, Amount::zero(), cb.clone());
+                cache.store(height, Amount::zero(), parent_nsm_value_balance, cb.clone());
             }
             cb
         });
