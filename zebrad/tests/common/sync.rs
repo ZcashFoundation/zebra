@@ -5,13 +5,22 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
+use indexmap::IndexSet;
 use tempfile::TempDir;
+use tower::{service_fn, BoxError};
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{
+    block::{Block, Height},
+    chain_tip::NoChainTip,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+};
+use zebra_network::{AddressBook, InventoryResponse, Request, Response};
 use zebrad::{components::sync, config::ZebradConfig};
 
+use color_eyre::eyre::eyre;
 use zebra_test::{args, prelude::*};
 
 use super::{
@@ -191,6 +200,46 @@ pub fn sync_until(
     checkpoint_sync: bool,
     check_legacy_chain: bool,
 ) -> Result<TempDir> {
+    sync_until_with_peers(
+        height,
+        network,
+        stop_regex,
+        timeout,
+        reuse_tempdir,
+        mempool_behavior,
+        checkpoint_sync,
+        check_legacy_chain,
+        None,
+    )
+}
+
+/// Sync on `network` until `zebrad` reaches `height`, or until it logs `stop_regex`,
+/// connecting only to `initial_peers` if they are supplied.
+///
+/// If `initial_peers` is `None`, uses the default DNS seeders for `network`, like [`sync_until`].
+/// Otherwise, `zebrad` connects to `initial_peers` and nothing else, so the sync doesn't depend
+/// on live network peers.
+///
+/// With [`MempoolBehavior::ShouldNotActivate`], `zebrad` has to exit by itself so the test can
+/// collect its whole output. `TestChild::with_timeout` doesn't apply to that wait, so `timeout`
+/// doesn't bound it: the per-test `slow-timeout` in `.config/nextest.toml` does.
+///
+/// See [`sync_until`] for the other arguments and the return value.
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(reuse_tempdir))]
+pub fn sync_until_with_peers(
+    height: Height,
+    network: &Network,
+    stop_regex: &str,
+    timeout: Duration,
+    // Test Settings
+    // TODO: turn these into an argument struct
+    reuse_tempdir: impl Into<Option<TempDir>>,
+    mempool_behavior: MempoolBehavior,
+    checkpoint_sync: bool,
+    check_legacy_chain: bool,
+    initial_peers: Option<IndexSet<String>>,
+) -> Result<TempDir> {
     let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
@@ -201,6 +250,11 @@ pub fn sync_until(
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config(network)?;
+    if let Some(initial_peers) = initial_peers {
+        // `zebrad` only uses the peers for its configured network.
+        config.network.initial_mainnet_peers = initial_peers.clone();
+        config.network.initial_testnet_peers = initial_peers;
+    }
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
     config.consensus.checkpoint_sync = checkpoint_sync;
@@ -410,4 +464,122 @@ pub fn create_cached_database_height(
     child.kill(true)?;
 
     Ok(())
+}
+
+/// The maximum number of connections a [`GenesisPeer`] accepts from each IP address.
+const GENESIS_PEER_MAX_CONNECTIONS_PER_IP: usize = 8;
+
+/// A local peer that serves the genesis block of a network, so sync tests can download it
+/// without connecting to live network peers.
+///
+/// Runs `zebra-network` on an OS-assigned IPv4 localhost port, with an inbound service that
+/// answers block requests with the genesis block (or `Missing` for any other block), answers
+/// peer requests with an empty list, and returns `Nil` for everything else.
+pub struct GenesisPeer {
+    /// The address the peer listens on.
+    listen_addr: SocketAddr,
+
+    /// Keeps the peer's network tasks running until the peer is dropped.
+    _network_handles: (
+        tower::buffer::Buffer<tower::util::BoxService<Request, Response, BoxError>, Request>,
+        Arc<std::sync::Mutex<AddressBook>>,
+        tokio::sync::mpsc::Sender<(zebra_network::PeerSocketAddr, u32)>,
+    ),
+
+    /// Runs the peer's network tasks.
+    ///
+    /// Declared last, so it is dropped after the network handles.
+    _runtime: tokio::runtime::Runtime,
+}
+
+impl GenesisPeer {
+    /// Starts a local peer that serves the genesis block of `network`.
+    ///
+    /// Only Mainnet and the default Testnet have genesis block test vectors.
+    pub fn spawn(network: &Network) -> Result<Self> {
+        let genesis_bytes = match network {
+            Network::Mainnet => zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.as_slice(),
+            _ if network.is_default_testnet() => {
+                zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES.as_slice()
+            }
+            _ => return Err(eyre!("no genesis block test vector for {network}")),
+        };
+        let genesis: Arc<Block> = genesis_bytes.zcash_deserialize_into()?;
+        let genesis_hash = genesis.hash();
+
+        if genesis_hash != network.genesis_hash() {
+            return Err(eyre!(
+                "genesis block test vector for {network} has the wrong hash: {genesis_hash:?}"
+            ));
+        }
+
+        let inbound_service = service_fn(move |request: Request| {
+            let genesis = genesis.clone();
+
+            async move {
+                let response = match request {
+                    Request::BlocksByHash(hashes) => Response::Blocks(
+                        hashes
+                            .into_iter()
+                            .map(|hash| {
+                                if hash == genesis_hash {
+                                    InventoryResponse::Available((genesis.clone(), None))
+                                } else {
+                                    InventoryResponse::Missing(hash)
+                                }
+                            })
+                            .collect(),
+                    ),
+                    Request::Peers => Response::Peers(Vec::new()),
+                    _ => Response::Nil,
+                };
+
+                Ok::<_, BoxError>(response)
+            }
+        });
+
+        // The peer only accepts connections: it must never dial the public network.
+        let config = zebra_network::Config {
+            listen_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded IPv4 localhost address is valid"),
+            network: network.clone(),
+            initial_mainnet_peers: IndexSet::new(),
+            initial_testnet_peers: IndexSet::new(),
+            cache_dir: zebra_network::CacheDir::disabled(),
+            // Every `zebrad` under test connects from 127.0.0.1. The default limit of one
+            // connection per IP would make the peer reject a restarted `zebrad` for about two
+            // minutes, so a test that needs to sync again would stall rather than fail quickly.
+            max_connections_per_ip: GENESIS_PEER_MAX_CONNECTIONS_PER_IP,
+            ..zebra_network::Config::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()?;
+
+        let (peer_set, address_book, misbehavior_tx) = runtime.block_on(zebra_network::init(
+            config,
+            inbound_service,
+            NoChainTip,
+            "Genesis test peer".to_string(),
+        ));
+
+        let listen_addr = address_book
+            .lock()
+            .expect("the address book lock is not held by a panicked thread")
+            .local_listener_socket_addr();
+
+        Ok(Self {
+            listen_addr,
+            _network_handles: (peer_set, address_book, misbehavior_tx),
+            _runtime: runtime,
+        })
+    }
+
+    /// Returns a peer list containing only this peer, for `zebrad`'s initial peer config.
+    pub fn initial_peers(&self) -> IndexSet<String> {
+        [self.listen_addr.to_string()].into_iter().collect()
+    }
 }
