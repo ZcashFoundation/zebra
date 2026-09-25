@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Initial sync no longer slows to a few hundred blocks per minute while every peer that serves historic blocks is busy downloading. The syncer''s tip requests now go to those peers, waiting up to 1.5 seconds for a busy one, instead of to idle peers that never answer them.'
+time: 2026-09-25T14:13:45.816222697Z
