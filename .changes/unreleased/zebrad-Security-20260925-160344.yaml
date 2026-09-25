@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: 'Fix a remotely triggerable denial of service when processing malformed V6 transactions ([GHSA-h5rr-8pqv-grp9](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h5rr-8pqv-grp9)).'
-time: 2026-09-25T16:03:44.706962543Z

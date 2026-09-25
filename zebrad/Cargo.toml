@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "6.4.1"
+version = "6.4.2"
 authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license.workspace = true
@@ -157,7 +157,7 @@ tokio-console = ["console-subscriber"]
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "13.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "13.0.1" }
 zebra-consensus = { path = "../zebra-consensus", version = "16.0.0" }
 zebra-network = { path = "../zebra-network", version = "13.0.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "11.0.0", features = ["rpc-client"] }
