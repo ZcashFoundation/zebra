@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getblocktemplate` reports the negative total transaction fees in `coinbasetxn.fee`, including after NU7 fee withholding. Cached responses distinguish gross fee totals that round to the same miner payout. ([#11496](https://github.com/ZcashFoundation/zebra/pull/11496))'
+time: 2026-09-23T17:20:16.003377254+02:00

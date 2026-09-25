@@ -12,6 +12,7 @@ use zebra_chain::parameters::testnet::ConfiguredFundingStreamRecipient;
 use zebra_chain::{
     block::Height,
     parameters::{
+        subsidy::scheduled_block_subsidy,
         subsidy::FundingStreamReceiver::{Deferred, Ecc, MajorGrants, ZcashFoundation},
         testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Network, NetworkUpgrade,
@@ -24,6 +25,139 @@ use crate::client::TransactionTemplate;
 use crate::config::mining::{default_miner_address, MinerAddressType};
 
 use super::MinerParams;
+
+/// Dependency metadata uses the final template order and lists each parent only once.
+#[test]
+fn template_reports_selected_transaction_dependencies() {
+    use zebra_chain::{
+        block,
+        serialization::DateTime32,
+        transaction::{self, LockTime, VerifiedUnminedTx},
+        transparent::{Input, OutPoint, Output, Script},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    };
+    use zebra_node_services::mempool::TransactionDependencies;
+    use zebra_state::GetBlockTemplateChainInfo;
+
+    use super::{zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache};
+    use crate::methods::types::long_poll::LongPollInput;
+
+    let net = Network::new_regtest(testnet::RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let transaction = |outpoints: Vec<OutPoint>, output_value: u64| {
+        let tx = Transaction::test_v5(
+            NetworkUpgrade::Nu7,
+            outpoints
+                .into_iter()
+                .map(|outpoint| Input::PrevOut {
+                    outpoint,
+                    unlock_script: Script::new(&[]),
+                    sequence: u32::MAX,
+                })
+                .collect(),
+            vec![
+                Output {
+                    value: output_value.try_into().unwrap(),
+                    lock_script: Script::new(&[0x51]),
+                };
+                2
+            ],
+            LockTime::unlocked(),
+            Height(100),
+        );
+        VerifiedUnminedTx::new(
+            std::sync::Arc::new(tx).into(),
+            10_000u64.try_into().unwrap(),
+            0,
+            0,
+            Default::default(),
+        )
+        .unwrap()
+    };
+    let parent = transaction(
+        vec![OutPoint::from_usize(transaction::Hash([1; 32]), 0)],
+        50_000,
+    );
+    let unrelated = transaction(
+        vec![OutPoint::from_usize(transaction::Hash([2; 32]), 0)],
+        50_000,
+    );
+    let parent_hash = parent.transaction.id.mined_id();
+    let parent_outputs = vec![
+        OutPoint::from_usize(parent_hash, 0),
+        OutPoint::from_usize(parent_hash, 1),
+    ];
+    let child = transaction(parent_outputs.clone(), 45_000);
+    let child_hash = child.transaction.id.mined_id();
+    let mut dependencies = TransactionDependencies::default();
+    dependencies.add(child_hash, parent_outputs);
+    let height = Height(11);
+    let subsidy = scheduled_block_subsidy(height, &net).unwrap();
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &net,
+            default_miner_address(net.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+    let selected = select_mempool_transactions(
+        &net,
+        height,
+        subsidy,
+        &miner_params,
+        vec![child, unrelated, parent],
+        dependencies,
+        None,
+    );
+    let chain_info = GetBlockTemplateChainInfo {
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        expected_block_subsidy: subsidy,
+        tip_height: Height(10),
+        tip_hash: block::Hash([3; 32]),
+        cur_time: DateTime32::from(1_700_000_000),
+        min_time: DateTime32::from(1_699_999_999),
+        max_time: DateTime32::from(1_700_000_001),
+        chain_history_root: Some([4; 32].into()),
+    };
+    let long_poll_id = LongPollInput::new(
+        chain_info.tip_height,
+        chain_info.tip_hash,
+        chain_info.max_time,
+        iter::empty(),
+    )
+    .generate_id();
+    let template = BlockTemplateResponse::new_internal(
+        &net,
+        &CoinbaseCache::default(),
+        &miner_params,
+        &chain_info,
+        long_poll_id,
+        selected,
+        None,
+    );
+    let [parent_index, child_index] = [parent_hash, child_hash].map(|hash| {
+        template
+            .transactions
+            .iter()
+            .position(|tx| tx.hash == hash)
+            .unwrap()
+    });
+    let json = serde_json::to_value(&template).unwrap();
+    assert!(parent_index < child_index);
+    assert_eq!(
+        json["transactions"][parent_index]["depends"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        json["transactions"][child_index]["depends"],
+        serde_json::json!([parent_index + 1])
+    );
+}
 
 /// Tests that coinbase transactions can be generated.
 ///
@@ -80,6 +214,7 @@ fn coinbase() -> anyhow::Result<()> {
                             Address::decode(&net, default_miner_address(net.kind(), &addr_type))
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
+                        zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &net)?,
                         Amount::zero(),
                     )?
                     .data()
@@ -166,9 +301,10 @@ fn coinbase_cache_reuses_built_coinbase() {
         .expect("hard-coded Sapling address is valid"),
     );
     let fee = Amount::zero();
+    let subsidy = scheduled_block_subsidy(height, &net).unwrap();
 
     let build = || {
-        TransactionTemplate::new_coinbase(&net, height, &miner_params, fee)
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, subsidy, fee)
             .expect("valid coinbase tx")
     };
 
@@ -182,11 +318,14 @@ fn coinbase_cache_reuses_built_coinbase() {
     );
 
     let cache = CoinbaseCache::default();
-    assert!(cache.get(height, fee).is_none(), "an empty cache misses");
+    assert!(
+        cache.get(height, subsidy, fee).is_none(),
+        "an empty cache misses"
+    );
 
-    cache.store(height, fee, coinbase.clone());
+    cache.store(height, subsidy, fee, coinbase.clone());
     assert_eq!(
-        cache.get(height, fee),
+        cache.get(height, subsidy, fee),
         Some(coinbase.clone()),
         "a cache hit reuses the stored coinbase",
     );
@@ -194,7 +333,7 @@ fn coinbase_cache_reuses_built_coinbase() {
     // A different height key misses, so the next request rebuilds.
     let next_height = height.next().expect("height is below Height::MAX");
     assert!(
-        cache.get(next_height, fee).is_none(),
+        cache.get(next_height, subsidy, fee).is_none(),
         "a different height misses"
     );
 }
@@ -207,6 +346,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
     use super::CoinbaseCache;
 
     let height = Height(1_000_000);
+    let subsidy = scheduled_block_subsidy(height, &Network::Mainnet).unwrap();
     let zero_fee = Amount::zero();
     let real_fee: Amount<zebra_chain::amount::NonNegative> =
         Amount::try_from(10_000).expect("valid amount");
@@ -228,6 +368,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
             )
             .unwrap(),
         ),
+        subsidy,
         zero_fee,
     )
     .unwrap();
@@ -245,27 +386,29 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
             )
             .unwrap(),
         ),
+        subsidy,
         real_fee,
     )
     .unwrap();
 
-    cache.store(height, zero_fee, fake_coinbase.clone());
-    cache.store(height, real_fee, real_coinbase.clone());
+    cache.store(height, subsidy, zero_fee, fake_coinbase.clone());
+    cache.store(height, subsidy, real_fee, real_coinbase.clone());
 
     // Both entries coexist — the zero-fee sizing coinbase survives the real-fee store.
     assert_eq!(
-        cache.get(height, zero_fee),
+        cache.get(height, subsidy, zero_fee),
         Some(fake_coinbase),
         "zero-fee fake coinbase should still be cached after storing real-fee coinbase"
     );
     assert_eq!(
-        cache.get(height, real_fee),
+        cache.get(height, subsidy, real_fee),
         Some(real_coinbase),
         "real-fee coinbase should be cached"
     );
 
     // Height transition: storing at a new height evicts the stale entries.
     let next_height = Height(height.0 + 1);
+    let next_subsidy = scheduled_block_subsidy(next_height, &Network::Mainnet).unwrap();
     let next_coinbase = TransactionTemplate::new_coinbase(
         &Network::Mainnet,
         next_height,
@@ -279,18 +422,19 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
             )
             .unwrap(),
         ),
+        next_subsidy,
         zero_fee,
     )
     .unwrap();
 
-    cache.store(next_height, zero_fee, next_coinbase.clone());
+    cache.store(next_height, next_subsidy, zero_fee, next_coinbase.clone());
     assert_eq!(
-        cache.get(next_height, zero_fee),
+        cache.get(next_height, next_subsidy, zero_fee),
         Some(next_coinbase),
         "new-height entry should be cached"
     );
     assert!(
-        cache.get(height, zero_fee).is_none(),
+        cache.get(height, subsidy, zero_fee).is_none(),
         "old-height entry should be evicted"
     );
 }
@@ -303,6 +447,7 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     use super::CoinbaseCache;
 
     let height = Height(2_000_000);
+    let subsidy = scheduled_block_subsidy(height, &Network::Mainnet).unwrap();
     let zero_fee = Amount::zero();
     let cache = CoinbaseCache::default();
 
@@ -318,22 +463,23 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     );
 
     let make_coinbase = |fee: Amount<zebra_chain::amount::NonNegative>| {
-        TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, fee).unwrap()
+        TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, subsidy, fee)
+            .unwrap()
     };
 
     // Store the zero-fee sizing coinbase first.
     let fake_coinbase = make_coinbase(zero_fee);
-    cache.store(height, zero_fee, fake_coinbase.clone());
+    cache.store(height, subsidy, zero_fee, fake_coinbase.clone());
 
     // Fill to capacity with distinct fee values (simulating mempool fee churn).
     for i in 1..=5u64 {
         let fee = Amount::try_from(i * 1_000).expect("valid amount");
-        cache.store(height, fee, make_coinbase(fee));
+        cache.store(height, subsidy, fee, make_coinbase(fee));
     }
 
     // The zero-fee entry must survive eviction at capacity.
     assert_eq!(
-        cache.get(height, zero_fee),
+        cache.get(height, subsidy, zero_fee),
         Some(fake_coinbase.clone()),
         "zero-fee sizing coinbase must survive fee churn at capacity"
     );
@@ -342,14 +488,14 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     let fee_1k: Amount<zebra_chain::amount::NonNegative> =
         Amount::try_from(1_000).expect("valid amount");
     let updated_coinbase = make_coinbase(fee_1k);
-    cache.store(height, fee_1k, updated_coinbase.clone());
+    cache.store(height, subsidy, fee_1k, updated_coinbase.clone());
     assert_eq!(
-        cache.get(height, fee_1k),
+        cache.get(height, subsidy, fee_1k),
         Some(updated_coinbase),
         "updating an existing key should replace in place"
     );
     assert_eq!(
-        cache.get(height, zero_fee),
+        cache.get(height, subsidy, zero_fee),
         Some(fake_coinbase),
         "zero-fee entry must still be present after in-place update"
     );
@@ -372,8 +518,14 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
         .expect("hard-coded Unified address is valid"),
     );
 
-    let template = TransactionTemplate::new_coinbase(&net, height, &miner_params, Amount::zero())
-        .expect("valid coinbase tx");
+    let template = TransactionTemplate::new_coinbase(
+        &net,
+        height,
+        &miner_params,
+        zebra_chain::parameters::subsidy::scheduled_block_subsidy(height, &net).unwrap(),
+        Amount::zero(),
+    )
+    .expect("valid coinbase tx");
     let coinbase: Transaction = template.data.as_ref().zcash_deserialize_into().unwrap();
 
     // The coinbase is a v6 transaction with Ironwood shielded data and no Orchard shielded data.

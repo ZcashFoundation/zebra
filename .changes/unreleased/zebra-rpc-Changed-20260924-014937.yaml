@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Block templates honor network-specific median-time rules and the local two-hour future limit, returning an error when no valid timestamp range exists. Cached templates are rejected after a backward clock change if any advertised timestamp is now too far in the future. ([#11514](https://github.com/ZcashFoundation/zebra/pull/11514))
+time: 2026-09-24T01:49:37.677342358+02:00

@@ -5,11 +5,11 @@ use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     ironwood, orchard,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy, Network, NetworkUpgrade},
     sapling,
     serialization::TrustedPreallocate,
     sprout,
@@ -257,8 +257,8 @@ impl Block {
     /// Returns the overall chain value pool change in this block---the negative sum of the
     /// transaction value balances in this block.
     ///
-    /// These are the changes in the transparent, Sprout, Sapling, Orchard, and
-    /// Deferred chain value pools, as a result of this block.
+    /// These are the changes in the transparent, Sprout, Sapling, Orchard, Ironwood and
+    /// Deferred chain value pools, and in the NSM reserve, as a result of this block.
     ///
     /// Positive values are added to the corresponding chain value pool and negative values are
     /// removed from the corresponding pool.
@@ -269,25 +269,115 @@ impl Block {
     /// including UTXOs created by earlier transactions in this block. It can also contain unrelated
     /// UTXOs, which are ignored.
     ///
+    /// `previous_value_pools` must be the exact parent's balances, because NSM reissuance and the
+    /// reserve seed depend on the parent's reserve.
+    ///
     /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.chain_value_pool_change_and_fees(
+            utxos,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+        .map(|(chain_value_pool_change, _transaction_fees)| chain_value_pool_change)
+    }
+
+    /// Returns the [`Self::chain_value_pool_change`] of this block, and its total transaction
+    /// fees.
+    ///
+    /// The fees are `None` before NU7, where they are not summed. From NU7, the contextual
+    /// subsidy checks use them, and summing them here avoids walking every input's UTXO again.
+    pub fn chain_value_pool_change_and_fees(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
+    {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
         // to propagate the first error instead.
-        let tx_pool_sum = self
-            .transactions
-            .iter()
-            .try_fold(ValueBalance::<NegativeAllowed>::zero(), |acc, tx| {
-                acc + tx.value_balance(utxos)?
-            })?;
+        //
+        // The transaction fees are accumulated in the same pass, because the NSM reserve
+        // contribution is calculated from them: `value_balance()` walks every input's UTXO, so a
+        // second pass would double the work on the state's block commit path.
+        //
+        // The fees are only accumulated once NU7 is active, so that this stays byte-for-byte the
+        // same calculation as before NU7 everywhere else. A transaction's fee is its remaining
+        // value, which is only guaranteed to be non-negative for semantically verified
+        // transactions, and this method is also called on blocks that have not been through the
+        // transaction verifier.
+        let needs_fees = self
+            .coinbase_height()
+            .is_some_and(|height| NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu7);
 
-        Ok(*tx_pool_sum
-            .neg()
-            .set_deferred_amount(deferred_pool_balance_change.value()))
+        let (tx_pool_sum, transaction_fees) = self.transactions.iter().try_fold(
+            (
+                ValueBalance::<NegativeAllowed>::zero(),
+                Amount::<NonNegative>::zero(),
+            ),
+            |(pool_sum, fees), tx| {
+                let value_balance = tx.value_balance(utxos)?;
+
+                // The coinbase transaction consumes the fees rather than paying them, so it is
+                // excluded from the total, exactly as in the block verifier's miner fee sum.
+                let fees = if needs_fees && !tx.is_coinbase() {
+                    let fee = value_balance
+                        .remaining_transaction_value()
+                        .map_err(ValueBalanceError::Total)?;
+
+                    (fees + fee).map_err(ValueBalanceError::Total)?
+                } else {
+                    fees
+                };
+
+                Ok::<_, ValueBalanceError>(((pool_sum + value_balance)?, fees))
+            },
+        )?;
+
+        let height = self.coinbase_height().ok_or(ValueBalanceError::Subsidy(
+            subsidy::SubsidyError::NoCoinbase,
+        ))?;
+        let previous_reserve = previous_value_pools.nsm_reserve_amount();
+        let additional = subsidy::nsm_subsidy(height, network, previous_reserve)
+            .map_err(ValueBalanceError::NsmReserve)?;
+        let contribution = subsidy::nsm_fee_contribution(height, network, transaction_fees)
+            .map_err(ValueBalanceError::NsmReserve)?;
+        let nsm_reserve_change = contribution
+            .checked_sub(additional)
+            .expect("the difference of two nonnegative amounts fits a signed amount");
+
+        let mut chain_value_pool_change = tx_pool_sum.neg();
+        chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
+        chain_value_pool_change.set_nsm_reserve_amount(nsm_reserve_change);
+
+        if NetworkUpgrade::Nu7
+            .activation_height(network)
+            .is_some_and(|activation| height + 1 == Some(activation))
+        {
+            let seeded = previous_value_pools
+                .add_chain_value_pool_change(chain_value_pool_change)?
+                .with_nsm_reserve_seed(height, network)?;
+            chain_value_pool_change.set_nsm_reserve_amount(
+                seeded
+                    .nsm_reserve_amount()
+                    .checked_sub(previous_reserve)
+                    .expect("the difference of two nonnegative amounts fits a signed amount"),
+            );
+        }
+
+        Ok((
+            chain_value_pool_change,
+            needs_fees.then_some(transaction_fees),
+        ))
     }
 
     /// Compute the root of the authorizing data Merkle tree,

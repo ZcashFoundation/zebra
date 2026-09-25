@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'ZIP 218 parameters for NU7: a 25-second target block spacing, a 102-block difficulty averaging window, a 5,040,000-block halving interval, and a block subsidy divided by a further factor of 3, so issuance per unit of wall clock time is unchanged. `NetworkUpgrade::averaging_window()` and `averaging_window_for_height()` replace the `POW_AVERAGING_WINDOW` constant for consensus checks.'
+time: 2026-09-21T13:00:00.000000000Z

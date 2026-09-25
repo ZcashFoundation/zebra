@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Regtest configurations preserve coincident upgrade activation heights when serialized and loaded again, rather than moving early upgrades to default heights.
+time: 2026-09-24T16:07:53.356728416+02:00

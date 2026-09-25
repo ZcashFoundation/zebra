@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Use the assigned NU7 consensus branch ID `0x77190AD9` for v5 and v6 transactions instead of placeholder branch IDs.
+time: 2026-09-23T14:46:06.556644489+02:00

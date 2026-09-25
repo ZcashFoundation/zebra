@@ -19,11 +19,11 @@ use tokio::{sync::watch, task::JoinHandle, time::sleep};
 use tower::ServiceExt;
 
 use zebra_chain::{
-    amount::{Amount, NegativeOrZero},
+    amount::{Amount, NegativeOrZero, NonNegative},
     block::{self, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy::scheduled_block_subsidy, Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     work::difficulty::ParameterDifficulty,
 };
@@ -134,8 +134,8 @@ impl TemplateCache {
         self.0.send_replace(Some(Arc::new(template)));
     }
 
-    /// Returns a template for `tip_hash`, unless Testnet's time-dependent difficulty may have
-    /// become easier since it was built.
+    /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
+    /// bound, unless Testnet's time-dependent difficulty may have become easier since it was built.
     pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
@@ -150,6 +150,12 @@ impl TemplateCache {
             return None;
         }
 
+        // Recheck the whole advertised range: the clock can move backwards between refreshes,
+        // and a failed refresh leaves the previous template cached.
+        if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
+            return None;
+        }
+
         // Only an abbreviated standard-difficulty Testnet time range can become unprofitable.
         // At the full 90-minute median-time cap, even a fresh build clamps to the same max_time.
         // Regtest deliberately uses historical chain time rather than the wall clock.
@@ -157,7 +163,7 @@ impl TemplateCache {
             && !network.is_regtest()
             && NetworkUpgrade::minimum_difficulty_spacing_for_height(
                 network,
-                Height(template.height.saturating_sub(1)),
+                Height(template.height),
             )
             .is_some()
             && template.bits != network.target_difficulty_limit().to_compact()
@@ -200,7 +206,11 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
 {
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
-    let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
+    let mut next_coinbase: Option<(
+        Height,
+        Amount<NonNegative>,
+        JoinHandle<TransactionTemplate<NegativeOrZero>>,
+    )> = None;
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
@@ -405,6 +415,7 @@ where
         let mempool_txs = select_mempool_transactions(
             &network,
             height,
+            chain_info.expected_block_subsidy,
             &miner_params,
             mempool_txs,
             mempool_tx_deps,
@@ -429,15 +440,28 @@ where
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
 /// already built or another coinbase is still being built.
 fn start_precomputing_coinbase(
-    next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
+    next_coinbase: &mut Option<(
+        Height,
+        Amount<NonNegative>,
+        JoinHandle<TransactionTemplate<NegativeOrZero>>,
+    )>,
     network: &Network,
     miner_params: &MinerParams,
     height: Height,
 ) {
+    // This parent does not exist yet, so its reserve (and therefore NSM reward) is unknown.
+    if network
+        .nsm_reissuance_height()
+        .is_some_and(|start| height >= start)
+    {
+        return;
+    }
+    let subsidy = scheduled_block_subsidy(height, network).expect("scheduled subsidy is valid");
     if next_coinbase
         .as_ref()
-        .is_some_and(|(precomputed_height, task)| {
-            *precomputed_height == height || !task.is_finished()
+        .is_some_and(|(precomputed_height, precomputed_subsidy, task)| {
+            (*precomputed_height == height && *precomputed_subsidy == subsidy)
+                || !task.is_finished()
         })
     {
         return;
@@ -447,9 +471,16 @@ fn start_precomputing_coinbase(
 
     *next_coinbase = Some((
         height,
+        subsidy,
         tokio::task::spawn_blocking(move || {
-            TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
-                .expect("valid coinbase tx")
+            TransactionTemplate::new_coinbase(
+                &network,
+                height,
+                &miner_params,
+                subsidy,
+                Amount::zero(),
+            )
+            .expect("valid coinbase tx")
         }),
     ));
 }
@@ -459,25 +490,29 @@ fn start_precomputing_coinbase(
 /// A coinbase built for another height has the wrong BIP-34 height and subsidy. Keep tracking it
 /// until it finishes, so a later precomputation cannot detach an unfinished proof.
 async fn store_precomputed_coinbase(
-    next_coinbase: &mut Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)>,
+    next_coinbase: &mut Option<(
+        Height,
+        Amount<NonNegative>,
+        JoinHandle<TransactionTemplate<NegativeOrZero>>,
+    )>,
     height: Height,
     coinbase_cache: &CoinbaseCache,
 ) {
     if next_coinbase
         .as_ref()
-        .is_none_or(|(precomputed_height, _)| *precomputed_height != height)
+        .is_none_or(|(precomputed_height, _, _)| *precomputed_height != height)
     {
         return;
     }
 
-    let (_, coinbase) = next_coinbase
+    let (_, subsidy, coinbase) = next_coinbase
         .take()
         .expect("the precomputed height was checked above");
 
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that
         // ZIP-317 transaction selection needs for its size and sigop limits.
-        Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), coinbase),
+        Ok(coinbase) => coinbase_cache.store(height, subsidy, Amount::zero(), coinbase),
         Err(error) => tracing::warn!(?error, "precomputed coinbase transaction task failed"),
     }
 }

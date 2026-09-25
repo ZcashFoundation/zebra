@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Converting an activation map into `parameters::testnet::ConfiguredActivationHeights` preserves implicit upgrades at shared heights, so configuration roundtrips do not replace them with earlier defaults.
+time: 2026-09-24T16:07:44.516479147+02:00

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'ZIP 218 widens the difficulty averaging window from 17 to 102 blocks at NU7, preserving integer rounding without overflowing on Testnet targets and retaining the proof-of-work limit through the initial window boundary. The adjustment span is height-dependent: `POW_ADJUSTMENT_BLOCK_SPAN` is replaced by `MAX_POW_ADJUSTMENT_BLOCK_SPAN` for buffers and `pow_adjustment_block_span()` for the applicable span.'
+time: 2026-09-21T13:00:02.000000000Z

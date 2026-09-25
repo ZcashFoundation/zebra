@@ -5,6 +5,7 @@ Custom Testnets in Zebra enable testing consensus rule changes on a public, conf
 Zebra's Testnet can be configured with custom:
 
 - Network upgrade activation heights,
+- NSM reissuance heights,
 - Network names,
 - Network magics,
 - Slow start intervals,
@@ -16,6 +17,17 @@ It's also possible to disable Proof-of-Work validation by setting `disable_pow` 
 Configuring any of those Testnet parameters except the network name with non-default values will result in an incompatible custom Testnet. Incompatible Testnets will fail to successfully complete peer handshakes with one another, or could provide one another with invalid blocks or invalid mempool transactions. Peer node connections that consistently provide invalid blocks or mempool transactions should be considered misbehaving peer connections and dropped.
 
 All of these parameters are optional, if they are all omitted or set to their default values, Zebra will run on the default public Testnet.
+
+To test NU7 reserve reissuance, set `network.testnet_parameters.nsm_reissuance_height`
+and configure a NU7 activation height. See the [Regtest example](regtest.md#testing-nu7-reissuance).
+Reissuance is disabled when the setting is omitted; public Mainnet and Testnet heights
+remain unset.
+
+To disable funding streams, set `network.testnet_parameters.funding_streams = []`
+and remove both legacy `pre_nu6_funding_streams` and `post_nu6_funding_streams`
+fields. Combining either legacy field with an empty list is a configuration error,
+on both Testnet and Regtest. Omitting the list retains the requested legacy payouts
+or, when no legacy fields are present, the network defaults.
 
 ## Usage
 
@@ -35,8 +47,7 @@ initial_testnet_peers = []
 
 [network.testnet_parameters]
 network_name = "ConfiguredTestnet_1"
-# The Testnet network magic is not reserved, but it's not recommended
-# for use with incompatible Testnet parameters like those in this config.
+# Custom consensus parameters require a network magic distinct from public Testnet.
 network_magic = [0, 1, 0, 255]
 slow_start_interval = 0
 target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
@@ -124,7 +135,7 @@ There are a few caveats:
 
 - Configured network upgrade activation heights must be above the genesis block height, which is reserved for Zebra's `Genesis` network upgrade, and must not be above Zebra's max block height of `2^31 - 1`[^fn2].
 - While it's possible to activate Canopy and later network upgrades after height 1, Zebra cannot currently produce pre-Canopy block templates, so the `getblocktemplate` RPC method and Zebra's internal miner which depends on the `getblocktemplate` method won't work until Canopy is activated. An alternative block source will be required to mine pre-Canopy blocks onto Zebra's chain.
-- While it's possible to use the default Testnet network magic with a configured Testnet, Zebra will panic when configured to use the default initial Testnet peers and Testnet parameters that are incompatible with the default public Testnet[^fn3].
+- Incompatible Testnets must configure a network magic distinct from public Testnet and use their own initial peers. Public Testnet magic is rejected even with an empty initial peer list, and the default public seeds are also rejected[^fn3].
 - If the genesis hash is configured, a genesis block will need to be copied into the custom Testnet state or submitted via the `submitblock` RPC method, Zebra cannot currently generate genesis blocks. See the `CreateGenesisBlock()` function in `zcashd/src/chainparams.cpp` for use cases that require a new genesis block.
 
 There are also a few other restrictions on these parameters:
@@ -135,6 +146,8 @@ There are also a few other restrictions on these parameters:
   - be shorter than the `MAX_NETWORK_NAME_LENGTH` of `30`.
 - The network magic must not be any of the reserved network magics: `[36, 233, 39, 100]` and `[170, 232, 63, 95]`, these are the `Mainnet` and `Regtest` network magics respectively.
 - The network upgrade activation heights must be in order, such that the activation height for every network upgrade is at or above the activation height of every preceding network upgrade.
+- The configured subsidy schedule must stay within the 21-million-ZEC cap through the maximum supported height. Early spacing upgrades during slow start can violate this bound; accelerated test networks can set `slow_start_interval = 0`.
+- Configured NSM reissuance requires a post-NU7 halving interval with a positive integer reissuance coefficient. Configured funding streams also require a nonzero address-change interval.
 
 ## Comparison To Mainnet and Default Public Testnet Consensus Rules
 
@@ -184,7 +197,7 @@ Aside from the network name, configuring any Testnet parameters in Zebra will re
 
 In the absence of a configurable Zcash DNS seeder, Zebra nodes on custom Testnets will need to know the exact hostname or IP address of other Zebra nodes on the same custom Testnet to make peer connections.
 
-Zebra nodes on custom Testnets will also reject peer connections with nodes that are using a different network magic or network protocol version, but may still make peer connections with other Zcash nodes which have incompatible network parameters. Zebra nodes should eventually drop those peer connections when it reaches its peerset connection limit and has more available peer candidates if they are consistently sending the node invalid blocks.
+Zebra nodes on custom Testnets reject peer connections using a different network magic or network protocol version. Nodes that reuse the same non-public magic can still have incompatible consensus parameters, so configure every peer in a custom network consistently.
 
 ##### Footnotes
 
@@ -192,6 +205,6 @@ Zebra nodes on custom Testnets will also reject peer connections with nodes that
 
 [^fn2]: Zebra's max on-disk serialized block height is currently `2^24 - 1`, the max block height of `2^31 - 1` can only be represented in-memory, so while an activation height of `2^31 - 1` is valid, Zebra's best chain would not currently be able to reach that activation height.
 
-[^fn3]: Configuring any of the Testnet parameters that are currently configurable except the network name will result in an incompatible custom Testnet, these are: the network magic, network upgrade activation heights, slow start interval, genesis hash, disabled Proof-of-Work and target difficulty limit.
+[^fn3]: Consensus-affecting parameters include network upgrade heights, subsidy and funding schedules, slow start, genesis, Proof-of-Work rules, and the temporary Orchard disabling height. Changing only the network name does not affect consensus compatibility.
 
 [^fn4]: Zebra won't make remote outbound peer connections on Regtest, but currently still listens for remote inbound peer connections, which will be rejected unless they use the Regtest network magic, and Zcash nodes using the Regtest network magic should not be making outbound peer connections. It may be updated to skip initialization of the peerset service altogether so that it won't listen for peer connections at all when support for isolated custom Testnets is added.

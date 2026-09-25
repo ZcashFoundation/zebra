@@ -105,6 +105,7 @@ fn check_parameters_impl() {
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             nu7: Some(expected_activation_height),
             ..Default::default()
@@ -303,9 +304,25 @@ fn check_network_name() {
     );
 }
 
+/// Duplicate activation heights must not hide an earlier out-of-order upgrade.
+#[test]
+fn activation_order_is_checked_before_coalescing_heights() {
+    let activation_heights = ConfiguredActivationHeights {
+        nu5: Some(10),
+        nu6: Some(9),
+        nu7: Some(10),
+        ..Default::default()
+    };
+    assert!(matches!(
+        testnet::Parameters::build().with_activation_heights(activation_heights),
+        Err(ParametersBuilderError::OutOfOrderUpgrades),
+    ));
+}
+
 #[test]
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             // Update this to be the latest network upgrade in Zebra, and update
             // the code below to expect the latest number of network upgrades.
@@ -613,7 +630,7 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
         return Amount::zero();
     };
 
-    let total_block_subsidy = block_subsidy(height, network).unwrap();
+    let total_block_subsidy = block_subsidy(height, network, Amount::zero()).unwrap();
     let &deferred_amount_per_block =
         funding_stream_values(nu6_activation_height, network, total_block_subsidy)
             .expect("we always expect a funding stream hashmap response even if empty")
@@ -768,4 +785,20 @@ fn temporary_orchard_disabling_soft_fork_heights() {
         None,
     );
     assert!(!disabled.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
+}
+
+#[test]
+fn public_testnet_peers_require_matching_orchard_disable_height() {
+    let builder = testnet::Parameters::build();
+    assert!(builder.is_compatible_with_default_parameters());
+    let public_height = Network::new_default_testnet()
+        .temporary_orchard_disabling_soft_fork_height()
+        .unwrap();
+    assert!(!builder
+        .clone()
+        .with_temporary_orchard_disabling_soft_fork_height(public_height.next().unwrap())
+        .is_compatible_with_default_parameters());
+    assert!(!builder
+        .disable_temporary_orchard_disabling_soft_fork()
+        .is_compatible_with_default_parameters());
 }

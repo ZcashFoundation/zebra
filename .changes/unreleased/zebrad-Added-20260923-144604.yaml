@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Custom Testnet and Regtest configurations can set `network.testnet_parameters.nsm_reissuance_height`. The NSM reserve starts with historical unissued supply and funds additional subsidy, with parent-specific accounting across reorgs and restarts. Templates and `getblocksubsidy` include reissuance; unknown future parents are rejected. Proposals check the current parent and required payouts before transaction verification, and invalid contextual payouts count toward peer misbehavior. Public activation and reissuance heights remain unset.'
+time: 2026-09-23T14:46:04.344494175+02:00

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Configured networks calculate first-halving heights with the slow-start shift applied once, including halvings before Blossom.
+time: 2026-09-24T01:49:22.903970519+02:00

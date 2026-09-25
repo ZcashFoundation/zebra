@@ -114,6 +114,7 @@ async fn test_z_get_treestate() {
     const SAPLING_ACTIVATION_HEIGHT: u32 = 2;
 
     let custom_testnet = Parameters::build()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             sapling: Some(SAPLING_ACTIVATION_HEIGHT),
             // We need to set the NU5 activation height higher than the height of the last block for
@@ -921,6 +922,8 @@ fn snapshot_rpc_getnetworkinfo(
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_peer_info", get_peer_info, {
+            // Peer versions vary; handshake tests cover protocol compatibility.
+            "[].version" => "[version]",
             "[].lastrecv" => dynamic_redaction(|value, _path| {
                 assert!(value.as_u64().unwrap() > 0, "lastrecv should be non-zero");
                 "[lastrecv]"
@@ -1053,7 +1056,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_connected(
         SocketAddr::new(
@@ -1187,6 +1190,12 @@ pub async fn test_mining_rpcs<State, ReadState>(
                 .await
                 .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                     expected_difficulty: fake_difficulty,
+                    expected_block_subsidy:
+                        zebra_chain::parameters::subsidy::scheduled_block_subsidy(
+                            fake_tip_height.next().unwrap(),
+                            network,
+                        )
+                        .unwrap(),
                     tip_height: fake_tip_height,
                     tip_hash: fake_tip_hash,
                     cur_time: fake_cur_time,

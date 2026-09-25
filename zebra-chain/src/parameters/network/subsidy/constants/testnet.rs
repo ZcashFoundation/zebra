@@ -11,12 +11,6 @@ use crate::parameters::{
     },
 };
 
-/// The first halving height in the testnet is at block height `1_116_000`
-/// as specified in [protocol specification §7.10.1][7.10.1]
-///
-/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub(crate) const FIRST_HALVING: Height = Height(1_116_000);
-
 /// The start height of post-NU6 funding streams on Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 pub(crate) const POST_NU6_FUNDING_STREAM_START_HEIGHT: u32 = 2_976_000;
 

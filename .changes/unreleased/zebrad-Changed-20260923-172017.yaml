@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblocktemplate` advertises only time mutation. Its required coinbase depends on the selected transactions and parent; miners must request a new template instead of changing those independently. ([#11496](https://github.com/ZcashFoundation/zebra/pull/11496))'
+time: 2026-09-23T17:20:17.112573354+02:00

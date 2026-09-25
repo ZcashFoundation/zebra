@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: 'NU7 adds an NSM reserve seeded at activation minus one from historical unissued supply, accruing 60% of block fees and reissuing from a configured height; it is excluded from Issued Supply. `subsidy::block_subsidy` requires the parent reserve and returns total subsidy; `Block::chain_value_pool_change` requires parent value pools. Adds `subsidy::{nsm_fee_contribution, miner_fees, nsm_subsidy, scheduled_block_subsidy, cumulative_scheduled_issuance, funding_stream_address, miner_fees_are_valid, subsidy_is_valid}`, `ValueBalance::with_nsm_reserve_seed`, `RegtestParameters::nsm_reissuance_height`, `Parameters::nsm_reissuance_height`, and `ParametersBuilder::with_nsm_reissuance_height`. Use `scheduled_block_subsidy` for scheduled issuance alone; exhaustive matches must handle `SubsidyError::Other` and `ValueBalanceError::Subsidy`.'
+time: 2026-09-23T14:45:58.813078036+02:00
