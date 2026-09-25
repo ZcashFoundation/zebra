@@ -18,14 +18,13 @@ use zebrad::config::ZebradConfig;
 use crate::common::{
     check::{EphemeralCheck, EphemeralConfig},
     config::{
-        config_file_full_path, configs_dir, default_test_config, os_assigned_rpc_port_config,
-        persistent_test_config, read_listen_addr_from_logs, testdir,
+        config_file_full_path, configs_dir, default_test_config, persistent_test_config,
+        random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
     },
     launch::{ZebradTestDirExt, EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY},
     sync::TINY_CHECKPOINT_TIMEOUT,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 
 #[test]
 fn ephemeral_existing_directory() -> Result<()> {
@@ -726,47 +725,89 @@ fn non_blocking_logger() -> Result<()> {
     use futures::FutureExt;
     use std::{sync::mpsc, time::Duration};
 
+    /// How long to wait for zebrad to start listening on its RPC port.
+    const RPC_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
+
+    /// How long to wait between attempts to reach the RPC server while it is starting up.
+    const RPC_SERVER_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+    /// How long to wait for a single RPC response.
+    ///
+    /// Shorter than the 90 second task timeout below, so a logger that blocks zebrad is reported
+    /// as an unanswered RPC request, rather than as a hung test task.
+    const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
     let rt = tokio::runtime::Runtime::new().unwrap();
     let (done_tx, done_rx) = mpsc::channel();
 
     let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
-        let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
-        config.tracing.filter = Some("trace".to_string());
-        config.tracing.buffer_limit = 100;
+        let result: Result<()> = async {
+            // This test configures zebrad to drop log lines, so it can't learn an OS-assigned port
+            // by reading the logs: the line reporting that port is dropped like any other line.
+            // [Note on port conflict](#Note on port conflict)
+            let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+            config.tracing.filter = Some("trace".to_string());
+            config.tracing.buffer_limit = 100;
 
-        let dir = testdir()?.with_config(&mut config)?;
-        let mut child = dir
-            .spawn_child(args!["start"])?
-            .with_timeout(TINY_CHECKPOINT_TIMEOUT);
+            let rpc_address = config
+                .rpc
+                .listen_addr
+                .expect("config was just created with a known RPC port");
 
-        // Wait until port is open.
-        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+            let dir = testdir()?.with_config(&mut config)?;
+            let mut child = dir
+                .spawn_child(args!["start"])?
+                .with_timeout(TINY_CHECKPOINT_TIMEOUT);
 
-        // Create an http client
-        let client = RpcRequestClient::new(rpc_address);
+            // Create an http client
+            let client = RpcRequestClient::new_with_timeout(rpc_address, RPC_REQUEST_TIMEOUT);
 
-        // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
-        // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
-        for _ in 0..500 {
-            let res = client.call("getinfo", "[]".to_string()).await?;
+            // Wait until the RPC port is open, without reading the logs.
+            let deadline = Instant::now() + RPC_SERVER_STARTUP_TIMEOUT;
+            while client.call("getinfo", "[]".to_string()).await.is_err() {
+                if !child.is_running() {
+                    return Err(eyre!("zebrad exited before opening its RPC port"));
+                }
 
-            // Test that zebrad rpc endpoint is still responding to requests
-            assert!(res.status().is_success());
+                if Instant::now() >= deadline {
+                    return Err(eyre!(
+                        "timed out after {RPC_SERVER_STARTUP_TIMEOUT:?} waiting for zebrad to open \
+                         its RPC port at {rpc_address}. \
+                         Possible port conflict. Are there other zebrad tests running?"
+                    ));
+                }
+
+                tokio::time::sleep(RPC_SERVER_RETRY_INTERVAL).await;
+            }
+
+            // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
+            // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
+            for _ in 0..500 {
+                let res = client.call("getinfo", "[]".to_string()).await?;
+
+                // Test that zebrad rpc endpoint is still responding to requests
+                assert!(res.status().is_success());
+            }
+
+            child.kill(false)?;
+
+            let output = child.wait_with_output()?;
+            let output = output.assert_failure()?;
+
+            // [Note on port conflict](#Note on port conflict)
+            output
+                .assert_was_killed()
+                .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
+
+            Ok(())
         }
+        .await;
 
-        child.kill(false)?;
+        // Report that the task has finished whether it passed or failed, so a failure is returned
+        // below instead of waiting out the timeout.
+        let _ = done_tx.send(());
 
-        let output = child.wait_with_output()?;
-        let output = output.assert_failure()?;
-
-        // [Note on port conflict](#Note on port conflict)
-        output
-            .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
-
-        done_tx.send(())?;
-
-        Ok(())
+        result
     });
 
     // Wait until the spawned task finishes up to 90 seconds before shutting down tokio runtime.
