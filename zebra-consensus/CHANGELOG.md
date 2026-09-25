@@ -5,12 +5,6 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [16.0.1] - 2026-09-25
-
-### Changed
-
-- Updated the following local packages: zebra-script, zebra-state, zebra-node-services, zebra-chain
-
 ## [16.0.0] - 2026-09-23
 
 ### Breaking Changes
@@ -35,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Security
 
 - `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity violations. The score reported by `router::RouterError`, `VerifyBlockError`, and `VerifyCheckpointError` for this error changes from 0 to 100 ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
-- `VerifyCheckpointError::misbehavior_score()` now unwraps the boxed `CommitCheckpointVerifiedError`, mirroring `is_duplicate_request()`, so misbehaviour scores from contextual validation reach the syncer during checkpoint sync. Checkpoint verification only checks the block hash, so a block body forged to keep that hash reaches contextual validation on the checkpoint path too, and its score was previously lost.
+- `VerifyCheckpointError::misbehavior_score()` now unwraps the boxed `CommitCheckpointVerifiedError`, mirroring `is_duplicate_request()`, so misbehaviour scores from contextual validation reach the syncer during checkpoint sync. Checkpoint verification only checks the block hash, so a block body forged to keep that hash reaches contextual validation on the checkpoint path too, and its score was previously lost ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
 
 ## [15.0.0] - 2026-08-10
 
