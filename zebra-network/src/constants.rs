@@ -166,7 +166,7 @@ pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(150
 ///
 /// This wait starts when the request enters the peer set and counts towards the syncer's
 /// six-second request timeout, leaving time for the fallback peer to respond.
-pub(crate) const FIND_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
+pub const FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// The default peer address crawler interval.
 ///

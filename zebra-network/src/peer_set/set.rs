@@ -133,7 +133,8 @@ use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
     constants::{
-        FIND_BUSY_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT, MIN_PEER_SET_LOG_INTERVAL,
+        FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
+        MIN_PEER_SET_LOG_INTERVAL,
     },
     peer::{ConnectionInfo, LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
@@ -188,6 +189,9 @@ struct QueuedInvRequest {
     /// Dropping the sender refuses the request.
     response_sender: oneshot::Sender<ResponseFuture>,
 }
+
+/// Bounds queued discovery requests; overflow falls back to any ready peer.
+const MAX_QUEUED_FIND_REQUESTS: usize = 16;
 
 /// A find request waiting for a serving peer, with a bounded serving-only preference.
 struct QueuedFindRequest {
@@ -1342,7 +1346,14 @@ where
         }
 
         if is_find_request {
-            return self.queue_find_request(req);
+            self.queued_find_requests
+                .retain(|queued| !queued.response_sender.is_canceled());
+            if self.queued_find_requests.len() < MAX_QUEUED_FIND_REQUESTS {
+                return self.queue_find_request(req);
+            }
+            if let Some(peer_key) = self.select_ready_find_peer(true) {
+                return self.call_ready_peer(peer_key, req);
+            }
         }
 
         async move {
@@ -1625,10 +1636,11 @@ where
 
     /// Waits for a serving peer, falling back to any ready peer once the bounded wait expires.
     fn queue_find_request(&mut self, request: Request) -> ResponseFuture {
+        metrics::counter!("zcash.net.peer_set.find_queued").increment(1);
         let (response_sender, response_receiver) = oneshot::channel();
         self.queued_find_requests.push_back(QueuedFindRequest {
             request,
-            deadline: tokio::time::Instant::now() + FIND_BUSY_PEER_WAIT_TIMEOUT,
+            deadline: tokio::time::Instant::now() + FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT,
             response_sender,
         });
 
@@ -1666,6 +1678,15 @@ where
 
             let expired = queued.deadline <= now;
             if let Some(peer) = self.select_ready_find_peer(expired) {
+                if !self.serving_peer_keys.contains(&peer) {
+                    let reason = if self.serving_peer_keys.is_empty() {
+                        "no_serving_peer"
+                    } else {
+                        "expired"
+                    };
+                    metrics::counter!("zcash.net.peer_set.find_fallback", "reason" => reason)
+                        .increment(1);
+                }
                 let response_fut = self.call_ready_peer(peer, queued.request);
                 // A concurrent cancellation drops the response future, cancelling peer work.
                 let _ = queued.response_sender.send(response_fut);
