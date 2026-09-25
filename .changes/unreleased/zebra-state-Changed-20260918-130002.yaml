@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: "With `--cfg zcash_unstable=\"zip235\"`, each block from NU7 activation credits the NSM value balance with the transaction fees ZIP 235 removes from circulation, and from the ZIP 234 deployment height contextual validation rejects a coinbase transaction that claims them ([zips#1363](https://github.com/zcash/zips/pull/1363))."
+time: 2026-09-18T13:00:02.000000000-06:00

@@ -70,6 +70,7 @@ incrementalmerkletree.workspace = true
 jubjub = { workspace = true }
 dirs = { workspace = true }
 num-integer = { workspace = true }
+mset = { workspace = true }
 primitive-types = { workspace = true }
 rand_core = { workspace = true }
 ripemd = { workspace = true }

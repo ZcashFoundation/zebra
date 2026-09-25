@@ -37,8 +37,8 @@ use crate::{
 
 use super::{
     check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, zip317::select_mempool_transactions, BlockTemplateResponse,
-    CoinbaseCache, MinerParams,
+    fetch_mempool_transactions, nsm_value_balance_for_next_block,
+    zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
@@ -398,6 +398,7 @@ where
     let network = network.clone();
     let miner_params = miner_params.clone();
     let coinbase_cache = coinbase_cache.clone();
+    let parent_nsm_value_balance = nsm_value_balance_for_next_block(&network, &chain_info);
 
     // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
     // a shielded coinbase takes seconds to prove, so keep them off the async executor.
@@ -409,6 +410,7 @@ where
             mempool_txs,
             mempool_tx_deps,
             Some(&coinbase_cache),
+            parent_nsm_value_balance,
         );
 
         // `submit_old` depends on the long poll ID the client sent, so the RPC sets it.
@@ -440,6 +442,13 @@ fn start_precomputing_coinbase(
             *precomputed_height == height || !task.is_finished()
         })
     {
+        return;
+    }
+
+    // From the ZIP 234 deployment height, the coinbase depends on the NSM value balance after the
+    // next block, which isn't known until that block arrives.
+    #[cfg(zcash_unstable = "zip234")]
+    if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network) {
         return;
     }
 
@@ -477,7 +486,7 @@ async fn store_precomputed_coinbase(
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that
         // ZIP-317 transaction selection needs for its size and sigop limits.
-        Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), coinbase),
+        Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), None, coinbase),
         Err(error) => tracing::warn!(?error, "precomputed coinbase transaction task failed"),
     }
 }

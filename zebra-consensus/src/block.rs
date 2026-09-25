@@ -298,12 +298,29 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
+            // From the ZIP 234 deployment height, the block subsidy depends on the
+            // NSM value balance after the parent block, which is not committed yet while
+            // blocks are verified concurrently. The state checks the subsidy, funding streams,
+            // and miner fees during contextual validation instead, where the parent's chain value
+            // pools are known.
+            #[cfg(zcash_unstable = "zip234")]
+            let zip234_reissuance_is_active =
+                zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &network);
+            #[cfg(not(zcash_unstable = "zip234"))]
+            let zip234_reissuance_is_active = false;
 
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let deferred_pool_balance_change =
-                check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+            let expected_subsidy_and_deferred_pool_balance_change = if zip234_reissuance_is_active {
+                None
+            } else {
+                let expected_block_subsidy =
+                    zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
+
+                // See [ZIP-1015](https://zips.z.cash/zip-1015).
+                let deferred_pool_balance_change =
+                    check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+
+                Some((expected_block_subsidy, deferred_pool_balance_change))
+            };
 
             // Now do the slower checks
 
@@ -375,14 +392,18 @@ where
                     source: amount_error,
                 })?;
 
-            check::miner_fees_are_valid(
-                &coinbase_tx,
-                height,
-                block_miner_fees,
-                expected_block_subsidy,
-                deferred_pool_balance_change,
-                &network,
-            )?;
+            if let Some((expected_block_subsidy, deferred_pool_balance_change)) =
+                expected_subsidy_and_deferred_pool_balance_change
+            {
+                check::miner_fees_are_valid(
+                    &coinbase_tx,
+                    height,
+                    block_miner_fees,
+                    expected_block_subsidy,
+                    deferred_pool_balance_change,
+                    &network,
+                )?;
+            }
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)

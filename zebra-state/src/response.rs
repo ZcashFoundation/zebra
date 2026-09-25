@@ -575,6 +575,15 @@ pub struct GetBlockTemplateChainInfo {
     /// The maximum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
     pub max_time: DateTime32,
+
+    /// The chain value pools after the tip block, which determine the candidate block's subsidy
+    /// once the [halving-preserving issuance ZIP][zip] is active.
+    /// Depends on the `tip_hash`.
+    ///
+    /// [zip]: https://github.com/zcash/zips/pull/1354
+    #[cfg(zcash_unstable = "zip234")]
+    pub chain_value_pools:
+        zebra_chain::value_balance::ValueBalance<zebra_chain::amount::NonNegative>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

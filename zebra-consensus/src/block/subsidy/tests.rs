@@ -6,10 +6,9 @@ use std::collections::HashMap;
 
 use color_eyre::Report;
 use zebra_chain::amount::Amount;
+use zebra_chain::block::Height;
 use zebra_chain::parameters::NetworkUpgrade::*;
-use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
-
-use super::*;
+use zebra_chain::parameters::{subsidy::*, Network, NetworkKind};
 
 /// Checks that the Mainnet funding stream values are correct.
 #[test]

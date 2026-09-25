@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: "`Block::transaction_fees`, `parameters::subsidy::nsm_value_balance_is_tracked` without the `zip234` cfg, and behind `--cfg zcash_unstable=\"zip235\"` the NU7 form of ZIP 235 from [zips#1363](https://github.com/zcash/zips/pull/1363): `parameters::subsidy::nsm_fee_contribution`, the 60% of a block's transaction fees that its coinbase transaction can't claim from NU7 activation, which `miner_fees_are_valid` enforces and the `zip234` NSM value balance is credited with."
+time: 2026-09-18T13:00:00.000000000-06:00

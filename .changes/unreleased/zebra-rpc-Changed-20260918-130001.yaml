@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: "With `--cfg zcash_unstable=\"zip235\"`, `getblocktemplate` coinbase transactions claim only the transaction fees ZIP 235 leaves to the miner from NU7 activation, and the coinbase `fee` field reports that amount."
+time: 2026-09-18T13:00:01.000000000-06:00

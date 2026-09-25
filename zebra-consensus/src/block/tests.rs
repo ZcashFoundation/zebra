@@ -574,6 +574,86 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     Ok(())
 }
 
+/// From NU7 activation, the coinbase transaction must claim exactly the fees ZIP 235 leaves in
+/// circulation, which are 40% of the block's fees, rounded up. Before it, it must claim them all.
+#[cfg(zcash_unstable = "zip235")]
+#[test]
+fn zip235_coinbase_cant_claim_the_nsm_fee_contribution() -> Result<(), Report> {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        parameters::testnet::{self, ConfiguredActivationHeights},
+        transparent,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    const NU7_HEIGHT: u32 = 10;
+
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(NU7_HEIGHT),
+            ..Default::default()
+        })?
+        .clear_funding_streams()
+        .to_network()?;
+
+    let fees = Amount::<NonNegative>::try_from(1_001)?;
+
+    let miner_fees_are_valid = |height: Height, claimed_fees: i64| {
+        // The rule doesn't depend on the block subsidy.
+        let block_subsidy = Amount::<NonNegative>::try_from(625_000_000).expect("valid amount");
+        let claimed_fees = Amount::<NonNegative>::try_from(claimed_fees).expect("valid amount");
+
+        let coinbase = Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: (block_subsidy + claimed_fees).expect("valid amount"),
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        );
+
+        check::miner_fees_are_valid(
+            &coinbase,
+            height,
+            fees,
+            block_subsidy,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+        )
+    };
+
+    let invalid_miner_fees = Err(BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::InvalidMinerFees,
+    )));
+
+    let before_nu7 = Height(NU7_HEIGHT - 1);
+    assert_eq!(miner_fees_are_valid(before_nu7, 1_001), Ok(()));
+    assert_eq!(miner_fees_are_valid(before_nu7, 401), invalid_miner_fees);
+
+    for height in [Height(NU7_HEIGHT), Height(NU7_HEIGHT + 1)] {
+        assert_eq!(miner_fees_are_valid(height, 401), Ok(()));
+
+        for claimed_fees in [400, 402, 1_001] {
+            assert_eq!(
+                miner_fees_are_valid(height, claimed_fees),
+                invalid_miner_fees
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[test]
 fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
@@ -917,6 +997,144 @@ fn state_commit_duplicate_errors_are_duplicate_requests() {
     );
     assert!(err.is_duplicate_request());
     assert_eq!(err.misbehavior_score(), 0);
+}
+
+/// From the ZIP 234 deployment height, the block verifier leaves the block subsidy,
+/// funding stream, and miner fee checks to contextual validation in the state, so it sends a block
+/// whose coinbase pays the wrong subsidy to the state to be committed. Before activation it rejects
+/// the same block.
+#[cfg(zcash_unstable = "zip234")]
+#[tokio::test(flavor = "multi_thread")]
+async fn zip234_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), Report> {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        parameters::testnet::{self, ConfiguredActivationHeights},
+        transaction::UnminedTxId,
+        transparent,
+    };
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+
+    const NU7_HEIGHT: u32 = 10;
+
+    // A network reissuing from `deployment_height`, which defaults to NU7 activation.
+    let network = |deployment_height: Option<Height>| -> Result<Network, Report> {
+        let mut params = testnet::Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(1),
+                nu6: Some(1),
+                nu6_3: Some(1),
+                nu7: Some(NU7_HEIGHT),
+                ..Default::default()
+            })?
+            .with_slow_start_interval(Height::MIN)
+            .with_disable_pow(true)
+            .clear_funding_streams()
+            .with_lockbox_disbursements(Vec::new());
+        if let Some(deployment_height) = deployment_height {
+            params = params.with_zip234_deployment_height(deployment_height);
+        }
+        Ok(params.to_network()?)
+    };
+
+    // A block at `height` whose coinbase pays 1 zatoshi, which is less than the block subsidy.
+    let block_at = |height: Height| -> Arc<Block> {
+        let mut block =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..]).unwrap();
+
+        let coinbase = Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: Amount::<NonNegative>::try_from(1).unwrap(),
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        );
+        block.transactions = vec![Arc::new(coinbase)];
+
+        let merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut block.header).merkle_root = merkle_root;
+
+        Arc::new(block)
+    };
+
+    let deployed_at_nu7 = network(None)?;
+    let deployed_later = network(Some(Height(NU7_HEIGHT + 2)))?;
+
+    for (network, height, is_active) in [
+        (&deployed_at_nu7, Height(NU7_HEIGHT - 1), false),
+        (&deployed_at_nu7, Height(NU7_HEIGHT), true),
+        // Between NU7 activation and the deployment height the verifier still checks the subsidy.
+        (&deployed_later, Height(NU7_HEIGHT), false),
+        (&deployed_later, Height(NU7_HEIGHT + 1), false),
+        (&deployed_later, Height(NU7_HEIGHT + 2), true),
+    ] {
+        let block = block_at(height);
+        let hash = block.hash();
+
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut transaction_verifier: MockService<_, _, _, BoxError> =
+            MockService::build().for_unit_tests();
+
+        let verifier =
+            SemanticBlockVerifier::new(network, state.clone(), transaction_verifier.clone());
+        let verify = tokio::spawn(verifier.oneshot(Request::Commit(block.clone())));
+
+        state
+            .expect_request(zs::Request::KnownBlock(hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+
+        transaction_verifier
+            .expect_request_that(|_| true)
+            .await
+            .respond(transaction::BlockResponse {
+                tx_id: UnminedTxId::from(block.transactions[0].as_ref()),
+                miner_fee: None,
+                sigops: 0,
+            });
+
+        if is_active {
+            state
+                .expect_request_that(|request| {
+                    matches!(request, zs::Request::CommitSemanticallyVerifiedBlock(_))
+                })
+                .await
+                .respond(zs::Response::Committed(hash));
+
+            assert_eq!(
+                verify
+                    .await?
+                    .expect("the block verifier leaves the subsidy checks to the state"),
+                hash
+            );
+        } else {
+            let err = verify
+                .await?
+                .expect_err("the coinbase pays the wrong subsidy");
+            assert!(
+                matches!(
+                    err,
+                    VerifyBlockError::Block {
+                        source: BlockError::Transaction(TransactionError::Subsidy(
+                            SubsidyError::InvalidMinerFees
+                        ))
+                    }
+                ),
+                "unexpected error: {err:?}"
+            );
+            state.expect_no_requests().await;
+        }
+    }
+
+    Ok(())
 }
 
 /// A same-hash forged block body is only rejected by the state's contextual

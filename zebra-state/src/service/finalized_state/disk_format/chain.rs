@@ -23,7 +23,7 @@ use zebra_chain::{
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 48];
+    type Bytes = [u8; zebra_chain::value_balance::SERIALIZED_SIZE];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.to_bytes()
@@ -182,6 +182,17 @@ impl FromDisk for BlockInfo {
         // length, and stay forward-compatible by reading the known prefix
         // and ignoring any unexpected trailing bytes.
         match bytes.as_ref().len() {
+            // With `zcash_unstable = "zip234"`, records are 60 bytes: a 56-byte value pool
+            // including the NSM value balance, plus the 4-byte block size. Records written without the
+            // NSM value balance are read by the arms below, which leave it zero.
+            #[cfg(zcash_unstable = "zip234")]
+            60.. => {
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..56])
+                    .expect("must work for 56 bytes");
+                let size =
+                    u32::from_le_bytes(bytes.as_ref()[56..60].try_into().expect("must be 4 bytes"));
+                BlockInfo::new(value_pools, size)
+            }
             // NU6.3 onward (and any forward-compatible larger record): 48-byte pool + 4-byte size.
             52.. => {
                 let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..48])

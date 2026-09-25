@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: "Experimental halving-preserving NU7 issuance ([zips#1354](https://github.com/zcash/zips/pull/1354)) behind `--cfg zcash_unstable=\"zip234\"`: from the ZIP 234 deployment height each block reissues `ceiling(BLOCK_SUBSIDY_FRACTION * NSMValueBalance)` on top of the unchanged halving schedule. It has no effect on Mainnet or the default Testnet, which have no deployment height ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
+time: 2026-09-15T15:00:03.000000000-06:00

@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     ironwood, orchard,
@@ -288,6 +288,62 @@ impl Block {
         Ok(*tx_pool_sum
             .neg()
             .set_deferred_amount(deferred_pool_balance_change.value()))
+    }
+
+    /// Returns the total transaction fees paid by the non-coinbase transactions in this block,
+    /// `TransactionFees(height)` in the [NU7 deployment ZIP][nu7].
+    ///
+    /// From NU7 activation the miner only receives part of them, see
+    /// [`nsm_fee_contribution`](crate::parameters::subsidy::nsm_fee_contribution).
+    ///
+    /// [nu7]: https://github.com/zcash/zips/pull/1363
+    ///
+    /// `utxos` has the same requirements as in [`Block::chain_value_pool_change`].
+    pub fn transaction_fees(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        self.transactions
+            .iter()
+            .filter(|tx| !tx.is_coinbase())
+            .try_fold(Amount::zero(), |fees, tx| {
+                let fee = tx
+                    .value_balance(utxos)?
+                    .remaining_transaction_value()
+                    .map_err(ValueBalanceError::Total)?;
+
+                (fees + fee).map_err(ValueBalanceError::Total)
+            })
+    }
+
+    /// Returns the change this block makes to the NSM value balance, where
+    /// `parent_chain_value_pools` are the chain value pools after its parent block.
+    ///
+    /// See [`subsidy::nsm_value_balance_change`]. `utxos` has the same requirements as in
+    /// [`Block::chain_value_pool_change`], and is only used from NU7 activation.
+    #[cfg(zcash_unstable = "zip234")]
+    pub fn nsm_value_balance_change(
+        &self,
+        height: Height,
+        network: &Network,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        parent_chain_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<Amount<NegativeAllowed>, ValueBalanceError> {
+        use crate::parameters::subsidy;
+
+        let block_miner_fees = if subsidy::nsm_value_balance_is_tracked(height, network) {
+            self.transaction_fees(utxos)?
+        } else {
+            Amount::zero()
+        };
+
+        subsidy::nsm_value_balance_change(
+            height,
+            network,
+            parent_chain_value_pools,
+            block_miner_fees,
+        )
+        .map_err(ValueBalanceError::Nsm)
     }
 
     /// Compute the root of the authorizing data Merkle tree,
