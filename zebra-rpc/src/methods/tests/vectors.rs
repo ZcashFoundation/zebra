@@ -50,6 +50,7 @@ use crate::methods::{
         constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
         CoinbaseCache, GetBlockTemplateRequestMode,
     },
+    types::transaction::Input,
 };
 
 use super::super::*;
@@ -789,6 +790,35 @@ async fn rpc_getblock() {
             }
         } else {
             panic!("Expected GetBlock::Object");
+        }
+    }
+
+    // Make height calls with verbosity=3 and check response. These early blocks only contain
+    // coinbase transactions, so every transaction must have no fee and its coinbase input must
+    // have no prevout.
+    for i in 0..blocks.len() {
+        let get_block = rpc
+            .get_block(i.to_string(), Some(3u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        let GetBlockResponse::Object(obj) = &get_block else {
+            panic!("Expected GetBlock::Object");
+        };
+
+        for actual_tx in obj.tx.iter() {
+            let GetBlockTransaction::Object(tx_object) = actual_tx else {
+                panic!("verbosity 3 must return transaction objects");
+            };
+
+            // Every transaction in these blocks is a coinbase, so there is no fee and no prevout.
+            assert_eq!(tx_object.fee(), None);
+            for input in &tx_object.inputs {
+                assert!(
+                    matches!(input, Input::Coinbase { .. }),
+                    "these blocks only contain coinbase inputs",
+                );
+            }
         }
     }
 
