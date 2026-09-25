@@ -2,7 +2,7 @@ name: Trigger Integration Tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "release/**"]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
