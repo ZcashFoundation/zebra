@@ -59,6 +59,15 @@ use Network::*;
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 
+/// The maximum amount of time to wait for the crawler to dial more peers than its outbound
+/// connection limit, when every connection closes as soon as it opens.
+///
+/// The test waits for each connection to close before it asks for another peer, so it doesn't
+/// depend on task scheduling. This timeout only fails the test if the crawler never reuses the
+/// freed slots. Outbound handshakes are paced at [`constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`],
+/// so going over a limit of 45 peers takes about 5 seconds.
+const CRAWLER_DIAL_PAST_LIMIT_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// The amount of time to run the peer cache updater task, before testing what it has done.
 ///
 /// Using a very short time can make the peer cache updater not run at all.
@@ -509,44 +518,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
 
-    let success_disconnect_outbound_connector =
-        service_fn(|req: OutboundConnectorRequest| async move {
-            let OutboundConnectorRequest {
-                addr,
-                connection_tracker,
-            } = req;
-
-            let (fake_client, _harness) = ClientTestHarness::build().finish();
-
-            // Fake the connection closing.
-            std::mem::drop(connection_tracker);
-
-            // Give the crawler time to get the message.
-            tokio::task::yield_now().await;
-
-            Ok((addr, fake_client))
-        });
-
-    let (config, mut peerset_rx) =
-        spawn_crawler_with_peer_limit(1, success_disconnect_outbound_connector).await;
-
-    let mut peer_count: usize = 0;
-    loop {
-        let peer_result = peerset_rx.try_recv();
-        match peer_result {
-            // A peer handshake succeeded.
-            Ok(_peer_change) => peer_count += 1,
-            // The channel is closed or there are no messages left in the channel.
-            Err(_) => break,
-        }
-    }
-
-    assert!(
-        peer_count > config.peerset_outbound_connection_limit(),
-        "unexpected number of peer connections {}, should be at least the limit of {}",
-        peer_count,
-        config.peerset_outbound_connection_limit(),
-    );
+    crawler_dials_past_limit_when_connections_drop(1).await;
 }
 
 /// Test the crawler with an outbound peer limit of one peer,
@@ -657,46 +629,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
 
-    let success_disconnect_outbound_connector =
-        service_fn(|req: OutboundConnectorRequest| async move {
-            let OutboundConnectorRequest {
-                addr,
-                connection_tracker,
-            } = req;
-
-            let (fake_client, _harness) = ClientTestHarness::build().finish();
-
-            // Fake the connection closing.
-            std::mem::drop(connection_tracker);
-
-            // Give the crawler time to get the message.
-            tokio::task::yield_now().await;
-
-            Ok((addr, fake_client))
-        });
-
-    // TODO: tweak the crawler timeouts and rate-limits so we get over the actual limit
-    //       (currently, getting over the limit can take 30 seconds or more)
-    let (config, mut peerset_rx) =
-        spawn_crawler_with_peer_limit(15, success_disconnect_outbound_connector).await;
-
-    let mut peer_count: usize = 0;
-    loop {
-        let peer_result = peerset_rx.try_recv();
-        match peer_result {
-            // A peer handshake succeeded.
-            Ok(_peer_change) => peer_count += 1,
-            // The channel is closed or there are no messages left in the channel.
-            Err(_) => break,
-        }
-    }
-
-    assert!(
-        peer_count > config.peerset_outbound_connection_limit(),
-        "unexpected number of peer connections {}, should be over the limit of {}",
-        peer_count,
-        config.peerset_outbound_connection_limit(),
-    );
+    crawler_dials_past_limit_when_connections_drop(15).await;
 }
 
 /// Test the crawler with the default outbound peer limit,
@@ -2265,7 +2198,8 @@ where
     address_book
 }
 
-/// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
+/// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`,
+/// for [`CRAWLER_TEST_DURATION`].
 ///
 /// Uses the default values for all other config fields.
 /// Does not bind a local listener.
@@ -2285,6 +2219,63 @@ where
         + 'static,
     C::Future: Send + 'static,
 {
+    let crawler = start_crawler_with_peer_limit(peerset_initial_target_size, outbound_connector);
+
+    // Let the crawler run for a while.
+    tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+
+    crawler.stop().await
+}
+
+/// A running peer crawler, started by [`start_crawler_with_peer_limit`].
+struct TestCrawler {
+    /// The generated crawler config.
+    config: Config,
+
+    /// Receives the peers the crawler has dialed.
+    peerset_rx: mpsc::Receiver<DiscoveredPeer>,
+
+    /// Sends demand for more peers to the crawler, like the peer set does.
+    demand_tx: mpsc::Sender<MorePeers>,
+
+    /// The crawler task.
+    crawl_task_handle: JoinHandle<Result<(), BoxError>>,
+
+    /// The crawler's address book.
+    address_book: Arc<std::sync::Mutex<AddressBook>>,
+
+    /// The number of fake peers added to the address book.
+    over_limit_peers: usize,
+
+    /// Address book updater handles, kept alive while the crawler runs.
+    _address_book_updater_handles: (
+        tokio::sync::watch::Receiver<crate::BanList>,
+        tokio::sync::watch::Receiver<crate::address_book::AddressMetrics>,
+        JoinHandle<Result<(), BoxError>>,
+    ),
+}
+
+/// Start a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
+///
+/// Uses the default values for all other config fields.
+/// Does not bind a local listener.
+///
+/// Fills the address book with more fake peers than the outbound connection limit, and queues
+/// demand for all of them. The crawler keeps running until [`TestCrawler::stop`] is called.
+fn start_crawler_with_peer_limit<C>(
+    peerset_initial_target_size: impl Into<Option<usize>>,
+    outbound_connector: C,
+) -> TestCrawler
+where
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    C::Future: Send + 'static,
+{
     // Create a test config.
     let mut config = Config::default();
     if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
@@ -2293,11 +2284,11 @@ where
 
     let (
         address_book,
-        _bans_receiver,
+        bans_receiver,
         address_book_updater,
         address_book_service,
-        _address_metrics,
-        _address_book_updater_guard,
+        address_metrics,
+        address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, config.listen_addr);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
@@ -2356,7 +2347,7 @@ where
     // Start the crawler.
     let crawl_fut = crawl_and_dial(
         config.clone(),
-        demand_tx,
+        demand_tx.clone(),
         demand_rx,
         next_peer_service,
         crawl_service,
@@ -2368,30 +2359,121 @@ where
     );
     let crawl_task_handle = tokio::spawn(crawl_fut);
 
-    // Let the crawler run for a while.
-    tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+    TestCrawler {
+        config,
+        peerset_rx,
+        demand_tx,
+        crawl_task_handle,
+        address_book,
+        over_limit_peers,
+        _address_book_updater_handles: (bans_receiver, address_metrics, address_book_updater_guard),
+    }
+}
 
-    // Stop the crawler and let it finish.
-    crawl_task_handle.abort();
-    tokio::task::yield_now().await;
+impl TestCrawler {
+    /// Stop the crawler, and check it didn't panic or change the address book size.
+    ///
+    /// Returns the crawler config, and the peer set receiver.
+    async fn stop(self) -> (Config, mpsc::Receiver<DiscoveredPeer>) {
+        let TestCrawler {
+            config,
+            peerset_rx,
+            demand_tx,
+            crawl_task_handle,
+            address_book,
+            over_limit_peers,
+            _address_book_updater_handles,
+        } = self;
 
-    // Check for panics or errors in the crawler.
-    let crawl_result = crawl_task_handle.now_or_never();
+        // Stop the crawler and let it finish.
+        crawl_task_handle.abort();
+        tokio::task::yield_now().await;
+
+        // Check for panics or errors in the crawler.
+        let crawl_result = crawl_task_handle.now_or_never();
+        assert!(
+            crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
+            "unexpected error or panic in peer crawler task: {crawl_result:?}",
+        );
+
+        // Check the final address book contents.
+        assert_eq!(
+            address_book.lock().unwrap().peers().count(),
+            over_limit_peers,
+            "expected {} peers in Mainnet address book, but got: {:?}",
+            over_limit_peers,
+            address_book.lock().unwrap().address_metrics(Utc::now())
+        );
+
+        std::mem::drop(demand_tx);
+
+        (config, peerset_rx)
+    }
+}
+
+/// Run a peer crawler with `peerset_initial_target_size` and a connector that returns success
+/// then disconnects the peer, and check that it dials more peers than its outbound connection
+/// limit.
+///
+/// Each disconnection frees an outbound slot, so the crawler should keep dialing while there is
+/// demand for peers. The test sends new demand only after a connection has closed, like the peer
+/// set does when it needs more peers. So the result doesn't depend on the order that the crawler
+/// handles its initial demand, its timer crawl, and its handshake tasks.
+async fn crawler_dials_past_limit_when_connections_drop(peerset_initial_target_size: usize) {
+    // Signals that a connection has closed, after its tracker has released its outbound slot.
+    let (closed_tx, mut closed_rx) = mpsc::unbounded();
+
+    let success_disconnect_outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+        let closed_tx = closed_tx.clone();
+        async move {
+            let OutboundConnectorRequest {
+                addr,
+                connection_tracker,
+            } = req;
+
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+            // Fake the connection closing.
+            std::mem::drop(connection_tracker);
+            let _ = closed_tx.unbounded_send(());
+
+            Ok((addr, fake_client))
+        }
+    });
+
+    let mut crawler = start_crawler_with_peer_limit(
+        peerset_initial_target_size,
+        success_disconnect_outbound_connector,
+    );
+    let limit = crawler.config.peerset_outbound_connection_limit();
+
+    let mut peer_count: usize = 0;
+    let dial_result = tokio::time::timeout(CRAWLER_DIAL_PAST_LIMIT_TIMEOUT, async {
+        while peer_count <= limit {
+            tokio::select! {
+                peer = crawler.peerset_rx.next() => {
+                    peer.expect("the running crawler keeps the peer set channel open");
+                    peer_count += 1;
+                }
+                closed = closed_rx.next() => {
+                    closed.expect("the connector keeps the closed connection channel open");
+
+                    // The closed connection freed an outbound slot, so ask for another peer.
+                    // If the demand channel is full, the crawler already has pending demand.
+                    let _ = crawler.demand_tx.try_send(MorePeers);
+                }
+            }
+        }
+    })
+    .await;
+
+    crawler.stop().await;
+
     assert!(
-        crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
-        "unexpected error or panic in peer crawler task: {crawl_result:?}",
+        dial_result.is_ok() && peer_count > limit,
+        "unexpected number of peer connections {peer_count} after \
+         {CRAWLER_DIAL_PAST_LIMIT_TIMEOUT:?}, should be over the limit of {limit}",
     );
-
-    // Check the final address book contents.
-    assert_eq!(
-        address_book.lock().unwrap().peers().count(),
-        over_limit_peers,
-        "expected {} peers in Mainnet address book, but got: {:?}",
-        over_limit_peers,
-        address_book.lock().unwrap().address_metrics(Utc::now())
-    );
-
-    (config, peerset_rx)
 }
 
 /// Connects to `listen_addr` from a specific loopback `source_ip`.
