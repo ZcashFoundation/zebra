@@ -434,7 +434,7 @@ fn setup(
         ChainTipSender::new(None, network);
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _transaction_verified) = Mempool::new(
         network,
         &Config {
             tx_cost_limit: 160_000_000,

@@ -23,11 +23,12 @@ use std::{
     future::Future,
     iter,
     pin::{pin, Pin},
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -305,6 +306,12 @@ pub struct Mempool {
     /// Only displayed after the mempool's first activation.
     #[cfg(feature = "progress-bar")]
     rejected_count_bar: Option<howudoin::Tx>,
+
+    /// Notified by [`TxDownloads`] when a transaction finishes verifying.
+    ///
+    /// Handed to the queue checker, which calls this service in response, so verified transactions
+    /// are stored and announced without waiting for its rate limit.
+    transaction_verified: Arc<Notify>,
 }
 
 impl Mempool {
@@ -319,10 +326,11 @@ impl Mempool {
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
-    ) -> (Self, MempoolTxSubscriber) {
+    ) -> (Self, MempoolTxSubscriber, Arc<Notify>) {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
         let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
+        let transaction_verified = Arc::new(Notify::new());
 
         let mut service = Mempool {
             network: network.clone(),
@@ -337,6 +345,7 @@ impl Mempool {
             tx_verifier,
             transaction_sender,
             misbehavior_sender,
+            transaction_verified: transaction_verified.clone(),
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -352,7 +361,7 @@ impl Mempool {
         let is_caught_up_to_start = service.is_caught_up_to_start();
         service.update_state(None, is_caught_up_to_start);
 
-        (service, transaction_subscriber)
+        (service, transaction_subscriber, transaction_verified)
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -397,6 +406,7 @@ impl Mempool {
             Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
             Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
             self.state.clone(),
+            self.transaction_verified.clone(),
         ));
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
