@@ -107,7 +107,7 @@ where
         .in_current_span();
 
         // TODO: Move this logic for selecting the first ready future and updating `chain_state` to its own method.
-        let (((hash, height), log_msg, updated_chain_state), is_block_submission) =
+        let (((mut hash, mut height), log_msg, updated_chain_state), mut is_block_submission) =
             if let Some(mined_block_receiver) = mined_block_receiver.as_mut() {
                 tokio::select! {
                     tip_change_close_to_network_tip = tip_change_close_to_network_tip_fut => {
@@ -126,37 +126,105 @@ where
 
         // TODO: Move logic for calling the peer set to its own method.
 
-        // block broadcasts inform other nodes about new blocks,
-        // so our internal Grow or Reset state doesn't matter to them
-        let request = if is_block_submission {
-            zn::Request::AdvertiseBlockToAll(hash)
-        } else {
-            zn::Request::AdvertiseBlock(hash, None)
-        };
+        info!(?height, ?hash, is_block_submission, log_msg);
 
-        info!(?height, ?request, log_msg);
-        let broadcast_fut = broadcast_network
-            .ready()
-            .await
-            .map_err(PeerSetReadiness)?
-            .call(request);
+        // `tower::timeout::Timeout` only bounds the response future, not `poll_ready()`.
+        // If there are no ready peers, only waiting for readiness would stop this task from
+        // consuming the mined block channel, and `submitblock` would eventually fail with a full
+        // channel even though the block was committed.
+        //
+        // So we keep receiving mined blocks while we wait, and only broadcast the latest one.
+        // The pending broadcast is kept until peers are ready, so the latest block is still
+        // advertised after a temporary lack of ready peers.
+        //
+        // A chain tip broadcast that is replaced by a mined block is sent after the mined block,
+        // unless the mined block is the new best tip. Mined blocks can be on side chains, and the
+        // tip change for the replaced broadcast has already been consumed from `chain_state`.
+        let mut displaced_tip = None;
 
-        // Await the broadcast future in a spawned task to avoid waiting on
-        // `AdvertiseBlockToAll` requests when there are unready peers.
-        // Broadcast requests don't return errors, and we'd just want to ignore them anyway.
-        tokio::spawn(broadcast_fut);
+        loop {
+            let mut superseded_blocks: usize = 0;
+            let ready_result = loop {
+                tokio::select! {
+                    biased;
 
-        // TODO: Move this logic for marking the last change hash as seen to its own method.
+                    // Dropping an unfinished `Ready` future doesn't affect the service's
+                    // readiness, and we call the service straight after it becomes ready.
+                    ready_result = broadcast_network.ready() => break ready_result.map(|_| ()),
 
-        // Mark the last change hash of `chain_state` as the last block submission hash to avoid
-        // advertising a block hash to some peers twice.
-        if is_block_submission
-            && mined_block_receiver
-                .as_ref()
-                .is_some_and(|rx| rx.is_empty())
-            && chain_state.latest_chain_tip().best_tip_hash() == Some(hash)
-        {
-            chain_state.mark_last_change_hash(hash);
+                    Some(mined_block) = recv_mined_block(&mut mined_block_receiver) => {
+                        if is_block_submission {
+                            superseded_blocks = superseded_blocks.saturating_add(1);
+                        } else {
+                            displaced_tip = Some((hash, height));
+                        }
+
+                        (hash, height) = mined_block;
+                        is_block_submission = true;
+                    }
+                }
+            };
+
+            ready_result.map_err(PeerSetReadiness)?;
+
+            if superseded_blocks > 0 {
+                info!(
+                    ?height,
+                    ?hash,
+                    superseded_blocks,
+                    "peers were not ready for block broadcasts, only sending the latest mined block",
+                );
+            }
+
+            // block broadcasts inform other nodes about new blocks,
+            // so our internal Grow or Reset state doesn't matter to them
+            let request = if is_block_submission {
+                zn::Request::AdvertiseBlockToAll(hash)
+            } else {
+                zn::Request::AdvertiseBlock(hash, None)
+            };
+
+            let broadcast_fut = broadcast_network.call(request);
+
+            // Await the broadcast future in a spawned task to avoid waiting on
+            // `AdvertiseBlockToAll` requests when there are unready peers.
+            // Broadcast requests don't return errors, and we'd just want to ignore them anyway.
+            tokio::spawn(broadcast_fut);
+
+            // TODO: Move this logic for marking the last change hash as seen to its own method.
+
+            let is_best_tip = chain_state.latest_chain_tip().best_tip_hash() == Some(hash);
+
+            // Mark the last change hash of `chain_state` as the last block submission hash to avoid
+            // advertising a block hash to some peers twice.
+            if is_block_submission
+                && mined_block_receiver
+                    .as_ref()
+                    .is_some_and(|rx| rx.is_empty())
+                && is_best_tip
+            {
+                chain_state.mark_last_change_hash(hash);
+            }
+
+            match displaced_tip.take() {
+                Some(tip) if !is_best_tip => {
+                    (hash, height) = tip;
+                    is_block_submission = false;
+                }
+                _ => break,
+            }
         }
+    }
+}
+
+/// Receives the next mined block from `mined_block_receiver`.
+///
+/// Never resolves if there is no receiver, so it can be used in a `select!` with other futures.
+async fn recv_mined_block(
+    mined_block_receiver: &mut Option<mpsc::Receiver<(block::Hash, block::Height)>>,
+) -> Option<(block::Hash, block::Height)> {
+    match mined_block_receiver {
+        Some(mined_block_receiver) => mined_block_receiver.recv().await,
+        None => std::future::pending().await,
     }
 }
