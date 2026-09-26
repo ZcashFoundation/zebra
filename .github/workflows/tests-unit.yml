@@ -9,14 +9,16 @@ on:
   merge_group:
     types: [checks_requested]
 
-# Cancel obsolete test runs after new commits. Unrelated label events use a
-# separate group so they cannot cancel the required unit test run.
+# Cancel obsolete test runs after new commits. Unrelated label events get a group of
+# their own, keyed by run id, so they can cancel neither the required unit test run
+# nor each other: cancelling one would report the required check as failed, because
+# `alls-green` reads a cancelled need as a failure.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       github.event.action == 'labeled' &&
       github.event.label.name != 'release' &&
-      'ignored-label' ||
+      format('ignored-label-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
@@ -34,7 +36,6 @@ env:
 
 jobs:
   changes:
-    if: github.event.action != 'labeled' || github.event.label.name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -53,7 +54,14 @@ jobs:
   run-unit-tests:
     name: stable 1.97.0
     needs: changes
-    if: needs.changes.outputs.unit_tests == 'true'
+    # Adding a label that is not `release` cannot change the result of a test run on a
+    # head commit that did not move, and this is the longest job in CI, so it must not
+    # re-run for one. `allowed-skips` tolerates the skip; the tests still have to pass on
+    # the merge group before anything reaches main.
+    if: >-
+      needs.changes.outputs.unit_tests == 'true' &&
+      (github.event.action != 'labeled' ||
+      github.event.label.name == 'release')
     permissions:
       contents: read
       statuses: write
@@ -106,19 +114,8 @@ jobs:
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
   unit-tests:
-    # Keep skipped unrelated-label runs from replacing the required check.
-    name: >-
-      ${{
-        github.event.action == 'labeled' &&
-        github.event.label.name != 'release' &&
-        'Label does not require unit tests' ||
-        'unit-tests'
-      }}
     runs-on: ubuntu-latest
-    if: >-
-      always() &&
-      (github.event.action != 'labeled' ||
-      github.event.label.name == 'release')
+    if: always()
     needs:
       - changes
       - run-unit-tests
