@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: '`parameters::testnet::ParametersBuilder::extend_funding_streams` returns `Result<Self, ParametersBuilderError>` instead of `Self`. Builder validation rejects unsupported halving schedules, issuance above the monetary cap, zero configured funding address periods, and insufficient recipient addresses. `to_network` returns an error rather than panicking on address shortages; explicitly extend addresses when required. `with_halving_interval` requires an interval in `1..=Height::MAX` and the first halving must be representable. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))'
+time: 2026-09-24T01:49:19.73688302+02:00

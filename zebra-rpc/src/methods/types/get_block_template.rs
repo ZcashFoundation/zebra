@@ -59,8 +59,8 @@ use crate::{
 };
 
 use constants::{
-    CAPABILITIES_FIELD, MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MUTABLE_FIELD,
-    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE,
+    CAPABILITIES_FIELD, MAX_TIME_SINCE_CHAIN_TIP, MUTABLE_FIELD, NONCE_RANGE_FIELD,
+    NOT_SYNCED_ERROR_CODE,
 };
 pub use parameters::{
     GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
@@ -884,21 +884,18 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    if network.is_a_test_network() {
+    if network.disable_pow() {
         return Ok(());
     }
 
-    // The tip estimate may not be the same as the one coming from the state
-    // but this is ok for an estimate
-    let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
-        .estimate_distance_to_network_chain_tip(network)
+    let (local_tip_height, local_tip_time) = latest_chain_tip
+        .best_tip_height_and_block_time()
         .ok_or_misc_error("no chain tip available yet")?;
+    let time_since_tip = chrono::Utc::now() - local_tip_time;
 
-    if !sync_status.is_close_to_tip()
-        || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP
-    {
+    if !sync_status.is_close_to_tip() || time_since_tip > MAX_TIME_SINCE_CHAIN_TIP {
         tracing::info!(
-            ?estimated_distance_to_chain_tip,
+            ?time_since_tip,
             ?local_tip_height,
             "Zebra has not synced to the chain tip. \
              Hint: check your network connection, clock, and time zone settings."
@@ -908,7 +905,7 @@ where
             NOT_SYNCED_ERROR_CODE.code(),
             format!(
                 "Zebra has not synced to the chain tip, \
-                 estimated distance: {estimated_distance_to_chain_tip:?}, \
+                 time since tip: {time_since_tip:?}, \
                  local tip: {local_tip_height:?}. \
                  Hint: check your network connection, clock, and time zone settings."
             ),

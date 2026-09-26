@@ -25,7 +25,7 @@ use zebra_chain::{
     },
 };
 
-use crate::{error::*, funding_stream_address};
+use crate::{block::ShieldedActionCounts, error::*, funding_stream_address};
 
 /// Checks if there is exactly one coinbase transaction in `Block`,
 /// and if that coinbase transaction is the first transaction in the block.
@@ -453,6 +453,69 @@ pub fn merkle_root_validity(
     // whether the transaction hashes are unique.
     if transaction_hashes.len() != transaction_hashes.iter().collect::<HashSet<_>>().len() {
         return Err(BlockError::DuplicateTransaction);
+    }
+
+    Ok(())
+}
+
+/// Checks the [ZIP 218] per-pool and global shielded action limits for `block`.
+///
+/// # Consensus
+///
+/// > For each block at height `height` where `IsNU7Activated(height)`, the following limits MUST
+/// > be satisfied:
+/// >
+/// > - The total number of Orchard actions across all transactions in the block MUST NOT exceed
+/// >   `OrchardBlockActionLimit`.
+/// > - The total number of Sapling inputs and outputs across all transactions in the block MUST
+/// >   NOT exceed `SaplingBlockIOLimit`.
+/// > - The total number of Sprout JoinSplits across all transactions in the block MUST NOT exceed
+/// >   `SproutBlockJoinSplitLimit`.
+/// >
+/// > In addition to the per-pool limits, the total shielded cost across all pools in a block MUST
+/// > NOT exceed `GlobalShieldedBudget`.
+///
+/// The global shielded cost counts each Sprout JoinSplit twice, because each JoinSplit produces
+/// two shielded outputs.
+///
+/// ZIP 218's cost counts Orchard, Sapling and Sprout, but not Ironwood, which NU6.3 added after
+/// the ZIP was written. Zebra implements the rule as specified: adding an unspecified limit would
+/// reject blocks other implementations accept, which is a chain split.
+//
+// TODO: count Ironwood actions once ZIP 218 says how (zcash/zips), and add a per-pool limit for
+// them if the ZIP adds one.
+///
+/// These limits bound the worst-case block verification time and the worst-case compact sync
+/// bandwidth that lightweight wallets must download, so they are checked before the block's
+/// proofs are queued for verification.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub fn shielded_action_limits_are_valid(
+    block: &Block,
+    network: &Network,
+    height: Height,
+    hash: Hash,
+) -> Result<(), BlockError> {
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu7 {
+        return Ok(());
+    }
+
+    let counts = block
+        .transactions
+        .iter()
+        .map(|transaction| ShieldedActionCounts::from_transaction(transaction))
+        .fold(ShieldedActionCounts::default(), |acc, counts| {
+            acc.saturating_add(counts)
+        });
+
+    if let Some((pool, count, limit)) = counts.exceeded_limit() {
+        Err(BlockError::TooManyShieldedActions {
+            height,
+            hash,
+            pool,
+            count,
+            limit,
+        })?;
     }
 
     Ok(())

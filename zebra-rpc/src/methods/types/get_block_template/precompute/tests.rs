@@ -145,6 +145,80 @@ fn only_current_work_is_served() {
     }
 }
 
+/// Before the MTP maximum activates, even a wide range can end at a difficulty boundary.
+#[test]
+fn wide_testnet_ranges_expire_before_mtp_maximum_activation() {
+    let _init_guard = zebra_test::init();
+    let configured = zebra_chain::parameters::testnet::Parameters::build()
+        .with_slow_start_interval(block::Height(0))
+        .with_activation_heights(
+            zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+                nu7: Some(299_188),
+                ..Default::default()
+            },
+        )
+        .expect("activation heights are valid")
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("configured Testnet parameters are valid");
+    let max_time = DateTime32::from(1654008719);
+    let expired = max_time.saturating_add(Duration32::from_seconds(1));
+
+    for network in [Network::new_default_testnet(), configured] {
+        for (height, usable) in [(299_188, false), (653_605, false), (653_606, true)] {
+            let cache = TemplateCache::default();
+            let mut current = template_with_max_time(&network, max_time);
+            current.height = height;
+            current.min_time = max_time
+                .saturating_sub(Duration32::from_minutes(90))
+                .saturating_add(Duration32::from_seconds(1));
+            let tip_hash = current.previous_block_hash;
+            cache.publish(current);
+            assert_eq!(
+                cache
+                    .template_for_tip(tip_hash, &network, expired)
+                    .is_some(),
+                usable,
+                "{network:?}, candidate height {height}",
+            );
+        }
+    }
+}
+
+/// A clock rollback must invalidate any template advertising timestamps beyond the new bound.
+#[test]
+fn clock_rollback_invalidates_cached_timestamp_range() {
+    let _init_guard = zebra_test::init();
+    let regtest = Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    for network in [Network::Mainnet, Network::new_default_testnet(), regtest] {
+        let cache = TemplateCache::default();
+        let current = template_with_max_time(&network, DateTime32::from(1654008719));
+        let tip_hash = current.previous_block_hash;
+        let boundary = current.max_time.saturating_sub(Duration32::from_hours(2));
+        let rollback = boundary.saturating_sub(Duration32::from_seconds(1));
+        // Checking only cur_time would miss the invalid advertised maximum.
+        assert!(current.cur_time <= rollback.saturating_add(Duration32::from_hours(2)));
+        cache.publish(current);
+
+        assert!(cache
+            .template_for_tip(tip_hash, &network, boundary)
+            .is_some());
+        assert!(
+            cache
+                .template_for_tip(tip_hash, &network, rollback)
+                .is_none(),
+            "every advertised timestamp must remain inside the local-clock bound on {network:?}",
+        );
+    }
+}
+
 /// Checks that a subscription taken before a template is published still reports it.
 ///
 /// `getblocktemplate` reads the cache, decides the client already has that template, and only then

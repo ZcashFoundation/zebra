@@ -170,3 +170,102 @@ fn reserves_space_for_block_header_and_transaction_count() {
         "should not select a transaction one byte over the safe block budget"
     );
 }
+
+/// The real selector must leave room for a Sapling coinbase in the global ZIP-218 budget.
+#[test]
+fn reserves_shielded_budget_for_sapling_coinbase() {
+    use super::super::CoinbaseCache;
+    use crate::config::mining::{default_miner_address, MinerAddressType};
+    use std::sync::Arc;
+    use zebra_chain::{
+        parameters::testnet::ConfiguredActivationHeights,
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        transaction::{arbitrary::v5_transactions, Transaction, VerifiedUnminedTx},
+    };
+    use zebra_consensus::ShieldedActionCounts;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let height = Height(1_000);
+    let miner = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Sapling),
+        )
+        .unwrap(),
+    );
+    let cache = CoinbaseCache::default();
+    let sizing =
+        TransactionTemplate::new_coinbase(&network, height, &miner, Amount::zero()).unwrap();
+    let sizing_tx: Transaction = sizing.data.as_ref().zcash_deserialize_into().unwrap();
+    let coinbase_counts = ShieldedActionCounts::from_transaction(&sizing_tx);
+    assert!(sizing_tx.sapling_outputs().count() > 0);
+    cache.store(height, Amount::zero(), sizing);
+
+    let orchard = v5_transactions(Network::Mainnet.block_iter())
+        .find(|tx| {
+            tx.orchard_actions().count() == 2
+                && tx.joinsplit_count() == 0
+                && tx.sapling_spends_count() == 0
+                && tx.sapling_outputs().count() == 0
+        })
+        .expect("fixture contains an Orchard-only two-action transaction");
+    // Distinct serialized transactions ensure the selector's txid map keeps all candidates.
+    let candidates: Vec<_> = (0..165)
+        .map(|i| {
+            let mut tx = orchard.clone();
+            tx.set_expiry_height(Height(2_000 + i));
+            let tx = zebra_chain::transaction::UnminedTx::from(Arc::new(tx));
+            let fee = tx.conventional_fee;
+            VerifiedUnminedTx::new(tx, fee, 0, 0, Arc::new(vec![])).unwrap()
+        })
+        .collect();
+    let extra_counts =
+        ShieldedActionCounts::from_transaction(&candidates[0].transaction.transaction);
+    let selected = select_mempool_transactions(
+        &network,
+        height,
+        &miner,
+        candidates,
+        TransactionDependencies::default(),
+        Some(&cache),
+    );
+    let counts = selected.iter().fold(coinbase_counts, |counts, (_, tx)| {
+        counts.saturating_add(ShieldedActionCounts::from_transaction(
+            &tx.transaction.transaction,
+        ))
+    });
+    assert!(counts.exceeded_limit().is_none());
+    assert!(counts
+        .saturating_add(extra_counts)
+        .exceeded_limit()
+        .is_some());
+
+    let fees = selected
+        .iter()
+        .map(|(_, tx)| tx.miner_fee)
+        .sum::<zebra_chain::amount::Result<Amount<_>>>()
+        .unwrap();
+    let actual = TransactionTemplate::new_coinbase(&network, height, &miner, fees).unwrap();
+    let actual_tx: Transaction = actual.data.as_ref().zcash_deserialize_into().unwrap();
+    assert_eq!(
+        ShieldedActionCounts::from_transaction(&actual_tx),
+        coinbase_counts
+    );
+    assert_eq!(
+        actual.data.as_ref().len(),
+        sizing_tx.zcash_serialized_size()
+    );
+}

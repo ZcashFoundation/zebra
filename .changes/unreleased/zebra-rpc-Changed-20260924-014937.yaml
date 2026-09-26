@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Block templates honor network-specific median-time rules and the local two-hour future limit. Cached and on-demand work reject timestamp ranges invalidated by clock rollback. Expired long polls return with `submitold = false`; cached Testnet difficulty expires according to the candidate-height median-time rule. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+time: 2026-09-24T01:49:37.677342358+02:00

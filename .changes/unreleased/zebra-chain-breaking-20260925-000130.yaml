@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: '`subsidy::funding_stream_address_period` now returns signed `HeightDiff` and floors negative periods. Subtract periods before converting to an unsigned funding-address index on compressed NU7 schedules.'
+time: 2026-09-25T00:01:30.270883582+02:00

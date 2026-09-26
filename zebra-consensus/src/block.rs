@@ -182,6 +182,102 @@ fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
 /// [§7.6]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
+/// The [ZIP 218] per-pool and global shielded action limits, which apply from NU7 activation.
+///
+/// `GlobalShieldedBudget`, `OrchardBlockActionLimit`, `SaplingBlockIOLimit` and
+/// `SproutBlockJoinSplitLimit` in the ZIP.
+///
+/// NU7 also disallows v4 transactions, and JoinSplits can only appear in v4 transactions, so the
+/// Sprout limit and the JoinSplit term of the global budget can never be reached in practice.
+/// They are implemented exactly as written: ZIP 218's limits predate NU7's v4 deprecation, and
+/// they would matter again if Sprout transfers were ever reintroduced in a later transaction
+/// version.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const GLOBAL_SHIELDED_BUDGET: usize = 330;
+/// See [`GLOBAL_SHIELDED_BUDGET`].
+pub const ORCHARD_BLOCK_ACTION_LIMIT: usize = 330;
+/// See [`GLOBAL_SHIELDED_BUDGET`].
+pub const SAPLING_BLOCK_IO_LIMIT: usize = 300;
+/// See [`GLOBAL_SHIELDED_BUDGET`].
+pub const SPROUT_BLOCK_JOIN_SPLIT_LIMIT: usize = 25;
+
+/// The shielded components that the [ZIP 218] action limits count.
+///
+/// Shared by the block verifier's limit check and by `getblocktemplate` transaction selection, so
+/// that a template can not be built from transactions the verifier would then reject.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShieldedActionCounts {
+    /// The number of Orchard actions.
+    pub orchard_actions: usize,
+    /// The number of Sapling inputs plus outputs.
+    pub sapling_io: usize,
+    /// The number of Sprout JoinSplits.
+    pub joinsplits: usize,
+}
+
+impl ShieldedActionCounts {
+    /// Returns the counts for `transaction`.
+    ///
+    /// Ironwood actions are not counted: see [`check::shielded_action_limits_are_valid`].
+    pub fn from_transaction(transaction: &zebra_chain::transaction::Transaction) -> Self {
+        Self {
+            orchard_actions: transaction.orchard_actions().count(),
+            sapling_io: transaction.sapling_spends_count() + transaction.sapling_outputs().count(),
+            joinsplits: transaction.joinsplit_count(),
+        }
+    }
+
+    /// Returns these counts plus `other`.
+    ///
+    /// Saturating, so that a malformed count can not wrap back below a limit.
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self {
+            orchard_actions: self.orchard_actions.saturating_add(other.orchard_actions),
+            sapling_io: self.sapling_io.saturating_add(other.sapling_io),
+            joinsplits: self.joinsplits.saturating_add(other.joinsplits),
+        }
+    }
+
+    /// Returns the total shielded cost, which each JoinSplit contributes twice to, because it
+    /// produces two shielded outputs.
+    pub fn shielded_cost(&self) -> usize {
+        self.orchard_actions
+            .saturating_add(self.sapling_io)
+            .saturating_add(self.joinsplits.saturating_mul(2))
+    }
+
+    /// Returns the first limit these counts exceed, as `(pool, count, limit)`.
+    pub fn exceeded_limit(&self) -> Option<(&'static str, usize, usize)> {
+        [
+            (
+                "Orchard actions",
+                self.orchard_actions,
+                ORCHARD_BLOCK_ACTION_LIMIT,
+            ),
+            (
+                "Sapling inputs and outputs",
+                self.sapling_io,
+                SAPLING_BLOCK_IO_LIMIT,
+            ),
+            (
+                "Sprout JoinSplits",
+                self.joinsplits,
+                SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+            ),
+            (
+                "shielded actions across all pools",
+                self.shielded_cost(),
+                GLOBAL_SHIELDED_BUDGET,
+            ),
+        ]
+        .into_iter()
+        .find(|&(_, count, limit)| count > limit)
+    }
+}
+
 impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -304,6 +400,9 @@ where
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let deferred_pool_balance_change =
                 check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+
+            // Bound shielded work before output recovery or proof verification.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
 
             // Now do the slower checks
 

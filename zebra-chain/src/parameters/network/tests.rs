@@ -14,6 +14,7 @@ use crate::{
             block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving, halving_divisor,
             height_for_halving, ParameterSubsidy as _,
         },
+        testnet::ConfiguredActivationHeights,
         NetworkUpgrade,
     },
 };
@@ -317,4 +318,239 @@ fn check_height_for_num_halvings() {
             );
         }
     }
+}
+
+/// Builds a Regtest network with NU7 activating at `nu7_height`, so [ZIP 218]'s post-NU7 era can
+/// be exercised while NU7 is unscheduled on Mainnet and the default Testnet.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+fn nu7_network(nu7_height: u32) -> Network {
+    Network::new_regtest(
+        crate::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(nu7_height),
+            ..Default::default()
+        }
+        .into(),
+    )
+}
+
+/// ZIP 218 drops the target block spacing to 25 seconds and widens the difficulty averaging
+/// window to 102 blocks from NU7 onward.
+#[test]
+fn zip_218_target_spacing_and_averaging_window() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    // ZIP 218 triples the block rate and doubles the wall-clock smoothing window.
+    for (upgrade, height, spacing, window, timespan) in [
+        (NetworkUpgrade::Nu6_3, Height(999), 75, 17, 1275),
+        (NetworkUpgrade::Nu7, Height(1_000), 25, 102, 2550),
+    ] {
+        let spacing = chrono::Duration::seconds(spacing);
+        assert_eq!(upgrade.target_spacing(), spacing);
+        assert_eq!(upgrade.averaging_window(), window);
+        assert_eq!(
+            upgrade.averaging_window_timespan(),
+            chrono::Duration::seconds(timespan)
+        );
+        assert_eq!(
+            NetworkUpgrade::target_spacing_for_height(&network, height),
+            spacing
+        );
+        assert_eq!(
+            NetworkUpgrade::averaging_window_for_height(&network, height),
+            window
+        );
+    }
+}
+
+/// ZIP 218 divides the block subsidy by a further factor of 3 from NU7, so that issuance per unit
+/// of wall clock time is unchanged by the faster block spacing.
+#[test]
+fn zip_218_block_subsidy() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    let pre_nu7 = Height(999);
+    let nu7 = Height(1_000);
+
+    let pre_nu7_subsidy = block_subsidy(pre_nu7, &network)?;
+    let nu7_subsidy = block_subsidy(nu7, &network)?;
+
+    // Both heights are in the same halving, so only the ZIP 218 divisor changes.
+    assert_eq!(halving(pre_nu7, &network), halving(nu7, &network));
+    assert_eq!(nu7_subsidy, (pre_nu7_subsidy / 3)?);
+
+    Ok(())
+}
+
+/// ZIP 218 triples the halving interval at NU7, so the wall-clock time between halvings is
+/// unchanged, and `halving()` and `height_for_halving()` stay consistent across the boundary.
+#[test]
+fn zip_218_halving_interval() {
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+
+    assert_eq!(
+        network.post_nu7_halving_interval(),
+        network.post_blossom_halving_interval() * 3,
+    );
+
+    // The halving index does not jump at the activation height.
+    assert_eq!(
+        halving(Height(999), &network),
+        halving(Height(1_000), &network),
+    );
+
+    for h in 1..20 {
+        let height = height_for_halving(h, &network).expect("halving height is representable");
+        let previous = height.previous().expect("there is a previous height");
+
+        assert_eq!(
+            halving(height, &network),
+            h,
+            "the halving index at height_for_halving({h}) should be {h}",
+        );
+        assert_eq!(
+            halving(previous, &network),
+            h - 1,
+            "the halving index just below height_for_halving({h}) should be {}",
+            h - 1,
+        );
+    }
+}
+
+/// The funding stream address period is a `floor`, not a truncation: the two spec periods either
+/// side of zero must not be merged, because both callers use the period only as a difference.
+///
+/// The period is never negative on Mainnet, the default Testnet or Regtest. It can be on a
+/// configured Testnet where ZIP 218 stretches the first halving above the post-Blossom halving
+/// interval, which is the case this pins.
+#[test]
+fn funding_stream_address_period_floors_negative_heights() {
+    use crate::parameters::{
+        subsidy::funding_stream_address_period,
+        testnet::{ConfiguredActivationHeights, Parameters},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    // A Testnet with NU7 well before the first halving, so ZIP 218 triples the remaining blocks
+    // of that halving and pushes `height_for_first_halving()` far above the post-Blossom halving
+    // interval. Funding streams are left empty, so no address period is ever used in anger here.
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(30),
+            nu5: Some(35),
+            nu6: Some(40),
+            nu6_1: Some(45),
+            nu6_2: Some(47),
+            nu6_3: Some(48),
+            nu7: Some(50),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("failed to build configured network");
+
+    let interval = network.funding_stream_address_change_interval();
+    let first_halving = network.height_for_first_halving();
+    let post_blossom = network.post_blossom_halving_interval();
+
+    // The height whose numerator is exactly zero, and so the first height of period 0.
+    let period_zero_start =
+        (first_halving - post_blossom).expect("the zero point is a valid height");
+
+    // Include both ends of periods -1 and 0: truncation would merge them at zero.
+    for (offset, expected) in [
+        (0, 0),
+        (interval - 1, 0),
+        (interval, 1),
+        (-1, -1),
+        (-interval, -1),
+        (-interval - 1, -2),
+    ] {
+        let height = (period_zero_start + offset).expect("valid height");
+        assert_eq!(
+            funding_stream_address_period(height, &network),
+            expected,
+            "incorrect funding stream period at {height:?}",
+        );
+    }
+}
+
+/// `height_for_first_halving()` derives the height from `height_for_halving(1)` rather than
+/// hard-coding it. These are the heights the spec gives, so deriving them must not move any of
+/// them.
+#[test]
+fn first_halving_heights_are_unchanged() {
+    let _init_guard = zebra_test::init();
+
+    // Mainnet's first halving is at Canopy; the Testnet height is from protocol specification
+    // §7.10.1 <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>.
+    for (network, expected) in [
+        (Network::Mainnet, Height(1_046_400)),
+        (Network::new_default_testnet(), Height(1_116_000)),
+        (Network::new_regtest(Default::default()), Height(287)),
+    ] {
+        assert_eq!(
+            network.height_for_first_halving(),
+            expected,
+            "the first halving height must not move on {network}",
+        );
+    }
+
+    assert_eq!(
+        Network::Mainnet.height_for_first_halving(),
+        NetworkUpgrade::Canopy
+            .activation_height(&Network::Mainnet)
+            .expect("Canopy is activated on Mainnet"),
+    );
+}
+
+/// `height_for_first_halving()` must agree with `halving()` even when ZIP 218 stretches the
+/// schedule, which a hard-coded height could not: NU7 activating before the first halving pushes
+/// it later, and both have to follow.
+#[test]
+fn first_halving_follows_the_zip_218_schedule() {
+    let _init_guard = zebra_test::init();
+
+    // NU7 activates at height 1, so every block of the first halving is stretched by ZIP 218.
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let first_halving = network.height_for_first_halving();
+    let unstretched = Network::new_regtest(Default::default()).height_for_first_halving();
+
+    assert!(
+        first_halving > unstretched,
+        "ZIP 218 should push the first halving {first_halving:?} past its unstretched height \
+         {unstretched:?}",
+    );
+
+    // The height it reports is the one `halving()` actually treats as the first halving.
+    assert_eq!(halving(first_halving, &network), 1);
+    assert_eq!(
+        halving(
+            first_halving
+                .previous()
+                .expect("the first halving is above genesis"),
+            &network
+        ),
+        0,
+    );
 }

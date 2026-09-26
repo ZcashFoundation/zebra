@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: '`chain_tip::ChainTip::is_at_or_near_network_tip` now accepts the current `chrono::DateTime<Utc>` instead of a network reference and compares the tip age. Replace `chain_tip::AT_OR_NEAR_TIP_THRESHOLD` with `chain_tip::AT_OR_NEAR_TIP_MAX_AGE`, a `chrono::Duration`, to preserve the freshness allowance across NU7.'
+time: 2026-09-24T16:07:45.622644216+02:00

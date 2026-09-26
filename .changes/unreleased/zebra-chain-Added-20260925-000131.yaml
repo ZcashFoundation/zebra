@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: '`subsidy::cumulative_scheduled_issuance` sums the scheduled subsidy across slow start, spacing upgrades and halvings, including the scheduled genesis subsidy.'
+time: 2026-09-25T00:01:31.379006311+02:00

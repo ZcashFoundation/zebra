@@ -14,6 +14,9 @@
 
 pub(crate) mod constants;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 
 use crate::{
@@ -24,9 +27,10 @@ use crate::{
 };
 
 use constants::{
-    regtest, testnet, BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
+    BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
     FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY,
-    POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
+    NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL, POST_NU7_HALVING_INTERVAL,
+    PRE_BLOSSOM_HALVING_INTERVAL,
 };
 
 /// The funding stream receiver categories.
@@ -225,6 +229,13 @@ pub trait ParameterSubsidy {
     /// Returns the halving interval before Blossom
     fn pre_blossom_halving_interval(&self) -> HeightDiff;
 
+    /// Returns the halving interval after NU7.
+    ///
+    /// `PostNU7HalvingInterval` in [ZIP 218].
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    fn post_nu7_halving_interval(&self) -> HeightDiff;
+
     /// Returns the address change interval for funding streams
     /// as described in [protocol specification §7.10][7.10].
     ///
@@ -237,23 +248,11 @@ pub trait ParameterSubsidy {
 /// Network methods related to Block Subsidy and Funding Streams
 impl ParameterSubsidy for Network {
     fn height_for_first_halving(&self) -> Height {
-        // First halving on Mainnet is at Canopy
-        // while in Testnet is at block constant height of `1_116_000`
+        // Derived rather than hard-coded, so that ZIP 218's stretched halving schedule applies
+        // here too and this can not disagree with `halving()`.
+        //
         // <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
-        match self {
-            Network::Mainnet => NetworkUpgrade::Canopy
-                .activation_height(self)
-                .expect("canopy activation height should be available"),
-            Network::Testnet(params) => {
-                if params.is_regtest() {
-                    regtest::FIRST_HALVING
-                } else if params.is_default_testnet() {
-                    testnet::FIRST_HALVING
-                } else {
-                    height_for_halving(1, self).expect("first halving height should be available")
-                }
-            }
-        }
+        height_for_halving(1, self).expect("the first halving height is representable")
     }
 
     fn post_blossom_halving_interval(&self) -> HeightDiff {
@@ -270,6 +269,16 @@ impl ParameterSubsidy for Network {
         }
     }
 
+    fn post_nu7_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => POST_NU7_HALVING_INTERVAL,
+            Network::Testnet(params) => {
+                params.post_blossom_halving_interval()
+                    * HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO)
+            }
+        }
+    }
+
     fn funding_stream_address_change_interval(&self) -> HeightDiff {
         self.post_blossom_halving_interval() / 48
     }
@@ -278,8 +287,18 @@ impl ParameterSubsidy for Network {
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]
 ///
+/// The result is signed, and callers only ever use the *difference* between two periods. It can
+/// be negative below the first funding stream: on a configured Testnet whose upgrades are packed
+/// into a few hundred blocks, ZIP 218 pushes the first halving above every height the network
+/// reaches once NU7 activates before it. Clamping a negative period to zero would silently
+/// collapse those differences, so the sign is preserved here and the conversion is left to the
+/// callers, which know the range they are counting over.
+///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, network: &N) -> u32 {
+pub fn funding_stream_address_period<N: ParameterSubsidy>(
+    height: Height,
+    network: &N,
+) -> HeightDiff {
     // Spec equation: `address_period = floor((height - (height_for_halving(1) - post_blossom_halving_interval))/funding_stream_address_change_interval)`,
     // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     //
@@ -287,16 +306,15 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
     //
     // In Rust, "integer division rounds towards zero":
     // <https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators>
-    // This is the same as `floor()`, because these numbers are all positive.
+    // which is not `floor()` for a negative numerator, so `div_euclid` is used instead. The
+    // divisor is positive, so `div_euclid` is exactly the spec's `floor()`. Truncating would
+    // merge the two spec periods either side of zero, and both callers subtract one period from
+    // another, so that would shift every later period down by one.
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
-    let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
-        / network.funding_stream_address_change_interval();
-
-    address_period
-        .try_into()
-        .expect("all values are positive and smaller than the input height")
+    (height_after_first_halving + network.post_blossom_halving_interval())
+        .div_euclid(network.funding_stream_address_change_interval())
 }
 
 /// The first block height of the halving at the provided halving index for a network.
@@ -314,18 +332,30 @@ pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
     let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
     let halving_index = i64::from(halving);
 
-    let unscaled_height = halving_index.checked_mul(pre_blossom_halving_interval)?;
-
-    let pre_blossom_height = unscaled_height
-        .min(blossom_height)
+    let unscaled_height = halving_index
+        .checked_mul(pre_blossom_halving_interval)?
         .checked_add(slow_start_shift)?;
 
-    let post_blossom_height = 0
-        .max(unscaled_height - blossom_height)
-        .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))?
-        .checked_add(slow_start_shift)?;
+    let height = if unscaled_height > blossom_height {
+        (unscaled_height - blossom_height)
+            .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))?
+            .checked_add(blossom_height)?
+    } else {
+        unscaled_height
+    };
 
-    let height = pre_blossom_height.checked_add(post_blossom_height)?;
+    // ZIP 218: once NU7 is active, the blocks after its activation height are three times as
+    // frequent, so the remaining blocks of this halving are stretched by the same ratio.
+    let height = match NetworkUpgrade::Nu7.activation_height(network) {
+        Some(nu7_height) if height > i64::from(nu7_height.0) => {
+            let nu7_height = i64::from(nu7_height.0);
+
+            (height - nu7_height)
+                .checked_mul(i64::from(NU7_POW_TARGET_SPACING_RATIO))?
+                .checked_add(nu7_height)?
+        }
+        _ => height,
+    };
 
     let height = u32::try_from(height).ok()?;
     height.try_into().ok()
@@ -421,12 +451,16 @@ pub fn halving(height: Height, network: &Network) -> u32 {
         .activation_height(network)
         .expect("blossom activation height should be available");
 
+    // `NetworkUpgrade::activation_height()` falls back to the next upgrade's height, so this is
+    // `None` exactly when no upgrade from NU7 onward is scheduled on `network`.
+    let nu7_height = NetworkUpgrade::Nu7.activation_height(network);
+
     let halving_index = if height < slow_start_shift {
         0
     } else if height < blossom_height {
         let pre_blossom_height = height - slow_start_shift;
         pre_blossom_height / network.pre_blossom_halving_interval()
-    } else {
+    } else if nu7_height.is_none_or(|nu7_height| height < nu7_height) {
         let pre_blossom_height = blossom_height - slow_start_shift;
         let scaled_pre_blossom_height =
             pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
@@ -434,6 +468,23 @@ pub fn halving(height: Height, network: &Network) -> u32 {
         let post_blossom_height = height - blossom_height;
 
         (scaled_pre_blossom_height + post_blossom_height) / network.post_blossom_halving_interval()
+    } else {
+        // ZIP 218 adds a third era to `Halving()`. Each era is scaled into post-NU7 blocks: a
+        // pre-Blossom block is worth `BlossomPoWTargetSpacingRatio * NU7PoWTargetSpacingRatio`
+        // of them, and a post-Blossom pre-NU7 block is worth `NU7PoWTargetSpacingRatio`.
+        let nu7_height = nu7_height.expect("checked by the branch condition above");
+
+        let scaled_pre_blossom_height = (blossom_height - slow_start_shift)
+            * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+            * HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
+
+        let scaled_post_blossom_height =
+            (nu7_height - blossom_height) * HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
+
+        let post_nu7_height = height - nu7_height;
+
+        (scaled_pre_blossom_height + scaled_post_blossom_height + post_nu7_height)
+            / network.post_nu7_halving_interval()
     };
 
     halving_index
@@ -462,16 +513,114 @@ pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative
             slow_start_rate * (u64::from(height) + 1)
         }
     } else {
-        let base_subsidy = if NetworkUpgrade::current(net, height) < NetworkUpgrade::Blossom {
+        // Nested integer divisions by `base_subsidy` then `halving_div` give the same result as
+        // the spec's single `floor()` over their product, because both divisors are positive.
+        let nu = NetworkUpgrade::current(net, height);
+        let base_subsidy = if nu < NetworkUpgrade::Blossom {
             MAX_BLOCK_SUBSIDY
-        } else {
+        } else if nu < NetworkUpgrade::Nu7 {
             MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+        } else {
+            // ZIP 218 divides the subsidy by a further `NU7PoWTargetSpacingRatio`, so that the
+            // issuance per unit of wall clock time is unchanged by the faster block spacing.
+            MAX_BLOCK_SUBSIDY
+                / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+                / u64::from(NU7_POW_TARGET_SPACING_RATIO)
         };
 
         base_subsidy / halving_div
     };
 
     Ok(Amount::try_from(amount)?)
+}
+
+/// Cumulative scheduled issuance through `height`, including the scheduled genesis subsidy.
+///
+/// Slow start is summed arithmetically; later constant-subsidy ranges are bounded by spacing
+/// changes and halvings. The inverse halving-height calculation is deliberately not required.
+pub fn cumulative_scheduled_issuance(
+    height: Height,
+    network: &Network,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    Ok(Amount::try_from(cumulative_scheduled_issuance_zatoshis(
+        height, network,
+    )?)?)
+}
+
+/// Sums the schedule before applying the monetary cap, so builder validation can exclude the
+/// unspendable genesis subsidy.
+pub(super) fn cumulative_scheduled_issuance_zatoshis(
+    height: Height,
+    network: &Network,
+) -> Result<u64, SubsidyError> {
+    let end = u64::from(height) + 1;
+    let mut slow_end = u64::from(network.slow_start_interval()).min(end);
+    // The schedule stops after 64 halvings, even during slow start on custom networks.
+    if slow_end > 0
+        && halving_divisor(
+            Height(u32::try_from(slow_end - 1).map_err(|_| SubsidyError::Overflow)?),
+            network,
+        )
+        .is_none()
+    {
+        let mut low = 0;
+        while low < slow_end {
+            let mid = low + (slow_end - low) / 2;
+            if halving_divisor(
+                Height(u32::try_from(mid).map_err(|_| SubsidyError::Overflow)?),
+                network,
+            )
+            .is_some()
+            {
+                low = mid + 1;
+            } else {
+                slow_end = mid;
+            }
+        }
+    }
+    let mut total = 0u64;
+    if slow_end > 0 {
+        let last = slow_end - 1;
+        let shift = u64::from(network.slow_start_shift());
+        total = (MAX_BLOCK_SUBSIDY / u64::from(network.slow_start_interval()))
+            * (last * (last + 1) / 2 + slow_end.saturating_sub(shift));
+    }
+
+    let mut start = slow_end;
+    while start < end {
+        let height = Height(u32::try_from(start).map_err(|_| SubsidyError::Overflow)?);
+        let subsidy = u64::from(block_subsidy(height, network)?);
+        if subsidy == 0 {
+            break;
+        }
+        let era_end = [NetworkUpgrade::Blossom, NetworkUpgrade::Nu7]
+            .into_iter()
+            .filter_map(|upgrade| upgrade.activation_height(network))
+            .map(u64::from)
+            .filter(|&boundary| boundary > start)
+            .min()
+            .unwrap_or(end)
+            .min(end);
+        let index = halving(height, network);
+        let (mut low, mut high) = (start + 1, era_end);
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if halving(
+                Height(u32::try_from(mid).map_err(|_| SubsidyError::Overflow)?),
+                network,
+            ) == index
+            {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        total = total
+            .checked_add(subsidy * (low - start))
+            .ok_or(SubsidyError::Overflow)?;
+        start = low;
+    }
+    Ok(total)
 }
 
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
