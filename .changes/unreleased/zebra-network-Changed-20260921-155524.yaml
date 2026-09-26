@@ -1,0 +1,7 @@
+project: zebra-network
+kind: Changed
+body: '`Request::{FindBlocks, FindHeaders}` rotate fairly across ready connections.
+  Successful replies, including empty ones, reset failure counts. Completed failures
+  count regardless of sync state; configured zcashd-compat sidecars remain exempt
+  ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).'
+time: 2026-09-21T15:55:24.425683545+02:00

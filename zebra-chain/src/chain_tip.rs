@@ -21,9 +21,6 @@ pub use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 /// for the time between blocks on mainnet, the node is considered far from the tip once the
 /// estimated distance exceeds this threshold, after approximately 20 hours and 51 minutes without
 /// a new block.
-///
-/// Since block production is approximately a Poisson process, this larger tolerance avoids
-/// enabling peer stall detection during normal long gaps between blocks.
 pub const AT_OR_NEAR_TIP_THRESHOLD: block::HeightDiff = 1_000;
 
 /// An interface for querying the chain tip.
@@ -133,8 +130,7 @@ pub trait ChainTip {
     /// Returns `true` if the node is at or near the network chain tip.
     ///
     /// Returns `false` if the chain is empty or the node is more than
-    /// [`AT_OR_NEAR_TIP_THRESHOLD`] blocks behind the estimated network tip,
-    /// meaning stall detection should remain active.
+    /// [`AT_OR_NEAR_TIP_THRESHOLD`] blocks behind the estimated network tip.
     fn is_at_or_near_network_tip(&self, network: &Network) -> bool {
         match self.estimate_distance_to_network_chain_tip(network) {
             None => false,
