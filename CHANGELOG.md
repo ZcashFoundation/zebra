@@ -93,6 +93,10 @@ Thank you to everyone who contributed to this release:
 
 ### Fixed
 
+- Re-inserting a transaction into the mempool eviction list no longer panics; a still-present
+  entry has its timestamp refreshed in place instead of tripping an assertion
+  ([#10690](https://github.com/ZcashFoundation/zebra/issues/10690)).
+
 - `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
   specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
   affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
