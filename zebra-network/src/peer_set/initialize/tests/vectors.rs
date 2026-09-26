@@ -64,6 +64,18 @@ const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 /// Using a very short time can make the peer cache updater not run at all.
 const PEER_CACHE_UPDATER_TEST_DURATION: Duration = Duration::from_secs(25);
 
+/// The amount of time to wait for a local peer connection to reach the address book.
+const LOCAL_PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The amount of time to wait for the peer cache updater to write the peer cache.
+///
+/// The updater waits `DNS_LOOKUP_TIMEOUT * 4` before its first run, and retries at that interval
+/// until it writes a cache. This timeout covers several runs, for slow CI runners.
+const PEER_CACHE_UPDATER_WRITE_TIMEOUT: Duration = constants::DNS_LOOKUP_TIMEOUT.saturating_mul(16);
+
+/// The interval between polls, when waiting for a peer connection or a peer cache write.
+const PEER_CACHE_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
 /// The amount of time to run the listener, before testing what it has done.
 ///
 /// Using a very short time can make the listener not run at all.
@@ -357,46 +369,108 @@ async fn peer_limit_two_testnet() {
 }
 
 /// Test zebra-network writes a peer cache file, and can read it back manually.
+///
+/// Runs two Zebra instances on localhost Regtest, and caches the connection between them, so
+/// this test does not depend on DNS seeders or live network peers.
 #[tokio::test]
 async fn written_peer_cache_can_be_read_manually() {
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
+
+    let network = Network::new_regtest(Default::default());
+
+    // The peer that the node under test connects to, and should cache.
+    // It doesn't cache anything itself, so it doesn't need a cache directory.
+    let remote_peer_config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network: network.clone(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+
+        ..Config::default()
+    };
+    let (_remote_peer_set, remote_address_book, _remote_misbehavior_tx) = init(
+        remote_peer_config,
+        nil_inbound_service,
+        NoChainTip,
+        "Remote peer user agent".to_string(),
+    )
+    .await;
+
+    let remote_peer_socket_addr = remote_address_book
+        .lock()
+        .expect("previous thread panicked while holding address book lock")
+        .local_listener_socket_addr();
+    let remote_peer_addr = PeerSocketAddr::from(remote_peer_socket_addr);
 
     // Use a temporary peer cache directory, so this test doesn't read or write the default
     // peer cache directory, which is shared with other tests and local zebrad instances.
     let peer_cache_dir =
         tempfile::tempdir().expect("creating a temporary cache directory should succeed");
     let config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network,
+        initial_testnet_peers: [remote_peer_socket_addr.to_string()].into_iter().collect(),
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
+
         ..Config::default()
     };
-    let address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let (_peer_set, address_book, _misbehavior_tx) = init(
+        config.clone(),
+        nil_inbound_service,
+        NoChainTip,
+        "Test user agent".to_string(),
+    )
+    .await;
 
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
+    // Wait for the handshake with the remote peer, so a missing cache below is a cache bug, and
+    // not just a peer that hasn't connected yet. Only peers that have responded are cacheable.
+    let connect_deadline = Instant::now() + LOCAL_PEER_CONNECT_TIMEOUT;
+    loop {
+        let cacheable_peers = address_book
+            .lock()
+            .expect("previous thread panicked while holding address book lock")
+            .cacheable(Utc::now());
 
-    let approximate_peer_count = address_book
-        .lock()
-        .expect("previous thread panicked while holding address book lock")
-        .len();
-    if approximate_peer_count > 0 {
+        if cacheable_peers
+            .iter()
+            .any(|peer| peer.addr == remote_peer_addr)
+        {
+            break;
+        }
+
+        assert!(
+            Instant::now() < connect_deadline,
+            "the local peer {remote_peer_addr} should be connected and cacheable \
+             within {LOCAL_PEER_CONNECT_TIMEOUT:?}, but the address book has {cacheable_peers:?}"
+        );
+
+        tokio::time::sleep(PEER_CACHE_POLL_INTERVAL).await;
+    }
+
+    // The updater only writes the cache on its own schedule, so poll until it has run, rather
+    // than waiting out a fixed time on every run.
+    let write_deadline = Instant::now() + PEER_CACHE_UPDATER_WRITE_TIMEOUT;
+    let cached_peers = loop {
         let cached_peers = config
             .load_peer_cache()
             .await
             .expect("unexpected error reading peer cache");
 
-        assert!(
-            !cached_peers.is_empty(),
-            "unexpected empty peer cache from manual load: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
+        if !cached_peers.is_empty() || Instant::now() >= write_deadline {
+            break cached_peers;
+        }
+
+        tokio::time::sleep(PEER_CACHE_POLL_INTERVAL).await;
+    };
+
+    assert_eq!(
+        cached_peers,
+        [remote_peer_addr].into_iter().collect(),
+        "the peer cache should contain the connected local peer: {:?}",
+        config.cache_dir.peer_cache_file_path(&config.network)
+    );
 }
 
 /// Test zebra-network writes a peer cache file, and reads it back automatically.
