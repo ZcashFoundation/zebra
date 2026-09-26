@@ -116,7 +116,7 @@ test-group = 'serial-zcashd-compat'
 [[profile.default.overrides]]
 filter = '''
 test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
+or test(=peer_set::initialize::tests::vectors::written_peer_cache_is_automatically_read_on_startup)
 or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
 or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
 or test(=unit::config::config_tests)
@@ -131,7 +131,7 @@ test-group = 'serial-live-mainnet'
 [[profile.ci.overrides]]
 filter = '''
 test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
+or test(=peer_set::initialize::tests::vectors::written_peer_cache_is_automatically_read_on_startup)
 or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
 or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
 or test(=unit::config::config_tests)
