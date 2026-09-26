@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Security
+body: "Bound the upfront `Vec` reservation in `zcash_deserialize_bytes_external_count` (and therefore `zcash_deserialize_string_external_count`, which delegates to it) so a peer-supplied byte count cannot force a large allocation before any payload byte is read. The buffer now grows incrementally as real bytes arrive, mirroring the element-path cap added in PR #10563. CWE-770 ([#10572](https://github.com/ZcashFoundation/zebra/issues/10572))."
+time: 2026-09-01T12:00:00.000000000-03:00
