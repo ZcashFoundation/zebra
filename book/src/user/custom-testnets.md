@@ -5,6 +5,7 @@ Custom Testnets in Zebra enable testing consensus rule changes on a public, conf
 Zebra's Testnet can be configured with custom:
 
 - Network upgrade activation heights,
+- NSM reissuance heights,
 - Network names,
 - Network magics,
 - Slow start intervals,
@@ -26,6 +27,11 @@ Custom Testnet state, non-finalized backups, and peer caches use
 Testnet caches are not reused: resynchronize the custom network after upgrading.
 Mainnet, public Testnet, and Regtest keep their existing storage names. Reserved
 network names are checked case-insensitively.
+
+To test NU7 reserve reissuance, set `network.testnet_parameters.nsm_reissuance_height`
+and configure a NU7 activation height. See the [Regtest example](regtest.md#testing-nu7-reissuance).
+Reissuance is disabled when the setting is omitted; public Mainnet and Testnet heights
+remain unset.
 
 To disable funding streams, set `network.testnet_parameters.funding_streams = []`
 and remove both legacy `pre_nu6_funding_streams` and `post_nu6_funding_streams`
@@ -156,7 +162,7 @@ There are also a few other restrictions on these parameters:
 - The network magic must not be any of the reserved network magics: `[36, 233, 39, 100]` and `[170, 232, 63, 95]`, these are the `Mainnet` and `Regtest` network magics respectively.
 - The network upgrade activation heights must be in order, such that the activation height for every network upgrade is at or above the activation height of every preceding network upgrade.
 - The configured subsidy schedule must stay within the 21-million-ZEC cap through the maximum supported height. Early spacing upgrades during slow start can violate this bound; accelerated test networks can set `slow_start_interval = 0`.
-- The pre-Blossom halving interval must be in `1..=Height::MAX`, and the first halving height must be representable. Configured funding streams require a nonzero address-change interval.
+- Configured NSM reissuance requires a post-NU7 halving interval with a positive integer reissuance coefficient. Configured funding streams also require a nonzero address-change interval.
 
 ## Comparison To Mainnet and Default Public Testnet Consensus Rules
 

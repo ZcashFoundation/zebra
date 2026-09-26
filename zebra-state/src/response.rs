@@ -564,6 +564,9 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`, and the local clock on testnet.
     pub expected_difficulty: CompactDifficulty,
 
+    /// Total subsidy for the candidate block, using the reserve at exactly `tip_hash`.
+    pub expected_block_subsidy: Amount<NonNegative>,
+
     /// The current system time, adjusted to fit within `min_time` and `max_time`.
     /// Always depends on the local clock and the `tip_hash`.
     pub cur_time: DateTime32,

@@ -164,25 +164,29 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
     // https://z.cash/support/faq/#what-is-slow-start-mining
     assert_eq!(
         Amount::<NonNegative>::try_from(1_250_000_000)?,
-        block_subsidy((network.slow_start_interval() + 1).unwrap(), network)?
+        block_subsidy(
+            (network.slow_start_interval() + 1).unwrap(),
+            network,
+            Amount::zero()
+        )?
     );
     assert_eq!(
         Amount::<NonNegative>::try_from(1_250_000_000)?,
-        block_subsidy((blossom_height - 1).unwrap(), network)?
+        block_subsidy((blossom_height - 1).unwrap(), network, Amount::zero())?
     );
 
     // After Blossom the block subsidy is reduced to 6.25 ZEC without halving
     // https://z.cash/upgrade/blossom/
     assert_eq!(
         Amount::<NonNegative>::try_from(625_000_000)?,
-        block_subsidy(blossom_height, network)?
+        block_subsidy(blossom_height, network, Amount::zero())?
     );
 
     // After the 1st halving, the block subsidy is reduced to 3.125 ZEC
     // https://z.cash/upgrade/canopy/
     assert_eq!(
         Amount::<NonNegative>::try_from(312_500_000)?,
-        block_subsidy(first_halving_height, network)?
+        block_subsidy(first_halving_height, network, Amount::zero())?
     );
 
     // After the 2nd halving, the block subsidy is reduced to 1.5625 ZEC
@@ -191,7 +195,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(156_250_000)?,
         block_subsidy(
             (first_halving_height + POST_BLOSSOM_HALVING_INTERVAL).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -201,7 +206,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(4_882_812)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 6)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -211,7 +217,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(1)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 28)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -221,7 +228,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -229,7 +237,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 39)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -237,7 +246,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 49)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -245,7 +255,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 59)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -254,7 +265,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -263,7 +275,8 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 63)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
@@ -271,23 +284,24 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(
             (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 64)).unwrap(),
-            network
+            network,
+            Amount::zero(),
         )?
     );
 
     assert_eq!(
         Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(Height(Height::MAX_AS_U32 / 4), network)?
+        block_subsidy(Height(Height::MAX_AS_U32 / 4), network, Amount::zero())?
     );
 
     assert_eq!(
         Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(Height(Height::MAX_AS_U32 / 2), network)?
+        block_subsidy(Height(Height::MAX_AS_U32 / 2), network, Amount::zero())?
     );
 
     assert_eq!(
         Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(Height::MAX, network)?
+        block_subsidy(Height::MAX, network, Amount::zero())?
     );
 
     Ok(())
@@ -380,8 +394,8 @@ fn zip_218_block_subsidy() -> Result<(), Report> {
     let pre_nu7 = Height(999);
     let nu7 = Height(1_000);
 
-    let pre_nu7_subsidy = block_subsidy(pre_nu7, &network)?;
-    let nu7_subsidy = block_subsidy(nu7, &network)?;
+    let pre_nu7_subsidy = block_subsidy(pre_nu7, &network, Amount::zero())?;
+    let nu7_subsidy = block_subsidy(nu7, &network, Amount::zero())?;
 
     // Both heights are in the same halving, so only the ZIP 218 divisor changes.
     assert_eq!(halving(pre_nu7, &network), halving(nu7, &network));
@@ -425,6 +439,87 @@ fn zip_218_halving_interval() {
             h - 1,
         );
     }
+}
+
+/// The NU7 deployment ZIP removes 60% of a block's transaction fees from circulation into the NSM
+/// reserve, rounding in the miner's favour, and leaves the fees untouched before NU7.
+#[test]
+fn nsm_fee_contribution_and_miner_fees() -> Result<(), Report> {
+    use crate::parameters::subsidy::{miner_fees, nsm_fee_contribution};
+
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    // Before NU7 all fees go to the miner; afterward 60% goes to the reserve, rounded down.
+    for (height, fees, contribution) in [
+        (999, 100_003, 0),
+        (1_000, 100_003, 60_001),
+        (1_000, 0, 0),
+        (1_000, 1, 0),
+        (1_000, 9, 5),
+        (1_000, 10, 6),
+        (1_000, 11, 6),
+        (1_000, 999, 599),
+        (1_000, 1_000_000_007, 600_000_004),
+    ] {
+        let fees = Amount::<NonNegative>::try_from(fees)?;
+        let contribution = Amount::<NonNegative>::try_from(contribution)?;
+        assert_eq!(
+            nsm_fee_contribution(Height(height), &network, fees)?,
+            contribution
+        );
+        assert_eq!(
+            miner_fees(Height(height), &network, fees)?,
+            (fees - contribution)?
+        );
+    }
+
+    Ok(())
+}
+
+/// The NSM reissuance height is unassigned, so no reserve is reissued yet; when it is assigned,
+/// the per-block subsidy is the reserve balance times the NSM fraction, rounded up.
+#[test]
+fn nsm_subsidy_reissuance() -> Result<(), Report> {
+    use crate::parameters::subsidy::nsm_subsidy;
+
+    let _init_guard = zebra_test::init();
+
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000_i64)?;
+
+    // No network has an assigned reissuance height, so nothing is reissued anywhere.
+    for network in Network::iter() {
+        assert_eq!(network.nsm_reissuance_height(), None);
+        assert_eq!(
+            nsm_subsidy(Height(2_000_000), &network, reserve)?,
+            Amount::<NonNegative>::zero(),
+        );
+    }
+
+    let network = crate::parameters::testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1_000_000),
+            ..Default::default()
+        })?
+        .with_nsm_reissuance_height(Some(Height(1_000_000)))
+        .with_funding_streams(Vec::new())
+        .to_network()?;
+
+    // Reissuance starts at the configured height and rounds up, even for a one-zatoshi reserve.
+    for (height, reserve, expected) in [
+        (999_999, 10_000_000_000_i64, 0),
+        (1_000_000, 10_000_000_000, 1375),
+        (1_000_000, 1, 1),
+        (1_000_000, 0, 0),
+    ] {
+        assert_eq!(
+            nsm_subsidy(Height(height), &network, Amount::try_from(reserve)?)?,
+            Amount::<NonNegative>::try_from(expected)?,
+        );
+    }
+
+    Ok(())
 }
 
 /// The funding stream address period is a `floor`, not a truncation: the two spec periods either

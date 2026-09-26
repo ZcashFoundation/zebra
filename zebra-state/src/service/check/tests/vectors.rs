@@ -172,3 +172,171 @@ fn ironwood_block_auth_commitment_accepts_honest_body_and_detects_a_forgery() {
         "a forged Ironwood body must score the serving peer at the ban threshold"
     );
 }
+
+/// Reserve-funded payout checks start at reissuance, not at NU7, and use the exact parent.
+#[test]
+fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError> {
+    use std::collections::HashMap;
+
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::{
+            subsidy::FundingStreamReceiver,
+            testnet::{
+                ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams, Parameters,
+            },
+        },
+        transaction::{Hash as TransactionHash, LockTime, Transaction},
+        transparent,
+        value_balance::ValueBalance,
+    };
+
+    use crate::service::finalized_state::calculate_deferred_pool_balance_change;
+
+    let reissuance = block::Height(1_001);
+    let network = Parameters::build()
+        .with_slow_start_interval(block::Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        })?
+        .with_nsm_reissuance_height(Some(reissuance))
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(block::Height(1_000)..block::Height(1_010)),
+            recipients: Some(vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ]),
+        }])
+        .to_network()?;
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000u64)?;
+    let mut parent_pools = ValueBalance::zero();
+    parent_pools.set_nsm_reserve_amount(reserve);
+    let header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    let outpoint = transparent::OutPoint::from_usize(TransactionHash([0; 32]), 0);
+    let utxos = HashMap::from([(
+        outpoint,
+        transparent::Utxo::new(
+            transparent::Output::new(100.try_into()?, transparent::Script::new(&[])),
+            block::Height(999),
+            false,
+        ),
+    )]);
+    let spend = Arc::new(Transaction::test_v1(
+        vec![transparent::Input::PrevOut {
+            outpoint,
+            unlock_script: transparent::Script::new(&[]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            89.try_into()?,
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    ));
+    let make_block = |height, miner, grant| Block {
+        header: Arc::new(header),
+        transactions: vec![
+            Arc::new(Transaction::test_v1(
+                vec![transparent::Input::Coinbase {
+                    height,
+                    data: vec![0],
+                    sequence: u32::MAX,
+                }],
+                vec![
+                    transparent::Output::new(miner, transparent::Script::new(&[])),
+                    transparent::Output::new(
+                        grant,
+                        subsidy::funding_stream_address(
+                            height,
+                            &network,
+                            FundingStreamReceiver::MajorGrants,
+                        )
+                        .expect("the funding stream has a configured address")
+                        .script(),
+                    ),
+                ],
+                LockTime::unlocked(),
+            )),
+            spend.clone(),
+        ],
+    };
+
+    for height in [block::Height(1_000), reissuance, block::Height(1_002)] {
+        let total = subsidy::block_subsidy(height, &network, reserve)?;
+        let funding = subsidy::funding_stream_values(height, &network, total)?;
+        let grant = funding[&FundingStreamReceiver::MajorGrants];
+        let deferred = funding[&FundingStreamReceiver::Deferred];
+        let deferred_change = calculate_deferred_pool_balance_change(height, &network, reserve)?;
+        assert_eq!(
+            deferred_change,
+            DeferredPoolBalanceChange::new(deferred.constrain()?),
+        );
+        // Of the 11 zatoshi in gross fees, 6 go to the reserve and 5 to the miner.
+        let miner = (total - grant - deferred + Amount::try_from(5)?)?;
+        for delta in [-1, 0, 1] {
+            let block = make_block(height, (miner.zatoshis() + delta).try_into()?, grant);
+            let (_, fees) = block.chain_value_pool_change_and_fees(
+                &utxos,
+                deferred_change,
+                &network,
+                parent_pools,
+            )?;
+            let result = reserve_funded_subsidy_is_valid(&block, height, &network, reserve, fees);
+            if height < reissuance || delta == 0 {
+                result?;
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ValidateContextError::Subsidy(
+                        SubsidyError::InvalidMinerFees
+                    )),
+                ));
+            }
+
+            if height >= reissuance && delta == 0 {
+                assert!(matches!(
+                    reserve_funded_subsidy_is_valid(&block, height, &network, (reserve * 2)?, fees,),
+                    Err(ValidateContextError::Subsidy(
+                        SubsidyError::FundingStreamNotFound
+                    )),
+                ));
+            }
+        }
+
+        if height >= reissuance {
+            // Preserve the total payout, but omit the reserve-funded part of the grant.
+            let scheduled_grant = subsidy::funding_stream_values(
+                height,
+                &network,
+                subsidy::scheduled_block_subsidy(height, &network)?,
+            )?[&FundingStreamReceiver::MajorGrants];
+            let block = make_block(height, (miner + grant - scheduled_grant)?, scheduled_grant);
+            let (_, fees) = block.chain_value_pool_change_and_fees(
+                &utxos,
+                deferred_change,
+                &network,
+                parent_pools,
+            )?;
+            assert!(matches!(
+                reserve_funded_subsidy_is_valid(&block, height, &network, reserve, fees),
+                Err(ValidateContextError::Subsidy(
+                    SubsidyError::FundingStreamNotFound
+                )),
+            ));
+        }
+    }
+
+    Ok(())
+}

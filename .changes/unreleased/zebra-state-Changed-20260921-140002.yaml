@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Database format 28.1.0 supports the [NU7](https://zips.z.cash/zip-0259) NSM reserve: chain value pool records can widen from 48 to 56 bytes and `BlockInfo` records from 52 to 60 bytes. Readers accept historical widths and derive the reserve from scheduled issuance less issued supply at NU7 activation minus one. Writers retain v28.0 widths before NU7 and reconstruct the historical seed on read. Public-network v28.0 databases upgrade in place. Custom networks with nonzero genesis outputs must rebuild their state so unspendable outputs are excluded from issued supply. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-21T14:00:02.000000000Z

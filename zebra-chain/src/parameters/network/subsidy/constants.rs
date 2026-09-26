@@ -63,3 +63,26 @@ pub(crate) const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/zip-1015";
 /// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
 /// in [ZIP-1015](https://zips.z.cash/zip-1015).
 pub(crate) const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
+
+/// The numerator of the fraction of transaction fees removed from circulation into the NSM
+/// reserve from NU7 activation.
+///
+/// `NSMFeeContribution(height) := floor(6 * TransactionFees(height) / 10)` in the NU7 deployment
+/// ZIP, which takes precedence over [ZIP 235] for NU7.
+///
+/// [ZIP 235]: https://zips.z.cash/zip-0235
+pub(crate) const NSM_FEE_NUMERATOR: u64 = 6;
+
+/// The denominator of the fraction of transaction fees removed from circulation into the NSM
+/// reserve from NU7 activation.
+///
+/// See [`NSM_FEE_NUMERATOR`].
+pub(crate) const NSM_FEE_DENOMINATOR: u64 = 10;
+
+/// ZIP 237's scaled logarithm, divided by the halving interval to obtain the release rate.
+pub(crate) const NSM_LN2_SCALED: u64 = 6_931_680_000;
+
+/// The denominator of the fraction of the NSM reserve reissued in each block.
+///
+/// See [`NSM_LN2_SCALED`].
+pub(crate) const NSM_SUBSIDY_DENOMINATOR: u64 = 10_000_000_000;

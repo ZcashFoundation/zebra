@@ -14,7 +14,10 @@ use zebra_chain::{
         },
         Block, Height,
     },
-    parameters::{subsidy::block_subsidy, NetworkUpgrade},
+    parameters::{
+        subsidy::{block_subsidy, miner_fees_are_valid, subsidy_is_valid},
+        NetworkUpgrade,
+    },
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
@@ -22,7 +25,7 @@ use zebra_chain::{
 use zebra_script::Sigops;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{block::check::subsidy_is_valid, transaction};
+use crate::transaction;
 
 use super::*;
 
@@ -306,10 +309,10 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         // TODO: first halving, second halving, third halving, and very large halvings
         if height >= canopy_activation_height {
             let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network, Amount::zero())
                     .expect("valid block subsidy");
 
-            check::subsidy_is_valid(&block, &network, expected_block_subsidy)
+            subsidy_is_valid(&block, &network, expected_block_subsidy)
                 .expect("subsidies should pass for this block");
         }
     }
@@ -334,6 +337,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        Amount::zero(),
     )
     .expect("valid block subsidy");
 
@@ -345,8 +349,8 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::NoTransactions;
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let expected = SubsidyError::NoCoinbase;
     assert_eq!(expected, result);
 
     // Get another funding stream block, and delete the coinbase transaction
@@ -360,6 +364,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        Amount::zero(),
     )
     .expect("valid block subsidy");
 
@@ -371,8 +376,8 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::Transaction(TransactionError::CoinbasePosition);
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let expected = SubsidyError::NoCoinbase;
     assert_eq!(expected, result);
 
     // Get another funding stream, and duplicate the coinbase transaction
@@ -400,10 +405,11 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        Amount::zero(),
     )
     .expect("valid block subsidy");
 
-    check::subsidy_is_valid(&block, &network, expected_block_subsidy)
+    subsidy_is_valid(&block, &network, expected_block_subsidy)
         .expect("subsidy does not check for extra coinbase transactions");
 
     Ok(())
@@ -432,11 +438,11 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
         if height >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network, Amount::zero())
                     .expect("valid block subsidy");
 
             // Validate
-            let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
+            let result = subsidy_is_valid(&block, &network, expected_block_subsidy);
             assert!(result.is_ok());
         }
     }
@@ -483,13 +489,12 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        Amount::zero(),
     )
     .expect("valid block subsidy");
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
-    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::FundingStreamNotFound,
-    )));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy);
+    let expected = Err(SubsidyError::FundingStreamNotFound);
     assert_eq!(expected, result);
 
     Ok(())
@@ -514,7 +519,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy = block_subsidy(height, &network)?;
+            let expected_block_subsidy = block_subsidy(height, &network, Amount::zero())?;
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let deferred_pool_balance_change =
                 match NetworkUpgrade::Canopy.activation_height(&network) {
@@ -524,7 +529,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
                     _other => DeferredPoolBalanceChange::zero(),
                 };
 
-            assert!(check::miner_fees_are_valid(
+            assert!(miner_fees_are_valid(
                 &coinbase_tx,
                 height,
                 // Set the miner fees to a high-enough amount.
@@ -547,7 +552,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
         .expect("block should deserialize");
     let height = block.coinbase_height().expect("valid coinbase height");
-    let expected_block_subsidy = block_subsidy(height, &network)?;
+    let expected_block_subsidy = block_subsidy(height, &network, Amount::zero())?;
     // See [ZIP-1015](https://zips.z.cash/zip-1015).
     let deferred_pool_balance_change = match NetworkUpgrade::Canopy.activation_height(&network) {
         Some(activation_height) if height >= activation_height => {
@@ -557,7 +562,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     };
 
     assert_eq!(
-        check::miner_fees_are_valid(
+        miner_fees_are_valid(
             check::coinbase_is_first(&block)?.as_ref(),
             height,
             // Set the miner fee to an invalid amount.
@@ -566,9 +571,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             deferred_pool_balance_change,
             &network
         ),
-        Err(BlockError::Transaction(TransactionError::Subsidy(
-            SubsidyError::InvalidMinerFees,
-        )))
+        Err(SubsidyError::InvalidMinerFees)
     );
 
     Ok(())
@@ -894,6 +897,19 @@ fn verify_block_error_misbehavior_scores() {
     assert_eq!(VerifyBlockError::Commit(dup_err).misbehavior_score(), 0);
 }
 
+/// Contextual payout failures must retain their peer penalty through state and router errors.
+#[test]
+fn contextual_subsidy_errors_score_through_router() {
+    let contextual = zs::ValidateContextError::Subsidy(SubsidyError::FundingStreamNotFound);
+    let source: BoxError = Box::new(zs::CommitSemanticallyVerifiedError::from(contextual));
+    let error = map_commit_error(source, block::Hash([1; 32]));
+    assert_eq!(error.misbehavior_score(), 100);
+    assert_eq!(
+        crate::router::RouterError::from(error).misbehavior_score(),
+        100
+    );
+}
+
 /// Duplicate block errors must stay classified as duplicate requests after the
 /// state wraps them, so they don't restart the syncer or turn `submitblock`
 /// duplicates into rejections.
@@ -1121,6 +1137,59 @@ async fn shielded_limits_precede_coinbase_recovery() {
         ),
         "{result:?}",
     );
+}
+
+/// From NU7, a coinbase transaction may only claim `MinerFees`, not the whole of the block's
+/// transaction fees: the rest is removed from circulation into the NSM reserve.
+#[test]
+fn nsm_fee_contribution_is_withheld_from_the_coinbase() -> Result<(), Report> {
+    use zebra_chain::{parameters::subsidy, transparent};
+
+    let _init_guard = zebra_test::init();
+    let network = nu7_network(1_000_000);
+    // Non-multiple of 10 exercises the flooring in `NSMFeeContribution`.
+    let transaction_fees = Amount::try_from(100_003)?;
+    let expected_miner_fees = subsidy::miner_fees(Height(1_000_000), &network, transaction_fees)?;
+
+    for (height, claimed_fees, expected) in [
+        (Height(1_000_000), expected_miner_fees, Ok(())),
+        (
+            Height(1_000_000),
+            transaction_fees,
+            Err(SubsidyError::InvalidMinerFees),
+        ),
+        (Height(999_999), transaction_fees, Ok(())),
+    ] {
+        let expected_block_subsidy = block_subsidy(height, &network, Amount::zero())?;
+        let coinbase = Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![transparent::Input::Coinbase {
+                height,
+                data: Vec::new(),
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: (expected_block_subsidy + claimed_fees)?,
+                lock_script: transparent::Script::new(&[0]),
+            }],
+            LockTime::Height(Height(0)),
+            height,
+        );
+        assert_eq!(
+            miner_fees_are_valid(
+                &coinbase,
+                height,
+                transaction_fees,
+                expected_block_subsidy,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+            ),
+            expected,
+            "claimed fees {claimed_fees:?} at {height:?}",
+        );
+    }
+
+    Ok(())
 }
 
 /// Pin each ZIP 218 limit's boundary and the global budget's weighting.

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: '[NU7](https://zips.z.cash/zip-0259) adds configurable NSM reissuance through `network.testnet_parameters.nsm_reissuance_height`, a nonzero height at or after NU7. Reissuance requires a positive coefficient, and schedule validation includes genesis issuance used by the historical seed. The reserve starts with historical unissued supply and funds additional subsidy, using parent-specific accounting across reorgs and restarts. Templates and `getblocksubsidy` include reissuance; unknown future parents are rejected. Proposal preflight checks the current parent and next height even if a caller supplies a pre-activation height. Public activation and reissuance heights remain unset. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-23T14:46:04.344494175+02:00

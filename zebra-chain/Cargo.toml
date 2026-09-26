@@ -54,6 +54,7 @@ bench = ["zebra-test"]
 
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 lazy_static = { workspace = true }
+mset.workspace = true
 tempfile = { workspace = true }
 bitvec = { workspace = true }
 bitflags = { workspace = true }

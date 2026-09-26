@@ -132,6 +132,7 @@ fn template_max_time_respects_network_height_gate() {
             Hash([0; 32]),
             &network,
             Arc::new(HistoryTree::default()),
+            Amount::zero(),
             now,
         )
         .expect("the template has a valid timestamp range");
@@ -180,6 +181,7 @@ fn template_times_respect_local_clock_bound() {
                 Hash([0; 32]),
                 &network,
                 Arc::new(HistoryTree::default()),
+                Amount::zero(),
                 now,
             );
 
@@ -241,6 +243,7 @@ fn template_times_near_timestamp_ceiling_stay_standard_difficulty() {
             Hash([0; 32]),
             &network,
             Arc::new(HistoryTree::default()),
+            Amount::zero(),
             now,
         )
         .expect("standard-difficulty timestamps remain representable");

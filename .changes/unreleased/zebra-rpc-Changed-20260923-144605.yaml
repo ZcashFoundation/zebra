@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Mining templates, coinbase caching, and `getblocksubsidy` use parent-specific total subsidy. Future coinbases are not precomputed when their NSM reserve is unknown, and subsidy queries requiring an unavailable parent return an error. On networks configured for NSM reissuance, proposal preflight checks the current parent and exact next height independently of caller-supplied heights, before transaction verification. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-23T14:46:05.450736496+02:00

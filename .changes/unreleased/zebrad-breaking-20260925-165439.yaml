@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'Custom networks with nonzero genesis transparent outputs must rebuild their state: those unspendable outputs no longer reduce the historical NSM reserve for [NU7](https://zips.z.cash/zip-0259). Public-network genesis outputs are zero, so public balances are unchanged. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))'
+time: 2026-09-25T16:54:39.364550411+02:00

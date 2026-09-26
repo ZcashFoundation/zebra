@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Late coinbase builds no longer replace cached entries for a newer height or subsidy context. The bounded cache retains zero-fee sizing work during fee changes. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))
+time: 2026-09-25T16:54:39.36090834+02:00

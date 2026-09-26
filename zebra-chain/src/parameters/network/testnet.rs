@@ -11,17 +11,16 @@ use crate::{
         network::error::ParametersBuilderError,
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
-            block_subsidy,
             constants::mainnet,
             constants::testnet,
             constants::{
                 BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
-                NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
+                NSM_LN2_SCALED, NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
                 PRE_BLOSSOM_HALVING_INTERVAL,
             },
             cumulative_scheduled_issuance_zatoshis, funding_stream_address_period,
-            height_for_halving, FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
-            ParameterSubsidy,
+            height_for_halving, scheduled_block_subsidy, FundingStreamReceiver,
+            FundingStreamRecipient, FundingStreams, ParameterSubsidy,
         },
         Network, NetworkKind, NetworkUpgrade,
     },
@@ -515,6 +514,8 @@ pub struct ParametersBuilder {
     checkpoints: Arc<CheckpointList>,
     /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
     temporary_orchard_disabling_soft_fork_height: Option<Height>,
+    /// First height eligible for reserve-funded subsidy.
+    nsm_reissuance_height: Option<Height>,
 }
 
 impl Default for ParametersBuilder {
@@ -554,6 +555,7 @@ impl Default for ParametersBuilder {
             temporary_orchard_disabling_soft_fork_height: Some(
                 super::TESTNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT,
             ),
+            nsm_reissuance_height: None,
         }
     }
 }
@@ -737,6 +739,7 @@ impl ParametersBuilder {
     /// This should be called after configuring the desired network upgrade activation heights.
     /// Validates the subsidy schedule as in [`Self::to_network`] before extending addresses.
     pub fn extend_funding_streams(mut self) -> Result<Self, ParametersBuilderError> {
+        self.validate_nsm_reissuance_height()?;
         let network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
 
@@ -786,7 +789,7 @@ impl ParametersBuilder {
     ///
     /// Returns an error if the interval is nonpositive, exceeds [`Height::MAX`], or funding
     /// streams already lock it. [`Self::to_network`] and [`Self::extend_funding_streams`] also
-    /// validate the full subsidy schedule, and funding stream address period.
+    /// validate the full subsidy schedule, funding stream address period, and NSM coefficient.
     pub fn with_halving_interval(
         mut self,
         pre_blossom_halving_interval: HeightDiff,
@@ -872,10 +875,32 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the first NSM reissuance height; validated against NU7 when building the network.
+    pub fn with_nsm_reissuance_height(mut self, height: Option<Height>) -> Self {
+        self.nsm_reissuance_height = height;
+        self
+    }
+
+    fn validate_nsm_reissuance_height(&self) -> Result<(), ParametersBuilderError> {
+        if let Some(height) = self.nsm_reissuance_height {
+            let activation = NetworkUpgrade::Nu7.activation_height(&self.to_network_unchecked());
+            if height == Height::MIN
+                || height > Height::MAX
+                || activation.is_none_or(|activation| height < activation)
+            {
+                return Err(ParametersBuilderError::InvalidNsmReissuanceHeight);
+            }
+        }
+        Ok(())
+    }
+
     fn validate_halving_interval(&self, network: &Network) -> Result<(), ParametersBuilderError> {
         if height_for_halving(1, network).is_none()
             || (!self.funding_streams.is_empty()
                 && network.funding_stream_address_change_interval() == 0)
+            || (self.nsm_reissuance_height.is_some()
+                && u64::try_from(network.post_nu7_halving_interval())
+                    .map_or(true, |interval| interval > NSM_LN2_SCALED))
         {
             return Err(ParametersBuilderError::InvalidHalvingInterval);
         }
@@ -906,12 +931,15 @@ impl ParametersBuilder {
 
         let mut total = cumulative_scheduled_issuance_zatoshis(Height::MAX, network)
             .map_err(|_| ParametersBuilderError::InvalidSubsidySchedule)?;
-        // Genesis is unspendable and is excluded from the monetary cap.
-        let genesis = block_subsidy(Height::MIN, network)
-            .map_err(|_| ParametersBuilderError::InvalidSubsidySchedule)?;
-        total = total
-            .checked_sub(u64::from(genesis))
-            .ok_or(ParametersBuilderError::InvalidSubsidySchedule)?;
+        // Genesis is unspendable, but NU7's historical reserve seed includes its scheduled
+        // subsidy even when no reissuance height has been configured yet.
+        if NetworkUpgrade::Nu7.activation_height(network).is_none() {
+            let genesis = scheduled_block_subsidy(Height::MIN, network)
+                .map_err(|_| ParametersBuilderError::InvalidSubsidySchedule)?;
+            total = total
+                .checked_sub(u64::from(genesis))
+                .ok_or(ParametersBuilderError::InvalidSubsidySchedule)?;
+        }
         if i128::from(total) > i128::from(MAX_MONEY) {
             return Err(ParametersBuilderError::InvalidSubsidySchedule);
         }
@@ -936,6 +964,7 @@ impl ParametersBuilder {
             lockbox_disbursements,
             checkpoints,
             temporary_orchard_disabling_soft_fork_height,
+            nsm_reissuance_height,
         } = self;
         Parameters {
             network_name,
@@ -953,6 +982,7 @@ impl ParametersBuilder {
             lockbox_disbursements,
             checkpoints,
             temporary_orchard_disabling_soft_fork_height,
+            nsm_reissuance_height,
         }
     }
 
@@ -964,8 +994,11 @@ impl ParametersBuilder {
     /// Checks subsidy, funding stream, and checkpoint parameters and builds a configured Testnet.
     ///
     /// Scheduled issuance through [`Height::MAX`] must not exceed [`MAX_MONEY`]. The scheduled
-    /// genesis subsidy is excluded because it is unspendable.
+    /// genesis subsidy is excluded only without NU7, which otherwise includes it in the NSM seed.
+    /// Reissuance also requires a post-NU7 halving interval no greater than `NSM_LN2_SCALED`,
+    /// so its integer coefficient is nonzero.
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
+        self.validate_nsm_reissuance_height()?;
         let network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
 
@@ -1004,6 +1037,7 @@ impl ParametersBuilder {
             lockbox_disbursements,
             checkpoints: _,
             temporary_orchard_disabling_soft_fork_height,
+            nsm_reissuance_height,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -1020,6 +1054,7 @@ impl ParametersBuilder {
             && self.lockbox_disbursements == lockbox_disbursements
             && self.temporary_orchard_disabling_soft_fork_height
                 == temporary_orchard_disabling_soft_fork_height
+            && self.nsm_reissuance_height == nsm_reissuance_height
     }
 }
 
@@ -1039,6 +1074,8 @@ pub struct RegtestParameters {
     /// Whether to allow coinbase spends to have transparent outputs (inverse of
     /// zcashd's `-regtestshieldcoinbase`).
     pub should_allow_unshielded_coinbase_spends: Option<bool>,
+    /// First height eligible for reserve-funded subsidy, at or after NU7.
+    pub nsm_reissuance_height: Option<Height>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -1084,6 +1121,8 @@ pub struct Parameters {
     checkpoints: Arc<CheckpointList>,
     /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
     temporary_orchard_disabling_soft_fork_height: Option<Height>,
+    /// First height eligible for reserve-funded subsidy.
+    nsm_reissuance_height: Option<Height>,
 }
 
 impl Default for Parameters {
@@ -1097,6 +1136,11 @@ impl Default for Parameters {
 }
 
 impl Parameters {
+    /// Returns the configured first NSM reissuance height.
+    pub fn nsm_reissuance_height(&self) -> Option<Height> {
+        self.nsm_reissuance_height
+    }
+
     /// Creates a new [`ParametersBuilder`].
     pub fn build() -> ParametersBuilder {
         ParametersBuilder::default()
@@ -1113,6 +1157,7 @@ impl Parameters {
             checkpoints,
             extend_funding_stream_addresses_as_required,
             should_allow_unshielded_coinbase_spends,
+            nsm_reissuance_height,
         }: RegtestParameters,
     ) -> Result<Self, ParametersBuilderError> {
         let mut parameters = Self::build()
@@ -1130,6 +1175,7 @@ impl Parameters {
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(activation_heights.for_regtest())?
+            .with_nsm_reissuance_height(nsm_reissuance_height)
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)?
             .with_funding_streams(funding_streams.unwrap_or_default())
             .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
@@ -1138,6 +1184,9 @@ impl Parameters {
         if Some(true) == extend_funding_stream_addresses_as_required {
             parameters = parameters.extend_funding_streams()?;
         }
+        // Regtest fixes slow start at zero and its pre-Blossom interval at 144, so every
+        // activation schedule stays below MAX_MONEY and has a positive NSM coefficient.
+        parameters.validate_nsm_reissuance_height()?;
 
         Ok(Self {
             network_name: "Regtest".to_string(),
@@ -1176,6 +1225,7 @@ impl Parameters {
             lockbox_disbursements: _,
             checkpoints: _,
             temporary_orchard_disabling_soft_fork_height: _,
+            nsm_reissuance_height: _,
         } = Self::new_regtest(Default::default()).expect("default regtest parameters are valid");
 
         self.network_name == network_name
@@ -1317,6 +1367,16 @@ impl Network {
             params.slow_start_shift()
         } else {
             SLOW_START_SHIFT
+        }
+    }
+
+    /// Returns the height at which NSM reissuance starts on this network, if it is assigned.
+    ///
+    /// Live network heights remain unassigned; custom networks may configure this at or after NU7.
+    pub fn nsm_reissuance_height(&self) -> Option<Height> {
+        match self {
+            Self::Mainnet => None,
+            Self::Testnet(parameters) => parameters.nsm_reissuance_height,
         }
     }
 

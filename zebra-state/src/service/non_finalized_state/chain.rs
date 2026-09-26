@@ -360,8 +360,9 @@ impl Chain {
     ///
     /// If the block is invalid, drops this chain, and returns an error.
     ///
-    /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
-    /// [`Self::update_chain_tip_with`] returns success.
+    /// The state service must also complete its other contextual checks, including reserve-funded
+    /// subsidy and miner fees. This method validates the chain updates in
+    /// [`Self::update_chain_tip_with`]; success alone does not establish contextual validity.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(mut self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members

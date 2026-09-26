@@ -613,11 +613,16 @@ struct DTestnetParameters {
     disable_pow: Option<bool>,
     genesis_hash: Option<String>,
     activation_heights: Option<ConfiguredActivationHeights>,
+    /// First height that reissues the NSM reserve on this configured network.
+    nsm_reissuance_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     /// Omission retains the default streams; an explicitly empty list disables them.
     /// An empty list cannot be combined with either legacy funding stream field.
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Must yield a supported first halving height and a schedule within the monetary cap.
+    /// Configured reissuance needs a positive coefficient; funding streams need a nonzero
+    /// address-change interval.
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     #[serde(default)]
@@ -702,6 +707,7 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
+            nsm_reissuance_height: params.nsm_reissuance_height(),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
@@ -912,6 +918,7 @@ where
         disable_pow,
         genesis_hash,
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -975,6 +982,8 @@ where
             .with_activation_heights(activation_heights)
             .map_err(de::Error::custom)?
     }
+
+    params_builder = params_builder.with_nsm_reissuance_height(nsm_reissuance_height);
 
     if let Some(halving_interval) = pre_blossom_halving_interval {
         params_builder = params_builder
@@ -1045,6 +1054,7 @@ where
 fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters, &'static str> {
     let DTestnetParameters {
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -1057,6 +1067,7 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
 
     Ok(RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
+        nsm_reissuance_height,
         funding_streams: merge_funding_streams(
             funding_streams,
             pre_nu6_funding_streams,
