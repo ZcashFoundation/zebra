@@ -227,7 +227,6 @@ impl InventoryRegistry {
     }
 
     /// Returns an iterator over addrs of peers that have recently missed `hash` in their inventory.
-    #[allow(dead_code)]
     pub fn missing_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
         self.status_peers(hash)
             .filter_map(|addr_status| addr_status.missing())
