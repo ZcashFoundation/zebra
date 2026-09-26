@@ -921,6 +921,8 @@ fn snapshot_rpc_getnetworkinfo(
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_peer_info", get_peer_info, {
+            // Peer versions vary; handshake tests cover protocol compatibility.
+            "[].version" => "[version]",
             "[].lastrecv" => dynamic_redaction(|value, _path| {
                 assert!(value.as_u64().unwrap() > 0, "lastrecv should be non-zero");
                 "[lastrecv]"

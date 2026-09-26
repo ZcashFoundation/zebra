@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '[ZIP 259](https://zips.z.cash/zip-0259) NU7 peer-version checks require 170180 on Testnet and Regtest and 170190 on Mainnet. Zebra advertises protocol version 170190. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
+time: 2026-09-23T14:46:07.662230567+02:00

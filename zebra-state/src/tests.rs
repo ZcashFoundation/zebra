@@ -85,3 +85,44 @@ fn round_trip_work_expanded() {
         prop_assert_eq!(work_before, work_after);
     });
 }
+
+#[test]
+fn configured_network_state_paths_are_isolated() {
+    use zebra_chain::parameters::{testnet, Magic, Network};
+
+    let config = crate::Config {
+        cache_dir: "cache".into(),
+        should_backup_non_finalized_state: true,
+        ..Default::default()
+    };
+    let networks = [0, 1].map(|byte| {
+        testnet::Parameters::build()
+            .with_network_magic(Magic([byte; 4]))
+            .unwrap()
+            .to_network()
+            .unwrap()
+    });
+    assert_ne!(
+        config.db_path("state", 1, &networks[0]),
+        config.db_path("state", 1, &networks[1]),
+    );
+    assert_ne!(
+        config.non_finalized_state_backup_dir(&networks[0]),
+        config.non_finalized_state_backup_dir(&networks[1]),
+    );
+
+    for network in [
+        Network::Mainnet,
+        Network::new_default_testnet(),
+        Network::new_regtest(Default::default()),
+    ] {
+        assert_eq!(
+            config.db_path("state", 1, &network),
+            std::path::Path::new("cache/state/v1").join(network.lowercase_name()),
+        );
+        assert_eq!(
+            config.non_finalized_state_backup_dir(&network),
+            Some(std::path::Path::new("cache/non_finalized_state").join(network.lowercase_name())),
+        );
+    }
+}

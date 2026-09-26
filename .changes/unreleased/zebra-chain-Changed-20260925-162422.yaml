@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`parameters::testnet::ParametersBuilder::with_network_name` rejects reserved network names case-insensitively. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
+time: 2026-09-25T16:24:22.271735037+02:00

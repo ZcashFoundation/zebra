@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Configured Testnets with consensus parameters incompatible with public Testnet must explicitly set distinct, non-reserved `network_magic` and use their own peers. Public seed hostnames are rejected regardless of case, trailing dots, or port. Empty peer lists and aliases do not permit public Testnet magic. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+time: 2026-09-24T01:49:28.183344818+02:00
