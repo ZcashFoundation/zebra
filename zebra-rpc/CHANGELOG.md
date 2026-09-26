@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Long polling `getblocktemplate` requests no longer build a coinbase transaction each, which ran a shielded proof per request for a miner address with a shielded component. The next tip's coinbase is built once and shared, and a request for a shielded miner address waits longer for the precomputed template rather than falling back to a build of its own ([#10747](https://github.com/ZcashFoundation/zebra/issues/10747)).
 - `z_gettreestate` no longer returns null commitments for a block it found when a concurrent reorg moves that block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).
 
+### Changed
+
+- The JSON-RPC version compatibility middleware no longer copies the request body an extra time when
+  building the rewritten request; the buffer is reclaimed in place when uniquely owned
+  ([#10574](https://github.com/ZcashFoundation/zebra/issues/10574)).
+
 ## [16.0.0] - 2026-08-10
 
 ### Breaking Changes
