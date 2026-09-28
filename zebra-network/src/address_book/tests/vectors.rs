@@ -1,6 +1,9 @@
 //! Fixed test vectors for the address book.
 
-use std::time::Instant;
+use std::{
+    net::IpAddr,
+    time::{Duration, Instant},
+};
 
 use chrono::Utc;
 use tracing::Span;
@@ -11,7 +14,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_PEER_MISBEHAVIOR_SCORE},
+    constants::{
+        BAN_DURATION, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
+        MAX_PEER_MISBEHAVIOR_SCORE,
+    },
     meta_addr::{MetaAddr, MetaAddrChange},
     protocol::external::types::PeerServices,
     AddressBook,
@@ -105,7 +111,7 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
     });
 
     assert!(
-        address_book.bans().contains_key(&banned_addr.ip()),
+        address_book.bans().is_banned(banned_addr.ip()),
         "ban-threshold misbehavior should ban the peer IP"
     );
     assert!(
@@ -459,7 +465,7 @@ fn ban_removes_every_entry_for_the_banned_ip() {
     });
 
     assert!(
-        address_book.bans().contains_key(&banned_addr.ip()),
+        address_book.bans().is_banned(banned_addr.ip()),
         "ban-threshold misbehavior should ban the peer IP",
     );
     assert_eq!(
@@ -478,5 +484,349 @@ fn ban_removes_every_entry_for_the_banned_ip() {
         candidates,
         vec![unrelated_addr],
         "a banned IP must never be a reconnection candidate",
+    );
+}
+
+/// A peer that rotates through the addresses of one IPv6 `/64` must not evade
+/// a misbehavior ban.
+///
+/// Bans used to be keyed by the full address, so a peer with a `/64` could
+/// misbehave from each of its 2^64 addresses in turn and never be shut out.
+#[test]
+fn ipv6_rotation_within_one_64_cannot_evade_a_ban() {
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: "[2001:db8::1]:8233".parse().unwrap(),
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    let group: IpAddr = "2001:db8::".parse().unwrap();
+    assert!(
+        address_book.bans().is_banned(group),
+        "the ban should be keyed on the /64, not the individual address"
+    );
+
+    // Every address in the banned /64 is now rejected, including ones that
+    // never misbehaved themselves.
+    let untouched: crate::PeerSocketAddr = "[2001:db8::dead:beef]:8233".parse().unwrap();
+    address_book.update(gossiped_change(
+        untouched,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    ));
+    assert!(
+        address_book.get(untouched).is_none(),
+        "a fresh address in the banned /64 must not be added to the address book"
+    );
+
+    // A different /64 is unaffected.
+    let other: crate::PeerSocketAddr = "[2001:db8:1::1]:8233".parse().unwrap();
+    address_book.update(gossiped_change(
+        other,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    ));
+    assert!(
+        address_book.get(other).is_some(),
+        "an address in a different /64 should still be accepted"
+    );
+}
+
+/// IPv4 peers are grouped per address, so one misbehaving IPv4 peer must not
+/// ban its neighbours.
+#[test]
+fn ipv4_ban_does_not_affect_neighbouring_addresses() {
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    let misbehaving: crate::PeerSocketAddr = "192.0.2.10:8233".parse().unwrap();
+    let neighbour: crate::PeerSocketAddr = "192.0.2.11:8233".parse().unwrap();
+
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: misbehaving,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    assert!(
+        address_book.bans().is_banned(misbehaving.ip()),
+        "the misbehaving IPv4 address should be banned"
+    );
+
+    address_book.update(gossiped_change(
+        neighbour,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    ));
+    assert!(
+        address_book.get(neighbour).is_some(),
+        "a neighbouring IPv4 address in the same /24 must not be banned"
+    );
+}
+
+/// Scores are not currently accumulated: a score at
+/// `MAX_PEER_MISBEHAVIOR_SCORE` bans the peer group on its own, and a score
+/// below it is dropped.
+///
+/// Every score Zebra produces is `0` or `MAX_PEER_MISBEHAVIOR_SCORE`, so a
+/// score below the threshold is a programming error, which the address book
+/// logs. It is still checked against the threshold rather than against zero, so
+/// this path keeps working if intermediate scores and accumulation are ever
+/// added back.
+///
+/// Change this test if we ever support partial scores.
+#[test]
+fn only_a_threshold_misbehavior_score_bans_the_peer_group() {
+    for (score, should_ban) in [
+        (1, false),
+        (MAX_PEER_MISBEHAVIOR_SCORE - 1, false),
+        (MAX_PEER_MISBEHAVIOR_SCORE, true),
+        (MAX_PEER_MISBEHAVIOR_SCORE + 1, true),
+    ] {
+        let mut address_book = AddressBook::new(
+            "0.0.0.0:0".parse().unwrap(),
+            &Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            Span::current(),
+        );
+
+        let misbehaving: crate::PeerSocketAddr = "[2001:db8::1]:8233".parse().unwrap();
+        address_book.update(MetaAddrChange::UpdateMisbehavior {
+            addr: misbehaving,
+            score_increment: score,
+        });
+
+        assert_eq!(
+            address_book.bans().is_banned(misbehaving.ip()),
+            should_ban,
+            "a misbehavior score of {score} should ban the peer group: {should_ban}"
+        );
+        assert_eq!(
+            address_book.misbehavior_score(misbehaving),
+            if should_ban {
+                MAX_PEER_MISBEHAVIOR_SCORE
+            } else {
+                0
+            },
+            "a score below the threshold is dropped, not stored: {score}"
+        );
+    }
+}
+
+/// The score reported for an address is its whole peer group's ban state, which
+/// is what `getpeerinfo` surfaces as `banscore`.
+#[test]
+fn misbehavior_score_is_reported_per_group() {
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    let banned: crate::PeerSocketAddr = "[2001:db8::1]:8233".parse().unwrap();
+    let sibling: crate::PeerSocketAddr = "[2001:db8::2]:8233".parse().unwrap();
+    let other_group: crate::PeerSocketAddr = "[2001:db8:1::1]:8233".parse().unwrap();
+
+    for addr in [banned, sibling, other_group] {
+        assert_eq!(
+            address_book.misbehavior_score(addr),
+            0,
+            "an unbanned group should report no score: {addr:?}"
+        );
+    }
+
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: banned,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    assert_eq!(
+        address_book.misbehavior_score(banned),
+        MAX_PEER_MISBEHAVIOR_SCORE,
+        "the banned address should report the ban score"
+    );
+    assert_eq!(
+        address_book.misbehavior_score(sibling),
+        MAX_PEER_MISBEHAVIOR_SCORE,
+        "a sibling in the same /64 should report the same score"
+    );
+    assert_eq!(
+        address_book.misbehavior_score(other_group),
+        0,
+        "an address in a different /64 should report no score"
+    );
+}
+
+/// A ban is enforced right up to `BAN_DURATION`, lapses at exactly
+/// `BAN_DURATION`, and the peer group is accepted again once it has.
+#[tokio::test(start_paused = true)]
+async fn bans_expire_after_the_ban_duration() {
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    let banned: crate::PeerSocketAddr = "[2001:db8::1]:8233".parse().unwrap();
+
+    // A fresh ban is enforced.
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: banned,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+    assert!(
+        address_book.bans().is_banned(banned.ip()),
+        "a fresh ban should be enforced"
+    );
+    address_book.update(gossiped_change(
+        banned,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    ));
+    assert!(
+        address_book.get(banned).is_none(),
+        "a banned peer should not be re-added to the address book"
+    );
+
+    // The ban is still enforced just before it lapses.
+    tokio::time::advance(BAN_DURATION - Duration::from_nanos(1)).await;
+    assert!(
+        address_book.bans().is_banned(banned.ip()),
+        "a ban should be enforced right up to BAN_DURATION"
+    );
+
+    // Then it lapses.
+    tokio::time::advance(Duration::from_nanos(1)).await;
+    assert!(
+        !address_book.bans().is_banned(banned.ip()),
+        "a ban should lapse at exactly BAN_DURATION"
+    );
+    assert_eq!(
+        address_book.misbehavior_score(banned),
+        0,
+        "a lapsed ban should no longer be reported as a score"
+    );
+
+    // The peer can be learned about again once its ban lapses.
+    let now: DateTime32 = Utc::now().try_into().expect("will succeed until 2038");
+    address_book.update(gossiped_change(banned, PeerServices::NODE_NETWORK, now));
+    assert!(
+        address_book.get(banned).is_some(),
+        "a peer whose ban has lapsed should be accepted again"
+    );
+}
+
+/// Applying a new ban prunes lapsed bans, so they don't occupy the
+/// `MAX_BANNED_IPS` slots that active bans need.
+#[tokio::test(start_paused = true)]
+async fn applying_a_ban_prunes_lapsed_bans() {
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    let lapsed: crate::PeerSocketAddr = "[2001:db8:1::1]:8233".parse().unwrap();
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: lapsed,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    tokio::time::advance(BAN_DURATION).await;
+    assert!(
+        !address_book.bans().is_banned(lapsed.ip()),
+        "the ban should have lapsed"
+    );
+    assert_eq!(
+        address_book.bans().len(),
+        1,
+        "the lapsed entry is still present until pruned"
+    );
+
+    // Banning another group prunes the lapsed entry.
+    let fresh: crate::PeerSocketAddr = "[2001:db8:2::1]:8233".parse().unwrap();
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: fresh,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    let bans = address_book.bans();
+    assert!(
+        !bans.is_banned("2001:db8:1::".parse::<IpAddr>().unwrap()),
+        "the lapsed ban should have been pruned"
+    );
+    assert!(
+        bans.is_banned("2001:db8:2::".parse::<IpAddr>().unwrap()),
+        "the new ban should be present"
+    );
+    assert_eq!(bans.len(), 1, "only the new ban should remain");
+}
+
+/// Once a group's ban lapses, misbehaving again bans the whole group for a full
+/// `BAN_DURATION`: the lapsed entry neither blocks nor shortens the new ban.
+///
+/// Changes from a banned group are rejected, so this is the only way a group
+/// can be banned twice through the address book.
+#[tokio::test(start_paused = true)]
+async fn a_lapsed_group_can_be_banned_again() {
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::current(),
+    );
+
+    let banned: crate::PeerSocketAddr = "[2001:db8::1]:8233".parse().unwrap();
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: banned,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+    assert!(address_book.bans().is_banned(banned.ip()));
+
+    tokio::time::advance(BAN_DURATION).await;
+    assert!(
+        !address_book.bans().is_banned(banned.ip()),
+        "the first ban should have lapsed"
+    );
+
+    // The group misbehaves again from a different address in the same /64.
+    let sibling: crate::PeerSocketAddr = "[2001:db8::2]:8233".parse().unwrap();
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: sibling,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    assert_eq!(
+        address_book.bans().len(),
+        1,
+        "the sibling address must share the banned group's entry"
+    );
+    assert!(
+        address_book.bans().is_banned(banned.ip()),
+        "the new ban should cover the whole group"
+    );
+
+    // The new ban runs for a full BAN_DURATION from the re-ban.
+    tokio::time::advance(BAN_DURATION - Duration::from_nanos(1)).await;
+    assert!(
+        address_book.bans().is_banned(banned.ip()),
+        "the new ban should be enforced right up to its own deadline"
+    );
+    tokio::time::advance(Duration::from_nanos(1)).await;
+    assert!(
+        !address_book.bans().is_banned(banned.ip()),
+        "the new ban should lapse BAN_DURATION after the re-ban"
     );
 }

@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: breaking
-body: "Replaced `groth16::Item::from_joinsplit` with `groth16::joinsplit_to_item`, which takes the `zcash_primitives` `JsDescription` that transactions now carry. The `groth16::Description` trait and `groth16::DescriptionWrapper` are removed, leaving a single JoinSplit primary-input encoder: the one the verifier uses ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
-time: 2026-08-13T12:00:00.000000000-03:00

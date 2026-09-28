@@ -397,8 +397,7 @@ pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
-/// The maximum number of peer misbehavior incidents before a peer is
-/// disconnected and banned.
+/// The misbehavior score that bans a peer group.
 pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
 
 /// The interval between flushes of batched peer misbehaviour updates into the address book.
@@ -417,6 +416,21 @@ pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The maximum number of banned IP addresses to be stored in-memory at any time.
 pub const MAX_BANNED_IPS: usize = 20_000;
+
+/// How long a peer group stays banned after reaching
+/// [`MAX_PEER_MISBEHAVIOR_SCORE`].
+///
+/// This matches `zcashd`'s and Bitcoin Core's `DEFAULT_MISBEHAVING_BANTIME`.
+///
+/// # Security
+///
+/// Bans must expire. A ban applies to a whole peer group, and an IPv6 `/64` can
+/// be shared by unrelated nodes at providers that allocate narrower prefixes per
+/// customer, so a permanent ban risks permanently isolating an honest peer.
+/// Expiry also bounds the damage from a misattributed score, at the cost of
+/// letting a genuinely malicious peer retry once the ban lapses — it is banned
+/// again as soon as it misbehaves again.
+pub const BAN_DURATION: Duration = Duration::from_secs(60 * 60 * 24);
 
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,

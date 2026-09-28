@@ -17,4 +17,16 @@ pub trait AddressBookPeers {
 
     /// Add a peer to the address book.
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool;
+
+    /// Returns the misbehavior score for the peer group containing `addr`:
+    /// [`MAX_PEER_MISBEHAVIOR_SCORE`](crate::constants::MAX_PEER_MISBEHAVIOR_SCORE)
+    /// if the group is banned, and `0` otherwise.
+    ///
+    /// Bans apply per peer group — one IPv4 address, or one IPv6 `/64` subnet —
+    /// so every address in a group reports the same score.
+    ///
+    /// Defaults to `0` for implementors that don't track misbehavior.
+    fn misbehavior_score(&self, _addr: PeerSocketAddr) -> u32 {
+        0
+    }
 }
