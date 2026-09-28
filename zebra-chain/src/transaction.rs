@@ -916,6 +916,36 @@ fn deserialize_and_check<R: std::io::Read>(
         )
     };
 
+    // # Consensus
+    //
+    // > [NU5 onward] If effectiveVersion ≥ 5, the nConsensusBranchId field MUST match the
+    // > consensus branch ID used for SIGHASH transaction hashes, as specified in [ZIP-244].
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    //
+    // > CONSENSUS_BRANCH_ID is the 4-byte little-endian encoding of the consensus branch ID
+    // > for the epoch of the block containing the transaction.
+    //
+    // <https://zips.z.cash/zip-0244#txid-digest>
+    //
+    // ZIP 229 introduces V6 at NU6.3, replacing the pre-NU6.3 version restriction with:
+    //
+    // > [NU6.3 onward] The transaction version number MUST be 4 or 5 or 6.
+    //
+    // <https://zips.z.cash/zip-0229#consensus-rules>
+    //
+    // Together, these rules exclude pre-NU6.3 branch IDs from V6 transactions.
+    // Older branch IDs select Orchard bundle versions that the V6 writer rejects.
+    // Reject them here so every successfully parsed transaction can be serialized.
+    if inner.version() == TxVersion::V6
+        && compat::branch_id_to_network_upgrade(inner.consensus_branch_id())
+            .is_none_or(|network_upgrade| network_upgrade < NetworkUpgrade::Nu6_3)
+    {
+        return Err(crate::serialization::SerializationError::Parse(
+            "v6 transaction must have a NU6.3 or later consensus branch ID",
+        ));
+    }
+
     // Validate coinbase inputs: the script length must be in bounds and the height
     // encoding must parse correctly. zcash_primitives accepts raw bytes without
     // validating either, so we validate explicitly here to preserve Zebra's

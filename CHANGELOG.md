@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 6.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.2) - 2026-09-25
+
+### Security
+
+- Fix a remotely triggerable denial of service when processing malformed V6 transactions ([GHSA-h5rr-8pqv-grp9](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h5rr-8pqv-grp9)).
+Originally reported by Google OSS-Fuzz; independently re-discovered by @v12security and @SphereDonout.
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@jvff
+
 ## [Zebra 6.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.1) - 2026-09-23
 
 ### Fixed
@@ -48,7 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Penalize coinbase scriptSig rewrite in inbound path ([GHSA-4f6v-mj46-gxg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4f6v-mj46-gxg3)). Thanks to @craftsoldier for reporting the issue.
 
 - Misbehaving peers can no longer avoid being banned by reconnecting from a different address in the same IPv6 `/64` allocation: bans now apply to the whole peer group ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
-- The syncer no longer restarts its sync round when a peer serves a block body whose authorizing data does not match the header commitment. The failure was an ordinary `Invalid` verification error, so it cancelled the round and idled the syncer for `SYNC_RESTART_DELAY`, and the block hash was dropped instead of being re-requested. The hash is canonical and only the served body was forged, so the syncer now continues the round and re-requests the body from another peer, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Blocks the state rejects because they were queued behind a forged body are re-requested the same way, without scoring the peers that served them.
+- The syncer no longer restarts its sync round when a peer serves a block body whose authorizing data does not match the header commitment. The failure was an ordinary `Invalid` verification error, so it cancelled the round and idled the syncer for `SYNC_RESTART_DELAY`, and the block hash was dropped instead of being re-requested. The hash is canonical and only the served body was forged, so the syncer now continues the round and re-requests the body from another peer, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Blocks the state rejects because they were queued behind a forged body are re-requested the same way, without scoring the peers that served them ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@Bortlesboat, @CodeMongerrr, @LarryRuane, @alchemydc, @andres-pcg, @aphelionz, @arya2, @conradoplg, @craftsoldier, @evan-forbes, @gustavovalverde, @jiehuo100net, @john-lawniczak, @mpguerra, @natalieesk, @oxarbitrage, @questfever, @robustfengbin, @str4d, @syszery and @upbqdn
 
 ## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 
