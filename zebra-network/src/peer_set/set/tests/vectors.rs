@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use futures::{stream, FutureExt as _, Stream, StreamExt};
+use futures::{stream, Future, FutureExt as _, Stream, StreamExt};
 use tokio::time::timeout;
 use tower::{
     discover::{Change, Discover},
@@ -29,7 +29,7 @@ use zebra_chain::{
 use crate::{
     constants::{
         CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
-        INVENTORY_BUSY_PEER_WAIT_TIMEOUT, REQUEST_TIMEOUT,
+        FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT, REQUEST_TIMEOUT,
     },
     peer::{
         ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
@@ -46,7 +46,10 @@ use crate::{
 };
 use tokio::sync::watch;
 
-use super::{mock_peer_discovery_with_start_height, PeerSetBuilder, PeerSetGuard, PeerVersions};
+use super::{
+    super::MAX_QUEUED_FIND_REQUESTS, mock_peer_discovery_with_start_height, PeerSetBuilder,
+    PeerSetGuard, PeerVersions,
+};
 
 #[test]
 fn peer_set_ready_single_connection() {
@@ -2139,6 +2142,446 @@ fn peer_set_ignores_disconnected_advertisers() {
             received_request(&mut handles[1]),
             None,
             "a block advertised by a disconnected peer should wait for the busy serving peer",
+        );
+    });
+}
+
+/// Returns a `FindBlocks` request for the tips of the chain.
+fn find_request() -> Request {
+    Request::FindBlocks {
+        known_blocks: vec![],
+        stop: None,
+    }
+}
+
+/// Answers a find request that a mock peer received, and asserts that `find_fut` resolves to
+/// that answer.
+async fn respond_to_find(
+    handle: &mut ClientTestHarness,
+    find_fut: impl Future<Output = Result<Response, BoxError>>,
+) {
+    let ClientRequest { request, tx, .. } = handle
+        .try_to_receive_outbound_client_request()
+        .request()
+        .expect("the peer should have received the find request");
+    assert_eq!(request, find_request());
+
+    let _ = tx.send(Ok(Response::BlockHashes(vec![])));
+    let response = timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, find_fut)
+        .await
+        .expect("the find request should resolve to the peer's response");
+    assert!(
+        matches!(response, Ok(Response::BlockHashes(ref hashes)) if hashes.is_empty()),
+        "unexpected response: {response:?}"
+    );
+}
+
+/// Check that when the only block-serving peer is busy, find requests wait for it, instead of
+/// going to a ready non-serving peer, which never answers them during the initial sync. The
+/// waiting request is routed to the serving peer as soon as it is ready again.
+///
+/// This is the slow initial sync from Zebra 6.4.1: block downloads kept every serving peer busy,
+/// so the syncer's tip extensions went to idle inbound peers, and timed out every round.
+#[test]
+fn peer_set_routes_queued_find_to_serving_peer_once_ready() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let mut find_fut = peer_ready.call(find_request());
+
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "find request should not be routed to the non-serving peer while a serving peer is busy",
+        );
+        assert!(
+            timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4, &mut find_fut)
+                .await
+                .is_err(),
+            "find request should wait while a serving peer is busy",
+        );
+
+        // Let the serving peer take its queued requests, so it becomes ready again.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+
+        // Polling the peer set routes the waiting find to the newly ready serving peer.
+        peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        respond_to_find(&mut handles[0], find_fut).await;
+        assert_eq!(received_request(&mut handles[1]), None);
+    });
+}
+
+/// Check that a queued find request is routed to the busy serving peer as soon as it becomes ready,
+/// even if the peer set gets no other requests. See
+/// [`peer_set_routes_queued_block_request_behind_buffer_without_other_requests`].
+#[test]
+fn peer_set_routes_queued_find_behind_buffer_without_other_requests() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
+
+        // Make the serving peer busy, then queue a find request for it. The mock peer channel holds
+        // 2 requests.
+        let mut futs = Vec::new();
+        for byte in [1, 9] {
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            futs.push(peer_ready.call(block_request(byte)));
+        }
+        let find_fut = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready")
+            .call(find_request());
+
+        // Let the buffer route the requests.
+        tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "find request should not be routed to the non-serving peer while a serving peer is busy",
+        );
+
+        // Receiving the serving peer's requests makes it ready. The test doesn't send any other
+        // requests to the peer set, so only the poll task can route the queued find.
+        tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
+
+        respond_to_find(&mut handles[0], find_fut).await;
+        assert_eq!(received_request(&mut handles[1]), None);
+    });
+}
+
+/// Check that find requests still go to non-serving peers immediately if no serving peer is
+/// connected.
+#[test]
+fn peer_set_routes_find_to_non_serving_peer_without_serving_peers() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&[PeerServices::empty(), PeerServices::empty()]);
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _find_fut = peer_ready.call(find_request());
+
+        let received = handles
+            .iter_mut()
+            .filter_map(received_request)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            received,
+            vec![find_request()],
+            "find requests should be routed to non-serving peers if no serving peer is connected",
+        );
+    });
+}
+
+/// Check that a queued find request is routed before a queued block request, when the busy serving
+/// peer they are both waiting for only has capacity for one of them.
+///
+/// The syncer can't download more blocks until its tips are extended, so finds go first.
+#[test]
+fn peer_set_routes_queued_find_before_queued_block_request() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // Queue a block request, then a find request, for the busy serving peer.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _block_fut = peer_ready.call(block_request(2));
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let find_fut = peer_ready.call(find_request());
+
+        assert_eq!(received_request(&mut handles[1]), None);
+
+        // Receiving one of the serving peer's requests makes it ready, with capacity for one more.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert!(
+            peer_set.cancel_handles.contains_key(&addrs[0]),
+            "serving peer should be busy again after taking one queued request",
+        );
+
+        // The first request the serving peer receives is the earlier queued block request. The
+        // queued find must be next, before the queued block request.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        respond_to_find(&mut handles[0], find_fut).await;
+        assert_eq!(
+            received_request(&mut handles[0]),
+            None,
+            "the queued block request should still be waiting for the serving peer",
+        );
+        assert_eq!(received_request(&mut handles[1]), None);
+    });
+}
+
+/// Check that a queued find request is sent to a ready non-serving peer once
+/// [`FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`] expires while the serving peer stays busy, even if the
+/// peer set gets no other requests and no peer changes state.
+///
+/// Like zebrad, the peer set is behind a `Buffer`, so only the task spawned by
+/// [`PeerSet::into_buffer`] can poll it when the wait times out.
+#[test]
+fn peer_set_routes_expired_find_to_non_serving_peer() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
+
+        // Make the serving peer busy, then queue a find request for it. The mock peer channel holds
+        // 2 requests.
+        let mut futs = Vec::new();
+        for byte in [1, 9] {
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            futs.push(peer_ready.call(block_request(byte)));
+        }
+        let mut find_fut = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready")
+            .call(find_request());
+
+        // The caller polls its find request, like the syncer does.
+        assert!(
+            timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 2, &mut find_fut)
+                .await
+                .is_err(),
+            "find request should wait while a serving peer is busy",
+        );
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "find request should not be routed to the non-serving peer before the wait times out",
+        );
+
+        // The serving peer stays busy past the wait timeout: the test doesn't receive its requests.
+        assert!(
+            timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, &mut find_fut)
+                .await
+                .is_err(),
+            "find request should wait for the non-serving peer's response",
+        );
+
+        respond_to_find(&mut handles[1], find_fut).await;
+    });
+}
+
+/// Check that find requests beyond the queue limit are routed to any ready peer immediately, so
+/// a syncer that is far behind isn't delayed further.
+#[test]
+fn peer_set_routes_find_beyond_queue_limit_to_any_peer() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // Fill the find queue.
+        let mut queued_futs = Vec::new();
+        for _ in 0..MAX_QUEUED_FIND_REQUESTS {
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            queued_futs.push(peer_ready.call(find_request()));
+        }
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "find requests should wait for the busy serving peer while the queue has room",
+        );
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _find_fut = peer_ready.call(find_request());
+
+        assert_eq!(
+            received_request(&mut handles[1]),
+            Some(find_request()),
+            "a find request beyond the queue limit should be routed to the non-serving peer",
+        );
+    });
+}
+
+/// Check that a find request whose wait timeout expires while no peer is ready keeps waiting,
+/// instead of failing, and is then sent to a serving peer once it becomes ready.
+#[test]
+fn peer_set_routes_expired_find_once_any_peer_is_ready() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // The only serving peer is busy, so the find waits for it.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let mut find_fut = peer_ready.call(find_request());
+
+        // Make the non-serving peer busy too, so no peer is ready when the wait expires.
+        let mut peers_futs = Vec::new();
+        for _ in 0..2 {
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            peers_futs.push(peer_ready.call(Request::Peers));
+        }
+        assert!(
+            peer_set.cancel_handles.contains_key(&addrs[1]),
+            "non-serving peer should be busy after 2 queued requests",
+        );
+
+        assert!(
+            timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT * 2, &mut find_fut)
+                .await
+                .is_err(),
+            "an expired find should keep waiting while no peer is ready",
+        );
+
+        // Let the serving peer take its queued requests, so it becomes ready again.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        respond_to_find(&mut handles[0], find_fut).await;
+        assert!(
+            !matches!(
+                received_request(&mut handles[1]),
+                Some(Request::FindBlocks { .. })
+            ),
+            "the find should not be sent to the non-serving peer",
+        );
+    });
+}
+
+/// Check that a find request whose caller gives up frees its queue slot for the next find.
+#[test]
+fn peer_set_frees_queue_slot_of_cancelled_find() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // Fill the queue while the only serving peer is busy.
+        let mut find_futs = Vec::new();
+        for _ in 0..MAX_QUEUED_FIND_REQUESTS {
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            find_futs.push(peer_ready.call(find_request()));
+        }
+        assert_eq!(received_request(&mut handles[1]), None);
+
+        // The caller of one queued find gives up, so the next find can take its slot.
+        drop(find_futs.pop());
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _next_find_fut = peer_ready.call(find_request());
+
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "the next find should wait in the freed queue slot, not go to the non-serving peer",
+        );
+        assert_eq!(
+            peer_set.queued_find_requests.len(),
+            MAX_QUEUED_FIND_REQUESTS,
+            "the cancelled find should have been replaced in the queue",
         );
     });
 }

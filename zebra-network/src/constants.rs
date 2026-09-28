@@ -170,6 +170,25 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// limit.
 pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
+/// How long a `FindBlocks`/`FindHeaders` request waits in the peer set for a busy block-serving
+/// peer to become ready, before it is sent to any ready peer.
+///
+/// During the initial sync, block downloads keep every block-serving peer busy, so the only ready
+/// peers are often inbound peers that don't serve blocks, and never answer find requests. Sending
+/// finds to those peers stalls the syncer: each tip extension round times out, then waits for the
+/// next round. The peer set waits for a serving peer instead, and routes the find to the first one
+/// that becomes ready. See `PeerSet::route_find`.
+///
+/// Waiting counts towards the caller's own timeout, which is zebrad's `TIPS_RESPONSE_TIMEOUT`
+/// (6 seconds). So this timeout must stay well under that: it only takes a fraction of the timeout
+/// budget, and leaves the serving peer most of the budget to answer. Block downloads typically
+/// finish in under a second, so a busy serving peer usually becomes ready well within this timeout.
+///
+/// Once this timeout expires, the find isn't failed: it is sent to any ready peer, like it was
+/// before serving peers were preferred. Waiting longer for a serving peer would risk no answer at
+/// all before the caller's timeout, and a non-serving peer might still answer.
+pub const FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
+
 /// The default peer address crawler interval.
 ///
 /// This should be at least [`HANDSHAKE_TIMEOUT`] lower than all other crawler

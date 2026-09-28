@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: '`PeerSet` now routes `FindBlocks` and `FindHeaders` requests to ready peers that advertised `NODE_NETWORK`, and queues them for up to `FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT` (1.5 seconds) while those peers are busy, before sending them to any ready peer. Queued finds are counted in `zcash.net.peer_set.find_queued`, and finds sent to a non-serving peer in `zcash.net.peer_set.find_fallback`.'
+time: 2026-09-25T14:13:45.816226397Z
