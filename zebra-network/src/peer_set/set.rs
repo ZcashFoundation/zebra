@@ -1317,7 +1317,7 @@ where
     fn route_find(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         let serving_only = !self.serving_peer_keys.is_empty();
 
-        if let Some(peer_key) = self.select_ready_find_peer(serving_only) {
+        if let Some(peer_key) = self.select_ready_find_peer(true) {
             return self.call_ready_find_peer(peer_key, req);
         }
 
@@ -1329,7 +1329,21 @@ where
         }
 
         match self.select_ready_find_peer(false) {
-            Some(peer_key) => self.call_ready_find_peer(peer_key, req),
+            Some(peer_key) => {
+                let reason = if serving_only {
+                    "queue_full"
+                } else {
+                    "no_serving_peer"
+                };
+                tracing::debug!(
+                    ?peer_key,
+                    reason,
+                    "no serving peer is ready, routing find to a non-serving peer"
+                );
+                metrics::counter!("zcash.net.peer_set.find_fallback", "reason" => reason)
+                    .increment(1);
+                self.call_ready_find_peer(peer_key, req)
+            }
             None => no_ready_peers_error(),
         }
     }
