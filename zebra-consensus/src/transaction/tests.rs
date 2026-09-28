@@ -5904,8 +5904,8 @@ fn the_sapling_cache_is_reused_only_for_the_transaction_that_earned_it() {
 }
 
 /// A V5 transaction with a pre-NU5 branch ID and a V6 with a pre-NU6.3 branch ID are rejected
-/// on both the block and mempool paths. Rejected at parse time before the `zcash_primitives`
-/// refactor, now by `check::consensus_branch_id` — pinned so a dependency bump can't drop it.
+/// on both the block and mempool paths. These transactions are constructed directly,
+/// bypassing the V6 parse-time branch ID check, to exercise `check::consensus_branch_id`.
 #[tokio::test]
 async fn tx_with_pre_activation_branch_id_is_rejected() {
     let network = Network::Mainnet;
