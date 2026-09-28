@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: breaking
-body: '`indexer::BlockAndHash` has a new `transaction_identifiers` field listing the ordered transaction IDs and authorizing data commitments of the block''s transactions, returned by `Indexer.GetBlock` and `NonFinalizedStateChange`; code that builds `BlockAndHash` with a struct literal must set it ([#PRNUM](https://github.com/ZcashFoundation/zebra/pull/PRNUM)).'
+body: '`indexer::BlockAndHash` has a new `transaction_identifiers` field listing the ordered transaction IDs and authorizing data commitments of the block''s transactions, returned by `Indexer.GetBlock` and `NonFinalizedStateChange`; code that builds `BlockAndHash` with a struct literal must set it ([#11535](https://github.com/ZcashFoundation/zebra/pull/11535)).'
 time: 2026-09-23T17:00:00.000000000Z
