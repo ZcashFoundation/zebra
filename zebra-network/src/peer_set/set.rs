@@ -1342,6 +1342,13 @@ where
         };
 
         if let Some(peer_key) = peer_key {
+            if is_find_request && !self.serving_peer_keys.contains(&peer_key) {
+                metrics::counter!(
+                    "zcash.net.peer_set.find_fallback",
+                    "reason" => "no_serving_peer"
+                )
+                .increment(1);
+            }
             return self.call_ready_peer(peer_key, req);
         }
 
@@ -1352,6 +1359,8 @@ where
                 return self.queue_find_request(req);
             }
             if let Some(peer_key) = self.select_ready_find_peer(true) {
+                metrics::counter!("zcash.net.peer_set.find_fallback", "reason" => "queue_full")
+                    .increment(1);
                 return self.call_ready_peer(peer_key, req);
             }
         }
