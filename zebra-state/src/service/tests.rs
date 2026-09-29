@@ -7,17 +7,21 @@
 use std::{env, sync::Arc, time::Duration};
 
 use tokio::runtime::Runtime;
-use tower::{buffer::Buffer, util::BoxService};
+use tower::{buffer::Buffer, util::BoxService, Service};
 
 use zebra_chain::{
     amount::DeferredPoolBalanceChange,
     block::{self, Block, CountedHeader, Height},
     chain_tip::ChainTip,
     fmt::SummaryDebug,
-    parameters::{Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    parameters::{
+        testnet::{ConfiguredActivationHeights, ParametersBuilder},
+        Network, NetworkUpgrade,
+    },
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction, transparent,
     value_balance::ValueBalance,
+    LedgerState,
 };
 
 use zebra_test::{prelude::*, transcript::Transcript};
@@ -25,9 +29,14 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     init_test,
-    service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
+    service::{
+        arbitrary::{populated_state, PreparedChain},
+        chain_tip::TipAction,
+        StateService,
+    },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, Config, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, KnownBlock, Request, Response,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -685,4 +694,143 @@ fn read_only_open_with_ephemeral_config_returns_error() {
             panic!("expected an error when opening a read-only state with an ephemeral config")
         }
     }
+}
+
+/// Returns a copy of `block` with one byte of its coinbase miner data flipped.
+///
+/// ZIP-244 excludes scriptSigs from v5 transaction IDs, so the block hash is unchanged,
+/// but the authorizing data commitment is not.
+fn coinbase_authorization_twin(block: &Arc<Block>) -> Arc<Block> {
+    let mut coinbase = block.transactions[0]
+        .zcash_serialize_to_vec()
+        .expect("coinbase serializes");
+
+    // A v5 header is 20 bytes, followed by the input count and the 36-byte null prevout.
+    const SCRIPT_LEN_OFFSET: usize = 20 + 1 + 36;
+    assert_eq!(
+        coinbase[SCRIPT_LEN_OFFSET - 4..SCRIPT_LEN_OFFSET],
+        [0xff; 4]
+    );
+    let script_end = SCRIPT_LEN_OFFSET + 1 + usize::from(coinbase[SCRIPT_LEN_OFFSET]);
+    coinbase[script_end - 1] ^= 0x01;
+
+    let coinbase: transaction::Transaction = coinbase
+        .zcash_deserialize_into()
+        .expect("mutated coinbase parses");
+
+    let mut twin = block.clone();
+    Arc::make_mut(&mut twin).transactions[0] = Arc::new(coinbase);
+    twin
+}
+
+/// Checks that a checkpoint block which fails the finalized commitment check, and the
+/// descendants dropped with it, are not reported as known, so they can be downloaded again
+/// and the honest block at the same hash can be committed without a restart.
+#[test]
+fn rejected_checkpoint_block_is_not_known_as_sent() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // Activate NU5 early, so the generated chain has v5 transactions and the finalized state
+    // checks the authorizing data commitment.
+    let network = ParametersBuilder::default()
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(3),
+            blossom: Some(4),
+            heartwood: Some(5),
+            canopy: Some(6),
+            nu5: Some(7),
+            ..Default::default()
+        })
+        .expect("valid activation heights")
+        .extend_funding_streams()
+        .to_network()
+        .expect("valid test network");
+    let ledger_strategy =
+        LedgerState::genesis_strategy(Some(network), NetworkUpgrade::Nu5, None, false);
+
+    proptest!(
+        ProptestConfig::with_cases(1),
+        |((chain, _count, network, _history_tree) in PreparedChain::default()
+            .with_ledger_strategy(ledger_strategy)
+            .with_valid_commitments()
+            .no_shrink())| {
+            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let honest_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
+            let honest = &chain[honest_index];
+            let child = &chain[honest_index + 1];
+            let parent_height = chain[honest_index - 1].height;
+
+            let twin = coinbase_authorization_twin(&honest.block);
+            prop_assert_eq!(twin.hash(), honest.hash);
+            prop_assert_ne!(twin.auth_data_root(), honest.block.auth_data_root());
+
+            let runtime = Runtime::new().unwrap();
+            // A large concurrency limit makes every block "close to the final checkpoint".
+            let (mut state, _, _, _) = runtime.block_on(StateService::new(
+                Config::ephemeral(),
+                &network,
+                child.height,
+                1_000,
+            ));
+
+            for block in chain.iter().take(honest_index) {
+                state
+                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
+                    .blocking_recv()
+                    .expect("write task responds")
+                    .expect("valid prefix commits");
+            }
+
+            // Send the child right behind the twin, so the write task drops it when the twin fails.
+            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
+            let child_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(child.block.clone()));
+
+            let twin_error = twin_rx.blocking_recv().expect("write task responds").expect_err("twin is rejected");
+            prop_assert!(
+                matches!(
+                    twin_error.inner(),
+                    CommitBlockError::ValidateContextError(error)
+                        if matches!(
+                            **error,
+                            ValidateContextError::InvalidBlockCommitment(
+                                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. }
+                            )
+                        )
+                ),
+                "unexpected twin error: {twin_error:?}"
+            );
+            // The write task drops the child after it sends the reset, so waiting for the child's
+            // response also guarantees the reset is queued before the checks below.
+            prop_assert!(child_rx.blocking_recv().is_err(), "dropped child gets no response");
+            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(parent_height));
+
+            // The rejected block and its dropped child must not be reported as sent.
+            for hash in [honest.hash, child.hash] {
+                let response = runtime
+                    .block_on(state.call(Request::KnownBlock(hash)))
+                    .expect("KnownBlock succeeds");
+                prop_assert_eq!(response, Response::KnownBlock(None));
+            }
+            prop_assert!(state.read_service.db.finalized_tip_height() < Some(honest.height));
+
+            // The honest block and its child commit without a restart.
+            for block in [honest, child] {
+                let committed = state
+                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
+                    .blocking_recv()
+                    .expect("write task responds")
+                    .expect("honest block commits");
+                prop_assert_eq!(committed, block.hash);
+            }
+            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(child.height));
+            let response = runtime
+                .block_on(state.call(Request::KnownBlock(honest.hash)))
+                .expect("KnownBlock succeeds");
+            prop_assert_eq!(response, Response::KnownBlock(Some(KnownBlock::WriteChannel)));
+        }
+    );
+
+    Ok(())
 }
