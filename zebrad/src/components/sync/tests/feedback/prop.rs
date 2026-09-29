@@ -11,6 +11,29 @@ use zebra_state as zs;
 use super::{TestScenario, FANOUT};
 
 proptest! {
+    /// An extend response without matching overlap receives stalled feedback.
+    #[test]
+    fn extend_response_without_matching_overlap_reports_stall(
+        hashes in vec(
+            any::<[u8; 32]>().prop_filter(
+                "response hashes differ from the expected overlap",
+                |hash| *hash != [1; 32],
+            ),
+            0..=0,
+        ),
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async {
+            let mut test = TestScenario::new();
+            let hashes = hashes.into_iter().map(Hash).collect();
+
+            let mut observer = test.raw_hashes_for_extend_tips(hashes).await;
+
+            assert_eq!(observer.try_outcome(), Ok(Some(false)));
+        });
+    }
+
     /// A matching overlap followed by a non-empty continuation receives useful feedback.
     #[test]
     fn extend_response_with_continuation_reports_useful_feedback(
