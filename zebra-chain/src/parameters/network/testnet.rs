@@ -481,6 +481,13 @@ pub struct ParametersBuilder {
     /// Whether to allow transactions with transparent outputs to spend coinbase outputs,
     /// similar to `fCoinbaseMustBeShielded` in zcashd.
     should_allow_unshielded_coinbase_spends: bool,
+    /// The NSM value balance seeded at NU7 activation under the halving-preserving issuance ZIP
+    #[cfg(zcash_unstable = "zip234")]
+    initial_nsm_value_balance: Amount<NonNegative>,
+    /// The height from which the halving-preserving issuance ZIP reissues the NSM value balance,
+    /// if not the NU7 activation height
+    #[cfg(zcash_unstable = "zip234")]
+    zip234_deployment_height: Option<Height>,
     /// The pre-Blossom halving interval for this network
     pre_blossom_halving_interval: HeightDiff,
     /// The post-Blossom halving interval for this network
@@ -522,6 +529,10 @@ impl Default for ParametersBuilder {
             pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
             post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
             should_allow_unshielded_coinbase_spends: false,
+            #[cfg(zcash_unstable = "zip234")]
+            initial_nsm_value_balance: Amount::zero(),
+            #[cfg(zcash_unstable = "zip234")]
+            zip234_deployment_height: None,
             lockbox_disbursements: testnet::NU6_1_LOCKBOX_DISBURSEMENTS
                 .iter()
                 .map(|(addr, amount)| (addr.to_string(), *amount))
@@ -764,6 +775,53 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the NSM value balance seeded at NU7 activation under the halving-preserving issuance
+    /// ZIP, `INITIAL_NSM_VALUE_BALANCE`.
+    ///
+    /// Configured Testnets and Regtest have no unclaimed value to recycle, so they default to
+    /// zero. Setting a value lets them exercise reissuance.
+    #[cfg(zcash_unstable = "zip234")]
+    pub fn with_initial_nsm_value_balance(
+        mut self,
+        initial_nsm_value_balance: Amount<NonNegative>,
+    ) -> Self {
+        self.initial_nsm_value_balance = initial_nsm_value_balance;
+        self
+    }
+
+    /// Sets the height from which the halving-preserving issuance ZIP reissues the NSM value
+    /// balance, `DEPLOYMENT_BLOCK_HEIGHT`.
+    ///
+    /// Without one, reissuance starts at the NU7 activation height. It must not be before the NU7
+    /// activation height.
+    #[cfg(zcash_unstable = "zip234")]
+    pub fn with_zip234_deployment_height(mut self, height: Height) -> Self {
+        self.zip234_deployment_height = Some(height);
+        self
+    }
+
+    /// Checks that any configured ZIP 234 deployment height is at or after the NU7 activation
+    /// height.
+    #[cfg(zcash_unstable = "zip234")]
+    fn check_zip234_deployment_height(&self) -> Result<(), ParametersBuilderError> {
+        let Some(deployment_height) = self.zip234_deployment_height else {
+            return Ok(());
+        };
+
+        let nu7_activation_height =
+            self.activation_heights
+                .iter()
+                .find_map(|(&height, &network_upgrade)| {
+                    (network_upgrade == NetworkUpgrade::Nu7).then_some(height)
+                });
+
+        if nu7_activation_height.is_none_or(|nu7_height| deployment_height < nu7_height) {
+            return Err(ParametersBuilderError::Zip234DeploymentHeightBeforeNu7);
+        }
+
+        Ok(())
+    }
+
     /// Sets the pre and post Blosssom halving intervals to be used in the [`Parameters`] being built.
     pub fn with_halving_interval(
         mut self,
@@ -858,6 +916,10 @@ impl ParametersBuilder {
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
+            #[cfg(zcash_unstable = "zip234")]
+            initial_nsm_value_balance,
+            #[cfg(zcash_unstable = "zip234")]
+            zip234_deployment_height,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
@@ -875,6 +937,10 @@ impl ParametersBuilder {
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
+            #[cfg(zcash_unstable = "zip234")]
+            initial_nsm_value_balance,
+            #[cfg(zcash_unstable = "zip234")]
+            zip234_deployment_height,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
@@ -890,6 +956,9 @@ impl ParametersBuilder {
 
     /// Checks funding streams and converts the builder to a configured [`Network::Testnet`]
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
+        #[cfg(zcash_unstable = "zip234")]
+        self.check_zip234_deployment_height()?;
+
         let network = self.to_network_unchecked();
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
@@ -922,12 +991,23 @@ impl ParametersBuilder {
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
+            #[cfg(zcash_unstable = "zip234")]
+            initial_nsm_value_balance,
+            #[cfg(zcash_unstable = "zip234")]
+            zip234_deployment_height,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints: _,
             temporary_orchard_disabling_soft_fork_height: _,
         } = Self::default();
+
+        // These parameters only exist with `zcash_unstable = "zip234"`.
+        #[cfg(zcash_unstable = "zip234")]
+        let zip234_parameters_match = self.initial_nsm_value_balance == initial_nsm_value_balance
+            && self.zip234_deployment_height == zip234_deployment_height;
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let zip234_parameters_match = true;
 
         self.activation_heights == activation_heights
             && self.network_magic == network_magic
@@ -938,6 +1018,7 @@ impl ParametersBuilder {
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
                 == should_allow_unshielded_coinbase_spends
+            && zip234_parameters_match
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
             && self.lockbox_disbursements == lockbox_disbursements
@@ -960,6 +1041,13 @@ pub struct RegtestParameters {
     /// Whether to allow coinbase spends to have transparent outputs (inverse of
     /// zcashd's `-regtestshieldcoinbase`).
     pub should_allow_unshielded_coinbase_spends: Option<bool>,
+    /// The NSM value balance seeded at NU7 activation under the halving-preserving issuance ZIP.
+    #[cfg(zcash_unstable = "zip234")]
+    pub initial_nsm_value_balance: Option<Amount<NonNegative>>,
+    /// The height from which the halving-preserving issuance ZIP reissues the NSM value balance.
+    /// If unset, reissuance starts at the NU7 activation height.
+    #[cfg(zcash_unstable = "zip234")]
+    pub zip234_deployment_height: Option<Height>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -995,6 +1083,13 @@ pub struct Parameters {
     /// Whether to allow transactions with transparent outputs to spend coinbase outputs,
     /// similar to `fCoinbaseMustBeShielded` in zcashd.
     should_allow_unshielded_coinbase_spends: bool,
+    /// The NSM value balance seeded at NU7 activation under the halving-preserving issuance ZIP
+    #[cfg(zcash_unstable = "zip234")]
+    initial_nsm_value_balance: Amount<NonNegative>,
+    /// The height from which the halving-preserving issuance ZIP reissues the NSM value balance,
+    /// if not the NU7 activation height
+    #[cfg(zcash_unstable = "zip234")]
+    zip234_deployment_height: Option<Height>,
     /// Pre-Blossom halving interval for this network
     pre_blossom_halving_interval: HeightDiff,
     /// Post-Blossom halving interval for this network
@@ -1034,6 +1129,10 @@ impl Parameters {
             checkpoints,
             extend_funding_stream_addresses_as_required,
             should_allow_unshielded_coinbase_spends,
+            #[cfg(zcash_unstable = "zip234")]
+            initial_nsm_value_balance,
+            #[cfg(zcash_unstable = "zip234")]
+            zip234_deployment_height,
         }: RegtestParameters,
     ) -> Result<Self, ParametersBuilderError> {
         let mut parameters = Self::build()
@@ -1059,6 +1158,19 @@ impl Parameters {
         if Some(true) == extend_funding_stream_addresses_as_required {
             parameters = parameters.extend_funding_streams();
         }
+
+        #[cfg(zcash_unstable = "zip234")]
+        if let Some(initial_nsm_value_balance) = initial_nsm_value_balance {
+            parameters = parameters.with_initial_nsm_value_balance(initial_nsm_value_balance);
+        }
+
+        #[cfg(zcash_unstable = "zip234")]
+        if let Some(zip234_deployment_height) = zip234_deployment_height {
+            parameters = parameters.with_zip234_deployment_height(zip234_deployment_height);
+        }
+
+        #[cfg(zcash_unstable = "zip234")]
+        parameters.check_zip234_deployment_height()?;
 
         Ok(Self {
             network_name: "Regtest".to_string(),
@@ -1092,6 +1204,12 @@ impl Parameters {
             disable_pow,
             // Configurable on Regtest
             should_allow_unshielded_coinbase_spends: _,
+            // Configurable on Regtest
+            #[cfg(zcash_unstable = "zip234")]
+                initial_nsm_value_balance: _,
+            // Configurable on Regtest
+            #[cfg(zcash_unstable = "zip234")]
+                zip234_deployment_height: _,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements: _,
@@ -1158,6 +1276,29 @@ impl Parameters {
     /// that spend coinbase outputs.
     pub fn should_allow_unshielded_coinbase_spends(&self) -> bool {
         self.should_allow_unshielded_coinbase_spends
+    }
+
+    /// Returns `INITIAL_NSM_VALUE_BALANCE` for this network: the NSM value balance seeded at NU7
+    /// activation under the halving-preserving issuance ZIP.
+    #[cfg(zcash_unstable = "zip234")]
+    pub fn initial_nsm_value_balance(&self) -> Amount<NonNegative> {
+        self.initial_nsm_value_balance
+    }
+
+    /// Returns `DEPLOYMENT_BLOCK_HEIGHT` for this network: the height from which the
+    /// halving-preserving issuance ZIP reissues the NSM value balance.
+    ///
+    /// This is the configured `zip234_deployment_height`, or the NU7 activation height if none is
+    /// configured. The default Testnet has neither, so it has none.
+    #[cfg(zcash_unstable = "zip234")]
+    pub fn zip234_deployment_height(&self) -> Option<Height> {
+        self.zip234_deployment_height.or_else(|| {
+            self.activation_heights
+                .iter()
+                .find_map(|(&height, &network_upgrade)| {
+                    (network_upgrade == NetworkUpgrade::Nu7).then_some(height)
+                })
+        })
     }
 
     /// Returns the pre-Blossom halving interval for this network

@@ -34,7 +34,15 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
+#[cfg(not(zcash_unstable = "zip234"))]
 const DATABASE_FORMAT_VERSION: u64 = 28;
+
+/// The `nsm` chain value pool widens the `ValueBalance` serialization from 48 to 56 bytes, so
+/// `zcash_unstable = "zip234"` builds use their own `state/v29` directory instead of upgrading a
+/// v28 database in place. Read code still accepts the narrower records, see
+/// [`ValueBalance::from_bytes`](zebra_chain::value_balance::ValueBalance::from_bytes).
+#[cfg(zcash_unstable = "zip234")]
+const DATABASE_FORMAT_VERSION: u64 = 29;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.

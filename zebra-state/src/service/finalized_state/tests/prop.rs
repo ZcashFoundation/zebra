@@ -78,7 +78,18 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
-        .extend_funding_streams()
+        .extend_funding_streams();
+
+    // Seed the NSM value balance at NU7 activation, so that committing blocks past it reissues
+    // from the balance and debits it.
+    #[cfg(zcash_unstable = "zip234")]
+    let initial_nsm_value_balance =
+        zebra_chain::amount::Amount::try_from(10 * zebra_chain::amount::COIN)
+            .expect("valid amount");
+    #[cfg(zcash_unstable = "zip234")]
+    let network = network.with_initial_nsm_value_balance(initial_nsm_value_balance);
+
+    let network = network
         .to_network()
         .expect("failed to build configured network");
     let ledger_strategy =
@@ -132,6 +143,27 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             }
             // Make sure the failure path was triggered
             prop_assert_eq!(failure_count, 4);
+
+            // The finalized state tracked the NSM value balance from NU7 activation: seeded, then
+            // debited by each block's additional subsidy.
+            #[cfg(zcash_unstable = "zip234")]
+            {
+                use zebra_chain::parameters::subsidy::additional_block_subsidy;
+
+                let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();
+                let tip_height = state.finalized_tip_height().unwrap();
+                prop_assert!(tip_height >= nu7_height, "the chain must reach NU7");
+
+                let mut expected = initial_nsm_value_balance;
+                for height in (nu7_height.0..=tip_height.0).map(Height) {
+                    expected = (expected - additional_block_subsidy(height, &network, expected))
+                        .expect("the balance never goes negative");
+                }
+
+                prop_assert_eq!(state.finalized_value_pool().nsm_amount(), expected);
+                prop_assert!(expected > zebra_chain::amount::Amount::<zebra_chain::amount::NonNegative>::zero());
+                prop_assert!(expected < initial_nsm_value_balance);
+            }
     });
 
     Ok(())

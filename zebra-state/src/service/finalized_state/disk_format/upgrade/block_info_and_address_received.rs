@@ -176,16 +176,24 @@ impl DiskFormatUpgrade for Upgrade {
                 } => (block, size, utxos, address_balance_changes),
             };
 
+            let deferred_pool_balance_change =
+                calculate_deferred_pool_balance_change(height, &network, value_pool);
+
+            #[cfg_attr(not(zcash_unstable = "zip234"), allow(unused_mut))]
+            let mut block_value_pool_change = block
+                .chain_value_pool_change(&utxos, deferred_pool_balance_change)
+                .unwrap_or_default();
+
+            #[cfg(zcash_unstable = "zip234")]
+            block_value_pool_change.set_nsm_amount(
+                zebra_chain::parameters::subsidy::nsm_value_balance_change(
+                    height, &network, value_pool,
+                ),
+            );
+
             // Add this block's value pool changes to the total value pool.
             value_pool = value_pool
-                .add_chain_value_pool_change(
-                    block
-                        .chain_value_pool_change(
-                            &utxos,
-                            calculate_deferred_pool_balance_change(height, &network),
-                        )
-                        .unwrap_or_default(),
-                )
+                .add_chain_value_pool_change(block_value_pool_change)
                 .expect("value pool change should not overflow");
 
             let mut batch = DiskWriteBatch::new();

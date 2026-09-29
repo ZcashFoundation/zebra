@@ -19,6 +19,17 @@ use crate::{
     BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::{
+    amount::{Amount, NonNegative},
+    parameters::subsidy::{self, CoinbaseTransactionError, SubsidyError},
+    transparent::utxos_from_ordered_utxos,
+    value_balance::ValueBalance,
+};
+
+#[cfg(zcash_unstable = "zip234")]
+use crate::ContextuallyVerifiedBlock;
+
 // use self as check
 use super::check;
 
@@ -415,4 +426,69 @@ pub(crate) fn initial_contextual_validity(
     check::nullifier::no_duplicates_in_finalized_chain(semantically_verified, finalized_state)?;
 
     Ok(())
+}
+
+/// Checks the block subsidy, funding streams, and miner fees paid by `contextual`'s coinbase
+/// transaction, from the ZIP 234 deployment height.
+///
+/// The block verifier checks the subsidy, funding streams and miner fees before the deployment
+/// height. From then on the block subsidy depends on the NSM value balance after the parent block,
+/// which is only known during contextual validation, so the checks run here instead.
+///
+/// [zip]: https://github.com/zcash/zips/pull/1354
+#[cfg(zcash_unstable = "zip234")]
+pub(crate) fn zip234_subsidy_is_valid(
+    contextual: &ContextuallyVerifiedBlock,
+    network: &Network,
+    parent_chain_value_pools: ValueBalance<NonNegative>,
+) -> Result<(), ValidateContextError> {
+    let invalid_subsidy =
+        |subsidy_error: CoinbaseTransactionError| ValidateContextError::InvalidSubsidy {
+            subsidy_error,
+            height: contextual.height,
+            block_hash: contextual.hash,
+        };
+
+    let expected_block_subsidy = subsidy::block_subsidy_with_parent_pools(
+        contextual.height,
+        network,
+        parent_chain_value_pools,
+    )
+    .map_err(|error| invalid_subsidy(error.into()))?;
+
+    let deferred_pool_balance_change =
+        subsidy::subsidy_is_valid(&contextual.block, network, expected_block_subsidy)
+            .map_err(invalid_subsidy)?;
+
+    let coinbase_tx = contextual
+        .block
+        .transactions
+        .first()
+        .ok_or_else(|| invalid_subsidy(SubsidyError::NoCoinbase.into()))?;
+
+    let spent_utxos = utxos_from_ordered_utxos(contextual.spent_outputs.clone());
+    let block_miner_fees = contextual
+        .block
+        .transactions
+        .iter()
+        .filter(|transaction| !transaction.is_coinbase())
+        .try_fold(Amount::<NonNegative>::zero(), |fees, transaction| {
+            let miner_fee = transaction
+                .value_balance(&spent_utxos)
+                .map_err(|_| SubsidyError::InvalidMinerFees)?
+                .remaining_transaction_value()?;
+
+            Ok::<_, SubsidyError>((fees + miner_fee)?)
+        })
+        .map_err(|error| invalid_subsidy(error.into()))?;
+
+    subsidy::miner_fees_are_valid(
+        coinbase_tx,
+        contextual.height,
+        block_miner_fees,
+        expected_block_subsidy,
+        deferred_pool_balance_change,
+        network,
+    )
+    .map_err(invalid_subsidy)
 }

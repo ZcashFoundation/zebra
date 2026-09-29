@@ -482,6 +482,18 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
+    #[cfg(zcash_unstable = "zip234")]
+    #[error(
+        "invalid block subsidy, funding stream, or miner fee payment in block {block_hash:?} at \
+         {height:?}: {subsidy_error}"
+    )]
+    #[non_exhaustive]
+    InvalidSubsidy {
+        subsidy_error: zebra_chain::parameters::subsidy::CoinbaseTransactionError,
+        height: block::Height,
+        block_hash: block::Hash,
+    },
+
     #[error("error updating a note commitment tree: {0}")]
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
@@ -608,6 +620,10 @@ impl ValidateContextError {
             ValidateContextError::InvalidBlockCommitment(
                 block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
             ) => 100,
+            // A wrong block subsidy, funding stream, or miner fee payment is invalid given only
+            // the block and its parent, so the peer that sent it is misbehaving.
+            #[cfg(zcash_unstable = "zip234")]
+            ValidateContextError::InvalidSubsidy { .. } => 100,
             _other => 0,
         }
     }
@@ -730,5 +746,20 @@ mod tests {
         .for_descendant(forged_hash);
         assert_eq!(other_child_err.misbehavior_score(), 0);
         assert!(!other_child_err.is_descendant_of_auth_commitment_mismatch());
+    }
+
+    #[cfg(zcash_unstable = "zip234")]
+    #[test]
+    fn invalid_subsidy_commit_error_misbehavior_score() {
+        use zebra_chain::parameters::subsidy::{CoinbaseTransactionError, SubsidyError};
+
+        let subsidy_err = CommitBlockError::ValidateContextError(Box::new(
+            ValidateContextError::InvalidSubsidy {
+                subsidy_error: CoinbaseTransactionError::Subsidy(SubsidyError::InvalidMinerFees),
+                height: Height(5),
+                block_hash: zebra_chain::block::Hash([0; 32]),
+            },
+        ));
+        assert_eq!(subsidy_err.misbehavior_score(), 100);
     }
 }

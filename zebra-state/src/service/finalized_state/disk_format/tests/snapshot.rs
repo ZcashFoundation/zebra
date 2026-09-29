@@ -144,6 +144,18 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             // The note commitment tree snapshots will change if the trees do not have cached roots.
             // But we expect them to always have cached roots,
             // because those roots are used to populate the anchor column families.
+            //
+            // With `zcash_unstable = "zip234"`, the `ValueBalance` records in these two column
+            // families are eight bytes wider, because of the NSM value balance. They get their own
+            // snapshots, so the other column families keep sharing theirs with the default build.
+            let cf_name = if cfg!(zcash_unstable = "zip234")
+                && matches!(cf_name.as_str(), "tip_chain_value_pool" | "block_info")
+            {
+                format!("{cf_name}_zip234")
+            } else {
+                cf_name.clone()
+            };
+
             insta::assert_ron_snapshot!(format!("{cf_name}_raw_data"), cf_data);
         }
     }

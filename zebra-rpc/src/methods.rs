@@ -2612,7 +2612,8 @@ where
     ) -> Result<GetBlockTemplateResponse> {
         use types::get_block_template::{
             check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
-            validate_block_proposal, zip317::select_mempool_transactions,
+            nsm_value_balance_for_next_block, validate_block_proposal,
+            zip317::select_mempool_transactions,
         };
 
         // Clone Services
@@ -2850,6 +2851,8 @@ where
 
         // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
+        let parent_nsm_value_balance = nsm_value_balance_for_next_block(&self.network, &chain_info);
+
         let mempool_txs = select_mempool_transactions(
             &self.network,
             height,
@@ -2857,6 +2860,7 @@ where
             mempool_txs,
             mempool_tx_deps,
             Some(&coinbase_cache),
+            parent_nsm_value_balance,
         );
 
         tracing::debug!(
@@ -3151,6 +3155,41 @@ where
             None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
+        // From the ZIP 234 deployment height, the block subsidy depends on the NSM
+        // value balance after the parent block, so it is only known up to the block after the
+        // best chain tip.
+        #[cfg(zcash_unstable = "zip234")]
+        let subsidy = if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &net)
+        {
+            let parent_height = (height - 1).ok_or_misc_error("height 0 has no parent block")?;
+
+            let zebra_state::ReadResponse::BlockInfo(parent_block_info) = self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::BlockInfo(parent_height.into()))
+                .await
+                .map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockInfo request")
+            };
+
+            let parent_chain_value_pools = *parent_block_info
+                .ok_or_misc_error(
+                    "the block subsidy is only known up to the block after the best chain tip \
+                     from the ZIP 234 deployment height",
+                )?
+                .value_pools();
+
+            zebra_chain::parameters::subsidy::block_subsidy_with_parent_pools(
+                height,
+                &net,
+                parent_chain_value_pools,
+            )
+            .map_misc_error()?
+        } else {
+            block_subsidy(height, &net).map_misc_error()?
+        };
+        #[cfg(not(zcash_unstable = "zip234"))]
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =

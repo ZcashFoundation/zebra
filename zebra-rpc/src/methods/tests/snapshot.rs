@@ -1193,6 +1193,8 @@ pub async fn test_mining_rpcs<State, ReadState>(
                     min_time: fake_min_time,
                     max_time: fake_max_time,
                     chain_history_root: fake_history_tree(network).hash(),
+                    #[cfg(zcash_unstable = "zip234")]
+                    chain_value_pools: Default::default(),
                 }));
         }
     };

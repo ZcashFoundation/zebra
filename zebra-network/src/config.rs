@@ -620,6 +620,12 @@ struct DTestnetParameters {
     temporary_orchard_disabling_soft_fork_height: Option<u32>,
     /// Regtest only: whether to allow coinbase spends to have transparent outputs.
     should_allow_unshielded_coinbase_spends: Option<bool>,
+
+    /// Regtest and configured Testnets only: the NSM value balance seeded at NU7 activation
+    /// under the halving-preserving issuance ZIP.
+    #[cfg(zcash_unstable = "zip234")]
+    initial_nsm_value_balance:
+        Option<zebra_chain::amount::Amount<zebra_chain::amount::NonNegative>>,
 }
 
 /// Network configuration used during deserialization.
@@ -692,6 +698,8 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             activation_heights: Some(params.activation_heights().into()),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
+            #[cfg(zcash_unstable = "zip234")]
+            initial_nsm_value_balance: Some(params.initial_nsm_value_balance()),
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
                 params
@@ -908,6 +916,8 @@ where
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
         should_allow_unshielded_coinbase_spends,
+        #[cfg(zcash_unstable = "zip234")]
+        initial_nsm_value_balance,
     } = params;
 
     // This is a Regtest-only consensus knob, so reject it rather than silently ignoring it.
@@ -918,6 +928,11 @@ where
     }
 
     let mut params_builder = testnet::Parameters::build();
+
+    #[cfg(zcash_unstable = "zip234")]
+    if let Some(initial_nsm_value_balance) = initial_nsm_value_balance {
+        params_builder = params_builder.with_initial_nsm_value_balance(initial_nsm_value_balance);
+    }
 
     if let Some(network_name) = network_name.clone() {
         params_builder = params_builder
@@ -1031,6 +1046,8 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
         checkpoints,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
+        #[cfg(zcash_unstable = "zip234")]
+        initial_nsm_value_balance,
         ..
     } = params;
 
@@ -1051,5 +1068,10 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
         checkpoints: Some(checkpoints),
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
+        #[cfg(zcash_unstable = "zip234")]
+        initial_nsm_value_balance,
+        // Reissuance starts at NU7 activation on Regtest; tests set a later height in code.
+        #[cfg(zcash_unstable = "zip234")]
+        zip234_deployment_height: None,
     }
 }

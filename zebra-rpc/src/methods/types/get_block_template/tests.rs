@@ -182,11 +182,14 @@ fn coinbase_cache_reuses_built_coinbase() {
     );
 
     let cache = CoinbaseCache::default();
-    assert!(cache.get(height, fee).is_none(), "an empty cache misses");
+    assert!(
+        cache.get(height, fee, None).is_none(),
+        "an empty cache misses"
+    );
 
-    cache.store(height, fee, coinbase.clone());
+    cache.store(height, fee, None, coinbase.clone());
     assert_eq!(
-        cache.get(height, fee),
+        cache.get(height, fee, None),
         Some(coinbase.clone()),
         "a cache hit reuses the stored coinbase",
     );
@@ -194,7 +197,7 @@ fn coinbase_cache_reuses_built_coinbase() {
     // A different height key misses, so the next request rebuilds.
     let next_height = height.next().expect("height is below Height::MAX");
     assert!(
-        cache.get(next_height, fee).is_none(),
+        cache.get(next_height, fee, None).is_none(),
         "a different height misses"
     );
 }
@@ -249,17 +252,17 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
     )
     .unwrap();
 
-    cache.store(height, zero_fee, fake_coinbase.clone());
-    cache.store(height, real_fee, real_coinbase.clone());
+    cache.store(height, zero_fee, None, fake_coinbase.clone());
+    cache.store(height, real_fee, None, real_coinbase.clone());
 
     // Both entries coexist — the zero-fee sizing coinbase survives the real-fee store.
     assert_eq!(
-        cache.get(height, zero_fee),
+        cache.get(height, zero_fee, None),
         Some(fake_coinbase),
         "zero-fee fake coinbase should still be cached after storing real-fee coinbase"
     );
     assert_eq!(
-        cache.get(height, real_fee),
+        cache.get(height, real_fee, None),
         Some(real_coinbase),
         "real-fee coinbase should be cached"
     );
@@ -283,14 +286,14 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
     )
     .unwrap();
 
-    cache.store(next_height, zero_fee, next_coinbase.clone());
+    cache.store(next_height, zero_fee, None, next_coinbase.clone());
     assert_eq!(
-        cache.get(next_height, zero_fee),
+        cache.get(next_height, zero_fee, None),
         Some(next_coinbase),
         "new-height entry should be cached"
     );
     assert!(
-        cache.get(height, zero_fee).is_none(),
+        cache.get(height, zero_fee, None).is_none(),
         "old-height entry should be evicted"
     );
 }
@@ -323,17 +326,17 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
 
     // Store the zero-fee sizing coinbase first.
     let fake_coinbase = make_coinbase(zero_fee);
-    cache.store(height, zero_fee, fake_coinbase.clone());
+    cache.store(height, zero_fee, None, fake_coinbase.clone());
 
     // Fill to capacity with distinct fee values (simulating mempool fee churn).
     for i in 1..=5u64 {
         let fee = Amount::try_from(i * 1_000).expect("valid amount");
-        cache.store(height, fee, make_coinbase(fee));
+        cache.store(height, fee, None, make_coinbase(fee));
     }
 
     // The zero-fee entry must survive eviction at capacity.
     assert_eq!(
-        cache.get(height, zero_fee),
+        cache.get(height, zero_fee, None),
         Some(fake_coinbase.clone()),
         "zero-fee sizing coinbase must survive fee churn at capacity"
     );
@@ -342,14 +345,14 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     let fee_1k: Amount<zebra_chain::amount::NonNegative> =
         Amount::try_from(1_000).expect("valid amount");
     let updated_coinbase = make_coinbase(fee_1k);
-    cache.store(height, fee_1k, updated_coinbase.clone());
+    cache.store(height, fee_1k, None, updated_coinbase.clone());
     assert_eq!(
-        cache.get(height, fee_1k),
+        cache.get(height, fee_1k, None),
         Some(updated_coinbase),
         "updating an existing key should replace in place"
     );
     assert_eq!(
-        cache.get(height, zero_fee),
+        cache.get(height, zero_fee, None),
         Some(fake_coinbase),
         "zero-fee entry must still be present after in-place update"
     );
@@ -389,4 +392,91 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
     );
     zebra_consensus::transaction::check::coinbase_outputs_are_decryptable(&coinbase, &net, height)
         .expect("Ironwood coinbase output is recoverable with the zero outgoing viewing key");
+}
+
+/// From the ZIP 234 deployment height, the coinbase pays the block subsidy computed
+/// from the parent block's chain value pools, and can't be built without them.
+#[cfg(zcash_unstable = "zip234")]
+#[test]
+fn coinbase_pays_zip234_subsidy() {
+    use zcash_transparent::address::TransparentAddress;
+    use zebra_chain::{
+        amount::NonNegative,
+        parameters::{
+            subsidy::{additional_block_subsidy, scheduled_block_subsidy},
+            testnet::RegtestParameters,
+        },
+    };
+    use zebra_consensus::error::TransactionError;
+
+    use super::CoinbaseCache;
+
+    let _init_guard = zebra_test::init();
+
+    let net = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(10),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let miner_params =
+        MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
+    let fee = Amount::<NonNegative>::try_from(1_000).unwrap();
+
+    let miner_output = |height, parent_nsm_value_balance| {
+        let template = TransactionTemplate::new_coinbase_with_parent_pools(
+            &net,
+            height,
+            &miner_params,
+            fee,
+            parent_nsm_value_balance,
+        )
+        .expect("valid coinbase tx");
+        let coinbase: Transaction = template.data.as_ref().zcash_deserialize_into().unwrap();
+        assert_eq!(coinbase.outputs().len(), 1);
+        coinbase.outputs()[0].value()
+    };
+
+    let height = Height(12);
+    let nsm_value_balance = Amount::<NonNegative>::try_from(1_000_000_000_i64).unwrap();
+
+    // Before activation, the parent's NSM value balance doesn't affect the coinbase.
+    let before = Height(9);
+    let scheduled = (scheduled_block_subsidy(before, &net).unwrap() + fee).unwrap();
+    assert_eq!(miner_output(before, None), scheduled);
+    assert_eq!(miner_output(before, Some(nsm_value_balance)), scheduled);
+
+    let subsidy = (scheduled_block_subsidy(height, &net).unwrap()
+        + additional_block_subsidy(height, &net, nsm_value_balance))
+    .unwrap();
+    assert_eq!(
+        miner_output(height, Some(nsm_value_balance)),
+        (subsidy + fee).unwrap()
+    );
+
+    assert!(matches!(
+        TransactionTemplate::new_coinbase(&net, height, &miner_params, fee),
+        Err(TransactionError::Subsidy(_))
+    ));
+
+    // The coinbase cache doesn't reuse a coinbase built after a different parent.
+    let coinbase = TransactionTemplate::new_coinbase_with_parent_pools(
+        &net,
+        height,
+        &miner_params,
+        fee,
+        Some(nsm_value_balance),
+    )
+    .unwrap();
+    let cache = CoinbaseCache::default();
+    cache.store(height, fee, Some(nsm_value_balance), coinbase.clone());
+    assert_eq!(
+        cache.get(height, fee, Some(nsm_value_balance)),
+        Some(coinbase)
+    );
+    assert!(cache.get(height, fee, Some(Amount::zero())).is_none());
 }

@@ -1171,11 +1171,302 @@ fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
     state.commit_new_chain(block.prepare(), &finalized_state.db)?;
 
     let chain = state.best_chain().expect("chain was just committed");
-    let expected = calculate_deferred_pool_balance_change(height, &network)
-        .value()
-        .constrain::<NonNegative>()?;
+    let expected = calculate_deferred_pool_balance_change(
+        height,
+        &network,
+        ValueBalance::<NonNegative>::fake_populated_pool(),
+    )
+    .value()
+    .constrain::<NonNegative>()?;
 
     assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
+
+    Ok(())
+}
+
+/// From the ZIP 234 deployment height, the deferred (lockbox) funding stream is a
+/// fraction of the whole block subsidy, including the additional subsidy that depends on the parent
+/// block's chain value pools.
+#[cfg(zcash_unstable = "zip234")]
+#[test]
+fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
+    use zebra_chain::parameters::{
+        subsidy::{
+            block_subsidy_with_parent_pools, funding_stream_values, scheduled_block_subsidy,
+            FundingStreamReceiver,
+        },
+        testnet::{
+            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            ConfiguredFundingStreams, RegtestParameters,
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(10),
+            ..Default::default()
+        },
+        funding_streams: Some(vec![ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(100)),
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Deferred,
+                numerator: 12,
+                addresses: None,
+            }]),
+        }]),
+        ..Default::default()
+    });
+
+    let deferred = |height, subsidy| {
+        funding_stream_values(height, &network, subsidy)
+            .unwrap()
+            .remove(&FundingStreamReceiver::Deferred)
+            .expect("the deferred funding stream is active")
+    };
+
+    let height = Height(12);
+    let mut parent_pools = ValueBalance::<NonNegative>::zero();
+    parent_pools.set_nsm_amount(Amount::try_from(1_000_000_000_i64)?);
+
+    let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)?;
+    let expected = deferred(height, subsidy);
+    assert_ne!(
+        expected,
+        deferred(height, scheduled_block_subsidy(height, &network)?)
+    );
+
+    assert_eq!(
+        calculate_deferred_pool_balance_change(height, &network, parent_pools).value(),
+        expected.constrain::<zebra_chain::amount::NegativeAllowed>()?,
+    );
+
+    // Before activation the parent's chain value pools don't matter.
+    let height = Height(9);
+    assert_eq!(
+        calculate_deferred_pool_balance_change(height, &network, parent_pools),
+        calculate_deferred_pool_balance_change(height, &network, ValueBalance::zero()),
+    );
+
+    Ok(())
+}
+
+/// Committed blocks track the NSM value balance: the NU7 activation block seeds it, blocks before
+/// the ZIP 234 deployment height leave it unchanged, and from the deployment height each block
+/// reissues from the balance after its parent. A block paying the scheduled subsidy instead is
+/// rejected from the deployment height.
+///
+/// Without ZIP 233 there is nothing to remove from circulation, so the NSM value balance at a height
+/// is the same on every chain that reaches it. The block subsidy still comes from the parent block
+/// on the committing block's own chain.
+#[cfg(zcash_unstable = "zip234")]
+#[test]
+fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
+    use chrono::Duration;
+    use zebra_chain::{
+        block::{
+            ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash,
+            CHAIN_HISTORY_ACTIVATION_RESERVED,
+        },
+        parameters::{
+            subsidy::{
+                additional_block_subsidy, block_subsidy_with_parent_pools, scheduled_block_subsidy,
+                CoinbaseTransactionError, SubsidyError,
+            },
+            testnet::{ConfiguredActivationHeights, RegtestParameters},
+        },
+        transaction::{LockTime, Transaction},
+    };
+
+    use crate::ValidateContextError;
+
+    let _init_guard = zebra_test::init();
+
+    // Every upgrade from Heartwood activates together, so the activation block's parent is
+    // pre-Heartwood and its block commitment only needs the reserved chain history root.
+    const ACTIVATION_HEIGHT: u32 = 11;
+    const DEPLOYMENT_HEIGHT: u32 = ACTIVATION_HEIGHT + 2;
+    const INITIAL_NSM_VALUE_BALANCE: i64 = 1_000_000_000;
+
+    let zats = |zats: i64| Amount::<NonNegative>::try_from(zats).expect("valid amount");
+
+    let network = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            sapling: Some(1),
+            blossom: Some(1),
+            heartwood: Some(ACTIVATION_HEIGHT),
+            canopy: Some(ACTIVATION_HEIGHT),
+            nu5: Some(ACTIVATION_HEIGHT),
+            nu6: Some(ACTIVATION_HEIGHT),
+            nu6_3: Some(ACTIVATION_HEIGHT),
+            nu7: Some(ACTIVATION_HEIGHT),
+            ..Default::default()
+        },
+        funding_streams: Some(Vec::new()),
+        initial_nsm_value_balance: Some(zats(INITIAL_NSM_VALUE_BALANCE)),
+        zip234_deployment_height: Some(Height(DEPLOYMENT_HEIGHT)),
+        ..Default::default()
+    });
+
+    // A block at `height` whose coinbase pays `coinbase_value`. Block times increase with height,
+    // so each block's time is after the median time of the blocks before it.
+    let block = |height: Height, previous_block_hash, coinbase_value| -> Arc<Block> {
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let header = Arc::make_mut(&mut block.header);
+        header.time += Duration::minutes(height.0.into());
+
+        block.transactions = vec![Arc::new(Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: coinbase_value,
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        ))];
+        Arc::make_mut(&mut block.header).previous_block_hash = previous_block_hash;
+
+        Arc::new(block)
+    };
+
+    // A block at `height` whose coinbase pays `coinbase_value`, committing to `history_root`.
+    let committed_block = |height: Height,
+                           previous_block_hash,
+                           coinbase_value,
+                           history_root: &ChainHistoryMmrRootHash| {
+        let child = block(height, previous_block_hash, coinbase_value);
+        let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            history_root,
+            &child.auth_data_root(),
+        );
+
+        child.set_block_commitment(commitment.into())
+    };
+
+    // A block at `height` paying the ZIP's subsidy for `parent_pools`, committing to `history_root`.
+    let subsidy_block = |height: Height, previous_block_hash, parent_pools, history_root: &_| {
+        let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)
+            .expect("the block subsidy is valid");
+
+        committed_block(height, previous_block_hash, subsidy, history_root)
+    };
+
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )?;
+
+    let parent_height = Height(ACTIVATION_HEIGHT - 1);
+    let activation = Height(ACTIVATION_HEIGHT);
+
+    // The block before activation pays the scheduled subsidy, and leaves the NSM value balance empty.
+    let parent = block(
+        parent_height,
+        block::Hash([1; 32]),
+        scheduled_block_subsidy(parent_height, &network)?,
+    );
+
+    let mut state = NonFinalizedState::new(&network);
+    state.commit_new_chain(parent.clone().prepare(), &finalized_state)?;
+    let pools_before_activation = state
+        .best_chain()
+        .expect("the chain was just committed")
+        .chain_value_pools;
+    assert_eq!(pools_before_activation.nsm_amount(), zats(0));
+
+    // The activation block seeds the balance, and pays only the scheduled subsidy because the
+    // deployment height is later.
+    let initial = zats(INITIAL_NSM_VALUE_BALANCE);
+    let activation_block = subsidy_block(
+        activation,
+        parent.hash(),
+        pools_before_activation,
+        &CHAIN_HISTORY_ACTIVATION_RESERVED.into(),
+    );
+    assert_eq!(
+        activation_block.transactions[0].outputs()[0].value(),
+        scheduled_block_subsidy(activation, &network)?,
+    );
+    state.commit_block(activation_block.clone().prepare(), &finalized_state)?;
+
+    let chain = state
+        .best_chain()
+        .expect("the activation block was committed");
+    assert_eq!(chain.chain_value_pools.nsm_amount(), initial);
+
+    // Later blocks commit to the chain history tree, which starts at the activation block. The
+    // blocks have no shielded transactions, so the note commitment tree roots never change.
+    let sapling_root = chain.sapling_note_commitment_tree_for_tip().root();
+    let orchard_root = chain.orchard_note_commitment_tree_for_tip().root();
+    let ironwood_root = chain.ironwood_note_commitment_tree_for_tip().root();
+    let roots = || BlockCommitmentTreeRoots {
+        sapling: &sapling_root,
+        orchard: &orchard_root,
+        ironwood: &ironwood_root,
+    };
+    let mut tree = NonEmptyHistoryTree::from_block(&network, activation_block, roots())?;
+
+    let mut previous = state.best_tip().expect("the chain has a tip");
+    for height in (ACTIVATION_HEIGHT + 1..=DEPLOYMENT_HEIGHT + 2).map(Height) {
+        let parent_pools = state
+            .best_chain()
+            .expect("the chain has blocks")
+            .chain_value_pools;
+        let reissued = additional_block_subsidy(height, &network, parent_pools.nsm_amount());
+
+        if height < Height(DEPLOYMENT_HEIGHT) {
+            assert_eq!(
+                reissued,
+                zats(0),
+                "no reissuance before the deployment height"
+            );
+        } else {
+            assert!(reissued > zats(0), "reissuance from the deployment height");
+
+            // A block paying only the scheduled subsidy is rejected from the deployment height.
+            let scheduled_only = committed_block(
+                height,
+                previous.1,
+                scheduled_block_subsidy(height, &network)?,
+                &tree.hash(),
+            );
+            assert!(matches!(
+                state.commit_block(scheduled_only.prepare(), &finalized_state),
+                Err(ValidateContextError::InvalidSubsidy {
+                    subsidy_error: CoinbaseTransactionError::Subsidy(
+                        SubsidyError::InvalidMinerFees
+                    ),
+                    ..
+                })
+            ));
+        }
+
+        let next_block = subsidy_block(height, previous.1, parent_pools, &tree.hash());
+        state.commit_block(next_block.clone().prepare(), &finalized_state)?;
+
+        // The block debits exactly what it reissued.
+        let chain = state.best_chain().expect("the block was committed");
+        assert_eq!(
+            chain.chain_value_pools.nsm_amount(),
+            (parent_pools.nsm_amount() - reissued)?,
+        );
+
+        tree.push(next_block, roots())?;
+        previous = state.best_tip().expect("the chain has a tip");
+    }
 
     Ok(())
 }

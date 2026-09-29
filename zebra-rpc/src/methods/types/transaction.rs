@@ -128,7 +128,32 @@ impl TransactionTemplate<NegativeOrZero> {
         miner_params: &MinerParams,
         txs_fee: Amount<NonNegative>,
     ) -> Result<Self, TransactionError> {
-        let block_subsidy = block_subsidy(height, net)?;
+        Self::new_coinbase_with_parent_pools(net, height, miner_params, txs_fee, None)
+    }
+
+    /// Constructs a transaction template for a coinbase transaction in a block whose parent leaves
+    /// `parent_nsm_value_balance` in the NSM value balance.
+    ///
+    /// The parent's NSM value balance is required from the ZIP 234 deployment height, because it
+    /// determines the block subsidy.
+    pub fn new_coinbase_with_parent_pools(
+        net: &Network,
+        height: Height,
+        miner_params: &MinerParams,
+        txs_fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> Result<Self, TransactionError> {
+        let block_subsidy = match parent_nsm_value_balance {
+            #[cfg(zcash_unstable = "zip234")]
+            Some(parent_nsm_value_balance) => {
+                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                    height,
+                    net,
+                    parent_nsm_value_balance,
+                )?
+            }
+            _ => block_subsidy(height, net)?,
+        };
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
         let miner_reward = Zatoshis::try_from(miner_reward?)?;
 
