@@ -19,7 +19,7 @@ proptest! {
                 "response hashes differ from the expected overlap",
                 |hash| *hash != [1; 32],
             ),
-            0..=1,
+            0..=2,
         ),
     ) {
         let (runtime, _test_guard) = zebra_test::init_async();
