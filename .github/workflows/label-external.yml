@@ -1,6 +1,6 @@
 # Labels issues and PRs opened by people outside the maintainer team, so outside work can be
-# filtered. GitHub already classifies every author (`author_association`); this only turns that
-# into the `external-contribution` label, which used to be applied by hand and drifted.
+# filtered. The team is whoever can write to the repository; this turns that into the
+# `external-contribution` label, which used to be applied by hand and drifted.
 name: Label External Contributions
 
 on:
@@ -16,8 +16,8 @@ permissions: {}
 jobs:
   label:
     name: Label outside author
-    # Owners, members and collaborators are the team; bots (dependabot, release-plz, CI) are not
-    # contributions.
+    # Bots (dependabot, release-plz, CI) are not contributions. `author_association` only skips the
+    # obvious team cases: it reports private org members as CONTRIBUTOR, so the step checks access too.
     if: >-
       github.event.sender.type != 'Bot' &&
       !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
@@ -32,4 +32,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
-        run: gh issue edit "${NUMBER}" --repo "${REPOSITORY}" --add-label external-contribution
+          AUTHOR: ${{ github.event.issue.user.login || github.event.pull_request.user.login }}
+        run: |
+          permission=$(gh api "repos/${REPOSITORY}/collaborators/${AUTHOR}/permission" --jq .permission) || permission=none
+          case "${permission}" in
+            admin | maintain | write) echo "${AUTHOR} has ${permission} access, not labeling" ;;
+            *) gh issue edit "${NUMBER}" --repo "${REPOSITORY}" --add-label external-contribution ;;
+          esac
