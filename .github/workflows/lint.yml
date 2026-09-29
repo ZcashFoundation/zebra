@@ -288,6 +288,8 @@ jobs:
           version: v1.25.2
       - name: Test release changelog batching
         run: .github/scripts/test-batch-release-changelogs.sh
+      - name: Test change fragment validator
+        run: .github/scripts/test-validate-changelog-fragments.sh
 
   lint:
     runs-on: ubuntu-latest

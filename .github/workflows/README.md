@@ -220,7 +220,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
-- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
+- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, change fragment syntax on pull requests, the merge queue and `main`, API compatibility, and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
