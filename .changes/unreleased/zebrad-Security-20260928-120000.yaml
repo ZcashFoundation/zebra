@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: "A checkpoint block whose authorizing data fails the finalized `hashBlockCommitments` check no longer leaves its hash, and the hashes of the blocks queued behind it, marked as present in the state for the rest of the process. The syncer and inbound downloader trusted that answer and never re-requested the honest bodies, so a peer that served a forged body near the final checkpoint could stall initial sync until restart ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h)). Thanks to @saxenism for reporting the issue."
+time: 2026-09-28T12:00:00.000000000-03:00

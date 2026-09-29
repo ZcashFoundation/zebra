@@ -125,7 +125,9 @@ struct WriteBlockWorkerTask {
     non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteMessage>,
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
-    invalid_block_reset_sender: UnboundedSender<block::Hash>,
+    /// Signals the [`crate::service::StateService`] that a finalized block commit failed,
+    /// carrying the durable finalized tip height and hash to reset to.
+    invalid_block_reset_sender: UnboundedSender<(Option<block::Height>, block::Hash)>,
     /// Signals the [`crate::service::StateService`] that a non-finalized block was rejected by
     /// the write task, so its hash should be removed from
     /// `non_finalized_block_write_sent_hashes`.
@@ -201,7 +203,7 @@ impl BlockWriteSender {
         backup_dir_path: Option<PathBuf>,
     ) -> (
         Self,
-        tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
@@ -331,8 +333,10 @@ impl WriteBlockWorkerTask {
                         "committing a block to the finalized state failed, resetting state queue",
                     );
 
-                    let send_result =
-                        invalid_block_reset_sender.send(finalized_state.db.finalized_tip_hash());
+                    let send_result = invalid_block_reset_sender.send((
+                        finalized_state.db.finalized_tip_height(),
+                        finalized_state.db.finalized_tip_hash(),
+                    ));
 
                     if send_result.is_err() {
                         info!(

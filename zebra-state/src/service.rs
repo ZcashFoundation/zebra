@@ -151,12 +151,12 @@ pub(crate) struct StateService {
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     non_finalized_block_write_sent_hashes: SentHashes,
 
-    /// If an invalid block is sent on `finalized_block_write_sender`
-    /// or `non_finalized_block_write_sender`,
-    /// this channel gets the [`block::Hash`] of the valid tip.
+    /// If an invalid block is sent on `finalized_block_write_sender`,
+    /// this channel gets the height and [`block::Hash`] of the valid finalized tip.
     //
-    // TODO: add tests for finalized and non-finalized resets (#2654)
-    invalid_block_write_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+    // TODO: add tests for non-finalized resets (#2654)
+    invalid_block_write_reset_receiver:
+        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
 
     /// Receives the hash of every non-finalized block that the write task
     /// rejected, so the corresponding entry can be removed from
@@ -516,6 +516,9 @@ impl StateService {
         let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
         let queued_height = checkpoint_verified.height;
 
+        // Apply pending resets first, so they can't remove the hash of the block sent below.
+        self.drain_finalized_resets();
+
         // If we're close to the final checkpoint, make the block's UTXOs available for
         // semantic block verification, even when it is in the channel.
         if self.is_close_to_final_checkpoint(queued_height) {
@@ -587,7 +590,7 @@ impl StateService {
     ///
     /// Returns an error if the block commit channel has been closed.
     pub fn drain_finalized_queue_and_commit(&mut self) {
-        use tokio::sync::mpsc::error::{SendError, TryRecvError};
+        use tokio::sync::mpsc::error::SendError;
 
         // # Correctness & Performance
         //
@@ -595,14 +598,8 @@ impl StateService {
         // because it is called directly from the tokio executor's Future threads.
 
         // If a block failed, we need to start again from a valid tip.
-        match self.invalid_block_write_reset_receiver.try_recv() {
-            Ok(reset_tip_hash) => self.finalized_block_write_last_sent_hash = reset_tip_hash,
-            Err(TryRecvError::Disconnected) => {
-                info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
-                return;
-            }
-            // There are no errors, so we can just use the last block hash we sent
-            Err(TryRecvError::Empty) => {}
+        if !self.drain_finalized_resets() {
+            return;
         }
 
         while let Some(queued_block) = self
@@ -631,6 +628,32 @@ impl StateService {
                     metrics::gauge!("state.checkpoint.sent.block.height")
                         .set(last_sent_finalized_block_height.0 as f64);
                 };
+            }
+        }
+    }
+
+    /// Applies every reset queued on `invalid_block_write_reset_receiver`: rewinds the last
+    /// sent hash to the finalized tip, and forgets the sent hashes above it, so the rejected
+    /// block and the descendants the write task dropped can be downloaded again.
+    ///
+    /// Returns `false` if the write task closed the reset channel.
+    fn drain_finalized_resets(&mut self) -> bool {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        loop {
+            match self.invalid_block_write_reset_receiver.try_recv() {
+                Ok((reset_tip_height, reset_tip_hash)) => {
+                    self.finalized_block_write_last_sent_hash = reset_tip_hash;
+                    self.non_finalized_block_write_sent_hashes
+                        .remove_above_height(reset_tip_height);
+                }
+                Err(TryRecvError::Empty) => return true,
+                Err(TryRecvError::Disconnected) => {
+                    info!(
+                        "Block commit task closed the block reset channel. Is Zebra shutting down?"
+                    );
+                    return false;
+                }
             }
         }
     }
@@ -1252,6 +1275,8 @@ impl Service<Request> for StateService {
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
 
+                // Rejected blocks must not be reported as sent, or they never get re-downloaded.
+                self.drain_finalized_resets();
                 self.drain_non_finalized_rejected_hashes();
 
                 let known_sent_hash = self.known_sent_hash(&hash);
