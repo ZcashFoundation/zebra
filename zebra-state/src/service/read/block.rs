@@ -197,42 +197,29 @@ where
 
     let mut spent_outputs = HashMap::new();
 
-    // Parent transactions recovered from the transaction index, read at most once each. `None`
-    // records a parent that was looked up and not found, so it is not read again.
-    let mut parent_txs: HashMap<transaction::Hash, Option<(Arc<Transaction>, Height)>> =
-        HashMap::new();
+    // Outpoints missing from the UTXO set, grouped by parent so each parent is read once,
+    // used, and dropped before the next one is read.
+    let mut by_parent: HashMap<transaction::Hash, Vec<transparent::OutPoint>> = HashMap::new();
 
-    for tx in block.transactions.iter() {
-        // Coinbase transactions spend no outputs.
-        if tx.is_coinbase() {
-            continue;
-        }
-
+    for tx in block.transactions.iter().filter(|tx| !tx.is_coinbase()) {
         for outpoint in tx.spent_outpoints() {
-            // The live UTXO set (non-finalized created outputs and unspent finalized outputs) is
-            // the cheapest source, and already carries the correct height and coinbase flag.
             if let Some(utxo) = utxo(chain, db, outpoint) {
                 spent_outputs.insert(outpoint, utxo);
-                continue;
+            } else {
+                by_parent.entry(outpoint.hash).or_default().push(outpoint);
             }
+        }
+    }
 
-            // The output has already been spent in the finalized chain, so it is no longer in the
-            // UTXO set. Recover it from its parent transaction, reading each distinct parent once.
-            let parent_tx = parent_txs.entry(outpoint.hash).or_insert_with(|| {
-                transaction(chain, db, outpoint.hash).map(|(tx, height, _)| (tx, height))
-            });
-
-            let Some((parent_tx, height)) = parent_tx else {
-                continue;
-            };
-
-            // `outpoint.index` is a `u32` output index; widening it to `usize` is lossless on
-            // every platform Zebra supports.
-            if let Some(output) = parent_tx.outputs().get(outpoint.index as usize) {
-                spent_outputs.insert(
-                    outpoint,
-                    Utxo::new(output.clone(), *height, parent_tx.is_coinbase()),
-                );
+    for (parent_hash, outpoints) in by_parent {
+        let Some((parent_tx, height, _)) = transaction(chain, db, parent_hash) else {
+            continue;
+        };
+        let from_coinbase = parent_tx.is_coinbase();
+        let outputs = parent_tx.outputs();
+        for outpoint in outpoints {
+            if let Some(output) = outputs.get(outpoint.index as usize) {
+                spent_outputs.insert(outpoint, Utxo::new(output.clone(), height, from_coinbase));
             }
         }
     }
