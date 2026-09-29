@@ -555,3 +555,64 @@ fn time_check_fixed() {
         node_time_check(now, block_header_time).expect("the inverse comparison should be valid");
     }
 }
+
+/// `Block::transaction_fees` sums the fees of the non-coinbase transactions, so the fees ZIP 235 removes
+/// from circulation are rounded once per block rather than once per transaction.
+#[test]
+fn transaction_fees_sum_the_non_coinbase_transactions() {
+    let _init_guard = zebra_test::init();
+
+    let height = Height(347_499);
+    let amount = |zatoshis: i64| Amount::<NonNegative>::try_from(zatoshis).expect("valid amount");
+    let output = |zatoshis| transparent::Output {
+        value: amount(zatoshis),
+        lock_script: transparent::Script::new(&[]),
+    };
+
+    let coinbase = Transaction::test_v4(
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![output(1_000_000)],
+        LockTime::unlocked(),
+        height,
+    );
+
+    let mut utxos = HashMap::new();
+    let mut transactions = vec![Arc::new(coinbase)];
+    for (index, fee) in [1, 1, 1_000].into_iter().enumerate() {
+        let outpoint = transparent::OutPoint {
+            hash: crate::transaction::Hash([index as u8 + 1; 32]),
+            index: 0,
+        };
+        utxos.insert(
+            outpoint,
+            transparent::Utxo::new(output(10_000), Height(1), false),
+        );
+        transactions.push(Arc::new(Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            vec![output(10_000 - fee)],
+            LockTime::unlocked(),
+            height,
+        )));
+    }
+
+    let mut block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+        .zcash_deserialize_into::<Block>()
+        .expect("block should deserialize");
+
+    block.transactions = transactions[..1].to_vec();
+    assert_eq!(block.transaction_fees(&utxos), Ok(amount(0)));
+
+    block.transactions = transactions[..3].to_vec();
+    assert_eq!(block.transaction_fees(&utxos), Ok(amount(2)));
+
+    block.transactions = transactions;
+    assert_eq!(block.transaction_fees(&utxos), Ok(amount(1_002)));
+}

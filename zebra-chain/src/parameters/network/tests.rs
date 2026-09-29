@@ -561,7 +561,9 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
 
     use crate::{
         amount::NegativeAllowed,
-        parameters::subsidy::{additional_block_subsidy, nsm_value_balance_change},
+        parameters::subsidy::{
+            additional_block_subsidy, nsm_fee_contribution, nsm_value_balance_change,
+        },
         value_balance::ValueBalance,
     };
 
@@ -573,12 +575,18 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
 
     // Before activation, the balance doesn't change.
     assert_eq!(
-        nsm_value_balance_change((activation - 1).unwrap(), &network, ValueBalance::zero()),
+        nsm_value_balance_change(
+            (activation - 1).unwrap(),
+            &network,
+            ValueBalance::zero(),
+            Amount::zero()
+        )?,
         Amount::<NegativeAllowed>::zero(),
     );
 
     // The activation block seeds the balance and reissues from it in the same block.
-    let seeded = nsm_value_balance_change(activation, &network, ValueBalance::zero());
+    let seeded =
+        nsm_value_balance_change(activation, &network, ValueBalance::zero(), Amount::zero())?;
     assert_eq!(
         seeded,
         (initial.constrain::<NegativeAllowed>()?
@@ -593,13 +601,28 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
         (activation + 1).unwrap(),
         &network,
         zip234_pools_with_nsm_balance(nsm_value_balance.into()),
-    );
+        Amount::zero(),
+    )?;
 
     assert_eq!(
         change,
         additional_block_subsidy((activation + 1).unwrap(), &network, nsm_value_balance)
             .constrain::<NegativeAllowed>()?
             .neg(),
+    );
+
+    // The fees ZIP 235 removes from circulation credit the balance.
+    let fees = Amount::<NonNegative>::try_from(1_001)?;
+    assert_eq!(
+        nsm_value_balance_change(
+            (activation + 1).unwrap(),
+            &network,
+            zip234_pools_with_nsm_balance(nsm_value_balance.into()),
+            fees,
+        )?,
+        (change
+            + nsm_fee_contribution((activation + 1).unwrap(), &network, fees)
+                .constrain::<NegativeAllowed>()?)?,
     );
 
     // The pool balance after this block stays non-negative, as the ZIP requires.
@@ -656,7 +679,7 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
     assert!(!zip234_reissuance_is_active(nu7, &network));
     assert!(additional_block_subsidy(nu7, &network, initial).is_zero());
     assert_eq!(
-        nsm_value_balance_change(nu7, &network, ValueBalance::zero()),
+        nsm_value_balance_change(nu7, &network, ValueBalance::zero(), Amount::zero())?,
         initial.constrain::<NegativeAllowed>()?,
     );
     assert_eq!(
@@ -675,8 +698,9 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
         nsm_value_balance_change(
             before_deployment,
             &network,
-            zip234_pools_with_nsm_balance(initial.into())
-        ),
+            zip234_pools_with_nsm_balance(initial.into()),
+            Amount::zero()
+        )?,
         Amount::<NegativeAllowed>::zero(),
     );
 
@@ -696,8 +720,9 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
         nsm_value_balance_change(
             deployment,
             &network,
-            zip234_pools_with_nsm_balance(initial.into())
-        ),
+            zip234_pools_with_nsm_balance(initial.into()),
+            Amount::zero()
+        )?,
         reissued.constrain::<NegativeAllowed>()?.neg(),
     );
     assert_eq!(
@@ -827,6 +852,96 @@ fn check_zip234_deployment_height_is_unassigned_on_public_networks() -> Result<(
         .with_lockbox_disbursements(Vec::new())
         .to_network()?;
     assert_eq!(configured.zip234_deployment_height(), Some(Height(1_000)));
+
+    Ok(())
+}
+
+/// `NSMFeeContribution` is `floor(fees * 6 / 10)` of the block's total fees from NU7 activation,
+/// so rounding favors the miner, and zero before it.
+#[cfg(zcash_unstable = "zip235")]
+#[test]
+fn check_zip235_nsm_fee_contribution() -> Result<(), Report> {
+    use crate::{
+        amount::MAX_MONEY,
+        parameters::{
+            subsidy::nsm_fee_contribution,
+            testnet::{self, ConfiguredActivationHeights},
+        },
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let nu7 = Height(3_687_123);
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(nu7.0),
+            ..(&Network::Mainnet.activation_list()).into()
+        })?
+        .to_network()?;
+
+    for (fees, contribution) in [
+        (0, 0_i64),
+        (1, 0),
+        (2, 1),
+        (3, 1),
+        (4, 2),
+        (5, 3),
+        (9, 5),
+        (10, 6),
+        (1_000, 600),
+        (1_001, 600),
+        (20_002, 12_001),
+        (MAX_MONEY - 1, 1_259_999_999_999_999),
+        (MAX_MONEY, 1_260_000_000_000_000),
+    ] {
+        let fees = Amount::<NonNegative>::try_from(fees)?;
+
+        assert_eq!(
+            nsm_fee_contribution(nu7, &network, fees),
+            Amount::<NonNegative>::try_from(contribution)?,
+        );
+        assert!(nsm_fee_contribution((nu7 - 1).unwrap(), &network, fees).is_zero());
+    }
+
+    Ok(())
+}
+
+/// The NSM value balance change is an error, rather than a panic, when the seed and the fees
+/// removed from circulation don't fit in an amount together.
+#[cfg(zcash_unstable = "zip235")]
+#[test]
+fn check_zip235_nsm_value_balance_change_overflow() -> Result<(), Report> {
+    use crate::{
+        amount::{NegativeAllowed, MAX_MONEY},
+        parameters::subsidy::{
+            additional_block_subsidy, nsm_fee_contribution, nsm_value_balance_change,
+        },
+        value_balance::ValueBalance,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let activation = Height(3_687_123);
+    let network = zip234_mainnet_like_testnet_with_initial_balance(activation.0, MAX_MONEY);
+    let seed = Amount::<NonNegative>::try_from(MAX_MONEY)?;
+    let reissued = additional_block_subsidy(activation, &network, seed);
+
+    // The activation block reissues from the seed, which leaves room for a smaller contribution.
+    let fees = Amount::<NonNegative>::try_from(2)?;
+    assert_eq!(
+        nsm_fee_contribution(activation, &network, fees),
+        Amount::<NonNegative>::try_from(1)?
+    );
+    assert_eq!(
+        nsm_value_balance_change(activation, &network, ValueBalance::zero(), fees)?,
+        ((seed.constrain::<NegativeAllowed>()? - reissued.constrain::<NegativeAllowed>()?)?
+            + Amount::<NegativeAllowed>::try_from(1)?)?,
+    );
+
+    // A contribution larger than the reissued amount takes the change over `MAX_MONEY`.
+    let fees = (reissued + reissued)?;
+    assert!(nsm_fee_contribution(activation, &network, fees) > reissued);
+    assert!(nsm_value_balance_change(activation, &network, ValueBalance::zero(), fees).is_err());
 
     Ok(())
 }

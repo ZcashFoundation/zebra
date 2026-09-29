@@ -186,9 +186,9 @@ impl DiskFormatUpgrade for Upgrade {
 
             #[cfg(zcash_unstable = "zip234")]
             block_value_pool_change.set_nsm_amount(
-                zebra_chain::parameters::subsidy::nsm_value_balance_change(
-                    height, &network, value_pool,
-                ),
+                block
+                    .nsm_value_balance_change(height, &network, &utxos, value_pool)
+                    .unwrap_or_default(),
             );
 
             // Add this block's value pool changes to the total value pool.

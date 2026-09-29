@@ -403,7 +403,7 @@ fn coinbase_pays_zip234_subsidy() {
     use zebra_chain::{
         amount::NonNegative,
         parameters::{
-            subsidy::{additional_block_subsidy, scheduled_block_subsidy},
+            subsidy::{additional_block_subsidy, nsm_fee_contribution, scheduled_block_subsidy},
             testnet::RegtestParameters,
         },
     };
@@ -453,9 +453,30 @@ fn coinbase_pays_zip234_subsidy() {
     let subsidy = (scheduled_block_subsidy(height, &net).unwrap()
         + additional_block_subsidy(height, &net, nsm_value_balance))
     .unwrap();
+    // From NU7 activation the miner only gets the fees ZIP 235 leaves in circulation, which is
+    // all of them in builds without the `zip235` cfg.
+    let miner_fees = (fee - nsm_fee_contribution(height, &net, fee)).unwrap();
+    #[cfg(zcash_unstable = "zip235")]
+    assert_eq!(miner_fees, Amount::<NonNegative>::try_from(400).unwrap());
     assert_eq!(
         miner_output(height, Some(nsm_value_balance)),
-        (subsidy + fee).unwrap()
+        (subsidy + miner_fees).unwrap()
+    );
+
+    // The template reports the fees the coinbase claims.
+    let template = TransactionTemplate::new_coinbase_with_parent_pools(
+        &net,
+        height,
+        &miner_params,
+        fee,
+        Some(nsm_value_balance),
+    )
+    .expect("valid coinbase tx");
+    assert_eq!(
+        template.fee,
+        (-miner_fees)
+            .constrain::<zebra_chain::amount::NegativeOrZero>()
+            .unwrap()
     );
 
     assert!(matches!(
