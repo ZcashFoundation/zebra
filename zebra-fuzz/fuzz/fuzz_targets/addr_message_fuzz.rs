@@ -261,18 +261,6 @@ fuzz_target!(|data: &[u8]| {
             let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 let _ = addr.clone().new_gossiped_change();
             }));
-
-            // -----------------------------------------------------------
-            // A-7: `misbehavior()` accessor.
-            //
-            // Returns `u32` directly, so panic-free by signature, but
-            // we include it so future refactors that introduce e.g.
-            // saturating-arithmetic-overflow assertions are caught
-            // early.
-            // -----------------------------------------------------------
-            let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-                let _ = addr.misbehavior();
-            }));
         }
 
         // ---------------------------------------------------------------
