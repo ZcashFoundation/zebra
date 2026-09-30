@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: "Transaction serialization is delegated to `zcash_primitives`. The `ZcashSerialize` and `ZcashDeserialize` impls for Zebra's own `sapling`, `orchard` and `ironwood` shielded-data types are now compiled only for tests, so they are no longer part of the released API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
-time: 2026-08-13T12:00:00.000000000-03:00

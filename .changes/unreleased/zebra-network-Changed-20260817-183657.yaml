@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: 'Outbound connection pacing is now applied only when an address-book candidate is returned. An empty candidate-selection attempt no longer delays the next available connection attempt. Crawls are still skipped while rate-limited, and the intervals are unchanged ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).'
-time: 2026-08-17T18:36:57.000000000Z

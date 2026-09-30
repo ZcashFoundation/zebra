@@ -19,7 +19,6 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future, TryFutureExt,
 };
-use indexmap::IndexMap;
 use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -54,7 +53,7 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, BanList, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 #[cfg(test)]
@@ -664,7 +663,7 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    bans_receiver: watch::Receiver<BanList>,
     zcashd_compat_peer_ips: Vec<IpAddr>,
 ) -> Result<(), BoxError>
 where
@@ -732,13 +731,14 @@ where
 
             // # Security
             //
-            // Check bans in both the raw and canonical representations: on a
-            // dual-stack listener, an IPv4 peer can connect as IPv4-mapped IPv6,
-            // and it must not dodge a ban stored for its IPv4 address and then
-            // be granted the zcashd-compat sidecar privileges below.
+            // Bans are keyed by peer group, which unmaps IPv4-mapped IPv6 and
+            // masks IPv6 to its `/64`. So a peer cannot dodge a ban — and then
+            // be granted the zcashd-compat sidecar privileges below — by
+            // connecting as IPv4-mapped IPv6 on a dual-stack listener, or from
+            // another address in a banned `/64`.
             let canonical_ip = canonical_socket_addr(addr.remove_socket_addr_privacy()).ip();
             let bans = bans_receiver.borrow().clone();
-            if bans.contains_key(&addr.ip()) || bans.contains_key(&canonical_ip) {
+            if bans.is_banned(addr.ip()) {
                 debug!(?addr, "banned inbound connection attempt");
                 record_inbound_connection_rejected(&config.network, addr, "banned");
                 std::mem::drop(tcp_stream);

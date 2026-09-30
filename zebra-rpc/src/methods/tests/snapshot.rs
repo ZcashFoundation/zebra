@@ -918,9 +918,20 @@ fn snapshot_rpc_getnetworkinfo(
 }
 
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
+fn snapshot_rpc_getpeerinfo(
+    get_peer_info: Vec<PeerInfo>,
+    minimum_peer_version: zebra_network::Version,
+    settings: &insta::Settings,
+) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_peer_info", get_peer_info, {
+            "[].version" => dynamic_redaction(move |value, _path| {
+                assert!(
+                    value.as_u64().unwrap() >= u64::from(minimum_peer_version.0),
+                    "peer version must meet the minimum for the network and tip",
+                );
+                "[version]"
+            }),
             "[].lastrecv" => dynamic_redaction(|value, _path| {
                 assert!(value.as_u64().unwrap() > 0, "lastrecv should be non-zero");
                 "[lastrecv]"
@@ -1160,7 +1171,11 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .get_peer_info()
         .await
         .expect("We should have a success response");
-    snapshot_rpc_getpeerinfo(get_peer_info, &settings);
+    snapshot_rpc_getpeerinfo(
+        get_peer_info,
+        zebra_network::Version::min_remote_for_height(network, fake_tip_height),
+        &settings,
+    );
 
     // `getnetworksolps` (and `getnetworkhashps`)
     //
@@ -1193,6 +1208,8 @@ pub async fn test_mining_rpcs<State, ReadState>(
                     min_time: fake_min_time,
                     max_time: fake_max_time,
                     chain_history_root: fake_history_tree(network).hash(),
+                    #[cfg(zcash_unstable = "zip234")]
+                    chain_value_pools: Default::default(),
                 }));
         }
     };

@@ -334,6 +334,8 @@ fuzz_target!(|data: &[u8]| {
     // exercises the saturating-arithmetic contract on the public entry
     // points across both networks, not subsidy correctness.
     // -------------------------------------------------------------------
+    // With `zcash_unstable = "zip234"`, `block_subsidy` returns an error once ZIP 234 reissues,
+    // because the subsidy then depends on the parent block; the entry points still don't panic.
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let height = block.coinbase_height().unwrap_or(Height(0));
         for net in [Network::Mainnet, default_testnet().clone()] {

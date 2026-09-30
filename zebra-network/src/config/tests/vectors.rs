@@ -4,8 +4,10 @@ use static_assertions::const_assert;
 use zebra_chain::{
     block::Height,
     parameters::{
+        constants::magics,
+        subsidy::FundingStreamReceiver,
         testnet::{self, ConfiguredFundingStreams},
-        Network,
+        Magic, Network, NetworkUpgrade,
     },
 };
 
@@ -69,6 +71,8 @@ fn testnet_params_serialization_roundtrip() {
 
     let config = Config {
         network: testnet::Parameters::build()
+            .with_network_magic(Magic([0; 4]))
+            .unwrap()
             .with_disable_pow(true)
             .to_network()
             .expect("failed to build configured network"),
@@ -116,6 +120,36 @@ fn funding_streams_serialization_roundtrip() {
     assert_eq!(config, deserialized);
 }
 
+#[test]
+fn empty_funding_streams_survive_configuration_roundtrip() {
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        network: testnet::Parameters::build()
+            .with_network_magic(Magic([0; 4]))
+            .unwrap()
+            .with_funding_streams(Vec::new())
+            .to_network()
+            .unwrap(),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+    let deserialized: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    let Network::Testnet(params) = deserialized.network else {
+        panic!("configured Testnet must stay a Testnet");
+    };
+    assert!(params.funding_streams().is_empty());
+
+    let omitted: Config =
+        toml::from_str("network = 'Testnet'\n[testnet_parameters]\ncheckpoints = true\n").unwrap();
+    let Network::Testnet(params) = omitted.network else {
+        panic!("configured Testnet must stay a Testnet");
+    };
+    assert_eq!(
+        params.funding_streams(),
+        testnet::Parameters::default().funding_streams(),
+    );
+}
+
 /// Checks that a configured Testnet's temporary Orchard-disabling soft fork height
 /// survives a serialization round-trip.
 #[test]
@@ -126,6 +160,8 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
 
     let config = Config {
         network: testnet::Parameters::build()
+            .with_network_magic(Magic([0; 4]))
+            .unwrap()
             .with_temporary_orchard_disabling_soft_fork_height(soft_fork_height)
             .to_network()
             .expect("failed to build configured network"),
@@ -146,6 +182,32 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
         params.temporary_orchard_disabling_soft_fork_height(),
         Some(soft_fork_height),
     );
+}
+
+/// Coalesced upgrades must not acquire earlier Regtest defaults after serialization.
+#[test]
+fn coincident_regtest_upgrades_preserve_activation_on_roundtrip() {
+    let _init_guard = zebra_test::init();
+    let config: Config = toml::from_str(
+        "network = 'Regtest'\n\
+         [testnet_parameters.activation_heights]\n\
+         Overwinter = 10\n\
+         NU7 = 10\n",
+    )
+    .unwrap();
+    let restored: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+
+    for network in [&config.network, &restored.network] {
+        assert_eq!(
+            NetworkUpgrade::current(network, Height(9)),
+            NetworkUpgrade::Genesis
+        );
+        assert_eq!(
+            NetworkUpgrade::current(network, Height(10)),
+            NetworkUpgrade::Nu7
+        );
+    }
+    assert_eq!(config, restored);
 }
 
 /// Checks that a Regtest configured to forbid unshielded coinbase spends survives a
@@ -193,4 +255,215 @@ fn should_allow_unshielded_coinbase_spends_rejected_on_testnet() {
             .contains("should_allow_unshielded_coinbase_spends"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn incompatible_testnet_requires_isolated_magic() {
+    let _init_guard = zebra_test::init();
+    let uppercase_seed = Config::default()
+        .initial_testnet_peers
+        .first()
+        .unwrap()
+        .to_ascii_uppercase();
+
+    // None of these peer lists can guarantee isolation from public Testnet.
+    for peers in [format!("{uppercase_seed:?}"), String::new()] {
+        let config = format!(
+            "network = 'Testnet'\n\
+             initial_testnet_peers = [{peers}]\n\
+             [testnet_parameters]\n\
+             checkpoints = true\n\
+             temporary_orchard_disabling_soft_fork_height = 2000000\n"
+        );
+        assert!(toml::from_str::<Config>(&config).is_err());
+        assert!(toml::from_str::<Config>(&format!(
+            "{config}network_magic = {:?}\n",
+            magics::TESTNET.0,
+        ))
+        .is_err());
+    }
+
+    let private: Config = toml::from_str(
+        "network = 'Testnet'\n\
+         initial_testnet_peers = ['127.0.0.1:18233']\n\
+         [testnet_parameters]\n\
+         checkpoints = true\n\
+         network_magic = [0, 0, 0, 0]\n\
+         temporary_orchard_disabling_soft_fork_height = 2000000\n",
+    )
+    .unwrap();
+    assert_eq!(private.network.magic(), Magic([0; 4]));
+    let Network::Testnet(params) = private.network else {
+        panic!("configured Testnet must stay a Testnet");
+    };
+    assert_eq!(
+        params.temporary_orchard_disabling_soft_fork_height(),
+        Some(Height(2_000_000)),
+    );
+
+    let public: Config = toml::from_str(&format!(
+        "network = 'Testnet'\n\
+         initial_testnet_peers = [{uppercase_seed:?}]\n\
+         [testnet_parameters]\n\
+         checkpoints = true\n\
+         network_magic = {:?}\n",
+        magics::TESTNET.0,
+    ))
+    .unwrap();
+    assert_eq!(public.network, Network::new_default_testnet());
+}
+
+#[test]
+fn empty_funding_streams_reject_legacy_declarations() {
+    let _init_guard = zebra_test::init();
+
+    for network in ["Testnet", "Regtest"] {
+        let checkpoints = network == "Testnet";
+        for legacy_field in ["pre_nu6_funding_streams", "post_nu6_funding_streams"] {
+            let config = format!(
+                "network = '{network}'\n\
+                 initial_testnet_peers = []\n\
+                 [testnet_parameters]\n\
+                 checkpoints = {checkpoints}\n\
+                 network_magic = [0, 0, 0, 0]\n\
+                 funding_streams = []\n\
+                 {legacy_field} = {{ height_range = {{ start = 1, end = 2 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n"
+            );
+            assert!(toml::from_str::<Config>(&config).is_err());
+
+            // Omitting the new field must retain the requested legacy payout.
+            let config: Config =
+                toml::from_str(&config.replace("funding_streams = []\n", "")).unwrap();
+            assert_eq!(
+                config
+                    .network
+                    .funding_streams(Height(1))
+                    .unwrap()
+                    .recipients()[&FundingStreamReceiver::Deferred]
+                    .numerator(),
+                1,
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_funding_streams_keep_precedence_over_nonempty_lists() {
+    let _init_guard = zebra_test::init();
+
+    for network in ["Testnet", "Regtest"] {
+        let checkpoints = network == "Testnet";
+        let config: Config = toml::from_str(&format!(
+            "network = '{network}'\n\
+             initial_testnet_peers = []\n\
+             [testnet_parameters]\n\
+             checkpoints = {checkpoints}\n\
+             network_magic = [0, 0, 0, 0]\n\
+             pre_nu6_funding_streams = {{ height_range = {{ start = 1, end = 4 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n\
+             post_nu6_funding_streams = {{ height_range = {{ start = 2, end = 5 }}, recipients = [{{ receiver = 'Deferred', numerator = 2 }}] }}\n\
+             funding_streams = [{{ height_range = {{ start = 3, end = 6 }}, recipients = [{{ receiver = 'Deferred', numerator = 3 }}] }}]\n"
+        ))
+        .unwrap();
+
+        for (height, numerator) in [(3, 1), (4, 2), (5, 3)] {
+            assert_eq!(
+                config
+                    .network
+                    .funding_streams(Height(height))
+                    .unwrap()
+                    .recipients()[&FundingStreamReceiver::Deferred]
+                    .numerator(),
+                numerator,
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_post_nu6_defaults_do_not_depend_on_pre_nu6_streams() {
+    let defaults = testnet::Parameters::default();
+    let expected = &defaults.funding_streams()[1];
+
+    for pre_nu6 in ["", "pre_nu6_funding_streams = {}\n"] {
+        let config: Config = toml::from_str(&format!(
+            "network = 'Testnet'\n\
+             initial_testnet_peers = []\n\
+             [testnet_parameters]\n\
+             network_magic = [0, 0, 0, 0]\n\
+             checkpoints = true\n\
+             {pre_nu6}\
+             post_nu6_funding_streams = {{}}\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            config
+                .network
+                .funding_streams(expected.height_range().start),
+            Some(expected),
+        );
+    }
+}
+
+#[test]
+fn incompatible_testnet_rejects_public_seed_aliases() {
+    for seed in [
+        "DNSSEED.TESTNET.Z.CASH:18233",
+        "dnsseed.testnet.z.cash.:18233",
+        "DNSSEED.Z.CASH.:8233",
+    ] {
+        let config = format!(
+            "network = 'Testnet'\n\
+             initial_testnet_peers = ['{seed}']\n\
+             [testnet_parameters]\n\
+             network_magic = [0, 0, 0, 0]\n\
+             checkpoints = true\n\
+             disable_pow = true\n"
+        );
+        assert!(toml::from_str::<Config>(&config).is_err(), "{seed}");
+    }
+}
+
+#[test]
+fn configured_testnets_have_isolated_peer_caches() {
+    let cache = crate::config::CacheDir::custom_path("cache");
+    let networks = [0, 1].map(|byte| {
+        testnet::Parameters::build()
+            .with_network_magic(Magic([byte; 4]))
+            .unwrap()
+            .to_network()
+            .unwrap()
+    });
+    assert_ne!(
+        cache.peer_cache_file_path(&networks[0]),
+        cache.peer_cache_file_path(&networks[1]),
+    );
+    for network in networks {
+        assert_ne!(
+            cache.peer_cache_file_path(&network),
+            cache.peer_cache_file_path(&Network::new_default_testnet()),
+        );
+    }
+}
+
+#[tokio::test]
+async fn regtest_skips_public_seed_resolution() {
+    let mut config = Config {
+        network: Network::new_regtest(Default::default()),
+        ..Config::default()
+    };
+    assert!(config.initial_peer_hostnames().is_empty());
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), config.initial_peers())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    config
+        .initial_testnet_peers
+        .insert("127.0.0.1:18233".into());
+    let peers = tokio::time::timeout(std::time::Duration::from_secs(1), config.initial_peers())
+        .await
+        .unwrap();
+    assert_eq!(peers, ["127.0.0.1:18233".parse().unwrap()].into());
 }

@@ -411,7 +411,9 @@ proptest! {
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
-                            max_time: DateTime32::now()
+                            max_time: DateTime32::now(),
+                            #[cfg(zcash_unstable = "zip234")]
+                            chain_value_pools: Default::default(),
                         }));
                 }
             };
@@ -485,7 +487,9 @@ proptest! {
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
-                            max_time: DateTime32::now()
+                            max_time: DateTime32::now(),
+                            #[cfg(zcash_unstable = "zip234")]
+                            chain_value_pools: Default::default(),
                         }));
                 }
             };

@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Added
-body: "`transaction::Transaction::ironwood_anchor`, `has_enough_ironwood_flags`, `orchard_proof_size_is_canonical` and `ironwood_proof_size_is_canonical` ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
-time: 2026-08-13T12:00:00.000000000-03:00

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: "Behind `--cfg zcash_unstable=\"zip234\"`, the `initial_nsm_value_balance` key under `[network.testnet_parameters]`, for Regtest and configured Testnets ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
+time: 2026-09-15T15:00:05.000000000-06:00

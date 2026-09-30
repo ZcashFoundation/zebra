@@ -41,6 +41,8 @@ fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateR
         min_time: DateTime32::from(1654008606),
         max_time,
         chain_history_root: fake_history_tree(net).hash(),
+        #[cfg(zcash_unstable = "zip234")]
+        chain_value_pools: Default::default(),
     };
 
     let long_poll_id = LongPollInput::new(
@@ -234,12 +236,12 @@ async fn in_flight_coinbase_is_retained_across_height_changes() {
         store_precomputed_coinbase(&mut next_coinbase, height, &cache).await;
 
         assert_eq!(
-            cache.get(height, Amount::zero()),
+            cache.get(height, Amount::zero(), None),
             Some(expected_coinbase),
             "returning to the original height must reuse the tracked proof"
         );
         assert!(
-            cache.get(other_height, Amount::zero()).is_none(),
+            cache.get(other_height, Amount::zero(), None).is_none(),
             "a proof must not be stored under a different height"
         );
     })
@@ -276,13 +278,13 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
         }
 
         store_precomputed_coinbase(&mut next_coinbase, other_height, &cache).await;
-        assert!(cache.get(height, Amount::zero()).is_none());
-        assert!(cache.get(other_height, Amount::zero()).is_none());
+        assert!(cache.get(height, Amount::zero(), None).is_none());
+        assert!(cache.get(other_height, Amount::zero(), None).is_none());
 
         start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, other_height);
         store_precomputed_coinbase(&mut next_coinbase, other_height, &cache).await;
         assert_eq!(
-            cache.get(other_height, Amount::zero()),
+            cache.get(other_height, Amount::zero(), None),
             Some(
                 TransactionTemplate::new_coinbase(
                     &net,

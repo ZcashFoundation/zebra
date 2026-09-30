@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: "`TransactionTemplate::new_coinbase_with_parent_pools`, which builds a coinbase whose block subsidy depends on the parent block's NSM value balance ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454))."
+time: 2026-09-15T15:00:02.000000000-06:00

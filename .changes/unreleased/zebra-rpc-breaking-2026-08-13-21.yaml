@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: "`zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in this crate's public API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461))."
-time: 2026-08-13T12:00:00.000000000-03:00

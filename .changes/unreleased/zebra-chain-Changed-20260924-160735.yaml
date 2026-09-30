@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`parameters::testnet::ParametersBuilder::with_activation_heights` rejects out-of-order explicit upgrades before coalescing equal heights, preventing a later upgrade from hiding an invalid earlier activation.'
+time: 2026-09-24T16:07:35.491346966+02:00

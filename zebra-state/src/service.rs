@@ -1254,12 +1254,16 @@ impl Service<Request> for StateService {
 
                 self.drain_non_finalized_rejected_hashes();
 
-                let sent_hash_response = self.known_sent_hash(&hash);
+                let known_sent_hash = self.known_sent_hash(&hash);
+                let known_queued = self
+                    .non_finalized_state_queued_blocks
+                    .has(hash)
+                    .then_some(KnownBlock::Queue);
                 let read_service = self.read_service.clone();
 
                 async move {
-                    if sent_hash_response.is_some() {
-                        return Ok(Response::KnownBlock(sent_hash_response));
+                    if let Some(loc) = known_sent_hash.or(known_queued) {
+                        return Ok(Response::KnownBlock(Some(loc)));
                     };
 
                     let response = read::non_finalized_state_contains_block_hash(

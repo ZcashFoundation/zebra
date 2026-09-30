@@ -42,7 +42,6 @@ fn sanitize_extremes() {
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
-        misbehavior_score: Default::default(),
         is_inbound: false,
         user_agent: None,
         negotiated_version: None,
@@ -58,7 +57,6 @@ fn sanitize_extremes() {
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
-        misbehavior_score: Default::default(),
         is_inbound: false,
         user_agent: None,
         negotiated_version: None,
@@ -564,5 +562,9 @@ fn new_misbehavior_canonicalizes_ipv4_mapped_addr() {
         .expect("canonical misbehavior update should apply to existing peer");
 
     assert_eq!(updated.addr(), canonical_addr);
-    assert_eq!(updated.misbehavior(), 100);
+    assert_eq!(
+        change.misbehavior_score(),
+        100,
+        "canonicalization must preserve the misbehavior increment"
+    );
 }

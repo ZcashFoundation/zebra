@@ -253,21 +253,39 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), ValidateContextError> {
-        let block_value_pool_change = finalized
+        let calculate_value_change_error =
+            |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height: finalized.height,
+                block_hash: finalized.hash,
+                transaction_count: finalized.transaction_hashes.len(),
+                spent_utxo_count: utxos_spent_by_block.len(),
+            };
+
+        #[cfg_attr(not(zcash_unstable = "zip234"), allow(unused_mut))]
+        let mut block_value_pool_change = finalized
             .block
             .chain_value_pool_change(
                 &utxos_spent_by_block,
                 finalized.deferred_pool_balance_change,
             )
-            .map_err(|value_balance_error| {
-                ValidateContextError::CalculateBlockChainValueChange {
-                    value_balance_error,
-                    height: finalized.height,
-                    block_hash: finalized.hash,
-                    transaction_count: finalized.transaction_hashes.len(),
-                    spent_utxo_count: utxos_spent_by_block.len(),
-                }
-            })?;
+            .map_err(calculate_value_change_error)?;
+
+        // The NSM value balance is credited at NU7 activation and with this block's ZIP 235 fee
+        // contribution, and debited by this block's additional subsidy, calculated from the chain
+        // value pools after its parent block, which are `value_pool` here.
+        #[cfg(zcash_unstable = "zip234")]
+        block_value_pool_change.set_nsm_amount(
+            finalized
+                .block
+                .nsm_value_balance_change(
+                    finalized.height,
+                    &db.network(),
+                    &utxos_spent_by_block,
+                    value_pool,
+                )
+                .map_err(calculate_value_change_error)?,
+        );
 
         let new_value_pool = value_pool
             .add_chain_value_pool_change(block_value_pool_change)

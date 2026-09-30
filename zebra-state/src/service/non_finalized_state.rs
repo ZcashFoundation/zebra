@@ -600,20 +600,71 @@ impl NonFinalizedState {
         );
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-            prepared.clone(),
-            spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(prepared.height, &self.network),
-        )
-        .map_err(|value_balance_error| {
-            ValidateContextError::CalculateBlockChainValueChange {
+        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
+            prepared.height,
+            &self.network,
+            new_chain.chain_value_pools,
+        );
+
+        let calculate_value_change_error =
+            |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
                 value_balance_error,
                 height: prepared.height,
                 block_hash: prepared.hash,
                 transaction_count: prepared.block.transactions.len(),
                 spent_utxo_count: spent_utxos.len(),
+            };
+
+        #[cfg_attr(not(zcash_unstable = "zip234"), allow(unused_mut))]
+        let mut contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            prepared.clone(),
+            spent_utxos.clone(),
+            deferred_pool_balance_change,
+        )
+        .map_err(calculate_value_change_error)?;
+
+        // From NU7 activation, the NSM value balance is credited with the seed and the block's
+        // ZIP 235 fee contribution, and debited by the block's additional subsidy.
+        #[cfg(zcash_unstable = "zip234")]
+        if zebra_chain::parameters::subsidy::nsm_value_balance_is_tracked(
+            prepared.height,
+            &self.network,
+        ) {
+            let block_miner_fees = contextual
+                .block
+                .transaction_fees(&zebra_chain::transparent::utxos_from_ordered_utxos(
+                    contextual.spent_outputs.clone(),
+                ))
+                .map_err(calculate_value_change_error)?;
+
+            contextual.chain_value_pool_change.set_nsm_amount(
+                zebra_chain::parameters::subsidy::nsm_value_balance_change(
+                    prepared.height,
+                    &self.network,
+                    new_chain.chain_value_pools,
+                    block_miner_fees,
+                )
+                .map_err(zebra_chain::value_balance::ValueBalanceError::Nsm)
+                .map_err(calculate_value_change_error)?,
+            );
+
+            // Quick check that doesn't read from disk
+            //
+            // From the ZIP 234 deployment height, the block verifier leaves the subsidy checks to
+            // contextual validation, because the block subsidy depends on the NSM value balance
+            // after the parent block.
+            if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(
+                prepared.height,
+                &self.network,
+            ) {
+                check::zip234_subsidy_is_valid(
+                    &contextual,
+                    &self.network,
+                    new_chain.chain_value_pools,
+                    block_miner_fees,
+                )?;
             }
-        })?;
+        }
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
