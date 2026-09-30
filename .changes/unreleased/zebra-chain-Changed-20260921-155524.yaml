@@ -1,0 +1,6 @@
+project: zebra-chain
+kind: Changed
+body: 'Clarified that `ChainTip::is_at_or_near_network_tip` is a timestamp-based estimate,
+  not a find-response stall gate
+  ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).'
+time: 2026-09-21T15:55:24.445124592+02:00

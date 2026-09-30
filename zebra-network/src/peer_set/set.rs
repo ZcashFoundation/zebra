@@ -133,7 +133,7 @@ use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
     constants::{INVENTORY_BUSY_PEER_WAIT_TIMEOUT, MIN_PEER_SET_LOG_INTERVAL},
-    peer::{LoadTrackedClient, MinimumPeerVersion},
+    peer::{ConnectionInfo, LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
@@ -265,12 +265,11 @@ enum StallOutcome {
     Clear,
 }
 
+type StallEvent = (PeerSocketAddr, Arc<ConnectionInfo>, StallOutcome);
+
 fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
     match result {
-        Ok(Response::BlockHashes(hashes)) if hashes.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHashes(_)) => Some(StallOutcome::Clear),
-        Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
+        Ok(Response::BlockHashes(_) | Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
         Ok(_) => None,
         Err(_) => Some(StallOutcome::Stall),
     }
@@ -304,18 +303,18 @@ where
     /// A watch channel receiver with a snapshot of the banned peer groups.
     bans_receiver: watch::Receiver<BanList>,
 
-    /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
+    /// Tracks peers returning failed `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
 
     /// Receives stall/clear events from tracked routing futures in
-    /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
+    /// [`Self::route_request`]. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
-    stall_event_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, StallOutcome)>,
+    stall_event_rx: tokio_mpsc::UnboundedReceiver<StallEvent>,
 
     /// Producer clones handed to each tracked request's response wrapper.
-    stall_event_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
+    stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
 
     // Peer Tracking: Ready Peers
     //
@@ -325,6 +324,13 @@ where
 
     // Request Routing
     //
+    /// Connection identities in find-request order, preserved while peers are busy.
+    ///
+    /// New connections join at the back; disconnected connections are pruned in
+    /// [`Self::poll_peers`]. The metadata allocation identifies a connection even if
+    /// a later connection reuses its address.
+    find_peer_queue: VecDeque<(D::Key, Arc<ConnectionInfo>)>,
+
     /// Stores gossiped inventory hashes from connected peers.
     ///
     /// Used to route inventory requests to peers that are likely to have it.
@@ -505,6 +511,7 @@ where
             // Ready peers
             ready_services: HashMap::new(),
             // Request Routing
+            find_peer_queue: VecDeque::new(),
             inventory_registry: InventoryRegistry::new(inv_stream),
             queued_broadcast_all: None,
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
@@ -669,7 +676,16 @@ where
 
         // Check for failures in ready peers, removing newly errored or disconnected peers.
         // So it needs to run after `poll_unready()`.
-        self.poll_ready_peer_errors(cx).map(Ok)
+        let ready_peers = self.poll_ready_peer_errors(cx);
+        self.find_peer_queue.retain(|(key, _)| {
+            let connected =
+                self.ready_services.contains_key(key) || self.cancel_handles.contains_key(key);
+            if !connected {
+                self.find_response_stalls.clear(*key);
+            }
+            connected
+        });
+        ready_peers.map(Ok)
     }
 
     /// Check busy peer services for request completion or errors.
@@ -934,6 +950,8 @@ where
                         self.serving_peer_keys.remove(&key);
                     }
 
+                    self.find_peer_queue
+                        .push_back((key, svc.connection_info().clone()));
                     self.push_unready(key, svc);
                 }
             }
@@ -970,7 +988,17 @@ where
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((addr, outcome))) = self.stall_event_rx.poll_recv(cx) {
+        while let Poll::Ready(Some((addr, connection_info, outcome))) =
+            self.stall_event_rx.poll_recv(cx)
+        {
+            // A delayed response from an old connection must not affect its replacement.
+            if !self
+                .find_peer_queue
+                .iter()
+                .any(|(key, info)| *key == addr && Arc::ptr_eq(info, &connection_info))
+            {
+                continue;
+            }
             match outcome {
                 StallOutcome::Stall => {
                     if self.find_response_stalls.record_stall(addr) {
@@ -992,6 +1020,7 @@ where
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
+        self.find_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
@@ -1060,6 +1089,18 @@ where
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
     fn select_ready_p2c_peer(&self) -> Option<D::Key> {
         self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
+    }
+
+    /// Rotates find requests across connections, skipping peers that are currently busy.
+    fn select_ready_find_peer(&mut self) -> Option<D::Key> {
+        let (index, (key, _)) = self
+            .find_peer_queue
+            .iter()
+            .enumerate()
+            .find(|(_, (key, _))| self.ready_services.contains_key(key))?;
+        let key = *key;
+        self.find_peer_queue.rotate_left(index + 1);
+        Some(key)
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
@@ -1196,57 +1237,51 @@ where
         svc.map(|svc| svc.load())
     }
 
-    /// Routes a request using P2C load-balancing.
-    fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        if let Some(p2c_key) = self.select_ready_p2c_peer() {
-            tracing::trace!(?p2c_key, "routing based on p2c");
+    /// Routes find requests fairly and other requests using P2C load-balancing.
+    fn route_request(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let is_find_request = matches!(
+            &req,
+            Request::FindBlocks { .. } | Request::FindHeaders { .. }
+        );
+        let peer_key = if is_find_request {
+            // Fast empty responses must not gain a latency-based routing advantage.
+            self.select_ready_find_peer()
+        } else {
+            self.select_ready_p2c_peer()
+        };
 
+        if let Some(peer_key) = peer_key {
+            tracing::trace!(?peer_key, is_find_request, "routing request to peer");
             let mut svc = self
-                .take_ready_service(&p2c_key)
+                .take_ready_service(&peer_key)
                 .expect("selected peer must be ready");
 
-            let is_find_request = matches!(
-                &req,
-                Request::FindBlocks { .. } | Request::FindHeaders { .. }
-            );
-            let is_syncing = || {
-                !self
-                    .minimum_peer_version
-                    .chain_tip()
-                    .is_at_or_near_network_tip(&self.network)
-            };
-            // zcashd-compat sidecars are exempt: they sync *from* this node,
-            // so they can legitimately trail it without being stalled peers.
-            let track_stalls =
-                is_find_request && !self.zcashd_compat_peer_keys.contains(&p2c_key) && is_syncing();
-
+            // Configured sidecars are trusted downstream consumers, not upstream sync sources.
+            let track_stalls = is_find_request && !self.zcashd_compat_peer_keys.contains(&peer_key);
             let fut = svc.call(req);
-            self.push_unready(p2c_key, svc);
-
-            if track_stalls {
+            let response = if track_stalls {
+                let connection_info = svc.connection_info().clone();
                 let stall_tx = self.stall_event_tx.clone();
-                return async move {
+                async move {
+                    // Cancellation is not evidence of failure: a caught-up peer can
+                    // legitimately send no getblocks reply before the caller times out.
                     let result = fut.await;
                     if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
+                        let _ = stall_tx.send((peer_key, connection_info, outcome));
                     }
                     result.map_err(Into::into)
                 }
-                .boxed();
-            }
-
-            return fut.map_err(Into::into).boxed();
+                .boxed()
+            } else {
+                fut.map_err(Into::into).boxed()
+            };
+            self.push_unready(peer_key, svc);
+            return response;
         }
 
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
             tokio::task::yield_now().await;
-
-            // # Security
-            //
-            // Avoid routing requests to peers that are missing inventory.
-            // If we kept trying doomed requests, peers that are missing our requested inventory
-            // could take up a large amount of our bandwidth and retry limits.
             Err(SharedPeerError::from(PeerError::NoReadyPeers))
         }
         .map_err(Into::into)
@@ -1976,8 +2011,8 @@ where
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
 
-            // Choose a random less-loaded peer for all other requests
-            _ => self.route_p2c(req),
+            // Find requests rotate across ready peers; other requests use P2C.
+            _ => self.route_request(req),
         };
         self.update_metrics();
 

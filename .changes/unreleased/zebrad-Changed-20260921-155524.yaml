@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: 'Empty discovery replies no longer trigger stalled-peer disconnections.
+  Chain discovery rotates across ready peers instead of favoring fast empty responders
+  ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).'
+time: 2026-09-21T15:55:24.404170412+02:00

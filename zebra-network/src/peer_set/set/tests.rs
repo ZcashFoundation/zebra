@@ -110,6 +110,24 @@ impl PeerVersions {
     }
 }
 
+/// Discover one peer advertising `start_height`, and return its request harness.
+fn mock_peer_discovery_with_start_height(
+    start_height: block::Height,
+) -> (
+    impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>,
+    ClientTestHarness,
+) {
+    let (client, harness) = ClientTestHarness::build()
+        .with_version(crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION)
+        .with_start_height(start_height)
+        .finish();
+    let peer_address: PeerSocketAddr = SocketAddr::new([127, 0, 0, 1].into(), 1).into();
+    let discovery =
+        stream::iter([Ok(Change::Insert(peer_address, client.into()))]).chain(stream::pending());
+
+    (discovery, harness)
+}
+
 /// A helper builder type for creating test [`PeerSet`] instances.
 ///
 /// This helps to reduce repeated boilerplate code. Fields that are not set are configured to use
