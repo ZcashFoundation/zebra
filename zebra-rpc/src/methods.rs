@@ -303,6 +303,9 @@ pub trait Rpc {
     /// Verbosity 3 adds a `prevout` object to each transparent input and a `fee` field to each
     /// non-coinbase transaction, matching Bitcoin Core's `getblock` verbosity 3.
     ///
+    /// Verbosity 3 resolves each spent output by reading its parent transaction, so it is more
+    /// expensive than lower verbosities.
+    ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblock")]
     async fn get_block(
