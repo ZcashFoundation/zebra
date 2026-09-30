@@ -188,6 +188,62 @@ fn commit_chain(
     (state, parents, spender)
 }
 
+/// The resolved [`Utxo`] must carry the spent output's own value, its parent's creation height,
+/// and the parent's coinbase flag — not another output's value, nor the spending block's height.
+///
+/// The spent output is deleted from the finalized UTXO set when the spending block commits, so
+/// this exercises the parent-transaction fallback that reconstructs the fields from the parent.
+#[test]
+fn spent_outputs_resolves_value_height_and_generated() {
+    let _init_guard = zebra_test::init();
+
+    // Three outputs with distinct values, so resolving the wrong output index would surface as a
+    // wrong value rather than passing silently.
+    let spent_value = Amount::try_from(7).expect("valid amount");
+    let parent_outputs = vec![vec![
+        Output::new(
+            Amount::try_from(1).expect("valid amount"),
+            Script::new(&[0x76; 25]),
+        ),
+        Output::new(spent_value, Script::new(&[0x76; 25])),
+        Output::new(
+            Amount::try_from(3).expect("valid amount"),
+            Script::new(&[0x76; 25]),
+        ),
+    ]];
+
+    // Spend output index 1 of the single parent's coinbase transaction.
+    let spent_outpoint = |parents: &[Arc<Block>]| OutPoint {
+        hash: parents[0].transactions[0].hash(),
+        index: 1,
+    };
+    let (state, parents, _spender) =
+        commit_chain(parent_outputs, |parents| vec![spent_outpoint(parents)]);
+
+    // The single parent commits at height 1 (genesis is 0), and the spender at height 2.
+    let spent = spent_outputs_for_block(None::<Arc<Chain>>, &state.db, Height(2).into())
+        .expect("block is in the best chain");
+
+    let utxo = spent
+        .get(&spent_outpoint(&parents))
+        .expect("the spent output is resolved");
+
+    assert_eq!(
+        utxo.output.value(),
+        spent_value,
+        "the resolved output is the one the input spends (index 1), not another index",
+    );
+    assert_eq!(
+        utxo.height,
+        Height(1),
+        "height is the parent's creation height, not the spending block's height",
+    );
+    assert!(
+        utxo.from_coinbase,
+        "the spent output was created by a coinbase transaction",
+    );
+}
+
 /// Every input spends a small output of a distinct large parent. The lookup must not keep all
 /// the parents in memory at once: peak heap should stay near one parent, not all of them.
 #[test]
