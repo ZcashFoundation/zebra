@@ -8,22 +8,36 @@ use std::{
     time::Duration,
 };
 
-use futures::{stream, FutureExt as _, StreamExt};
+use futures::{stream, FutureExt as _, Stream, StreamExt};
 use tokio::time::timeout;
-use tower::{discover::Change, Service, ServiceExt};
+use tower::{
+    discover::{Change, Discover},
+    Service, ServiceExt,
+};
 
 use zebra_chain::{
     block,
-    chain_tip::AT_OR_NEAR_TIP_THRESHOLD,
+    chain_tip::{ChainTip, AT_OR_NEAR_TIP_THRESHOLD},
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
+    transaction::{self, UnminedTxId},
 };
 
 use crate::{
-    constants::{CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP},
-    peer::{ClientRequest, ClientTestHarness, ConnectedAddr, MinimumPeerVersion},
-    peer_set::{inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD},
-    protocol::external::{types::Version, InventoryHash},
+    constants::{
+        CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
+        INVENTORY_BUSY_PEER_REFUSAL_DELAY, REQUEST_TIMEOUT,
+    },
+    peer::{
+        ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
+    },
+    peer_set::{
+        inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerSet,
+    },
+    protocol::external::{
+        types::{PeerServices, Version},
+        InventoryHash,
+    },
     BoxError, PeerSocketAddr, Request, Response, SharedPeerError,
 };
 use tokio::sync::watch;
@@ -1126,5 +1140,581 @@ fn busy_sidecar_receives_queued_block_gossip() {
             Request::AdvertiseBlock(block_hash, None),
             "the queued request must be the block advert"
         );
+    });
+}
+
+/// Returns mock peers with `services`, as a discovery stream, their addresses, and their handles.
+///
+/// All peers use the same IP, so the peer set needs a `max_conns_per_ip` of at least
+/// `services.len()`.
+fn mock_peers_with_services(
+    services: &[PeerServices],
+) -> (
+    impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> + Unpin,
+    Vec<PeerSocketAddr>,
+    Vec<ClientTestHarness>,
+) {
+    let mut changes = Vec::new();
+    let mut addrs = Vec::new();
+    let mut handles = Vec::new();
+
+    for (port, services) in (1..).zip(services) {
+        let addr: PeerSocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port).into();
+        let (client, handle) = ClientTestHarness::build()
+            .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+            .with_services(*services)
+            .finish();
+
+        changes.push(Ok(Change::Insert(addr, client.into())));
+        addrs.push(addr);
+        handles.push(handle);
+    }
+
+    (
+        stream::iter(changes).chain(stream::pending()),
+        addrs,
+        handles,
+    )
+}
+
+/// Returns a single block request for a test block hash made from `byte`.
+fn block_request(byte: u8) -> Request {
+    Request::BlocksByHash(iter::once(block::Hash([byte; 32])).collect())
+}
+
+/// Makes the first mock peer in the peer set busy, by queuing 2 block requests for it.
+///
+/// Block requests prefer serving peers, so the first peer must be the only serving peer.
+/// The mock peer channel holds 2 requests, so the peer only becomes busy after the second one.
+async fn make_serving_peer_busy<D, C>(
+    peer_set: &mut PeerSet<D, C>,
+    serving_addr: PeerSocketAddr,
+) -> Vec<<PeerSet<D, C> as Service<Request>>::Future>
+where
+    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D::Error: Into<BoxError>,
+    C: ChainTip,
+{
+    let mut futs = Vec::new();
+    for byte in [1, 9] {
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        futs.push(peer_ready.call(block_request(byte)));
+    }
+
+    peer_set
+        .ready()
+        .await
+        .expect("peer set service is always ready");
+    assert!(
+        peer_set.cancel_handles.contains_key(&serving_addr),
+        "serving peer should be busy after 2 queued requests",
+    );
+
+    futs
+}
+
+/// Returns the request a mock peer received, if any.
+fn received_request(handle: &mut ClientTestHarness) -> Option<Request> {
+    handle
+        .try_to_receive_outbound_client_request()
+        .request()
+        .map(|ClientRequest { request, .. }| request)
+}
+
+/// Asserts that `response` is a synthetic `NotFoundRegistry` error.
+fn assert_not_found_registry(response: Result<Response, BoxError>) {
+    let error = response.expect_err("peer set should refuse the request");
+    let error = error
+        .downcast_ref::<SharedPeerError>()
+        .expect("peer set should return a boxed SharedPeerError");
+    assert!(
+        error.inner_debug().contains("NotFoundRegistry"),
+        "unexpected error: {error:?}"
+    );
+}
+
+/// Check that block requests that no peer advertised go to a peer that can serve historic blocks,
+/// rather than a non-serving peer that is likely to answer `notfound`.
+#[test]
+fn peer_set_route_block_prefers_serving_peer() {
+    peer_set_route_block_prefers_serving_peer_order(true);
+    peer_set_route_block_prefers_serving_peer_order(false);
+}
+
+fn peer_set_route_block_prefers_serving_peer_order(serving_first: bool) {
+    let services = if serving_first {
+        [PeerServices::NODE_NETWORK, PeerServices::empty()]
+    } else {
+        [PeerServices::empty(), PeerServices::NODE_NETWORK]
+    };
+    let (serving, non_serving) = if serving_first { (0, 1) } else { (1, 0) };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, _addrs, mut handles) = mock_peers_with_services(&services);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 2);
+
+        let _fut = peer_ready.call(block_request(1));
+
+        assert_eq!(
+            received_request(&mut handles[serving]),
+            Some(block_request(1)),
+            "block request should be routed to the serving peer",
+        );
+        assert_eq!(
+            received_request(&mut handles[non_serving]),
+            None,
+            "block request should not be routed to the non-serving peer",
+        );
+    });
+}
+
+/// Check that when the only block-serving peer is busy, block requests wait for it, instead of
+/// going to a ready non-serving peer, or being refused instantly. After the delayed refusal, a
+/// retry reaches the serving peer once it is ready again.
+///
+/// This is the mainnet stall from Zebra 6.4.1: while all serving peers were busy, the syncer used
+/// up its retries on instant local refusals, and dropped the block after the chain tip.
+#[test]
+fn peer_set_delays_block_refusal_while_serving_peer_busy() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // Make the serving peer busy: its request stays queued until the test receives it.
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        let peer_ready = peer_set.ready().await.expect("peer set service is always ready");
+        assert_eq!(
+            peer_ready.ready_services.len(),
+            1,
+            "only the non-serving peer should be ready"
+        );
+
+        let mut refused_fut = peer_ready.call(block_request(2));
+
+        assert_eq!(
+            received_request(&mut handles[1]),
+            None,
+            "block request should not be routed to the non-serving peer while a serving peer is busy",
+        );
+        assert!(
+            timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, &mut refused_fut)
+                .await
+                .is_err(),
+            "refusal should be delayed while a serving peer is busy",
+        );
+        assert_not_found_registry(refused_fut.await);
+
+        // Let the serving peer take its queued requests, so it becomes ready again.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+
+        let peer_ready = peer_set.ready().await.expect("peer set service is always ready");
+        let _retry_fut = peer_ready.call(block_request(2));
+
+        assert_eq!(
+            received_request(&mut handles[0]),
+            Some(block_request(2)),
+            "the retried block request should be routed to the now-ready serving peer",
+        );
+    });
+}
+
+/// Check that recent blocks, which peers have advertised, still go to a ready non-serving peer
+/// while the only serving peer is busy. Non-serving peers can usually serve recent blocks, and
+/// the inbound block gossip downloader doesn't retry refused requests.
+#[test]
+fn peer_set_routes_advertised_block_to_non_serving_peer_while_serving_peer_busy() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // The busy serving peer advertised the block, so it is a recent block.
+        let advertised_inv = InventoryHash::Block(block::Hash([2; 32]));
+        peer_set_guard
+            .inventory_sender()
+            .as_mut()
+            .expect("unexpected missing inv sender")
+            .send(InventoryStatus::new_available(advertised_inv, addrs[0]))
+            .expect("unexpected dropped receiver");
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _fut = peer_ready.call(block_request(2));
+
+        assert_eq!(
+            received_request(&mut handles[1]),
+            Some(block_request(2)),
+            "an advertised block should be routed to the ready non-serving peer",
+        );
+    });
+}
+
+/// Check that block requests still go to non-serving peers if no serving peer is connected.
+#[test]
+fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, _addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::empty(), PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // The mock peer channels hold 2 requests each, so after 3 requests one peer is busy. Then
+        // check the other peer still gets the 4th request immediately.
+        let mut futs = Vec::new();
+        for byte in 1..=4 {
+            let peer_ready = peer_set.ready().await.expect("peer set service is always ready");
+            futs.push(peer_ready.call(block_request(byte)));
+        }
+
+        let received = handles
+            .iter_mut()
+            .map(|handle| iter::from_fn(|| received_request(handle)).count())
+            .sum::<usize>();
+
+        assert_eq!(
+            received, 4,
+            "block requests should still be routed to non-serving peers if no serving peer is connected",
+        );
+    });
+}
+
+/// Check that delayed refusals give a busy serving peer time to recover, even if it only recovers
+/// just before its request would time out.
+#[test]
+fn peer_set_refusal_budget_outlasts_busy_serving_peer() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        let recovery = REQUEST_TIMEOUT - Duration::from_secs(2);
+        let started = tokio::time::Instant::now();
+        let mut drained = false;
+        let mut routed = false;
+
+        // zebrad makes up to 16 attempts for a missing block, see its `ensure_timeouts_consistent`
+        // test. The serving peer recovers just before its request would time out.
+        for _attempt in 0..16 {
+            if !drained && started.elapsed() >= recovery {
+                assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+                assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+                drained = true;
+            }
+
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            let fut = peer_ready.call(block_request(2));
+
+            // Only check the serving peer after it recovers: receiving its queued requests would
+            // make it ready.
+            if drained && received_request(&mut handles[0]) == Some(block_request(2)) {
+                routed = true;
+                break;
+            }
+            assert_not_found_registry(fut.await);
+        }
+
+        assert!(
+            routed,
+            "the block request should reach the serving peer within the syncer's 16 attempts, elapsed: {:?}",
+            started.elapsed(),
+        );
+        assert_eq!(received_request(&mut handles[1]), None);
+    });
+}
+
+/// Check that a busy non-serving peer only delays the refusal of a block that was advertised.
+///
+/// Non-serving peers usually can't serve historic blocks, so waiting for one to finish its current
+/// request would only slow down the refusal. But peers advertise recent blocks, which non-serving
+/// peers can usually serve.
+#[test]
+fn peer_set_only_delays_block_refusal_for_busy_non_serving_peer_if_advertised() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, _handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (serving_addr, non_serving_addr) = (addrs[0], addrs[1]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // The test inventory channel only holds one change, so poll the peer set to process each
+        // change before sending the next one.
+        let mut send_inventory_change = |change| {
+            peer_set_guard
+                .inventory_sender()
+                .as_mut()
+                .expect("unexpected missing inv sender")
+                .send(change)
+                .expect("unexpected dropped receiver");
+        };
+
+        // Make the non-serving peer busy, by marking the serving peer as missing the requested
+        // blocks. The mock peer channel holds 2 requests.
+        let mut busy_futs = Vec::new();
+        for byte in [1, 9] {
+            send_inventory_change(InventoryStatus::new_missing(
+                InventoryHash::Block(block::Hash([byte; 32])),
+                serving_addr,
+            ));
+            let peer_ready = peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+            busy_futs.push(peer_ready.call(block_request(byte)));
+        }
+
+        // A historic block that the ready serving peer is missing: the busy non-serving peer
+        // can't serve it either, so the refusal is instant.
+        send_inventory_change(InventoryStatus::new_missing(
+            InventoryHash::Block(block::Hash([2; 32])),
+            serving_addr,
+        ));
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert!(
+            peer_ready.cancel_handles.contains_key(&non_serving_addr),
+            "non-serving peer should be busy after 2 queued requests",
+        );
+
+        let refused_fut = peer_ready.call(block_request(2));
+        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+            .await
+            .expect("a busy non-serving peer should not delay the refusal of a historic block");
+        assert_not_found_registry(response);
+
+        // A recent block that the busy non-serving peer advertised: the refusal is delayed, so a
+        // retry can reach that peer once it is ready.
+        let advertised_hash = block::Hash([3; 32]);
+        send_inventory_change(InventoryStatus::new_missing(
+            InventoryHash::Block(advertised_hash),
+            serving_addr,
+        ));
+        peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        send_inventory_change(InventoryStatus::new_available(
+            InventoryHash::Block(advertised_hash),
+            non_serving_addr,
+        ));
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        let mut refused_fut = peer_ready.call(block_request(3));
+        assert!(
+            timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, &mut refused_fut)
+                .await
+                .is_err(),
+            "a busy non-serving peer should delay the refusal of a block it advertised",
+        );
+        assert_not_found_registry(refused_fut.await);
+    });
+}
+
+/// Check that block requests are refused instantly if every connected peer, ready or busy, is
+/// missing the block.
+#[test]
+fn peer_set_refuses_block_instantly_if_all_peers_missing() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // Make the serving peer busy.
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // Mark the requested block as missing on both peers. The test inventory channel only holds
+        // one change, so poll the peer set to process each change before sending the next one.
+        let missing_inv = InventoryHash::Block(block::Hash([2; 32]));
+        for addr in addrs {
+            peer_set_guard
+                .inventory_sender()
+                .as_mut()
+                .expect("unexpected missing inv sender")
+                .send(InventoryStatus::new_missing(missing_inv, addr))
+                .expect("unexpected dropped receiver");
+            peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+        }
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let refused_fut = peer_ready.call(block_request(2));
+
+        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+            .await
+            .expect("refusal should be instant when every peer is missing the block");
+        assert_not_found_registry(response);
+
+        assert_eq!(received_request(&mut handles[1]), None);
+    });
+}
+
+/// Check that transaction requests are still refused instantly while a serving peer is busy:
+/// non-serving peers can serve mempool transactions, and transaction downloads don't retry.
+#[test]
+fn peer_set_refuses_transaction_instantly_while_serving_peer_busy() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, addrs, mut handles) =
+        mock_peers_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // Make the serving peer busy.
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+
+        // Mark the requested transaction as missing on the ready non-serving peer only.
+        let tx_id = UnminedTxId::Legacy(transaction::Hash([3; 32]));
+        peer_set_guard
+            .inventory_sender()
+            .as_mut()
+            .expect("unexpected missing inv sender")
+            .send(InventoryStatus::new_missing(
+                InventoryHash::from(tx_id),
+                addrs[1],
+            ))
+            .expect("unexpected dropped receiver");
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let refused_fut = peer_ready.call(Request::TransactionsById(iter::once(tx_id).collect()));
+
+        let response = timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY / 2, refused_fut)
+            .await
+            .expect("transaction refusals should not be delayed");
+        assert_not_found_registry(response);
+
+        assert_eq!(received_request(&mut handles[1]), None);
     });
 }

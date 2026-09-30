@@ -56,6 +56,7 @@ impl ClientTestHarness {
     pub fn build() -> ClientTestHarnessBuilder {
         ClientTestHarnessBuilder {
             version: None,
+            services: None,
             connection_task: None,
             heartbeat_task: None,
             connected_addr: None,
@@ -252,6 +253,7 @@ pub struct ClientTestHarnessBuilder<C = future::Ready<()>, H = future::Ready<()>
     connection_task: Option<C>,
     heartbeat_task: Option<H>,
     version: Option<Version>,
+    services: Option<PeerServices>,
     connected_addr: Option<ConnectedAddr>,
 }
 
@@ -263,6 +265,12 @@ where
     /// Configure the mocked version for the peer.
     pub fn with_version(mut self, version: Version) -> Self {
         self.version = Some(version);
+        self
+    }
+
+    /// Configure the mocked services the peer advertised in its `version` message.
+    pub fn with_services(mut self, services: PeerServices) -> Self {
+        self.services = Some(services);
         self
     }
 
@@ -281,6 +289,7 @@ where
             connection_task: Some(connection_task),
             heartbeat_task: self.heartbeat_task,
             version: self.version,
+            services: self.services,
             connected_addr: self.connected_addr,
         }
     }
@@ -294,6 +303,7 @@ where
             connection_task: self.connection_task,
             heartbeat_task: Some(heartbeat_task),
             version: self.version,
+            services: self.services,
             connected_addr: self.connected_addr,
         }
     }
@@ -317,7 +327,7 @@ where
 
         let remote = VersionMessage {
             version: remote_version,
-            services: PeerServices::default(),
+            services: self.services.unwrap_or_default(),
             timestamp: Utc::now(),
             address_recv: AddrInVersion::new(
                 SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1),
