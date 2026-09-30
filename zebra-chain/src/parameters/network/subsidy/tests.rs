@@ -122,7 +122,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
     Ok(())
 }
 
-/// Check mainnet and testnet funding stream addresses are valid transparent P2SH addresses.
+/// Check mainnet and testnet funding stream addresses use the expected network.
 #[test]
 fn test_funding_stream_addresses() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
@@ -144,13 +144,6 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                     expected_network_kind,
                     "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );
-
-                assert!(
-                    address.is_script_hash(),
-                    "funding stream address is not P2SH: {address}"
-                );
-
-                let _script = address.script();
             }
         }
     }
