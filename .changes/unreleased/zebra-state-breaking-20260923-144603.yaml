@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ReadRequest::SolutionRate::num_blocks` is now `Option<usize>`: use `Some` for an explicit window or `None` to select the consensus averaging window after the requested height is clamped to the snapshotted tip.'
+time: 2026-09-23T14:46:03.238374307+02:00

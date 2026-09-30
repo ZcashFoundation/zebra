@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Peer-service requirements and stall detection use the local tip timestamp for freshness, preserving the elapsed-time allowance when NU7 shortens block spacing.
+time: 2026-09-24T16:07:48.94079773+02:00

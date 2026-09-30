@@ -26,6 +26,8 @@ proptest! {
         let blossom_activation_height = NetworkUpgrade::Blossom
             .activation_height(&network)
             .expect("Blossom activation height is missing");
+        let blossom_parent_height = (blossom_activation_height - 1)
+            .expect("Blossom activates after genesis");
 
         block_heights.sort();
         let current_height = block_heights[0];
@@ -37,20 +39,20 @@ proptest! {
         let estimated_time_difference =
             // Estimate time difference for heights before Blossom activation.
             estimate_time_difference(
-                current_height.min(blossom_activation_height),
-                network_height.min(blossom_activation_height),
+                current_height.min(blossom_parent_height),
+                network_height.min(blossom_parent_height),
                 NU_BEFORE_BLOSSOM,
             )
-            // Estimate time difference for heights after Blossom activation.
+            // Include the interval ending at Blossom activation in the new spacing.
             + estimate_time_difference(
-                current_height.max(blossom_activation_height),
-                network_height.max(blossom_activation_height),
+                current_height.max(blossom_parent_height),
+                network_height.max(blossom_parent_height),
                 NetworkUpgrade::Blossom,
             );
 
         let time_displacement = calculate_time_displacement(
             time_displacement_factor,
-            NetworkUpgrade::current(&network, network_height),
+            NetworkUpgrade::current(&network, (network_height + 1).unwrap_or(network_height)),
         );
 
         let mock_local_time = current_block_time + estimated_time_difference + time_displacement;

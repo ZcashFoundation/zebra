@@ -360,3 +360,54 @@ fn full_activation_list_contains_all_upgrades() {
     // full activation list even though it is always present in the iter.
     assert_eq!(full_list.len(), NetworkUpgrade::iter().count() - 1);
 }
+
+/// Minimum difficulty keeps its historical start gate and strict timestamp boundary through NU7.
+#[test]
+fn minimum_difficulty_spacing_boundaries() {
+    use chrono::{DateTime, Duration};
+
+    use super::testnet::{ConfiguredActivationHeights, Parameters};
+
+    let _init_guard = zebra_test::init();
+    let testnet = Parameters::build()
+        .with_slow_start_interval(block::Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(300_000),
+            nu7: Some(400_000),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("configured Testnet parameters are valid");
+    let previous_time = DateTime::from_timestamp(1_600_000_000, 0).unwrap();
+
+    for (network, height, threshold) in [
+        (&Mainnet, block::Height::MAX, None),
+        (&testnet, block::Height(299_187), None),
+        (&testnet, block::Height(299_188), Some(900)),
+        (&testnet, block::Height(299_999), Some(900)),
+        (&testnet, block::Height(300_000), Some(450)),
+        (&testnet, block::Height(399_999), Some(450)),
+        (&testnet, block::Height(400_000), Some(450)),
+        (&testnet, block::Height(400_001), Some(450)),
+    ] {
+        assert_eq!(
+            NetworkUpgrade::minimum_difficulty_spacing_for_height(network, height),
+            threshold.map(Duration::seconds),
+            "{network:?}, candidate height {height:?}",
+        );
+        for gap in [threshold.unwrap_or(900), threshold.unwrap_or(900) + 1] {
+            assert_eq!(
+                NetworkUpgrade::is_testnet_min_difficulty_block(
+                    network,
+                    height,
+                    previous_time + Duration::seconds(gap),
+                    previous_time,
+                ),
+                threshold.is_some_and(|threshold| gap > threshold),
+                "{network:?}, candidate height {height:?}, gap {gap}",
+            );
+        }
+    }
+}

@@ -485,6 +485,17 @@ where
                 return Err(TransactionError::CoinbaseInMempool);
             }
 
+            // A mempool transaction must fit in the next block's ZIP 218 shielded budget.
+            // Reject it before state lookups or proof verification; block verification checks
+            // the aggregate budget separately, including the coinbase.
+            if nu >= NetworkUpgrade::Nu7 {
+                if let Some((pool, count, limit)) =
+                    crate::block::ShieldedActionCounts::from_transaction(tx.as_ref()).exceeded_limit()
+                {
+                    return Err(TransactionError::TooManyShieldedActions { pool, count, limit });
+                }
+            }
+
             // Do quick checks first
             check_common_consensus_rules(tx.as_ref(), height, &network)?;
 

@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Invalid custom subsidy schedules, funding address periods, and insufficient funding-recipient addresses are now rejected during configuration loading. Previously accepted configurations with early spacing upgrades, such as NU6 at height 1 with the default slow-start interval, can exceed the monetary cap; set `slow_start_interval = 0` for accelerated test networks. Valid streamless networks can still use short halving intervals. Supply enough addresses or explicitly enable funding-address extension when changing upgrade heights. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+time: 2026-09-24T01:49:20.792268864+02:00

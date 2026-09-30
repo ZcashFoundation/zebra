@@ -150,6 +150,21 @@ fn empty_funding_streams_survive_configuration_roundtrip() {
     );
 }
 
+#[test]
+fn funding_stream_extension_rejects_zero_address_period() {
+    let _init_guard = zebra_test::init();
+    let config = r#"
+network = "Testnet"
+initial_testnet_peers = []
+[testnet_parameters]
+network_magic = [0, 0, 0, 0]
+checkpoints = true
+pre_blossom_halving_interval = 1
+extend_funding_stream_addresses_as_required = true
+"#;
+    assert!(toml::from_str::<Config>(config).is_err());
+}
+
 /// Checks that a configured Testnet's temporary Orchard-disabling soft fork height
 /// survives a serialization round-trip.
 #[test]

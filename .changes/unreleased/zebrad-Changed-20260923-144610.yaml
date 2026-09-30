@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Block-template transaction selection applies the same NU7 shielded-action limits as block validation and reserves the coinbase budget before selecting mempool transactions, including Sapling coinbases.
+time: 2026-09-23T14:46:10.983689573+02:00

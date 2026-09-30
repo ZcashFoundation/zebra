@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: From NU7, mempool admission rejects transactions that individually exceed a ZIP 218 shielded block budget before state lookup or proof verification, without penalizing the sending peer ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+time: 2026-09-30T18:22:51.858178881+02:00

@@ -108,6 +108,14 @@ e.g. `curl --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method":
 "getpeerinfo", "params": [] }' -H 'Content-Type: application/json'
 http://127.0.0.1:8232` to check that. See "Getting Peers" section below.
 
+PoW-enabled private Testnets must finish synchronizing with their peers before
+`getblocktemplate` or the internal miner will produce work. Unlike Mainnet, they
+do not require a tip less than 125 minutes old: once synchronized, participants
+can resume mining from an old snapshot even if setup took longer than that.
+`rpc.debug_force_finished_sync` only changes `getblockchaininfo`; it does not
+bypass mining synchronization. Keep the participants on the same agreed tip
+and check peer connectivity if mining still reports that Zebra is not synced.
+
 ### Wait Until Activation Happens
 
 And monitor logs for behaviour.

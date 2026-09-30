@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`Config` deserialization rejects custom Testnet subsidy schedules that exceed the monetary cap, including early spacing upgrades with the default slow-start interval. Set `slow_start_interval = 0` for accelerated test networks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))'
+time: 2026-09-30T23:24:26.435351793+02:00
