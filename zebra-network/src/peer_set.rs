@@ -15,5 +15,8 @@ pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker};
 
 use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
+pub use stall_tracker::FindResponseFeedback;
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use stall_tracker::FindResponseFeedbackObserver;
 
 pub use initialize::{init, init_with_block_gossip_peer_ips};

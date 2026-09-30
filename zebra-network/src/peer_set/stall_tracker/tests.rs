@@ -2,6 +2,25 @@
 
 use super::*;
 
+/// Distinguishes an unclassified event from feedback that is still pending.
+#[test]
+fn observer_distinguishes_unclassified_feedback() {
+    let (feedback, mut observer) = FindResponseFeedback::new_for_test();
+
+    assert_eq!(
+        observer.try_outcome(),
+        Err(mpsc::error::TryRecvError::Empty)
+    );
+
+    drop(feedback);
+
+    assert_eq!(observer.try_outcome(), Ok(None));
+    assert_eq!(
+        observer.try_outcome(),
+        Err(mpsc::error::TryRecvError::Disconnected)
+    );
+}
+
 fn test_addr(last_octet: u8) -> PeerSocketAddr {
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
     SocketAddr::V4(SocketAddrV4::new(
@@ -56,3 +75,6 @@ fn independent_per_peer() {
     assert!(!tracker.record_stall(addr_b));
     assert!(tracker.record_stall(addr_b));
 }
+
+mod feedback;
+mod prop;
