@@ -256,6 +256,34 @@ where
     }
 }
 
+/// Reports a block request that a peer failed to answer to the peer set, when it is dropped,
+/// unless the peer returned the block or answered `notfound`.
+///
+/// Failures are reported on drop, because the caller's own timeout can drop the response future
+/// before the peer connection's request timeout fails it.
+struct InvFailureReporter {
+    /// Sends the failure to the peer set.
+    failure_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, InventoryHash)>,
+
+    /// The peer the request was routed to.
+    peer: PeerSocketAddr,
+
+    /// The requested block.
+    hash: InventoryHash,
+
+    /// True if the peer returned the block, or answered `notfound`, which is tracked as missing
+    /// inventory instead.
+    answered: bool,
+}
+
+impl Drop for InvFailureReporter {
+    fn drop(&mut self) {
+        if !self.answered {
+            let _ = self.failure_tx.send((self.peer, self.hash));
+        }
+    }
+}
+
 /// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
 /// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
 /// the stall tracker can be updated and the peer disconnected if needed.
@@ -315,6 +343,16 @@ where
 
     /// Producer clones handed to each tracked request's response wrapper.
     stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
+
+    /// Receives block requests that peers failed to answer, from [`InvFailureReporter`]s, and
+    /// records them in the [`InventoryRegistry`].
+    ///
+    /// Each routed block request sends at most one failure, so the channel is limited by the
+    /// number of block requests in flight.
+    inv_failure_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, InventoryHash)>,
+
+    /// Producer clones handed to each block request's [`InvFailureReporter`].
+    inv_failure_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, InventoryHash)>,
 
     // Peer Tracking: Ready Peers
     //
@@ -496,6 +534,7 @@ where
         max_conns_per_ip: Option<usize>,
     ) -> Self {
         let (stall_event_tx, stall_event_rx) = tokio_mpsc::unbounded_channel();
+        let (inv_failure_tx, inv_failure_rx) = tokio_mpsc::unbounded_channel();
         Self {
             // New peers
             discover,
@@ -507,6 +546,10 @@ where
             find_response_stalls: FindResponseStallTracker::new(),
             stall_event_rx,
             stall_event_tx,
+
+            // Failed block request tracking
+            inv_failure_rx,
+            inv_failure_tx,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -1014,6 +1057,17 @@ where
         }
     }
 
+    /// Records block requests that peers failed to answer in the inventory registry.
+    ///
+    /// Peers declare their own services, and request timeouts don't mark inventory as missing. So
+    /// otherwise a peer that falsely claims to serve blocks, and withholds them, could get every
+    /// retry for a block.
+    fn drain_inv_failures(&mut self, cx: &mut Context<'_>) {
+        while let Poll::Ready(Some((peer, hash))) = self.inv_failure_rx.poll_recv(cx) {
+            self.inventory_registry.register_failed(hash, peer);
+        }
+    }
+
     /// Remove the service corresponding to `key` from the peer set.
     ///
     /// Drops the service, cancelling any pending request or response to that peer.
@@ -1303,7 +1357,7 @@ where
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
         match self.select_inv_route(hash) {
-            InvRoute::Peer(peer) => self.call_ready_peer(peer, req),
+            InvRoute::Peer(peer) => self.call_inv_peer(peer, req, hash),
             InvRoute::Wait => self.queue_inv_request(req, hash),
             InvRoute::Refuse => {
                 tracing::debug!(
@@ -1334,8 +1388,23 @@ where
     /// Only block requests wait for busy peers: transaction downloads don't retry, so waiting
     /// would only slow them down.
     ///
+    /// Peers that recently failed to return a block are skipped for that block, unless no other
+    /// peer might have it.
+    ///
     /// Uses P2C to choose the least loaded peer in each list.
     fn select_inv_route(&self, hash: InventoryHash) -> InvRoute<D::Key> {
+        // # Security
+        //
+        // Peers that recently failed to return this block lose any preference for it, and are only
+        // asked again as a last resort. Otherwise, a peer that falsely claims to serve blocks and
+        // withholds them could get every retry.
+        let failed_peer_list: HashSet<PeerSocketAddr> = self
+            .inventory_registry
+            .failed_peers(hash)
+            .copied()
+            .collect();
+        let has_failed = |addr: &PeerSocketAddr| failed_peer_list.contains(addr);
+
         let advertising_peers: Vec<PeerSocketAddr> = self
             .inventory_registry
             .advertising_peers(hash)
@@ -1343,7 +1412,7 @@ where
             .collect();
         let advertising_peer_list = advertising_peers
             .iter()
-            .filter(|addr| self.ready_services.contains_key(addr))
+            .filter(|addr| self.ready_services.contains_key(addr) && !has_failed(addr))
             .copied()
             .collect();
 
@@ -1374,6 +1443,7 @@ where
                 .keys()
                 .filter(|addr| {
                     !missing_peer_list.contains(addr)
+                        && !has_failed(addr)
                         && (!is_block || self.serving_peer_keys.contains(addr) == serving)
                 })
                 .copied()
@@ -1404,25 +1474,86 @@ where
         let is_advertised = advertising_peers
             .iter()
             .any(|addr| self.has_peer_with_addr(*addr));
-        let busy_peer_might_have = self.cancel_handles.keys().any(|key| {
-            !missing_peer_list.contains(key)
-                && (is_advertised || self.serving_peer_keys.contains(key))
-        });
+        let busy_peer_might_have = |failed: bool| {
+            self.cancel_handles.keys().any(|key| {
+                !missing_peer_list.contains(key)
+                    && has_failed(key) == failed
+                    && (is_advertised || self.serving_peer_keys.contains(key))
+            })
+        };
+        let other_busy_peer_might_have = busy_peer_might_have(false);
 
         // Waiting for a busy serving peer is better than asking a non-serving peer, which would
         // most likely answer `notfound` for a historic block, and get marked as missing it.
-        if is_advertised || !busy_peer_might_have {
+        if is_advertised || !other_busy_peer_might_have {
             if let Some(peer) = self.select_p2c_peer_from_list(&ready_peers_with_services(false)) {
                 tracing::trace!(?hash, ?peer, "routing to a non-serving peer");
                 return InvRoute::Peer(peer);
             }
         }
 
-        if busy_peer_might_have {
+        if other_busy_peer_might_have {
+            return InvRoute::Wait;
+        }
+
+        // As a last resort, ask a peer that failed to return this block again, or wait for it.
+        let failed_ready_peer_list = self
+            .ready_services
+            .keys()
+            .filter(|addr| has_failed(addr) && !missing_peer_list.contains(addr))
+            .copied()
+            .collect();
+        if let Some(peer) = self.select_p2c_peer_from_list(&failed_ready_peer_list) {
+            tracing::trace!(
+                ?hash,
+                ?peer,
+                "routing to a peer that failed to return the block"
+            );
+            return InvRoute::Peer(peer);
+        }
+
+        if busy_peer_might_have(true) {
             InvRoute::Wait
         } else {
             InvRoute::Refuse
         }
+    }
+
+    /// Sends the inventory request `req` for `hash` to the ready peer `key`, and returns its
+    /// response future.
+    ///
+    /// If a block request fails, reports the failure to the peer set.
+    fn call_inv_peer(
+        &mut self,
+        key: D::Key,
+        req: Request,
+        hash: InventoryHash,
+    ) -> <Self as tower::Service<Request>>::Future {
+        let fut = self.call_ready_peer(key, req);
+
+        // Transaction requests don't wait for busy peers, so there is no preference to lose.
+        if !matches!(hash, InventoryHash::Block(_)) {
+            return fut;
+        }
+
+        let mut failure_reporter = InvFailureReporter {
+            failure_tx: self.inv_failure_tx.clone(),
+            peer: key,
+            hash,
+            answered: false,
+        };
+
+        async move {
+            let result = fut.await;
+            failure_reporter.answered = match &result {
+                Ok(_) => true,
+                Err(error) => error
+                    .downcast_ref::<SharedPeerError>()
+                    .is_some_and(|error| error.inner_debug().contains("NotFoundResponse")),
+            };
+            result
+        }
+        .boxed()
     }
 
     /// Sends `req` to the ready peer `key`, and returns its response future.
@@ -1519,7 +1650,7 @@ where
 
             match self.select_inv_route(queued.hash) {
                 InvRoute::Peer(peer) => {
-                    let response_fut = self.call_ready_peer(peer, queued.request);
+                    let response_fut = self.call_inv_peer(peer, queued.request, queued.hash);
                     // If the receiver was dropped since the check above, dropping the response
                     // future cancels the peer's request.
                     let _ = queued.response_sender.send(response_fut);
@@ -1923,6 +2054,7 @@ where
         // Drain stall events first, so disconnects free up slots that
         // `poll_discover` can fill in the same poll cycle.
         self.drain_stall_events(cx);
+        self.drain_inv_failures(cx);
 
         // While requests are queued, new or newly ready peers also notify the queued request task,
         // so the peer set gets polled to route those requests.

@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures::{FutureExt, Stream, StreamExt};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use tokio::{
     sync::broadcast,
     time::{self, Instant},
@@ -97,6 +97,23 @@ pub struct InventoryRegistry {
 
     /// Map tracking inventory statuses from the previous interval period.
     prev: IndexMap<InventoryHash, IndexMap<PeerSocketAddr, InventoryMarker>>,
+
+    /// Map tracking peers that failed to return inventory in the current interval period.
+    ///
+    /// A failure is a request that timed out or was dropped, not a `notfound` response, which is
+    /// tracked as missing inventory. So a failed peer might still have the inventory.
+    ///
+    /// Failures are tracked separately from inventory statuses, so a peer can't clear its failure
+    /// by advertising the inventory again.
+    ///
+    /// # Security
+    ///
+    /// This map is limited like the status maps, using [`MAX_INV_PER_MAP`] and
+    /// [`MAX_PEERS_PER_INV`]. So it uses up to 3 MB for both intervals.
+    failed_current: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+
+    /// Map tracking peers that failed to return inventory in the previous interval period.
+    failed_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -215,6 +232,8 @@ impl InventoryRegistry {
         Self {
             current: Default::default(),
             prev: Default::default(),
+            failed_current: Default::default(),
+            failed_prev: Default::default(),
             inv_stream: BroadcastStream::new(inv_stream).boxed(),
             interval: IntervalStream::new(interval),
         }
@@ -230,6 +249,38 @@ impl InventoryRegistry {
     pub fn missing_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
         self.status_peers(hash)
             .filter_map(|addr_status| addr_status.missing())
+    }
+
+    /// Returns an iterator over addrs of peers that recently failed to return `hash`.
+    ///
+    /// Can include the same peer twice, if it failed in the current and previous interval.
+    pub fn failed_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
+        self.failed_current
+            .get(&hash)
+            .into_iter()
+            .chain(self.failed_prev.get(&hash))
+            .flatten()
+    }
+
+    /// Records that `peer` failed to return `hash`.
+    ///
+    /// Failures expire after the registry rotates twice, like inventory statuses.
+    pub fn register_failed(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {
+        let failed_peers = self.failed_current.entry(hash).or_default();
+        failed_peers.insert(peer);
+
+        // # Security
+        //
+        // Limit the number of stored peers and hashes, removing the oldest entries, like
+        // `register()`.
+        if failed_peers.len() > MAX_PEERS_PER_INV {
+            // Performance: `MAX_PEERS_PER_INV` is small, so O(n) performance is acceptable.
+            failed_peers.shift_remove_index(0);
+        }
+        if self.failed_current.len() > MAX_INV_PER_MAP {
+            // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
+            self.failed_current.shift_remove_index(0);
+        }
     }
 
     /// Returns an iterator over peer inventory statuses for `hash`.
@@ -437,5 +488,6 @@ impl InventoryRegistry {
     /// HashMap
     fn rotate(&mut self) {
         self.prev = std::mem::take(&mut self.current);
+        self.failed_prev = std::mem::take(&mut self.failed_current);
     }
 }
