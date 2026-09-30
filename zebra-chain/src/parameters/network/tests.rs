@@ -19,6 +19,69 @@ use crate::{
 };
 
 #[test]
+fn funding_stream_p2pkh_recipient_is_matched_exactly() -> Result<(), Report> {
+    use crate::{
+        block::Block,
+        parameters::{
+            subsidy::{
+                subsidy_is_valid, CoinbaseTransactionError, FundingStreamReceiver,
+                FundingStreamRecipient, FundingStreams, SubsidyError,
+            },
+            testnet::Parameters,
+            NetworkKind,
+        },
+        serialization::ZcashDeserializeInto,
+        transaction::{LockTime, Transaction},
+        transparent::{Address, Output},
+    };
+    use std::sync::Arc;
+
+    let height = Height(1_046_400);
+    let recipient = "t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG";
+    // The private network needs a Testnet encoding of the same ZIP 2008 P2PKH script.
+    let configured_recipient = Address::from_pub_key_hash(
+        NetworkKind::Testnet,
+        recipient.parse::<Address>()?.hash_bytes(),
+    );
+    let streams = FundingStreams::new(
+        height..height.next()?,
+        [(
+            FundingStreamReceiver::MajorGrants,
+            FundingStreamRecipient::new(8, [configured_recipient.to_string()]),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let network = Parameters::build()
+        .with_funding_streams(vec![(&streams).into()])
+        .to_network()?;
+    let subsidy = block_subsidy(height, &network)?;
+    let payment = ((subsidy * 8)? / 100)?;
+    let mut block: Block =
+        zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES.zcash_deserialize_into()?;
+    let inputs = block.transactions[0].inputs().to_vec();
+    for (address, expected) in [
+        (recipient, Ok(Default::default())),
+        (
+            "t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow",
+            Err(CoinbaseTransactionError::Subsidy(
+                SubsidyError::FundingStreamNotFound,
+            )),
+        ),
+    ] {
+        let address: Address = address.parse()?;
+        block.transactions[0] = Arc::new(Transaction::test_v4(
+            inputs.clone(),
+            vec![Output::new(payment, address.script())],
+            LockTime::unlocked(),
+            Height::MIN,
+        ));
+        assert_eq!(subsidy_is_valid(&block, &network, subsidy), expected);
+    }
+    Ok(())
+}
+
+#[test]
 fn halving_test() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
     for network in Network::iter() {
