@@ -26,6 +26,8 @@ use crate::{block::check::subsidy_is_valid, transaction};
 
 use super::*;
 
+mod nu7;
+
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
