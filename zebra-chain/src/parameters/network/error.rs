@@ -47,11 +47,11 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidHeightZero,
 
-    #[error("halving interval must be positive, give supported halving indices and heights, a nonzero funding stream address period")]
+    #[error("halving interval must be in 1..=Height::MAX and produce supported halving indices and heights; configured funding streams require a nonzero address period")]
     #[non_exhaustive]
     InvalidHalvingInterval,
 
-    #[error("scheduled issuance through the maximum supported height must not exceed MAX_MONEY, excluding the unspendable genesis subsidy")]
+    #[error("scheduled issuance through the maximum supported height must not exceed MAX_MONEY, excluding the unspendable genesis subsidy; early spacing upgrades may require slow_start_interval = 0")]
     #[non_exhaustive]
     InvalidSubsidySchedule,
 
