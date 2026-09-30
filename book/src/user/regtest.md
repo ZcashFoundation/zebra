@@ -75,8 +75,24 @@ block's reserve. `getblocksubsidy` rejects a future reissuance height whose pare
 block is not yet in the best chain.
 
 Ordinary builds use database format v29.0.0, including the NSM balance in each
-stored value-pool record. A v28 database is not upgraded in place: resynchronize
-or restore a compatible v29 database.
+new value-pool record. The registered upgrade automatically moves compatible v28
+state into `state/v29` when no v29 database exists, without resyncing. Legacy
+48-byte value-pool and 52-byte block-info records remain readable with a zero NSM
+balance; new writes use 56 and 60 bytes.
+
+Before upgrading, stop Zebra and direct database readers and retain a v28 backup
+for rollback. Disabling `state.delete_old_database` does not preserve the
+directory that the upgrade moves. Upgrade direct database readers, including
+Zallet's Zebra backend and Zaino's Zebra read-state backend, together with the
+node: their `zebra-state` dependency must support v29. Start the writer before
+compatible readers. A v28 reader cannot read the wider records written by v29;
+manually renaming or symlinking versioned directories is not a substitute for
+the supported upgrade.
+
+Format reuse does not fix old custom-network accounting: existing state with
+nonzero genesis transparent outputs must still be rebuilt, including experimental
+v29 state created with the old accounting. Rebuild custom state if consensus
+parameters change for blocks already in the cache.
 
 ### Using Zebra's Internal Miner
 

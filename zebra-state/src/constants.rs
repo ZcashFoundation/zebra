@@ -45,9 +45,11 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
-/// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens `ValueBalance` from
-///   48 to 56 bytes and `BlockInfo` from 52 to 60 bytes. Uses a separate `state/v29`
-///   directory rather than upgrading v28 in place.
+/// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens new `ValueBalance` writes from
+///   48 to 56 bytes and `BlockInfo` writes from 52 to 60 bytes. Legacy records remain readable with
+///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network
+///   directory to `state/v29`, without a resync or record migration. Retain a v28 backup for rollback:
+///   disabling old-database cleanup does not prevent this move, and v28 readers cannot use new records.
 /// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
 ///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
 ///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree
