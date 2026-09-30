@@ -23,22 +23,18 @@ impl NetworkUpgrade {
     pub fn nu5_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
         prop_oneof![
             Just(NetworkUpgrade::Nu5),
-            // TODO: add future network upgrades (#1974)
+            Just(NetworkUpgrade::Nu6),
+            Just(NetworkUpgrade::Nu6_1),
+            Just(NetworkUpgrade::Nu6_2),
+            Just(NetworkUpgrade::Nu6_3),
+            Just(NetworkUpgrade::Nu7),
         ]
         .boxed()
     }
 
     /// Generates network upgrades that are valid for V6 transactions (NU6.3 onward).
-    ///
-    /// Does not generate `Nu7`: its consensus branch ID is still a placeholder that
-    /// librustzcash does not recognise, so transactions carrying it cannot round-trip
-    /// through `to_librustzcash` (which computes txids and auth digests).
     pub fn nu6_3_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
-        prop_oneof![
-            Just(NetworkUpgrade::Nu6_3),
-            // TODO: add Nu7 once its consensus branch ID is set in librustzcash
-        ]
-        .boxed()
+        prop_oneof![Just(NetworkUpgrade::Nu6_3), Just(NetworkUpgrade::Nu7),].boxed()
     }
 
     /// Generates network upgrades from a reduced set

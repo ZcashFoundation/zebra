@@ -35,23 +35,12 @@ use super::{
     FieldNotPresent, JoinSplitData, LockTime, Memo, Transaction, UnminedTx, VerifiedUnminedTx,
 };
 
-/// Returns the librustzcash consensus branch ID for `network_upgrade`, falling back to
-/// `fallback` when the upgrade has no branch ID that librustzcash recognises.
-///
-/// Shielded bundles must be built for the branch of the transaction that will carry them, since
-/// the branch selects the bundle version and therefore which flags are representable. The
-/// fallback must match the one the corresponding `Transaction::test_v*` constructor uses, or the
-/// bundle would be built for a different branch than the transaction it ends up in. In
-/// particular NU7's branch ID is behind an unstable feature, so a v6 transaction at NU7 falls
-/// back to NU6.3 — the branch where v6 and the Ironwood pool were introduced.
-fn branch_id_of(
-    network_upgrade: NetworkUpgrade,
-    fallback: zcash_protocol::consensus::BranchId,
-) -> zcash_protocol::consensus::BranchId {
+/// Returns the librustzcash consensus branch ID selected for the test transaction and its bundles.
+fn branch_id_of(network_upgrade: NetworkUpgrade) -> zcash_protocol::consensus::BranchId {
     network_upgrade
         .branch_id()
         .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-        .unwrap_or(fallback)
+        .expect("the generated transaction upgrade has a supported consensus branch ID")
 }
 
 /// The maximum number of arbitrary transactions, inputs, or outputs.
@@ -160,7 +149,7 @@ impl Transaction {
                         .flatten()
                         .and_then(|(n_actions, seed)| {
                             shielded::fake_bundle_for_branch(
-                                branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu5),
+                                branch_id_of(nu),
                                 ::orchard::ValuePool::Orchard,
                                 n_actions,
                                 seed,
@@ -224,7 +213,7 @@ impl Transaction {
                             .flatten()
                             .and_then(|(n_actions, seed)| {
                                 shielded::fake_bundle_for_branch(
-                                    branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu6_3),
+                                    branch_id_of(nu),
                                     ::orchard::ValuePool::Orchard,
                                     n_actions,
                                     seed,
@@ -237,7 +226,7 @@ impl Transaction {
                     let ironwood_bundle = (!is_genesis).then_some(ironwood).flatten().and_then(
                         |(n_actions, seed)| {
                             shielded::fake_bundle_for_branch(
-                                branch_id_of(nu, zcash_protocol::consensus::BranchId::Nu6_3),
+                                branch_id_of(nu),
                                 ::orchard::ValuePool::Ironwood,
                                 n_actions,
                                 seed ^ 0xEEEE_0000_u64,
@@ -972,7 +961,7 @@ pub fn transaction_to_fake_v5(
 
             let branch_id = block_nu
                 .branch_id()
-                .and_then(|cbid| BranchId::try_from(cbid).ok())
+                .map(|id| BranchId::try_from(id).expect("known branch IDs are supported"))
                 .unwrap_or(BranchId::Nu5);
 
             let inputs = trans.inputs();
@@ -1005,9 +994,6 @@ pub fn transaction_to_fake_v5(
 
             Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
         }
-        // unreachable but suppress warning for non-nu7 builds
-        #[allow(unreachable_patterns)]
-        _ => trans.clone(),
     }
 }
 

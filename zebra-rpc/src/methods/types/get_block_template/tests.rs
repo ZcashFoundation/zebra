@@ -73,7 +73,7 @@ fn coinbase() -> anyhow::Result<()> {
         for nu in NetworkUpgrade::iter().filter(|nu| nu >= &NetworkUpgrade::Sapling) {
             if let Some(height) = nu.activation_height(&net) {
                 for addr_type in MinerAddressType::iter() {
-                    TransactionTemplate::new_coinbase(
+                    TransactionTemplate::new_coinbase_with_parent_pools(
                         &net,
                         height,
                         &MinerParams::from(
@@ -81,6 +81,7 @@ fn coinbase() -> anyhow::Result<()> {
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
                         Amount::zero(),
+                        Some(Amount::zero()),
                     )?
                     .data()
                     .as_ref()

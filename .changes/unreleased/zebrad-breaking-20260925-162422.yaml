@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'Custom Testnets isolate state, non-finalized backups, and peer caches by network name and wire magic. Existing unsuffixed custom-network caches are not reused: resynchronize after upgrading. Reserved names are case-insensitive; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
+time: 2026-09-25T16:24:22.283189551+02:00

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Regtest skips public DNS seeders before resolving initial peers, while retaining explicitly configured local peers. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+time: 2026-09-25T16:24:22.274872669+02:00

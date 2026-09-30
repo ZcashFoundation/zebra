@@ -792,7 +792,7 @@ pub fn block_subsidy_with_parent_nsm_value_balance(
 
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
-/// With `zcash_unstable = "zip234"`, this returns [`SubsidyError::ParentChainValuePoolsRequired`]
+/// With `zcash_unstable = "zip234"`, this returns `SubsidyError::ParentChainValuePoolsRequired`
 /// once the [halving-preserving issuance ZIP][zip] reissues, because the subsidy then depends on
 /// the parent block's NSM value balance. Use [`block_subsidy_with_parent_pools`] there.
 ///

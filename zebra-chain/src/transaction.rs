@@ -1263,7 +1263,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
         Self::build_transparent(
             zcash_primitives::transaction::TxVersion::V5,
             branch_id,
@@ -1285,7 +1285,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu6_3);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
         Self::build_transparent(
             zcash_primitives::transaction::TxVersion::V6,
             branch_id,
@@ -1344,7 +1344,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
 
         let tx_data = zp_tx::TransactionData::from_parts(
             zp_tx::TxVersion::V5,
@@ -1378,7 +1378,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu6_3);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
 
         let tx_data = zp_tx::TransactionData::from_parts_v6(
             branch_id,

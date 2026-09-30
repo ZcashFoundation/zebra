@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: '`parameters::Network::directory_name`: a persistent storage namespace that includes configured Testnet wire magic. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
+time: 2026-09-25T16:24:22.267751671+02:00
