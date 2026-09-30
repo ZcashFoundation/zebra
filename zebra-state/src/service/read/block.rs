@@ -184,6 +184,10 @@ where
 /// transaction is read at most once, so this is `O(distinct spent parent transactions)` reads —
 /// the same cost as resolving the prevouts individually, but in a single state request under one
 /// snapshot.
+///
+/// UTXO lookups only help for a non-finalized block: its spent outputs are still in the
+/// non-finalized chain's created UTXOs or the finalized UTXO set. A finalized block skips them
+/// and reads the parent transactions directly.
 pub fn spent_outputs_for_block<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -195,6 +199,13 @@ where
     let chain = chain.as_ref();
     let block = block(chain, db, hash_or_height)?;
 
+    // The finalized tip can only advance between these reads, which can only turn a UTXO hit
+    // into a parent read, never the reverse.
+    let is_finalized = match (block.coinbase_height(), db.finalized_tip_height()) {
+        (Some(height), Some(finalized_tip)) => height <= finalized_tip,
+        _ => false,
+    };
+
     let mut spent_outputs = HashMap::new();
 
     // Outpoints missing from the UTXO set, grouped by parent so each parent is read once,
@@ -203,7 +214,12 @@ where
 
     for tx in block.transactions.iter().filter(|tx| !tx.is_coinbase()) {
         for outpoint in tx.spent_outpoints() {
-            if let Some(utxo) = utxo(chain, db, outpoint) {
+            let unspent = if is_finalized {
+                None
+            } else {
+                utxo(chain, db, outpoint)
+            };
+            if let Some(utxo) = unspent {
                 spent_outputs.insert(outpoint, utxo);
             } else {
                 by_parent.entry(outpoint.hash).or_default().push(outpoint);
