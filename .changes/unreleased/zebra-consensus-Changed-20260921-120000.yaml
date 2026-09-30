@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'ZFuture rejects v4 transactions, matching NU7 under [ZIP 2003](https://zips.z.cash/zip-2003). Existing experimental ZFuture chains containing v4 transactions must be reset, including finalized state and non-finalized backups, before using the new rules. ([#11528](https://github.com/ZcashFoundation/zebra/pull/11528))'
+time: 2026-09-21T12:00:00.000000000Z
