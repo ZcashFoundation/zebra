@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Hash, Height},
+    block::{self, Hash, Height},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
@@ -14,7 +14,6 @@ use zebra_chain::{
 
 use crate::{
     service::{
-        any_ancestor_blocks,
         block_iter::any_chain_ancestor_iter,
         check::{
             difficulty::{
@@ -156,7 +155,7 @@ pub fn solution_rate(
 /// Do a consistency check by checking the finalized tip before and after all other database
 /// queries.
 ///
-/// Returns the best chain tip, recent blocks in reverse height order from the tip,
+/// Returns the best chain tip, recent header difficulties and times in reverse height order,
 /// and the tip history tree.
 /// Returns an error if the tip obtained before and after is not the same.
 ///
@@ -167,19 +166,32 @@ fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     network: &Network,
-) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
+) -> Result<
+    (
+        Height,
+        block::Hash,
+        Vec<(CompactDifficulty, DateTime<Utc>)>,
+        Arc<HistoryTree>,
+    ),
+    BoxError,
+> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
     // The candidate block is the one after the tip, and ZIP 218 makes the span depend on its
-    // height, so only fetch as many blocks as that height actually needs.
+    // height, so only fetch as many headers as that height actually needs.
     let candidate_height = state_tip_before_queries.0.next()?;
     let block_span = pow_adjustment_block_span(network, candidate_height);
 
-    let best_relevant_chain =
-        any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
-    let best_relevant_chain: Vec<_> = best_relevant_chain.into_iter().take(block_span).collect();
+    let best_relevant_chain = any_chain_ancestor_iter::<block::Header>(
+        non_finalized_state,
+        db,
+        state_tip_before_queries.1,
+    )
+    .take(block_span)
+    .map(|header| (header.difficulty_threshold, header.time))
+    .collect::<Vec<_>>();
 
     if best_relevant_chain.is_empty() {
         return Err("missing genesis block, wait until it is committed".into());
@@ -209,14 +221,14 @@ fn best_relevant_chain_and_history_tree(
     ))
 }
 
-/// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_chain`, tip, `network`,
+/// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_data`, tip, `network`,
 /// `history_tree`, and captured local time `now`, or an error if no valid timestamp is available.
 ///
-/// The `relevant_chain` has recent blocks in reverse height order from the tip.
+/// The `relevant_data` has header difficulties and times in reverse height order from the tip.
 ///
 /// See [`get_block_template_chain_info()`] for details.
 fn difficulty_time_and_history_tree(
-    relevant_chain: Vec<Arc<Block>>,
+    relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)>,
     tip_height: Height,
     tip_hash: block::Hash,
     network: &Network,
@@ -226,19 +238,14 @@ fn difficulty_time_and_history_tree(
     >,
     now: DateTime32,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
-    let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
-        .iter()
-        .map(|block| (block.header.difficulty_threshold, block.header.time))
-        .collect();
-
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let median_time_past = calculate_median_time_past(
-        relevant_chain
+        relevant_data
             .iter()
             .take(POW_MEDIAN_BLOCK_SPAN)
-            .cloned()
+            .map(|(_, time)| *time)
             .collect(),
     );
 

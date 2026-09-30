@@ -47,6 +47,71 @@ fn test_sequential_height_check() {
         .expect_err("parent height is way more, should panic");
 }
 
+/// Header ancestry must use the candidate's parent, not the best tip's height.
+#[test]
+fn contextual_header_ancestry_preserves_parent_height_and_error_order() {
+    use crate::{
+        arbitrary::Prepare,
+        tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
+    };
+
+    let _init_guard = zebra_test::init();
+    let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+    let db = &finalized_state.db;
+    let base = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+
+    initial_contextual_validity(db, &non_finalized_state, &base.clone().prepare())
+        .expect("genesis supplies the parent height for the first block");
+    non_finalized_state
+        .commit_new_chain(base.clone().prepare(), db)
+        .unwrap();
+    let best = base.make_fake_child().set_work(100);
+    let best_tip = best.make_fake_child();
+    let side = base.make_fake_child().set_work(50);
+    for block in [best, best_tip.clone(), side.clone()] {
+        non_finalized_state
+            .commit_block(block.prepare(), db)
+            .unwrap();
+    }
+    assert_eq!(
+        crate::service::read::best_tip(&non_finalized_state, db),
+        Some((block::Height(3), best_tip.hash()))
+    );
+
+    let candidate = side.make_fake_child().prepare();
+    initial_contextual_validity(db, &non_finalized_state, &candidate)
+        .expect("a candidate can extend a shorter side chain with partial history");
+
+    let mut non_sequential = candidate.clone();
+    non_sequential.height = block::Height(4);
+    assert!(matches!(
+        initial_contextual_validity(db, &non_finalized_state, &non_sequential),
+        Err(ValidateContextError::NonSequentialBlock {
+            candidate_height: block::Height(4),
+            parent_height: block::Height(2),
+        })
+    ));
+
+    let mut missing_parent = candidate.block.clone();
+    Arc::make_mut(&mut Arc::make_mut(&mut missing_parent).header).previous_block_hash =
+        block::Hash([0xff; 32]);
+    assert!(matches!(
+        initial_contextual_validity(db, &non_finalized_state, &missing_parent.prepare()),
+        Err(ValidateContextError::NotReadyToBeCommitted)
+    ));
+
+    // Genesis has an unknown parent, but the orphan error takes precedence.
+    assert!(matches!(
+        initial_contextual_validity(db, &non_finalized_state, &genesis.block.clone().prepare()),
+        Err(ValidateContextError::OrphanedBlock {
+            candidate_height: block::Height(0),
+            finalized_tip_height: block::Height(0),
+        })
+    ));
+}
+
 /// Tests for the contextual block subsidy checks once the [halving-preserving issuance ZIP][zip] is
 /// active.
 ///

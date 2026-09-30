@@ -1,6 +1,7 @@
 //! Template timestamp bounds and Testnet minimum-difficulty intervals.
 
 use zebra_chain::{
+    block::Block,
     parameters::{
         testnet::{ConfiguredActivationHeights, Parameters},
         TESTNET_MAX_TIME_START_HEIGHT,
@@ -9,6 +10,71 @@ use zebra_chain::{
 };
 
 use super::*;
+
+/// Header-only queries must retain genesis and follow the best fork's timestamps.
+#[test]
+fn header_context_queries_preserve_genesis_and_fork_ancestry() {
+    use crate::{
+        arbitrary::Prepare,
+        tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
+    };
+
+    let _init_guard = zebra_test::init();
+    let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+    let db = &finalized_state.db;
+    let network = Network::Mainnet;
+    let genesis_time = DateTime32::try_from(genesis.block.header.time).unwrap();
+    let genesis_info = get_block_template_chain_info(&non_finalized_state, db, &network).unwrap();
+    assert_eq!(genesis_info.tip_hash, genesis.hash);
+    assert_eq!(genesis_info.tip_height, Height(0));
+    assert_eq!(
+        genesis_info.min_time,
+        genesis_time
+            .checked_add(Duration32::from_seconds(1))
+            .unwrap()
+    );
+    assert_eq!(
+        read::next_median_time_past(&non_finalized_state, db).unwrap(),
+        genesis_time
+    );
+
+    let base = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let base_time = base.header.time;
+    non_finalized_state
+        .commit_new_chain(base.clone().prepare(), db)
+        .unwrap();
+    let mut best = base.make_fake_child().set_work(100);
+    Arc::make_mut(&mut Arc::make_mut(&mut best).header).time =
+        base_time + chrono::Duration::seconds(10);
+    let mut side = base.make_fake_child().set_work(50);
+    Arc::make_mut(&mut Arc::make_mut(&mut side).header).time =
+        base_time + chrono::Duration::seconds(30);
+    let mut best_tip = best.make_fake_child();
+    Arc::make_mut(&mut Arc::make_mut(&mut best_tip).header).time =
+        base_time + chrono::Duration::seconds(20);
+    for block in [best, best_tip.clone(), side] {
+        non_finalized_state
+            .commit_block(block.prepare(), db)
+            .unwrap();
+    }
+
+    let expected_median = DateTime32::try_from(base_time + chrono::Duration::seconds(10)).unwrap();
+    let info = get_block_template_chain_info(&non_finalized_state, db, &network).unwrap();
+    assert_eq!(info.tip_hash, best_tip.hash());
+    assert_eq!(info.tip_height, Height(3));
+    assert_eq!(
+        info.min_time,
+        expected_median
+            .checked_add(Duration32::from_seconds(1))
+            .unwrap()
+    );
+    assert_eq!(
+        read::next_median_time_past(&non_finalized_state, db).unwrap(),
+        expected_median
+    );
+}
 
 #[test]
 fn nu7_template_times_match_difficulty_across_activation() {
@@ -164,6 +230,10 @@ fn template_times_respect_local_clock_bound() {
     let now = DateTime32::from(PREV);
     let max_time = now.checked_add(Duration32::from_hours(2)).unwrap();
     let median_offset = u32::try_from(POW_MEDIAN_BLOCK_SPAN / 2).unwrap() * 75;
+    let mut header = *zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Block>()
+        .expect("block fixture must deserialize")
+        .header;
 
     for (network, candidate_height) in [
         (Network::Mainnet, Height(2_000_000)),
@@ -173,7 +243,6 @@ fn template_times_respect_local_clock_bound() {
         for future_median_seconds in [60 * 60, 2 * 60 * 60 - 1, 2 * 60 * 60] {
             let context =
                 template_block_context(&network, PREV + future_median_seconds + median_offset);
-            let mut header = *context[0].header;
             let result = difficulty_time_and_history_tree(
                 context,
                 (candidate_height - 1).unwrap(),
@@ -227,9 +296,7 @@ fn template_times_near_timestamp_ceiling_stay_standard_difficulty() {
                 time.into(),
                 ACTIVE_HEIGHT,
                 &network,
-                context
-                    .iter()
-                    .map(|block| (block.header.difficulty_threshold, block.header.time)),
+                context.iter().cloned(),
             )
             .expected_difficulty_threshold()
         };
@@ -267,19 +334,16 @@ fn template_times_near_timestamp_ceiling_stay_standard_difficulty() {
     }
 }
 
-/// The block contents are irrelevant: templates use only these header times and difficulties.
-fn template_block_context(network: &Network, previous_time: u32) -> Vec<Arc<Block>> {
-    let block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
-        .zcash_deserialize_into::<Block>()
-        .expect("block fixture must deserialize");
+/// Header difficulties and times for template calculation, newest first.
+fn template_block_context(
+    network: &Network,
+    previous_time: u32,
+) -> Vec<(CompactDifficulty, DateTime<Utc>)> {
+    let threshold = (network.target_difficulty_limit() / 8_u64).to_compact();
     (0..MAX_POW_ADJUSTMENT_BLOCK_SPAN)
         .map(|index| {
-            let mut block = block.clone();
-            let header = Arc::make_mut(&mut block.header);
-            header.time =
-                DateTime32::from(previous_time - u32::try_from(index).unwrap() * 75).into();
-            header.difficulty_threshold = (network.target_difficulty_limit() / 8_u64).to_compact();
-            Arc::new(block)
+            let time = DateTime32::from(previous_time - u32::try_from(index).unwrap() * 75);
+            (threshold, time.into())
         })
         .collect()
 }
