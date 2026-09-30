@@ -287,7 +287,14 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .get_info()
         .await
         .expect("We should have a GetInfo struct");
-    snapshot_rpc_getinfo(get_info, &settings);
+    snapshot_rpc_getinfo(
+        get_info,
+        zebra_network::Version::min_remote_for_height(
+            network,
+            blocks.last().unwrap().coinbase_height().unwrap(),
+        ),
+        &settings,
+    );
 
     // `getblockchaininfo`
     let get_blockchain_info = rpc
@@ -707,9 +714,20 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
+fn snapshot_rpc_getinfo(
+    info: GetInfoResponse,
+    minimum_peer_version: zebra_network::Version,
+    settings: &insta::Settings,
+) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_info", info, {
+            ".protocolversion" => dynamic_redaction(move |value, _path| {
+                assert!(
+                    value.as_u64().unwrap() >= u64::from(minimum_peer_version.0),
+                    "the advertised version must meet the minimum for the network and tip",
+                );
+                "[version]"
+            }),
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
                 assert_eq!(value.as_str().unwrap(), "RPC test".to_string());
@@ -913,9 +931,20 @@ fn snapshot_rpc_getblocksubsidy(
 /// Snapshot `getnetworkinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getnetworkinfo(
     get_network_info: GetNetworkInfoResponse,
+    minimum_peer_version: zebra_network::Version,
     settings: &insta::Settings,
 ) {
-    settings.bind(|| insta::assert_json_snapshot!("get_network_info", get_network_info));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("get_network_info", get_network_info, {
+            ".protocolversion" => dynamic_redaction(move |value, _path| {
+                assert!(
+                    value.as_u64().unwrap() >= u64::from(minimum_peer_version.0),
+                    "the advertised version must meet the minimum for the network and tip",
+                );
+                "[version]"
+            }),
+        })
+    });
 }
 
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
@@ -1165,7 +1194,11 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .get_network_info()
         .await
         .expect("We should have a success response");
-    snapshot_rpc_getnetworkinfo(get_network_info, &settings);
+    snapshot_rpc_getnetworkinfo(
+        get_network_info,
+        zebra_network::Version::min_remote_for_height(network, fake_tip_height),
+        &settings,
+    );
 
     // `getpeerinfo`
     let get_peer_info = rpc
