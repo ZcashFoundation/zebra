@@ -250,6 +250,18 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
 
+    // Mempool admission policy: this transaction cannot fit in the next block's ZIP 218 budget.
+    // Block consensus checks the aggregate budget and uses BlockError::TooManyShieldedActions.
+    #[error(
+        "mempool transaction has {count} {pool}, exceeding the next block's ZIP 218 limit of {limit}"
+    )]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    TooManyShieldedActions {
+        pool: &'static str,
+        count: usize,
+        limit: usize,
+    },
+
     // Mempool standardness (policy) rejections, applied before script verification.
     // These are not consensus rules: the same input scripts are valid in blocks.
     #[error(

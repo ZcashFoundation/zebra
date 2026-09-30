@@ -530,6 +530,124 @@ async fn mempool_request_with_missing_input_is_rejected() {
     }
 }
 
+/// ZIP 218 mempool admission uses the candidate height and rejects oversized transactions
+/// before state access or verification of their deliberately invalid Sapling proofs.
+#[tokio::test]
+async fn mempool_zip218_sapling_limit_precedes_state_and_proofs() {
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let fixture = v5_transactions(Network::Mainnet.block_iter())
+        .find(|tx| tx.sapling_outputs().next().is_some())
+        .expect("mainnet fixtures contain a V5 Sapling output");
+    let bundle = fixture.sapling_bundle().expect("fixture has Sapling data");
+    let output = &bundle.shielded_outputs()[0];
+    let output = sapling_crypto::bundle::OutputDescription::from_parts(
+        output.cv().clone(),
+        *output.cmu(),
+        output.ephemeral_key().clone(),
+        *output.enc_ciphertext(),
+        *output.out_ciphertext(),
+        [0; 192],
+    );
+
+    for (height, sapling_io, coinbase, exceeds_budget) in [
+        (Height(999), 301, false, false),
+        (Height(1_000), 300, false, false),
+        (Height(1_000), 301, false, true),
+        (Height(1_001), 301, false, true),
+        (Height(1_000), 301, true, true),
+    ] {
+        let (input, transparent_output, _) =
+            mock_transparent_transfer(Height(1), true, 0, Amount::zero());
+        let outpoint = input.outpoint().expect("transfer has a previous output");
+        let input = if coinbase {
+            mock_coinbase_transparent_output(height).0
+        } else {
+            input
+        };
+        let template = Transaction::test_v5(
+            NetworkUpgrade::current(&network, height),
+            vec![input],
+            vec![transparent_output],
+            LockTime::unlocked(),
+            Height(0),
+        );
+        let data = zcash_primitives::transaction::TransactionData::from_parts(
+            template.tx_version(),
+            template.consensus_branch_id(),
+            0,
+            zcash_protocol::consensus::BlockHeight::from_u32(0),
+            template.transparent_bundle().cloned(),
+            None,
+            sapling_crypto::bundle::Bundle::from_parts(
+                Vec::new(),
+                vec![output.clone(); sapling_io],
+                zcash_protocol::value::ZatBalance::zero(),
+                *bundle.authorization(),
+            ),
+            None,
+        );
+        let mut bytes = Vec::new();
+        data.freeze()
+            .expect("test transaction has well-formed components")
+            .write(&mut bytes)
+            .expect("test transaction serializes");
+        let transaction = Transaction::zcash_deserialize(bytes.as_slice())
+            .expect("invalid proofs do not prevent transaction parsing");
+
+        let expected = if coinbase {
+            TransactionError::CoinbaseInMempool
+        } else if exceeds_budget {
+            let error = TransactionError::TooManyShieldedActions {
+                pool: "Sapling inputs and outputs",
+                count: 301,
+                limit: 300,
+            };
+            assert_eq!(error.mempool_misbehavior_score(), 0);
+            error
+        } else {
+            TransactionError::TransparentInputNotFound
+        };
+        let state = service_fn(move |request| {
+            assert!(
+                !coinbase && !exceeds_budget,
+                "coinbase and oversized transactions must be rejected before state access"
+            );
+            assert_eq!(
+                request,
+                zebra_state::Request::UnspentBestChainUtxo(outpoint)
+            );
+            async { Ok(zebra_state::Response::UnspentBestChainUtxo(None)) }
+        });
+        let result = timeout(
+            test_timeout(),
+            MempoolTxVerifier::new_for_tests(&network, state).oneshot(MempoolRequest {
+                transaction: Arc::new(transaction).into(),
+                height,
+            }),
+        )
+        .await
+        .expect("mempool admission completes without proof verification");
+        assert_eq!(
+            result,
+            Err(expected),
+            "{height:?}, {sapling_io} Sapling outputs, coinbase: {coinbase}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn mempool_request_with_present_input_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
