@@ -140,7 +140,7 @@ impl TransactionTemplate<NegativeOrZero> {
     /// Constructs a transaction template for a coinbase transaction in a block whose parent leaves
     /// `parent_nsm_value_balance` in the NSM value balance.
     ///
-    /// The parent's NSM value balance is required from the ZIP 234 deployment height, because it
+    /// The parent's NSM value balance is required from the NSM reissuance height, because it
     /// determines the block subsidy.
     /// The payout includes only net miner fees, but `fee` reports the negative gross `txs_fee`.
     pub fn new_coinbase_with_parent_pools(

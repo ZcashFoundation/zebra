@@ -612,7 +612,7 @@ pub(crate) fn nsm_value_balance_for_next_block(
     chain_info: &GetBlockTemplateChainInfo,
 ) -> Option<Amount<NonNegative>> {
     let height = chain_info.tip_height.next().ok()?;
-    zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network)
+    zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network)
         .then(|| chain_info.chain_value_pools.nsm_amount())
 }
 
@@ -933,7 +933,7 @@ where
 
     let height = block.coinbase_height();
     // A caller-controlled pre-reissuance height must not bypass the parent/height preflight.
-    if net.zip234_deployment_height().is_some() {
+    if net.nsm_reissuance_height().is_some() {
         let chain_info = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             fetch_chain_info(read_state),

@@ -79,6 +79,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
+        .with_nsm_reissuance_height(Height(50))
         // These short chains have no historical funding-stream deposits to disburse.
         .clear_funding_streams()
         .with_lockbox_disbursements(vec![]);

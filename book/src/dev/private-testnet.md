@@ -165,6 +165,11 @@ in `state/vN/nu7private-00010007` and the non-finalized backup path ends in
 `non_finalized_state/nu7private-00010007`. Keep old database deletion disabled
 while preparing and running the test so that backups are not removed.
 
+The sample carries public Testnet's historical reserve seed into the copied
+chain. With NU7 at 4,200,000, ZIP 237 derives reissuance height 7,835,274.
+For an accelerated test, set `nsm_reissuance_height` explicitly and agree
+on that override across all participants.
+
 ```toml
 [consensus]
 checkpoint_sync = true
@@ -203,6 +208,7 @@ network_name = "Nu7Private"
 # Use the same distinct magic on every participant; do not use public Testnet magic.
 network_magic = [0, 1, 0, 7]
 checkpoints = "nu7-private-checkpoints.txt"
+initial_nsm_value_balance = 55_768_414_957
 
 [network.testnet_parameters.activation_heights]
 BeforeOverwinter = 1

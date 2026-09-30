@@ -50,7 +50,7 @@ Use a fresh test chain and replace the activation-height section above with:
 ```toml
 [network.testnet_parameters]
 initial_nsm_value_balance = 100000000
-zip234_deployment_height = 12
+nsm_reissuance_height = 12
 
 [network.testnet_parameters.activation_heights]
 Canopy = 1
@@ -58,9 +58,11 @@ NU5 = 2
 NU7 = 9
 ```
 
-The deployment height must be at least 1, no earlier than NU7 activation, and less
-than 2^31. Omitting it starts reissuance at NU7 activation. These are example
-consensus parameters, not public Mainnet or Testnet activation heights.
+The reissuance height must be at least 1, no earlier than NU7 activation, and less
+than 2^31. Omitting it uses ZIP 237's scheduled-issuance crossover, which short
+Regtest schedules usually never reach, so set it explicitly to test reissuance.
+These are example consensus parameters, not public Mainnet or Testnet activation
+heights.
 
 At NU7 activation, the NSM reserve receives the explicitly configured initial
 balance in zatoshis; it is not derived from historical issued supply. From that

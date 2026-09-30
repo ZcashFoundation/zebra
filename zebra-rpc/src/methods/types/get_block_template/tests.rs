@@ -491,6 +491,7 @@ fn coinbase_cache_discards_late_old_parent_builds() {
             nu7: Some(1),
             ..Default::default()
         },
+        nsm_reissuance_height: Some(Height(1)),
         ..Default::default()
     });
     let height = Height(10);
@@ -635,10 +636,10 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
         .expect("Ironwood coinbase output is recoverable with the zero outgoing viewing key");
 }
 
-/// From the ZIP 234 deployment height, the coinbase pays the block subsidy computed
+/// From the NSM reissuance height, the coinbase pays the block subsidy computed
 /// from the parent block's chain value pools, and can't be built without them.
 #[test]
-fn coinbase_pays_zip234_subsidy() {
+fn coinbase_pays_nsm_subsidy() {
     use zcash_transparent::address::TransparentAddress;
     use zebra_chain::{
         amount::NonNegative,
@@ -663,6 +664,7 @@ fn coinbase_pays_zip234_subsidy() {
             ..Default::default()
         },
         initial_nsm_value_balance: Some(initial_seed),
+        nsm_reissuance_height: Some(Height(10)),
         ..Default::default()
     });
     let miner_params =

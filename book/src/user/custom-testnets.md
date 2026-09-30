@@ -29,10 +29,24 @@ Mainnet, public Testnet, and Regtest keep their existing storage names. Reserved
 network names are checked case-insensitively.
 
 To test NU7 reserve reissuance, configure a NU7 activation height and
-`network.testnet_parameters.initial_nsm_value_balance`. The optional
-`network.testnet_parameters.zip234_deployment_height` delays reissuance; omitting
-it uses the NU7 activation height. See the [Regtest example](regtest.md#testing-nu7-reissuance).
-Public Mainnet and Testnet activation and deployment heights remain unset.
+`network.testnet_parameters.initial_nsm_value_balance`. Omission of
+`network.testnet_parameters.nsm_reissuance_height` uses ZIP 237's
+scheduled-issuance crossover, not NU7 activation. Some short custom schedules
+have no crossover. Set an explicit height for accelerated tests, as in the
+[Regtest example](regtest.md#testing-nu7-reissuance).
+Existing private chains that started reissuance at NU7 must explicitly retain
+that height or restart from before activation with the new schedule.
+Public NU7 activation heights remain unset.
+
+Public Mainnet and Testnet use their historical pre-NU6 shortfalls: 36,858,445,520
+and 55,768,414,957 zatoshis respectively. Testnets using public Testnet magic inherit
+the public seed when it is omitted, regardless of their name or checkpoints.
+An explicit matching public seed is normalized away, preserving the public
+Testnet identity and state directory.
+Regtest and Testnets with other magic default to zero. Explicit seed settings
+override these defaults; a zero-seed network cannot use public Testnet magic.
+An isolated chain copied from public Testnet must configure its historical seed
+explicitly.
 
 To disable funding streams, set `network.testnet_parameters.funding_streams = []`
 and remove both legacy `pre_nu6_funding_streams` and `post_nu6_funding_streams`

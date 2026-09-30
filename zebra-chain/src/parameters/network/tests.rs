@@ -385,13 +385,13 @@ fn check_height_for_num_halvings() {
 
 /// A Testnet with Mainnet's activation heights, NU7 at `nu7`, and no funding streams or lockbox
 /// disbursements, so its scheduled block subsidies match Mainnet's.
-fn zip234_mainnet_like_testnet(nu7: u32) -> Network {
-    zip234_mainnet_like_testnet_with_initial_balance(nu7, 35_080_000_000)
+fn nsm_mainnet_like_testnet(nu7: u32) -> Network {
+    nsm_mainnet_like_testnet_with_initial_balance(nu7, 35_080_000_000)
 }
 
-/// A Testnet like [`zip234_mainnet_like_testnet`], seeding the NSM value balance with
+/// A Testnet like [`nsm_mainnet_like_testnet`], seeding the NSM value balance with
 /// `initial_nsm_value_balance` zatoshis at its NU7 activation height.
-fn zip234_mainnet_like_testnet_with_initial_balance(
+fn nsm_mainnet_like_testnet_with_initial_balance(
     nu7: u32,
     initial_nsm_value_balance: i64,
 ) -> Network {
@@ -406,12 +406,13 @@ fn zip234_mainnet_like_testnet_with_initial_balance(
         .clear_funding_streams()
         .with_lockbox_disbursements(Vec::new())
         .with_initial_nsm_value_balance(initial_nsm_value_balance.try_into().expect("valid amount"))
+        .with_nsm_reissuance_height(Height(nu7))
         .to_network()
         .unwrap()
 }
 
 /// Chain value pools whose NSM value balance holds `nsm` zatoshis.
-fn zip234_pools_with_nsm_balance(nsm: i64) -> crate::value_balance::ValueBalance<NonNegative> {
+fn nsm_pools_with_nsm_balance(nsm: i64) -> crate::value_balance::ValueBalance<NonNegative> {
     let mut pools = crate::value_balance::ValueBalance::<NonNegative>::zero();
     pools.set_nsm_amount(nsm.try_into().expect("valid amount"));
     pools
@@ -422,7 +423,7 @@ fn zip234_pools_with_nsm_balance(nsm: i64) -> crate::value_balance::ValueBalance
 /// triples.
 
 #[test]
-fn check_zip234_block_subsidy_fraction_follows_halving_interval() -> Result<(), Report> {
+fn check_nsm_block_subsidy_fraction_follows_halving_interval() -> Result<(), Report> {
     use crate::parameters::subsidy::{
         block_subsidy_fraction_numerator, ParameterSubsidy, LN2_SCALED,
     };
@@ -438,7 +439,7 @@ fn check_zip234_block_subsidy_fraction_follows_halving_interval() -> Result<(), 
 
     // ZIP 218's 25-second target spacing triples the number of blocks in a halving period.
     let activation = Height(3_687_123);
-    let zip218_like = zip234_mainnet_like_testnet(activation.0);
+    let zip218_like = nsm_mainnet_like_testnet(activation.0);
     assert_eq!(zip218_like.post_nu7_halving_interval(), 1_680_000 * 3);
     assert_eq!(
         block_subsidy_fraction_numerator(activation.previous()?, &zip218_like),
@@ -466,7 +467,7 @@ fn check_zip234_block_subsidy_fraction_follows_halving_interval() -> Result<(), 
 /// The additional block subsidy is `ceiling(BLOCK_SUBSIDY_FRACTION * NSMValueBalance)`.
 
 #[test]
-fn check_zip234_additional_block_subsidy_rounds_up() -> Result<(), Report> {
+fn check_nsm_additional_block_subsidy_rounds_up() -> Result<(), Report> {
     use crate::{
         amount::MAX_MONEY,
         parameters::subsidy::{additional_block_subsidy, BLOCK_SUBSIDY_FRACTION_DENOMINATOR},
@@ -476,7 +477,7 @@ fn check_zip234_additional_block_subsidy_rounds_up() -> Result<(), Report> {
 
     // A Mainnet-like network with ZIP 218 active reissues at 1375 / 10^10.
     let height = Height(3_687_123);
-    let network = zip234_mainnet_like_testnet(height.0);
+    let network = nsm_mainnet_like_testnet(height.0);
 
     // `ceiling(1375 * balance / 10^10)`
     for (nsm_value_balance, additional) in [
@@ -521,12 +522,12 @@ fn check_zip234_additional_block_subsidy_rounds_up() -> Result<(), Report> {
 /// `INITIAL_NSM_VALUE_BALANCE`.
 
 #[test]
-fn check_zip234_block_subsidy_with_parent_pools() -> Result<(), Report> {
+fn check_nsm_block_subsidy_with_parent_pools() -> Result<(), Report> {
     use crate::{
         parameters::subsidy::{
             additional_block_subsidy, block_subsidy, block_subsidy_with_parent_pools,
-            nsm_value_balance_before, nsm_value_balance_is_tracked, scheduled_block_subsidy,
-            zip234_reissuance_is_active, SubsidyError,
+            nsm_reissuance_is_active, nsm_value_balance_before, nsm_value_balance_is_tracked,
+            scheduled_block_subsidy, SubsidyError,
         },
         value_balance::ValueBalance,
     };
@@ -534,29 +535,29 @@ fn check_zip234_block_subsidy_with_parent_pools() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let activation = Height(3_687_123);
-    let network = zip234_mainnet_like_testnet(activation.0);
+    let network = nsm_mainnet_like_testnet(activation.0);
     let initial = network.initial_nsm_value_balance();
 
     // Mainnet and the default Testnet have no NU7 activation height and no deployment height, so
     // the balance is never tracked and the ZIP never reissues there.
     for network in [Network::Mainnet, Network::new_default_testnet()] {
         assert!(!nsm_value_balance_is_tracked(activation, &network));
-        assert!(!zip234_reissuance_is_active(activation, &network));
-        assert_eq!(network.zip234_deployment_height(), None);
+        assert!(!nsm_reissuance_is_active(activation, &network));
+        assert_eq!(network.nsm_reissuance_height(), None);
     }
 
-    // This network has no configured deployment height, so it reissues from NU7 activation.
-    assert_eq!(network.zip234_deployment_height(), Some(activation));
+    // This fixture explicitly accelerates reissuance to NU7 activation.
+    assert_eq!(network.nsm_reissuance_height(), Some(activation));
     assert!(!nsm_value_balance_is_tracked(
         (activation - 1).unwrap(),
         &network
     ));
-    assert!(!zip234_reissuance_is_active(
+    assert!(!nsm_reissuance_is_active(
         (activation - 1).unwrap(),
         &network
     ));
     assert!(nsm_value_balance_is_tracked(activation, &network));
-    assert!(zip234_reissuance_is_active(activation, &network));
+    assert!(nsm_reissuance_is_active(activation, &network));
 
     // Before activation the parent's pools are unused, and the subsidy is the scheduled one.
     let before_activation = (activation - 1).unwrap();
@@ -564,7 +565,7 @@ fn check_zip234_block_subsidy_with_parent_pools() -> Result<(), Report> {
         block_subsidy_with_parent_pools(
             before_activation,
             &network,
-            zip234_pools_with_nsm_balance(12_345)
+            nsm_pools_with_nsm_balance(12_345)
         )?,
         scheduled_block_subsidy(before_activation, &network)?,
     );
@@ -617,7 +618,7 @@ fn check_zip234_block_subsidy_with_parent_pools() -> Result<(), Report> {
 /// chain value pools.
 
 #[test]
-fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
+fn check_nsm_nsm_value_balance_change() -> Result<(), Report> {
     use std::ops::Neg;
 
     use crate::{
@@ -631,7 +632,7 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let activation = Height(3_687_123);
-    let network = zip234_mainnet_like_testnet(activation.0);
+    let network = nsm_mainnet_like_testnet(activation.0);
     let initial = network.initial_nsm_value_balance();
 
     // Before activation, the balance doesn't change.
@@ -661,7 +662,7 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
     let change = nsm_value_balance_change(
         (activation + 1).unwrap(),
         &network,
-        zip234_pools_with_nsm_balance(nsm_value_balance.into()),
+        nsm_pools_with_nsm_balance(nsm_value_balance.into()),
         Amount::zero(),
     )?;
 
@@ -678,7 +679,7 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
         nsm_value_balance_change(
             (activation + 1).unwrap(),
             &network,
-            zip234_pools_with_nsm_balance(nsm_value_balance.into()),
+            nsm_pools_with_nsm_balance(nsm_value_balance.into()),
             fees,
         )?,
         (change
@@ -700,7 +701,7 @@ fn check_zip234_nsm_value_balance_change() -> Result<(), Report> {
 /// the full balance.
 
 #[test]
-fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
+fn check_nsm_reissuance_starts_at_deployment_height() -> Result<(), Report> {
     use std::ops::Neg;
 
     use crate::{
@@ -708,8 +709,8 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
         parameters::{
             subsidy::{
                 additional_block_subsidy, block_subsidy, block_subsidy_with_parent_pools,
-                nsm_value_balance_change, nsm_value_balance_is_tracked, scheduled_block_subsidy,
-                zip234_reissuance_is_active, SubsidyError,
+                nsm_reissuance_is_active, nsm_value_balance_change, nsm_value_balance_is_tracked,
+                scheduled_block_subsidy, SubsidyError,
             },
             testnet::{self, ConfiguredActivationHeights},
         },
@@ -730,14 +731,14 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
         .clear_funding_streams()
         .with_lockbox_disbursements(Vec::new())
         .with_initial_nsm_value_balance(initial)
-        .with_zip234_deployment_height(deployment)
+        .with_nsm_reissuance_height(deployment)
         .to_network()?;
 
-    assert_eq!(network.zip234_deployment_height(), Some(deployment));
+    assert_eq!(network.nsm_reissuance_height(), Some(deployment));
 
     // The NU7 activation block seeds the balance and reissues nothing.
     assert!(nsm_value_balance_is_tracked(nu7, &network));
-    assert!(!zip234_reissuance_is_active(nu7, &network));
+    assert!(!nsm_reissuance_is_active(nu7, &network));
     assert!(additional_block_subsidy(nu7, &network, initial).is_zero());
     assert_eq!(
         nsm_value_balance_change(nu7, &network, ValueBalance::zero(), Amount::zero())?,
@@ -759,21 +760,21 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
         nsm_value_balance_change(
             before_deployment,
             &network,
-            zip234_pools_with_nsm_balance(initial.into()),
+            nsm_pools_with_nsm_balance(initial.into()),
             Amount::zero()
         )?,
         Amount::<NegativeAllowed>::zero(),
     );
 
     // The deployment block reissues from the whole balance.
-    assert!(zip234_reissuance_is_active(deployment, &network));
+    assert!(nsm_reissuance_is_active(deployment, &network));
     let reissued = additional_block_subsidy(deployment, &network, initial);
     assert!(!reissued.is_zero());
     assert_eq!(
         block_subsidy_with_parent_pools(
             deployment,
             &network,
-            zip234_pools_with_nsm_balance(initial.into())
+            nsm_pools_with_nsm_balance(initial.into())
         )?,
         (scheduled_block_subsidy(deployment, &network)? + reissued)?,
     );
@@ -781,7 +782,7 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
         nsm_value_balance_change(
             deployment,
             &network,
-            zip234_pools_with_nsm_balance(initial.into()),
+            nsm_pools_with_nsm_balance(initial.into()),
             Amount::zero()
         )?,
         reissued.constrain::<NegativeAllowed>()?.neg(),
@@ -797,7 +798,7 @@ fn check_zip234_reissuance_starts_at_deployment_height() -> Result<(), Report> {
 /// A deployment height before NU7 activation, or without one, is rejected.
 
 #[test]
-fn check_zip234_deployment_height_must_follow_nu7() -> Result<(), Report> {
+fn check_nsm_reissuance_height_must_follow_nu7() -> Result<(), Report> {
     use crate::parameters::{
         network::error::ParametersBuilderError,
         testnet::{self, ConfiguredActivationHeights, RegtestParameters},
@@ -814,17 +815,17 @@ fn check_zip234_deployment_height_must_follow_nu7() -> Result<(), Report> {
             .unwrap()
             .clear_funding_streams()
             .with_lockbox_disbursements(Vec::new())
-            .with_zip234_deployment_height(Height(deployment))
+            .with_nsm_reissuance_height(Height(deployment))
             .to_network()
     };
 
     assert!(matches!(
         build(Some(3_687_123), 3_687_122),
-        Err(ParametersBuilderError::Zip234DeploymentHeightBeforeNu7)
+        Err(ParametersBuilderError::NsmReissuanceHeightBeforeNu7)
     ));
     assert!(matches!(
         build(None, 3_687_123),
-        Err(ParametersBuilderError::Zip234DeploymentHeightBeforeNu7)
+        Err(ParametersBuilderError::NsmReissuanceHeightBeforeNu7)
     ));
     assert!(build(Some(3_687_123), 3_687_123).is_ok());
 
@@ -834,10 +835,10 @@ fn check_zip234_deployment_height_must_follow_nu7() -> Result<(), Report> {
                 nu7: Some(20),
                 ..Default::default()
             },
-            zip234_deployment_height: Some(Height(19)),
+            nsm_reissuance_height: Some(Height(19)),
             ..Default::default()
         }),
-        Err(ParametersBuilderError::Zip234DeploymentHeightBeforeNu7)
+        Err(ParametersBuilderError::NsmReissuanceHeightBeforeNu7)
     ));
 
     Ok(())
@@ -846,7 +847,7 @@ fn check_zip234_deployment_height_must_follow_nu7() -> Result<(), Report> {
 /// The NSM value balance halves about once per halving period, and drains to zero without new removals.
 
 #[test]
-fn check_zip234_pool_halves_over_a_halving_period() -> Result<(), Report> {
+fn check_nsm_pool_halves_over_a_halving_period() -> Result<(), Report> {
     use crate::parameters::subsidy::{additional_block_subsidy, ParameterSubsidy};
 
     let _init_guard = zebra_test::init();
@@ -867,6 +868,7 @@ fn check_zip234_pool_halves_over_a_halving_period() -> Result<(), Report> {
         .with_halving_interval(5_000)?
         .clear_funding_streams()
         .with_lockbox_disbursements(Vec::new())
+        .with_nsm_reissuance_height(Height(1))
         .to_network()?;
     let short_interval = short.post_nu7_halving_interval();
 
@@ -883,39 +885,6 @@ fn check_zip234_pool_halves_over_a_halving_period() -> Result<(), Report> {
         balance <= (half + tolerance)? && (balance + tolerance)? >= half,
         "after {short_interval} blocks the balance is {balance:?}, expected about {half:?}",
     );
-
-    Ok(())
-}
-
-/// Mainnet and the default Testnet have no `DEPLOYMENT_BLOCK_HEIGHT` until the NU7 deployment ZIP
-/// assigns one, so they never reissue, while a configured Testnet defaults to its NU7 activation
-/// height.
-
-#[test]
-fn check_zip234_deployment_height_is_unassigned_on_public_networks() -> Result<(), Report> {
-    use crate::parameters::{
-        subsidy::zip234_reissuance_is_active,
-        testnet::{self, ConfiguredActivationHeights},
-    };
-
-    let _init_guard = zebra_test::init();
-
-    for network in [Network::Mainnet, Network::new_default_testnet()] {
-        assert_eq!(network.zip234_deployment_height(), None);
-        assert!(!zip234_reissuance_is_active(Height::MAX, &network));
-    }
-
-    // Keep the early-upgrade fixture within the scheduled issuance cap.
-    let configured = testnet::Parameters::build()
-        .with_slow_start_interval(Height::MIN)
-        .with_activation_heights(ConfiguredActivationHeights {
-            nu7: Some(1_000),
-            ..Default::default()
-        })?
-        .clear_funding_streams()
-        .with_lockbox_disbursements(Vec::new())
-        .to_network()?;
-    assert_eq!(configured.zip234_deployment_height(), Some(Height(1_000)));
 
     Ok(())
 }
@@ -986,7 +955,7 @@ fn check_zip235_nsm_value_balance_change_overflow() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let activation = Height(3_687_123);
-    let network = zip234_mainnet_like_testnet_with_initial_balance(activation.0, MAX_MONEY);
+    let network = nsm_mainnet_like_testnet_with_initial_balance(activation.0, MAX_MONEY);
     let seed = Amount::<NonNegative>::try_from(MAX_MONEY)?;
     let reissued = additional_block_subsidy(activation, &network, seed);
 

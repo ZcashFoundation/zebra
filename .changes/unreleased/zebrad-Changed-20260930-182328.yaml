@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'NU7 seeds the public Mainnet and Testnet reserves with their historical pre-NU6 shortfalls: 36,858,445,520 and 55,768,414,957 zatoshis. Renaming Testnet or changing its checkpoints preserves the omitted seed with public Testnet magic. Explicitly matching that seed leaves network identity and state paths unchanged. Regtest and private networks with distinct magic default to zero; an isolated chain copied from public Testnet must configure its historical seed explicitly ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).'
+time: 2026-09-30T18:23:28.734447933+02:00

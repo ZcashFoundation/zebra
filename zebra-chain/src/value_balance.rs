@@ -370,7 +370,7 @@ impl ValueBalance<NonNegative> {
         // > as a result of accepting a block at height, then all nodes MUST reject the block as
         // > invalid.
         //
-        // https://github.com/zcash/zips/pull/1354
+        // https://zips.z.cash/zip-0237
         //
         // The `nsm` balance is constrained non-negative here with the pools. The additional block
         // subsidy is at most the balance it is calculated from, so this cannot fail by construction.

@@ -631,8 +631,8 @@ impl NonFinalizedState {
         })?;
 
         // The semantic verifier defers parent-dependent payouts to this exact-parent check.
-        if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &self.network) {
-            check::zip234_subsidy_is_valid(
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &self.network) {
+            check::nsm_subsidy_is_valid(
                 &contextual,
                 &self.network,
                 new_chain.chain_value_pools,

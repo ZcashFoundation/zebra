@@ -17,6 +17,7 @@ use zebra_chain::{
     common::atomic_write,
     parameters::{
         constants::magics,
+        subsidy::TESTNET_INITIAL_NSM_VALUE_BALANCE,
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
             ConfiguredLockboxDisbursement, RegtestParameters,
@@ -613,8 +614,8 @@ struct DTestnetParameters {
     disable_pow: Option<bool>,
     genesis_hash: Option<String>,
     activation_heights: Option<ConfiguredActivationHeights>,
-    /// First height that reissues the NSM value balance; defaults to NU7 activation.
-    zip234_deployment_height: Option<zebra_chain::block::Height>,
+    /// Override for the first NSM reissuance height; omission uses ZIP 237's crossover.
+    nsm_reissuance_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     /// Omission retains the default streams; an explicitly empty list disables them.
@@ -712,10 +713,10 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
-            zip234_deployment_height: params.configured_zip234_deployment_height(),
+            nsm_reissuance_height: params.configured_nsm_reissuance_height(),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
-            initial_nsm_value_balance: Some(params.initial_nsm_value_balance()),
+            initial_nsm_value_balance: params.configured_initial_nsm_value_balance(),
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
                 params
@@ -924,7 +925,7 @@ where
         disable_pow,
         genesis_hash,
         activation_heights,
-        zip234_deployment_height,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -946,7 +947,11 @@ where
 
     let mut params_builder = testnet::Parameters::build();
 
-    if let Some(initial_nsm_value_balance) = initial_nsm_value_balance {
+    // A redundant public seed must not turn public Testnet into a configured network.
+    if let Some(initial_nsm_value_balance) = initial_nsm_value_balance.filter(|seed| {
+        network_magic.map(Magic).unwrap_or(magics::TESTNET) != magics::TESTNET
+            || u64::from(*seed) != TESTNET_INITIAL_NSM_VALUE_BALANCE
+    }) {
         params_builder = params_builder.with_initial_nsm_value_balance(initial_nsm_value_balance);
     }
 
@@ -994,8 +999,8 @@ where
             .map_err(de::Error::custom)?
     }
 
-    if let Some(height) = zip234_deployment_height {
-        params_builder = params_builder.with_zip234_deployment_height(height);
+    if let Some(height) = nsm_reissuance_height {
+        params_builder = params_builder.with_nsm_reissuance_height(height);
     }
 
     if let Some(halving_interval) = pre_blossom_halving_interval {
@@ -1036,6 +1041,11 @@ where
         );
     }
 
+    // Preserve the canonical public Testnet representation when no parameters changed.
+    if network_name.is_none() && params_builder == testnet::Parameters::build() {
+        return Ok(Network::new_default_testnet());
+    }
+
     if !params_builder.is_compatible_with_default_parameters() {
         // Keep the diagnostic for explicitly configured public seeds, even with isolated magic.
         if initial_testnet_peers
@@ -1056,18 +1066,13 @@ where
         }
     }
 
-    // Return the default Testnet if no network name was configured and all parameters match the default Testnet
-    if network_name.is_none() && params_builder == testnet::Parameters::build() {
-        Ok(Network::new_default_testnet())
-    } else {
-        Ok(params_builder.to_network().map_err(de::Error::custom)?)
-    }
+    params_builder.to_network().map_err(de::Error::custom)
 }
 
 fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters, &'static str> {
     let DTestnetParameters {
         activation_heights,
-        zip234_deployment_height,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -1081,7 +1086,7 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
 
     Ok(RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
-        zip234_deployment_height,
+        nsm_reissuance_height,
         funding_streams: merge_funding_streams(
             funding_streams,
             pre_nu6_funding_streams,

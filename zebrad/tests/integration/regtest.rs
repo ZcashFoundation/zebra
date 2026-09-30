@@ -1552,7 +1552,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             },
             // The reserve is configured, not derived from historical coinbase underclaims.
             initial_nsm_value_balance: Some(seed),
-            zip234_deployment_height: Some(Height(106)),
+            nsm_reissuance_height: Some(Height(106)),
             should_allow_unshielded_coinbase_spends: Some(true),
             ..Default::default()
         });

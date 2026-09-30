@@ -444,7 +444,7 @@ fn start_precomputing_coinbase(
     height: Height,
 ) {
     // The future parent does not exist yet, so its NSM balance is unknown.
-    if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network) {
+    if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network) {
         return;
     }
     if next_coinbase

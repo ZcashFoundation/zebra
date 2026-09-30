@@ -109,7 +109,7 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InsufficientCheckpointCoverage,
 
-    #[error("the ZIP 234 deployment height must be at or after the NU7 activation height")]
+    #[error("the NSM reissuance height must be at or after the NU7 activation height")]
     #[non_exhaustive]
-    Zip234DeploymentHeightBeforeNu7,
+    NsmReissuanceHeightBeforeNu7,
 }

@@ -299,6 +299,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
             ..Default::default()
         })?
         .with_initial_nsm_value_balance(reserve)
+        .with_nsm_reissuance_height(height)
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(height..Height(1_010)),
             recipients: Some(vec![

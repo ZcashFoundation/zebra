@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Added
-body: "`initial_nsm_value_balance` and `zip234_deployment_height` under `[network.testnet_parameters]` are available for Regtest and configured Testnets in ordinary builds. Serialization preserves an omitted deployment height, whose effective value falls back to NU7 activation ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
+body: "`initial_nsm_value_balance` and `nsm_reissuance_height` under `[network.testnet_parameters]` are available for Regtest and configured Testnets in ordinary builds. Serialization preserves omitted settings. The effective reissuance height follows ZIP 237's scheduled-issuance crossover, with explicit overrides for accelerated testing ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
 time: 2026-09-15T15:00:05.000000000-06:00

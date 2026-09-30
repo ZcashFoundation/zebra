@@ -115,8 +115,8 @@ fn contextual_header_ancestry_preserves_parent_height_and_error_order() {
 /// Tests for the contextual block subsidy checks once the [halving-preserving issuance ZIP][zip] is
 /// active.
 ///
-/// [zip]: https://github.com/zcash/zips/pull/1354
-mod zip234 {
+/// [zip]: https://zips.z.cash/zip-0237
+mod nsm {
     use std::collections::HashMap;
 
     use zebra_chain::{
@@ -163,6 +163,7 @@ mod zip234 {
                 ..Default::default()
             },
             initial_nsm_value_balance: Some(amount(INITIAL_NSM_VALUE_BALANCE)),
+            nsm_reissuance_height: Some(Height(NU7_HEIGHT)),
             ..Default::default()
         })
     }
@@ -273,12 +274,12 @@ mod zip234 {
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+        check::nsm_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the coinbase pays the subsidy and the fees");
 
         // The same block is invalid after a parent with an empty NSM value balance.
         assert_eq!(
-            subsidy_error(check::zip234_subsidy_is_valid(
+            subsidy_error(check::nsm_subsidy_is_valid(
                 &valid,
                 &network,
                 ValueBalance::zero(),
@@ -295,7 +296,7 @@ mod zip234 {
             &network,
         );
         assert_eq!(
-            subsidy_error(check::zip234_subsidy_is_valid(
+            subsidy_error(check::nsm_subsidy_is_valid(
                 &invalid,
                 &network,
                 parent_pools,
@@ -307,7 +308,7 @@ mod zip234 {
         // A coinbase that doesn't claim the fees is invalid from NU6 onward.
         let invalid = block(height, subsidy, parent_pools, &network);
         assert_eq!(
-            subsidy_error(check::zip234_subsidy_is_valid(
+            subsidy_error(check::nsm_subsidy_is_valid(
                 &invalid,
                 &network,
                 parent_pools,
@@ -339,7 +340,7 @@ mod zip234 {
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+        check::nsm_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the activation block reissues from INITIAL_NSM_VALUE_BALANCE");
 
         // The block credits the balance with the seed and the fees removed from circulation, and
@@ -380,7 +381,7 @@ mod zip234 {
                 &network,
             );
             assert_eq!(
-                subsidy_error(check::zip234_subsidy_is_valid(
+                subsidy_error(check::nsm_subsidy_is_valid(
                     &invalid,
                     &network,
                     parent_pools,
@@ -396,7 +397,7 @@ mod zip234 {
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+        check::nsm_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the coinbase claims the miner's share of the fees");
 
         // The issued supply and the NSM value balance together grow by the scheduled subsidy.
@@ -574,7 +575,7 @@ fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError>
             nu7: Some(1_000),
             ..Default::default()
         })?
-        .with_zip234_deployment_height(reissuance)
+        .with_nsm_reissuance_height(reissuance)
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(block::Height(1_000)..block::Height(1_010)),
             recipients: Some(vec![
@@ -670,7 +671,7 @@ fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError>
                 // Before reissuance the semantic verifier owns the payout checks.
                 continue;
             }
-            let result = zip234_subsidy_is_valid(&contextual, &network, parent_pools, fees);
+            let result = nsm_subsidy_is_valid(&contextual, &network, parent_pools, fees);
             if delta == 0 {
                 result?;
             } else {
@@ -689,7 +690,7 @@ fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError>
                 let mut other_parent = parent_pools;
                 other_parent.set_nsm_amount((reserve * 2)?);
                 assert!(matches!(
-                    zip234_subsidy_is_valid(&contextual, &network, other_parent, fees),
+                    nsm_subsidy_is_valid(&contextual, &network, other_parent, fees),
                     Err(ValidateContextError::InvalidSubsidy {
                         subsidy_error: CoinbaseTransactionError::Subsidy(
                             SubsidyError::FundingStreamNotFound
@@ -716,7 +717,7 @@ fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError>
                 parent_pools,
             )?;
             assert!(matches!(
-                zip234_subsidy_is_valid(
+                nsm_subsidy_is_valid(
                     &contextual,
                     &network,
                     parent_pools,

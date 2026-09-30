@@ -3161,11 +3161,10 @@ where
             None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
-        // From the ZIP 234 deployment height, the block subsidy depends on the NSM
+        // From the NSM reissuance height, the block subsidy depends on the NSM
         // value balance after the parent block, so it is only known up to the block after the
         // best chain tip.
-        let subsidy = if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &net)
-        {
+        let subsidy = if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &net) {
             let parent_height = (height - 1).ok_or_misc_error("height 0 has no parent block")?;
 
             let zebra_state::ReadResponse::BlockInfo(parent_block_info) = self
@@ -3181,7 +3180,7 @@ where
             let parent_chain_value_pools = *parent_block_info
                 .ok_or_misc_error(
                     "the block subsidy is only known up to the block after the best chain tip \
-                     from the ZIP 234 deployment height",
+                     from the NSM reissuance height",
                 )?
                 .value_pools();
 

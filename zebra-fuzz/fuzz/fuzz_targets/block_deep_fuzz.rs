@@ -339,7 +339,7 @@ fuzz_target!(|data: &[u8]| {
     // exercises the saturating-arithmetic contract on the public entry
     // points across both networks, not subsidy correctness.
     // -------------------------------------------------------------------
-    // `block_subsidy` returns an error once ZIP 234 reissues,
+    // `block_subsidy` returns an error once NSM reissuance is active,
     // because the subsidy then depends on the parent block; the entry points still don't panic.
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let height = block.coinbase_height().unwrap_or(Height(0));

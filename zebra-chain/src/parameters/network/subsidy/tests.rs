@@ -351,14 +351,108 @@ fn cumulative_issuance_stops_at_the_halving_limit_during_slow_start() -> Result<
 }
 
 #[test]
+fn nsm_reissuance_starts_at_the_first_reference_crossing() -> Result<(), Report> {
+    let reserve = Amount::try_from(1u64)?;
+    for (public, activation, expected) in [
+        (Network::Mainnet, 3_543_000, 8_940_474),
+        (Network::new_default_testnet(), 4_200_000, 7_835_274),
+    ] {
+        let network = Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                nu7: Some(activation),
+                ..public.activation_list().into()
+            })?
+            .clear_funding_streams()
+            .with_lockbox_disbursements(Vec::new())
+            .with_initial_nsm_value_balance(reserve)
+            .to_network()?;
+        let crossing = network
+            .nsm_reissuance_height()
+            .expect("the reference curve crosses");
+        assert_eq!(crossing, Height(expected));
+        assert_eq!(
+            block_subsidy_with_parent_nsm_value_balance(
+                Height(activation),
+                &network,
+                Amount::zero()
+            )?,
+            scheduled_block_subsidy(Height(activation), &network)?,
+        );
+        for (height, crossed) in [(crossing.previous()?, false), (crossing, true)] {
+            let issued = cumulative_scheduled_issuance_zatoshis(height.previous()?, &network)?;
+            let reference = (u128::try_from(MAX_MONEY)? - u128::from(issued)) * 1_375;
+            let reference = reference.div_ceil(u128::from(BLOCK_SUBSIDY_FRACTION_DENOMINATOR));
+            assert_eq!(
+                reference < u128::from(u64::from(scheduled_block_subsidy(height, &network)?)),
+                crossed,
+            );
+            assert_eq!(
+                u64::from(additional_block_subsidy(height, &network, reserve)),
+                u64::from(crossed),
+            );
+        }
+    }
+    let no_crossing = Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(20_000_001),
+            ..Network::new_default_testnet().activation_list().into()
+        })?
+        .clear_funding_streams()
+        .with_lockbox_disbursements(Vec::new())
+        .to_network()?;
+    assert_eq!(no_crossing.nsm_reissuance_height(), None);
+    assert_eq!(
+        additional_block_subsidy(Height::MAX, &no_crossing, reserve).zatoshis(),
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn public_nsm_seeds_match_historical_unclaimed_issuance() -> Result<(), Report> {
+    // Historical chain value pools at the last pre-NU6 heights, in zatoshi:
+    // https://mainnet.zcashexplorer.app/blocks/2726399
+    // https://testnet.zcashexplorer.app/blocks/2975999
+    for (network, height, pools) in [
+        (
+            Network::Mainnet,
+            2_726_399,
+            [
+                1_402_654_579_762_796u64,
+                2_605_536_175_709,
+                101_161_389_852_194,
+                68_541_635_763_781,
+            ],
+        ),
+        (
+            Network::new_default_testnet(),
+            2_975_999,
+            [
+                1_433_024_042_538_559u64,
+                42_832_983_037_484,
+                123_413_239_739_335,
+                3_798_966_269_665,
+            ],
+        ),
+    ] {
+        let scheduled = cumulative_scheduled_issuance_zatoshis(Height(height), &network)?;
+        assert_eq!(
+            u64::from(network.initial_nsm_value_balance()),
+            scheduled - pools.into_iter().sum::<u64>(),
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn reissuance_height_requires_nu7_and_a_valid_height() {
     assert_eq!(
         Parameters::build()
             .with_funding_streams(Vec::new())
-            .with_zip234_deployment_height(Height(1))
+            .with_nsm_reissuance_height(Height(1))
             .to_network()
             .unwrap_err(),
-        ParametersBuilderError::Zip234DeploymentHeightBeforeNu7,
+        ParametersBuilderError::NsmReissuanceHeightBeforeNu7,
     );
     for height in [Height(0), Height(99), Height(Height::MAX.0 + 1)] {
         let builder = Parameters::build()
@@ -367,12 +461,12 @@ fn reissuance_height_requires_nu7_and_a_valid_height() {
                 ..Default::default()
             })
             .unwrap()
-            .with_zip234_deployment_height(height)
+            .with_nsm_reissuance_height(height)
             .with_funding_streams(Vec::new());
         let expected = if height == Height::MIN || height > Height::MAX {
             ParametersBuilderError::InvalidActivationHeight
         } else {
-            ParametersBuilderError::Zip234DeploymentHeightBeforeNu7
+            ParametersBuilderError::NsmReissuanceHeightBeforeNu7
         };
         assert_subsidy_error(builder, expected);
     }
@@ -476,7 +570,7 @@ fn reissuance_requires_a_positive_integer_coefficient() -> Result<(), Report> {
         ParametersBuilderError::InvalidHalvingInterval,
     );
     assert_subsidy_error(
-        builder.with_zip234_deployment_height(Height(interval + 1)),
+        builder.with_nsm_reissuance_height(Height(interval + 1)),
         ParametersBuilderError::InvalidHalvingInterval,
     );
     Ok(())
@@ -498,7 +592,7 @@ fn monetary_validation_preserves_valid_schedules() -> Result<(), Report> {
             nu7: Some(1),
             ..Default::default()
         },
-        zip234_deployment_height: Some(Height(1)),
+        nsm_reissuance_height: Some(Height(1)),
         ..Default::default()
     })?);
     for network in [

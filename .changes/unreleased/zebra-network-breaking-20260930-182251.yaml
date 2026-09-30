@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Configured Testnets using public Testnet magic inherit the historical public NSM seed when omitted. Explicitly matching that seed leaves network identity and state paths unchanged. A different seed requires distinct `network_magic` and non-public peers; Regtest and distinct-magic networks default to zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+time: 2026-09-30T18:22:51.211103472+02:00

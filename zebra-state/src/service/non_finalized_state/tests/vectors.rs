@@ -1101,11 +1101,11 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
     Ok(())
 }
 
-/// From the ZIP 234 deployment height, the deferred (lockbox) funding stream is a
+/// From the NSM reissuance height, the deferred (lockbox) funding stream is a
 /// fraction of the whole block subsidy, including the additional subsidy that depends on the parent
 /// block's chain value pools.
 #[test]
-fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
+fn deferred_pool_balance_change_uses_nsm_subsidy() -> Result<()> {
     use zebra_chain::parameters::{
         subsidy::{
             block_subsidy_with_parent_pools, funding_stream_values, scheduled_block_subsidy,
@@ -1135,6 +1135,7 @@ fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
                 addresses: None,
             }]),
         }]),
+        nsm_reissuance_height: Some(Height(10)),
         ..Default::default()
     });
 
@@ -1172,14 +1173,14 @@ fn deferred_pool_balance_change_uses_zip234_subsidy() -> Result<()> {
 }
 
 /// Committed blocks track the NSM value balance: the NU7 activation block seeds it, blocks before
-/// the ZIP 234 deployment height leave it unchanged, and from the deployment height each block
+/// the NSM reissuance height leave it unchanged, and from the deployment height each block
 /// reissues from the balance after its parent. A block paying the scheduled subsidy instead is
 /// rejected from the deployment height.
 ///
 /// Each block after activation credits the balance with the fees it removes from circulation.
 /// From the deployment height a block whose coinbase claims those fees is rejected.
 #[test]
-fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
+fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
     use chrono::Duration;
     use zebra_chain::{
         block::{
@@ -1227,7 +1228,7 @@ fn zip234_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         },
         funding_streams: Some(Vec::new()),
         initial_nsm_value_balance: Some(zats(INITIAL_NSM_VALUE_BALANCE)),
-        zip234_deployment_height: Some(Height(DEPLOYMENT_HEIGHT)),
+        nsm_reissuance_height: Some(Height(DEPLOYMENT_HEIGHT)),
         ..Default::default()
     });
 

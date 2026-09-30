@@ -2587,13 +2587,14 @@ async fn rpc_getnetworksolps_rejects_unrepresentable_rates() {
     .expect("solution-rate conversion must not stall");
 }
 
-/// Builds the shared NSM activation fixture with the test's required funding recipients.
+/// Builds the shared NSM activation fixture with a zero seed and the required funding recipients.
 fn nsm_test_network(
     height: Height,
     recipients: Vec<testnet::ConfiguredFundingStreamRecipient>,
 ) -> Network {
     Parameters::build()
         .with_slow_start_interval(Height::MIN)
+        .with_initial_nsm_value_balance(Amount::zero())
         .with_activation_heights(testnet::ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),
@@ -2605,7 +2606,7 @@ fn nsm_test_network(
             ..Default::default()
         })
         .unwrap()
-        .with_zip234_deployment_height(height)
+        .with_nsm_reissuance_height(height)
         .with_funding_streams(vec![testnet::ConfiguredFundingStreams {
             height_range: Some(height..Height(1_010)),
             recipients: Some(recipients),
@@ -5091,11 +5092,11 @@ async fn rpc_getblocksubsidy_major_grants_metadata_across_nu6_boundary() {
     }
 }
 
-/// From the ZIP 234 deployment height, `getblocksubsidy` returns the scheduled
+/// From the NSM reissuance height, `getblocksubsidy` returns the scheduled
 /// block subsidy plus the additional subsidy for the NSM value balance after the parent block, and
 /// returns an error if the parent block isn't in the state yet.
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblocksubsidy_zip234() {
+async fn rpc_getblocksubsidy_nsm() {
     use zebra_chain::{
         block::Height,
         parameters::{
@@ -5117,6 +5118,7 @@ async fn rpc_getblocksubsidy_zip234() {
             nu7: Some(10),
             ..Default::default()
         },
+        nsm_reissuance_height: Some(Height(10)),
         ..Default::default()
     });
 

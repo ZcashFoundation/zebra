@@ -1026,13 +1026,13 @@ fn state_commit_duplicate_errors_are_duplicate_requests() {
     assert_eq!(err.misbehavior_score(), 0);
 }
 
-/// From the ZIP 234 deployment height, the block verifier leaves the block subsidy,
+/// From the NSM reissuance height, the block verifier leaves the block subsidy,
 /// funding stream, and miner fee checks to contextual validation in the state, so it sends a block
 /// whose coinbase pays the wrong subsidy to the state to be committed. Before activation it rejects
 /// the same block.
 
-#[tokio::test(flavor = "multi_thread")]
-async fn zip234_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), Report> {
+#[tokio::test]
+async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), Report> {
     use zebra_chain::{
         amount::{Amount, NonNegative},
         parameters::testnet::{self, ConfiguredActivationHeights},
@@ -1045,9 +1045,9 @@ async fn zip234_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<()
 
     const NU7_HEIGHT: u32 = 10;
 
-    // A network reissuing from `deployment_height`, which defaults to NU7 activation.
-    let network = |deployment_height: Option<Height>| -> Result<Network, Report> {
-        let mut params = testnet::Parameters::build()
+    // A network reissuing from `deployment_height`.
+    let network = |deployment_height: Height| -> Result<Network, Report> {
+        let params = testnet::Parameters::build()
             .with_activation_heights(ConfiguredActivationHeights {
                 canopy: Some(1),
                 nu5: Some(1),
@@ -1057,12 +1057,10 @@ async fn zip234_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<()
                 ..Default::default()
             })?
             .with_slow_start_interval(Height::MIN)
+            .with_nsm_reissuance_height(deployment_height)
             .with_disable_pow(true)
             .clear_funding_streams()
             .with_lockbox_disbursements(Vec::new());
-        if let Some(deployment_height) = deployment_height {
-            params = params.with_zip234_deployment_height(deployment_height);
-        }
         Ok(params.to_network()?)
     };
 
@@ -1092,8 +1090,8 @@ async fn zip234_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<()
         Arc::new(block)
     };
 
-    let deployed_at_nu7 = network(None)?;
-    let deployed_later = network(Some(Height(NU7_HEIGHT + 2)))?;
+    let deployed_at_nu7 = network(Height(NU7_HEIGHT))?;
+    let deployed_later = network(Height(NU7_HEIGHT + 2))?;
 
     for (network, height, is_active) in [
         (&deployed_at_nu7, Height(NU7_HEIGHT - 1), false),
