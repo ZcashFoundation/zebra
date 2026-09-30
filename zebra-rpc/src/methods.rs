@@ -899,6 +899,10 @@ where
 
     /// Handler for the `getblocktemplate` RPC.
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
+
+    /// Per-instance wall clock for deterministic mining deadline and rollback tests.
+    #[cfg(test)]
+    template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
 }
 
 /// A type alias for the last event logged by the server.
@@ -995,6 +999,8 @@ where
             address_book,
             last_warn_error_log_rx,
             gbt,
+            #[cfg(test)]
+            template_clock: None,
         };
 
         // run the process queue
@@ -1005,6 +1011,16 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Reads wall time for template deadlines and serve-time timestamp validation.
+    fn template_clock_now(&self) -> DateTime32 {
+        #[cfg(test)]
+        if let Some(clock) = &self.template_clock {
+            return clock.load(std::sync::atomic::Ordering::SeqCst).into();
+        }
+
+        DateTime32::now()
     }
 
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
@@ -1040,7 +1056,7 @@ where
     /// has already seen a block for.
     ///
     /// A long polling client waits here until the updater publishes a template it doesn't have
-    /// yet, the chain tip changes, or `max_time` is reached.
+    /// yet, the chain tip changes, or its timestamp range expires during this request.
     ///
     /// # Correctness
     ///
@@ -1055,6 +1071,7 @@ where
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
+        long_poll_started: DateTime32,
     ) -> Option<BlockTemplateResponse> {
         let cache = self.gbt.template_cache()?;
 
@@ -1081,9 +1098,11 @@ where
             let template = self.precomputed_template_for_state_tip(cache).await?;
 
             let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
-            let now = DateTime32::now();
+            let now = self.template_clock_now();
+            let max_time_reached =
+                long_poll_started <= template.max_time && now > template.max_time;
 
-            if !is_client_template || now > template.max_time {
+            if !is_client_template || max_time_reached {
                 let mut template = (*template).clone();
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
@@ -1098,6 +1117,8 @@ where
 
             // `max_time` is inclusive. Wait until the clock passes it, not for the template's
             // original time range again: cached `cur_time` may already be several seconds old.
+            // If it was already expired when polling began, wait for changed work instead of
+            // repeatedly notifying the miner (or waking this loop every second).
             let duration_until_max_time = max_time.saturating_duration_since(now);
             let wait_for_max_time =
                 tokio::time::sleep(duration_until_max_time.to_std() + Duration::from_secs(1));
@@ -1113,7 +1134,7 @@ where
                 () = template_changes.changed() => {}
 
                 // Recheck wall time after waking: the monotonic timer cannot detect clock changes.
-                () = wait_for_max_time => {}
+                () = wait_for_max_time, if long_poll_started <= max_time => {}
             }
         }
     }
@@ -1150,7 +1171,7 @@ where
                 };
 
                 if let Some(template) =
-                    cache.template_for_tip(tip_hash, &self.network, DateTime32::now())
+                    cache.template_for_tip(tip_hash, &self.network, self.template_clock_now())
                 {
                     return Some(template);
                 }
@@ -2600,6 +2621,8 @@ where
         &self,
         parameters: Option<GetBlockTemplateParameters>,
     ) -> Result<GetBlockTemplateResponse> {
+        let long_poll_started = self.template_clock_now();
+
         use types::get_block_template::{
             check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
             nsm_value_balance_for_next_block, validate_block_proposal,
@@ -2642,15 +2665,15 @@ where
         // extends the current chain tip.
         check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
 
-        if let Some(template) = self.precomputed_block_template(client_long_poll_id).await {
+        if let Some(template) = self
+            .precomputed_block_template(client_long_poll_id, long_poll_started)
+            .await
+        {
             return Ok(template.into());
         }
 
         // - Checks and fetches that can change during long polling
         //
-        // Set up the loop.
-        let mut max_time_reached = false;
-
         // The loop returns the server long poll ID, which should be different to the client one.
         let (server_long_poll_id, chain_info, mempool_txs, mempool_tx_deps, submit_old) = loop {
             // Check if we are synced to the tip.
@@ -2672,8 +2695,8 @@ where
             // - if the tip block hash changes, we must return from long polling,
             // - if the local clock changes on testnet, we might return from long polling
             //
-            // We always return after 90 minutes on mainnet, even if we have the same response,
-            // because the max time has been reached.
+            // A timestamp range expiring during this request also ends the long poll, even if
+            // the tip and mempool have not changed. Already-expired work must wait for a change.
             let chain_info @ zebra_state::GetBlockTemplateChainInfo {
                 tip_hash,
                 tip_height,
@@ -2712,25 +2735,22 @@ where
             )
             .generate_id();
 
-            // A forward clock correction can expire the range while state or mempool reads
-            // are pending. Never disable the deadline just because it has already elapsed.
-            max_time_reached |= client_long_poll_id.is_some() && DateTime32::now() > max_time;
+            // Recheck after the reads: a forward clock correction can expire a live range.
+            // Only notify if it was still valid when this request started, otherwise miners
+            // repeatedly receive the same expired long poll ID and immediately poll again.
+            let now = self.template_clock_now();
+            let max_time_reached =
+                client_long_poll_id.is_some() && long_poll_started <= max_time && now > max_time;
 
             // The loop finishes if:
             // - the client didn't pass a long poll ID,
             // - the server long poll ID is different to the client long poll ID, or
-            // - the previous loop iteration waited until the max time.
+            // - the timestamp range expired during this request.
             if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
-                // On testnet, the max time changes the block difficulty, so old shares are invalid.
-                // On mainnet, this means there has been 90 minutes without a new block or mempool
-                // transaction, which is very unlikely. So the miner should probably reset anyway.
-                let submit_old = if max_time_reached {
-                    Some(false)
-                } else {
-                    client_long_poll_id
-                        .as_ref()
-                        .map(|old_long_poll_id| server_long_poll_id.submit_old(old_long_poll_id))
-                };
+                // Expired work cannot be retained, even when only the mempool changed the ID.
+                let submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
+                    now <= max_time && server_long_poll_id.submit_old(old_long_poll_id)
+                });
 
                 break (
                     server_long_poll_id,
@@ -2760,7 +2780,7 @@ where
 
             // `max_time` is inclusive. Use wall time, not the captured and clamped cur_time,
             // so time spent building or a clock adjustment cannot extend the long poll.
-            let duration_until_max_time = max_time.saturating_duration_since(DateTime32::now());
+            let duration_until_max_time = max_time.saturating_duration_since(now);
             let wait_for_max_time =
                 tokio::time::sleep(duration_until_max_time.to_std() + Duration::from_secs(1));
 
@@ -2790,8 +2810,9 @@ where
                     // Serve the template that the updater task precomputed for the new tip, so the
                     // miner doesn't waste any effort extending the shorter chain. Otherwise, loop
                     // around to build a template for the new tip from the state and the mempool.
-                    if let Some(template) =
-                        self.precomputed_block_template(client_long_poll_id).await
+                    if let Some(template) = self
+                        .precomputed_block_template(client_long_poll_id, long_poll_started)
+                        .await
                     {
                         return Ok(template.into());
                     }
@@ -2799,17 +2820,17 @@ where
 
                 // The max time does not elapse during normal operation on mainnet,
                 // and it rarely elapses on testnet.
-                () = wait_for_max_time => {
+                () = wait_for_max_time, if long_poll_started <= max_time => {
                     // This log is very rare so it's ok to be info.
                     tracing::info!(
                         ?max_time,
                         ?cur_time,
                         ?server_long_poll_id,
                         ?client_long_poll_id,
-                        "returning from long poll because max time was reached"
+                        "rechecking long poll after the max time deadline"
                     );
 
-                    max_time_reached = DateTime32::now() > max_time;
+                    // Recheck wall time in the next iteration in case the clock moved backwards.
                 }
             }
         };
@@ -2866,9 +2887,12 @@ where
 
         // Coinbase construction can take seconds. Recheck the whole advertised range after it,
         // just as the cache does, rather than returning timestamps invalidated by clock rollback.
-        (template.max_time <= DateTime32::now().saturating_add(Duration32::from_hours(2)))
-            .then(|| template.into())
-            .ok_or_misc_error("local clock moved backwards while building the block template")
+        (template.max_time
+            <= self
+                .template_clock_now()
+                .saturating_add(Duration32::from_hours(2)))
+        .then(|| template.into())
+        .ok_or_misc_error("local clock moved backwards while building the block template")
     }
 
     async fn submit_block(

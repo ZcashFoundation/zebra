@@ -924,7 +924,8 @@ where
 
 /// Returns an error if Zebra is not synced to the consensus chain tip.
 /// Returns early with `Ok(())` if Proof-of-Work is disabled on the provided `network`.
-/// This error might be incorrect if the local clock is skewed.
+/// Mainnet also requires a recent tip; this check can fail if the local clock is skewed.
+/// PoW test networks still require synchronization, but may restart mining after a long stall.
 pub fn check_synced_to_tip<Tip, SyncStatus>(
     network: &Network,
     latest_chain_tip: Tip,
@@ -943,7 +944,9 @@ where
         .ok_or_misc_error("no chain tip available yet")?;
     let time_since_tip = chrono::Utc::now() - local_tip_time;
 
-    if !sync_status.is_close_to_tip() || time_since_tip > MAX_TIME_SINCE_CHAIN_TIP {
+    if !sync_status.is_close_to_tip()
+        || (matches!(network, Network::Mainnet) && time_since_tip > MAX_TIME_SINCE_CHAIN_TIP)
+    {
         tracing::info!(
             ?time_since_tip,
             ?local_tip_height,

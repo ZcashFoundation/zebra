@@ -25,20 +25,32 @@ use crate::config::mining::{default_miner_address, MinerAddressType};
 
 use super::MinerParams;
 
-/// Only explicitly PoW-disabled networks may mine without synchronization.
+/// PoW test networks can restart a stalled chain, but must still be synchronized.
 #[test]
-fn mining_requires_a_recent_tip_and_sync_status() {
+fn mining_requires_sync_but_only_mainnet_requires_a_recent_tip() {
     use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
 
     let (tip, sender) = MockChainTip::new();
     let mut sync = MockSyncStatus::default();
     sender.send_best_tip_height(Height(1_000_000));
 
-    for network in [Network::Mainnet, Network::new_default_testnet()] {
+    let custom_testnet = testnet::Parameters::build()
+        .with_network_name("MiningTestnet")
+        .expect("custom network name is valid")
+        .to_network()
+        .expect("custom Testnet parameters are valid");
+    for network in [
+        Network::Mainnet,
+        Network::new_default_testnet(),
+        custom_testnet,
+    ] {
+        assert!(!network.disable_pow());
         for (age, close, valid) in [
             (chrono::Duration::minutes(1), true, true),
-            (chrono::Duration::hours(3), true, false),
+            (chrono::Duration::hours(3), true, !network.is_mainnet()),
+            (chrono::Duration::days(3650), true, !network.is_mainnet()),
             (chrono::Duration::minutes(1), false, false),
+            (chrono::Duration::hours(3), false, false),
         ] {
             sender.send_best_tip_block_time(chrono::Utc::now() - age);
             sync.set_is_close_to_tip(close);

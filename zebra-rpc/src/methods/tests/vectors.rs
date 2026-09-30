@@ -3,7 +3,7 @@
 use std::{
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -2935,52 +2935,6 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         i32::from(server::error::LegacyCode::Misc),
     );
 
-    // An already-expired long poll must return even without a tip or mempool change.
-    // Exercise both the on-demand path and the precomputed path with the same work.
-    for cached in [false, true] {
-        if cached {
-            rpc.gbt
-                .template_cache()
-                .expect("configured mining has a template cache")
-                .publish(*get_block_template.clone());
-        }
-        let mut poll_state = read_state.clone();
-        let mut poll_mempool = mempool.clone();
-        let response = tokio::time::timeout(Duration::from_secs(5), async {
-            let (response, ..) = tokio::join!(
-                rpc.get_block_template(Some(GetBlockTemplateParameters {
-                    long_poll_id: Some(get_block_template.long_poll_id),
-                    ..Default::default()
-                })),
-                async {
-                    if cached {
-                        poll_state
-                            .expect_request(ReadRequest::Tip)
-                            .await
-                            .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
-                    } else {
-                        make_mock_read_state_request_handler().await;
-                        poll_mempool
-                            .expect_request(mempool::Request::FullTransactions)
-                            .await
-                            .respond(mempool::Response::FullTransactions {
-                                transactions: vec![],
-                                transaction_dependencies: Default::default(),
-                                last_seen_tip_hash: fake_tip_hash,
-                            });
-                    }
-                },
-            );
-            response
-        })
-        .await
-        .expect("an expired timestamp range must end long polling")
-        .expect("expired work can be replaced")
-        .try_into_template()
-        .expect("template-mode response");
-        assert_eq!(response.submit_old, Some(false), "cached: {cached}");
-    }
-
     mempool.expect_no_requests().await;
 }
 
@@ -3413,6 +3367,217 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     read_state_responder.abort();
     mempool_responder.abort();
     updater.abort();
+}
+
+/// Expiry notifies a waiting miner once, but re-polling expired work waits for a real change.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_long_poll_expires_once() {
+    let _init_guard = zebra_test::init();
+
+    for cached in [false, true] {
+        let net = Network::Mainnet;
+        let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+        let tip_hash = Hash([1; 32]);
+        let now = DateTime32::from(1_700_000_000);
+        let max_time = now.saturating_add(Duration32::from_seconds(10));
+        let chain_info = GetBlockTemplateChainInfo {
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            tip_height,
+            tip_hash,
+            cur_time: now,
+            min_time: now,
+            max_time,
+            chain_history_root: fake_history_tree(&net).hash(),
+            #[cfg(zcash_unstable = "zip234")]
+            chain_value_pools: Default::default(),
+        };
+        let (chain_info_tx, chain_info_rx) = tokio::sync::watch::channel(chain_info.clone());
+        let mempool_tip = chain_info_rx.clone();
+        let state_reads = Arc::new(AtomicUsize::new(0));
+        let read_state = tower::service_fn({
+            let state_reads = state_reads.clone();
+            move |request| {
+                state_reads.fetch_add(1, Ordering::SeqCst);
+                let chain_info = chain_info_rx.borrow().clone();
+                async move {
+                    Ok::<_, BoxError>(match request {
+                        ReadRequest::Tip => {
+                            ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
+                        }
+                        ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                        other => panic!("unexpected state request: {other:?}"),
+                    })
+                }
+            }
+        });
+        let mempool = tower::service_fn(move |request| {
+            let tip_hash = mempool_tip.borrow().tip_hash;
+            async move {
+                assert!(matches!(request, mempool::Request::FullTransactions));
+                Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                })
+            }
+        });
+        let (mock_tip, mock_tip_sender) = MockChainTip::new();
+        mock_tip_sender.send_best_tip_height(tip_height);
+        mock_tip_sender.send_best_tip_hash(tip_hash);
+        mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (mut rpc, queue) = RpcImpl::new(
+            net.clone(),
+            mining::Config {
+                miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                    NetworkType::Main,
+                    [0x7e; 20],
+                )),
+                ..Default::default()
+            },
+            false,
+            "0.0.1",
+            "RPC test",
+            mempool,
+            MockService::build().for_unit_tests(),
+            read_state,
+            MockService::build().for_unit_tests(),
+            sync,
+            mock_tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let clock = Arc::new(AtomicU32::new(now.timestamp()));
+        rpc.template_clock = Some(clock.clone());
+        let cache = rpc.gbt.template_cache().unwrap();
+        let make_template = |chain_info: &GetBlockTemplateChainInfo| {
+            BlockTemplateResponse::new_internal(
+                &net,
+                &rpc.gbt.coinbase_cache(),
+                rpc.gbt.miner_params().unwrap(),
+                chain_info,
+                LongPollInput::new(
+                    chain_info.tip_height,
+                    chain_info.tip_hash,
+                    chain_info.max_time,
+                    std::iter::empty(),
+                )
+                .generate_id(),
+                vec![],
+                None,
+            )
+        };
+        let template = make_template(&chain_info);
+        if cached {
+            cache.publish(template.clone());
+        }
+        let parameters = || {
+            Some(GetBlockTemplateParameters {
+                long_poll_id: Some(template.long_poll_id),
+                ..Default::default()
+            })
+        };
+
+        let waiting = rpc.get_block_template(parameters());
+        tokio::pin!(waiting);
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "cached: {cached}"
+        );
+
+        // The original monotonic deadline has elapsed, but max_time itself is still valid.
+        clock.store(max_time.timestamp(), Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(11)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "max_time is inclusive"
+        );
+
+        // A deadline wakeup after wall-clock rollback must not falsely report expiry.
+        clock.store(now.timestamp(), Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "clock rolled back"
+        );
+
+        // Jump past max_time before the newly armed deadline. A cache/mempool refresh must
+        // notice expiry rather than disable the deadline and keep waiting indefinitely.
+        clock.store(max_time.timestamp() + 1, Ordering::SeqCst);
+        if cached {
+            cache.publish(template.clone());
+        } else {
+            tokio::time::advance(Duration::from_secs(
+                types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+            ))
+            .await;
+        }
+        let expired = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("a forward clock jump must end the long poll")
+            .expect("expired work can be replaced")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(expired.long_poll_id, template.long_poll_id);
+        assert_eq!(expired.submit_old, Some(false), "cached: {cached}");
+
+        // The miner re-polls the same now-expired ID. It must park, not notify again or
+        // wake every second. Normal mempool refreshes remain enabled on the on-demand path.
+        let waiting = rpc.get_block_template(parameters());
+        tokio::pin!(waiting);
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "cached: {cached}"
+        );
+        let reads_before_wait = state_reads.load(Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "expired ID must wait"
+        );
+        assert_eq!(
+            state_reads.load(Ordering::SeqCst),
+            reads_before_wait,
+            "already-expired work must not recheck every second, cached: {cached}",
+        );
+        if cached {
+            cache.publish(template.clone());
+        } else {
+            tokio::time::advance(Duration::from_secs(
+                types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+            ))
+            .await;
+        }
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "unchanged refresh must wait"
+        );
+
+        // A new block changes the ID and releases the miner normally.
+        let mut replacement_info = chain_info;
+        replacement_info.tip_height = tip_height.next().unwrap();
+        replacement_info.tip_hash = Hash([2; 32]);
+        replacement_info.max_time = max_time.saturating_add(Duration32::from_seconds(30));
+        let replacement = make_template(&replacement_info);
+        mock_tip_sender.send_best_tip_height(replacement_info.tip_height);
+        mock_tip_sender.send_best_tip_hash(replacement_info.tip_hash);
+        chain_info_tx.send_replace(replacement_info);
+        if cached {
+            cache.publish(replacement.clone());
+        }
+        let response = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("changed work must end the long poll")
+            .expect("replacement template is valid")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(response.long_poll_id, replacement.long_poll_id);
+        assert_eq!(response.submit_old, Some(false));
+        queue.abort();
+    }
 }
 
 /// Checks that `getblocktemplate` doesn't serve a precomputed template for a block the state has
