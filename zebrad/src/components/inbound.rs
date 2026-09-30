@@ -612,7 +612,9 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
+            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+
+            zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }
     }
 }

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: 'Added `Request::PollPeerSet`, which the peer set sends itself from a new background task, so it routes queued block requests as soon as a busy peer becomes ready. Peers never send it, so services that handle inbound peer requests can treat it as unreachable.'
+time: 2026-09-24T16:53:43.826811414Z

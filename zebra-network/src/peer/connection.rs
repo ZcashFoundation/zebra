@@ -1163,6 +1163,8 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
+            // The peer set handles this request itself, so there is nothing to send to the peer.
+            (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
 
         // Update the connection state with a new handler, or fail with an error.

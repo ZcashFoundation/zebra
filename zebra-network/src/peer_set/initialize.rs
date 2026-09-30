@@ -271,7 +271,8 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
-    let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
+    // Also route queued peer set requests as soon as a peer that might serve them is ready.
+    let (peer_set, poll_peer_set_guard) = peer_set.into_buffer(constants::PEERSET_BUFFER_SIZE);
 
     // Connect peerset_tx to the 3 peer sources:
     //
@@ -354,6 +355,7 @@ where
             crawl_guard,
             address_book_updater_guard,
             peer_cache_updater_guard,
+            poll_peer_set_guard,
         ])
         .unwrap();
 
