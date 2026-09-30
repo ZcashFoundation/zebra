@@ -318,21 +318,34 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(
     height: Height,
     network: &N,
 ) -> HeightDiff {
-    let interval = network.funding_stream_address_change_interval();
-    let offset = network.post_blossom_halving_interval()
-        - HeightDiff::from(network.height_for_first_halving().0);
-    let height = HeightDiff::from(height.0);
-    if let Some(activation) = network.nu7_activation_height() {
-        let activation = HeightDiff::from(activation.0);
-        if height >= activation {
-            let ratio = HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
-            return (ratio * (activation + offset) + height - activation)
-                .div_euclid(ratio * interval);
-        }
+    if let Some(nu7) = network.nu7_activation_height().filter(|&nu7| height >= nu7) {
+        return nu7_funding_stream_address_period(height, nu7, network);
     }
 
-    // Signed periods preserve floor division for accelerated custom schedules.
-    (height + offset).div_euclid(interval)
+    let height_after_first_halving = height - network.height_for_first_halving();
+
+    (height_after_first_halving + network.post_blossom_halving_interval())
+        .div_euclid(network.funding_stream_address_change_interval())
+}
+
+/// Returns the funding address period from NU7 onward, as redefined by [ZIP 207].
+///
+/// Pre-NU7 progress is scaled into post-NU7 blocks, preserving the partial period at activation.
+/// Signed Euclidean division preserves floor rounding for accelerated custom schedules.
+///
+/// [ZIP 207]: https://zips.z.cash/zip-0207
+fn nu7_funding_stream_address_period<N: ParameterSubsidy>(
+    height: Height,
+    nu7: Height,
+    network: &N,
+) -> HeightDiff {
+    let ratio = HeightDiff::from(NU7_POW_TARGET_SPACING_RATIO);
+    let pre_nu7_blocks =
+        nu7 - network.height_for_first_halving() + network.post_blossom_halving_interval();
+    let post_nu7_blocks = height - nu7;
+
+    (ratio * pre_nu7_blocks + post_nu7_blocks)
+        .div_euclid(ratio * network.funding_stream_address_change_interval())
 }
 
 /// Extends a canonical revision-2 funding stream to the ZIP 218 third halving.
