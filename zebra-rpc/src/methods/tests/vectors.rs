@@ -3787,7 +3787,6 @@ async fn getblocktemplate_long_poll_expires_once() {
             min_time: now,
             max_time,
             chain_history_root: fake_history_tree(&net).hash(),
-            #[cfg(zcash_unstable = "zip234")]
             chain_value_pools: Default::default(),
         };
         let (chain_info_tx, chain_info_rx) = tokio::sync::watch::channel(chain_info.clone());
