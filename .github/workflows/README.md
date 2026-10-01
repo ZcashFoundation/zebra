@@ -169,6 +169,13 @@ Three rules keep the quota usable:
 3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
    crate-matrix generator in `test-crates.yml` set `cache: false`.
 
+`.github/actions/setup-zebra-build` also caches the `.deb`s it installs (about 40 MB), because
+the runners' Azure Ubuntu mirror regularly takes minutes to serve them. It follows rule 1, and a
+new entry is written only when the set of `.deb`s changes. `.github/scripts/apt-install.sh`
+checks every cached file against the SHA256 in the signed package index before apt sees it, since
+apt itself trusts any file of the right size in its archive directory; a stale or tampered entry
+costs a download, never a different install.
+
 To inspect the current state:
 
 ```bash
