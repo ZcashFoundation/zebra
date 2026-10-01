@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
 
+This release candidate supports the NU7 network upgrade on Testnet, which
+activates at height 4,465,026, expected around October 6th. Mainnet node
+operators are not required to upgrade. We encourage Testnet operators to run
+this release to test the network upgrade.
+
 ### Breaking Changes
 
 - `getblocktemplate` removes `transactions` and `prevblock` from its advertised `mutable` list in ordinary builds, retaining only `time`. Its required coinbase depends on the selected transactions and parent; miners must request a new template instead of changing those independently. ([#11496](https://github.com/ZcashFoundation/zebra/pull/11496), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))
