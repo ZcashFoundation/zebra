@@ -69,6 +69,8 @@ pub mod activation_heights {
         pub const NU6_2: Height = Height(4_052_000);
         /// The block height at which `NU6.3` activates on Testnet.
         pub const NU6_3: Height = Height(4_134_000);
+        /// The block height at which `NU7` activates on Testnet, as specified in ZIP 259.
+        pub const NU7: Height = Height(4_465_026);
     }
 
     /// Network upgrade activation heights for Mainnet.

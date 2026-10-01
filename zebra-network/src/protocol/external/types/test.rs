@@ -13,7 +13,7 @@ fn version_extremes_testnet() {
 }
 
 #[test]
-fn nu7_peer_versions_support_configured_activation() {
+fn nu7_peer_versions_support_public_and_configured_activation() {
     use zebra_chain::parameters::testnet::{ConfiguredActivationHeights, RegtestParameters};
 
     let activation_height = block::Height(10);
@@ -41,6 +41,21 @@ fn nu7_peer_versions_support_configured_activation() {
     assert!(
         Version::min_remote_for_height(&regtest, block::Height(activation_height.0 - 1))
             < Version(170_180)
+    );
+
+    let testnet = Network::new_default_testnet();
+    let activation = block::Height(4_465_026);
+    assert_eq!(
+        Version::min_remote_for_height(&testnet, activation.previous().unwrap()),
+        Version(170_160),
+    );
+    assert_eq!(
+        Version::min_remote_for_height(&testnet, activation),
+        Version(170_180),
+    );
+    assert_eq!(
+        Version::min_remote_for_height(&Mainnet, block::Height::MAX),
+        Version(170_160),
     );
 }
 

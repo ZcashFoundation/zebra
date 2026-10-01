@@ -79,6 +79,26 @@ pub enum ParametersBuilderError {
         provided: usize,
     },
 
+    /// Two nonempty funding stream height ranges overlap after applying inherited defaults.
+    #[error("funding stream height ranges {first:?} and {second:?} overlap")]
+    #[non_exhaustive]
+    OverlappingFundingStreamRanges {
+        /// The earlier configured range in the overlapping pair.
+        first: std::ops::Range<crate::block::Height>,
+        /// The later configured range in the overlapping pair.
+        second: std::ops::Range<crate::block::Height>,
+    },
+
+    /// A non-deferred funding stream recipient uses an address without a supported payment script.
+    #[error("funding stream recipient {receiver:?} uses unsupported address {address}; only P2SH and P2PKH addresses are supported")]
+    #[non_exhaustive]
+    UnsupportedFundingStreamAddress {
+        /// The receiver whose payment cannot be represented by a supported funding stream script.
+        receiver: super::subsidy::FundingStreamReceiver,
+        /// The unsupported address.
+        address: crate::transparent::Address,
+    },
+
     #[error("checkpoints file format must be valid")]
     #[non_exhaustive]
     InvalidCheckpointsFormat,

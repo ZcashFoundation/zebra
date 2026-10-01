@@ -1650,7 +1650,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         for tx in fee_template.transactions() {
             assert_eq!(u64::from(tx.fee()), 10_001);
         }
-        assert_eq!(i64::from(fee_template.coinbase_txn().fee()), -20_002);
+        assert_eq!(i64::from(fee_template.coinbase_txn().fee()), -8_001);
         let fee_block = proposal_block_from_template(&fee_template, None, &network)?;
         assert_eq!(
             coinbase_value(&fee_block)?,

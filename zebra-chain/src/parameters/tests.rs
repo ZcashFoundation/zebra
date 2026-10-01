@@ -197,9 +197,7 @@ fn nu7_branch_id_and_transaction_formats() {
         assert!(NetworkUpgrade::try_from(obsolete_id).is_err());
         assert!(BranchId::try_from(obsolete_id).is_err());
     }
-    for network in [Mainnet, Network::new_default_testnet()] {
-        assert_eq!(Nu7.activation_height(&network), None);
-    }
+    assert_eq!(Nu7.activation_height(&Mainnet), None);
 
     // Empty codec/digest fixtures from librustzcash PR 3047 at 517047de130e.
     // These are not spendable transactions. They pin the NU7 header and both
@@ -235,6 +233,99 @@ fn nu7_branch_id_and_transaction_formats() {
             Err(crate::Error::InvalidConsensusBranchId)
         ));
     }
+}
+
+/// Public Testnet changes consensus and SDK transaction signing together at ZIP 259's height.
+#[test]
+fn public_testnet_nu7_activation() -> Result<(), color_eyre::Report> {
+    use chrono::Duration;
+    use zcash_protocol::consensus::BranchId;
+
+    use crate::{
+        amount::Amount,
+        parameters::subsidy::{
+            additional_block_subsidy, block_subsidy, funding_stream_values, height_for_halving,
+            nsm_value_balance_change, scheduled_block_subsidy, FundingStreamReceiver, SubsidyError,
+        },
+        value_balance::ValueBalance,
+    };
+
+    let activation = block::Height(4_465_026);
+    let third_halving = block::Height(4_497_948);
+    let reissuance = block::Height(7_305_222);
+
+    // The default constructor and configured public-parameter path must derive the same rules.
+    for network in [
+        Network::new_default_testnet(),
+        testnet::Parameters::build().to_network()?,
+    ] {
+        for (height, upgrade, branch, spacing, window) in [
+            (activation.previous()?, Nu6_3, BranchId::Nu6_3, 75, 17),
+            (activation, Nu7, BranchId::Nu7, 25, 102),
+        ] {
+            assert_eq!(NetworkUpgrade::current(&network, height), upgrade);
+            assert_eq!(
+                NetworkUpgrade::target_spacing_for_height(&network, height),
+                Duration::seconds(spacing),
+            );
+            assert_eq!(
+                NetworkUpgrade::averaging_window_for_height(&network, height),
+                window,
+            );
+            assert_eq!(
+                BranchId::try_from(ConsensusBranchId::current(&network, height).unwrap())?,
+                branch,
+            );
+            // Use Zebra's Parameters adapter, not the SDK's independent activation table.
+            assert_eq!(BranchId::for_height(&network, height.0.into()), branch);
+            assert_eq!(
+                NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, height),
+                Some(Duration::seconds(450)),
+            );
+            assert_eq!(
+                nsm_value_balance_change(height, &network, ValueBalance::zero(), Amount::zero())?
+                    .zatoshis(),
+                if height == activation {
+                    55_768_414_957
+                } else {
+                    0
+                },
+            );
+        }
+
+        assert_eq!(height_for_halving(3, &network), Some(third_halving));
+        assert_eq!(network.nsm_reissuance_height(), Some(reissuance));
+        // The old funding cutoff no longer ends payments; the adjusted third halving does.
+        for height in [block::Height(4_476_000), third_halving.previous()?] {
+            let subsidy = scheduled_block_subsidy(height, &network)?;
+            assert_eq!(subsidy.zatoshis(), 52_083_333);
+            assert_eq!(
+                funding_stream_values(height, &network, subsidy)?
+                    [&FundingStreamReceiver::MajorGrants]
+                    .zatoshis(),
+                4_166_666,
+            );
+        }
+        let subsidy = scheduled_block_subsidy(third_halving, &network)?;
+        assert_eq!(subsidy.zatoshis(), 26_041_666);
+        assert!(funding_stream_values(third_halving, &network, subsidy)?.is_empty());
+
+        let reserve = network.initial_nsm_value_balance();
+        assert!(additional_block_subsidy(reissuance.previous()?, &network, reserve).is_zero());
+        assert!(!additional_block_subsidy(reissuance, &network, reserve).is_zero());
+        assert_eq!(
+            block_subsidy(reissuance.previous()?, &network)?,
+            scheduled_block_subsidy(reissuance.previous()?, &network)?,
+        );
+        assert!(matches!(
+            block_subsidy(reissuance, &network),
+            Err(SubsidyError::ParentChainValuePoolsRequired(height)) if height == reissuance
+        ));
+    }
+
+    assert_eq!(Nu7.activation_height(&Mainnet), None);
+    assert_eq!(Mainnet.nsm_reissuance_height(), None);
+    Ok(())
 }
 
 #[test]

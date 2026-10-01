@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Reject Testnet and Regtest funding-stream configurations whose nonempty height ranges overlap after NU7 defaults are applied. Use disjoint ranges; adjacent and empty ranges remain accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+time: 2026-10-01T14:29:23.961162947+02:00

@@ -596,7 +596,7 @@ fn invalid_generated_config() -> Result<()> {
     Ok(())
 }
 
-/// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+/// Check stored config syntax, including the semantic rejection of historical overlapping ranges.
 #[tracing::instrument]
 #[test]
 fn stored_configs_parsed_correctly() -> Result<()> {
@@ -632,15 +632,25 @@ fn stored_configs_parsed_correctly() -> Result<()> {
             "testing old config can be parsed by current zebrad"
         );
 
-        ZebradApp::default()
-            .load_config(&config_file_path)
-            .expect("config should parse");
+        if config_file_name == "v2.5.0-funding-streams.toml" {
+            let source = fs::read_to_string(&config_file_path)?;
+            // The original TOML remains valid syntax, but its inherited and explicit streams overlap.
+            toml::from_str::<toml::Value>(&source)?;
+            let error = toml::from_str::<ZebradConfig>(&source)
+                .expect_err("overlapping historical funding ranges must be rejected");
+            // Serde flattens ParametersBuilderError into a message, so check the error category.
+            assert!(error.message().contains("overlap"), "{error}");
+        } else {
+            ZebradApp::default()
+                .load_config(&config_file_path)
+                .expect("config should parse");
+        }
     }
 
     Ok(())
 }
 
-/// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+/// Test stored configurations start successfully or reject known invalid consensus parameters.
 #[tracing::instrument]
 fn stored_configs_work() -> Result<()> {
     let old_configs_dir = configs_dir();
@@ -679,6 +689,12 @@ fn stored_configs_work() -> Result<()> {
         // run zebra with stored config
         let mut child =
             run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
+
+        if config_file_name == "v2.5.0-funding-streams.toml" {
+            let output = child.wait_with_output()?.assert_failure()?;
+            output.stderr_contains("overlap")?;
+            continue;
+        }
 
         let success_regexes = [
             // When logs are sent to the terminal, we see the config loading message and path.

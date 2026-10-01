@@ -207,10 +207,10 @@ impl FundingStreamRecipient {
     ///
     /// # Panics
     ///
-    /// If there are no recipient addresses.
+    /// If a nonzero target requires extending an empty address list.
     pub fn extend_addresses(&mut self, target_len: usize) {
         assert!(
-            !self.addresses.is_empty(),
+            target_len == 0 || !self.addresses.is_empty(),
             "cannot extend addresses for empty recipient"
         );
 

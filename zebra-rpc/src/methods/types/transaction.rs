@@ -71,8 +71,8 @@ where
     /// The fee for this transaction.
     ///
     /// Non-coinbase transactions must be `NonNegative`.
-    /// The Coinbase transaction `fee` is the negative sum of the fees of the transactions in
-    /// the block, so their fee must be `NegativeOrZero`.
+    /// The coinbase transaction `fee` is the negative total collected miner fees, excluding
+    /// the NSM contribution, so its fee must be `NegativeOrZero`.
     #[getter(copy)]
     pub(crate) fee: Amount<FeeConstraint>,
 
@@ -126,8 +126,8 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 impl TransactionTemplate<NegativeOrZero> {
     /// Constructs a transaction template for a coinbase without parent-dependent reissuance.
     ///
-    /// `txs_fee` is the gross transaction fee total. The payout claims only the miner's share,
-    /// while the template's negative `fee` reports the full total required by getblocktemplate.
+    /// `txs_fee` is the gross transaction fee total. The payout and the template's negative
+    /// `fee` include only the miner's share after the NSM contribution.
     pub fn new_coinbase(
         net: &Network,
         height: Height,
@@ -142,7 +142,7 @@ impl TransactionTemplate<NegativeOrZero> {
     ///
     /// The parent's NSM value balance is required from the NSM reissuance height, because it
     /// determines the block subsidy.
-    /// The payout includes only net miner fees, but `fee` reports the negative gross `txs_fee`.
+    /// The payout and negative `fee` include only net miner fees after the NSM contribution.
     pub fn new_coinbase_with_parent_pools(
         net: &Network,
         height: Height,
@@ -290,7 +290,7 @@ impl TransactionTemplate<NegativeOrZero> {
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),
-            fee: (-txs_fee).constrain()?,
+            fee: (-miner_fees).constrain()?,
             sigops: tx.sigops()?,
             required: true,
         })

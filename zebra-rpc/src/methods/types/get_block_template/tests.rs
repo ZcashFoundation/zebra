@@ -228,7 +228,7 @@ fn coinbase() -> anyhow::Result<()> {
         })?
         .with_funding_streams(vec![
             ConfiguredFundingStreams {
-                height_range: Some(Height(1)..Height(100)),
+                height_range: Some(Height(1)..Height(7)),
                 recipients: Some(vec![
                     ConfiguredFundingStreamRecipient::new_for(Ecc),
                     ConfiguredFundingStreamRecipient::new_for(ZcashFoundation),
@@ -236,7 +236,8 @@ fn coinbase() -> anyhow::Result<()> {
                 ]),
             },
             ConfiguredFundingStreams {
-                height_range: Some(Height(1)..Height(100)),
+                // NU6 replaces ECC and ZF payments with the deferred stream.
+                height_range: Some(Height(7)..Height(100)),
                 recipients: Some(vec![
                     ConfiguredFundingStreamRecipient::new_for(MajorGrants),
                     ConfiguredFundingStreamRecipient {
@@ -636,6 +637,47 @@ fn coinbase_at_nu6_3_routes_shielded_output_to_ironwood() {
         .expect("Ironwood coinbase output is recoverable with the zero outgoing viewing key");
 }
 
+/// Coinbase fee metadata reports the value collected, with ZIP 235 rounded once per block.
+#[test]
+fn coinbase_fee_metadata_matches_collected_fees() {
+    use zcash_transparent::address::TransparentAddress;
+    use zebra_chain::parameters::{subsidy::scheduled_block_subsidy, testnet::RegtestParameters};
+
+    let _init_guard = zebra_test::init();
+    let net = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu6_3: Some(1),
+            nu7: Some(10),
+            ..Default::default()
+        },
+        nsm_reissuance_height: Some(Height(12)),
+        ..Default::default()
+    });
+    let miner = MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
+    for height in [Height(9), Height(10)] {
+        let subsidy = scheduled_block_subsidy(height, &net).unwrap().zatoshis();
+        // 20,002 can be two 10,001-zatoshi fees: per-transaction rounding would yield 8,002.
+        for (gross, after_nu7) in [(0, 0), (1, 1), (2, 1), (10_000, 4_000), (20_002, 8_001)] {
+            let collected = if height == Height(9) {
+                gross
+            } else {
+                after_nu7
+            };
+            let template =
+                TransactionTemplate::new_coinbase(&net, height, &miner, gross.try_into().unwrap())
+                    .unwrap();
+            let coinbase: Transaction = template.data.as_ref().zcash_deserialize_into().unwrap();
+            let paid = coinbase
+                .outputs()
+                .iter()
+                .map(|output| output.value.zatoshis())
+                .sum::<i64>();
+            assert_eq!(paid - subsidy, collected);
+            assert_eq!(template.fee.zatoshis(), -collected);
+        }
+    }
+}
+
 /// From the NSM reissuance height, the coinbase pays the block subsidy computed
 /// from the parent block's chain value pools, and can't be built without them.
 #[test]
@@ -712,22 +754,6 @@ fn coinbase_pays_nsm_subsidy() {
     assert_eq!(
         miner_output(height, Some(nsm_value_balance)),
         (subsidy + miner_fees).unwrap()
-    );
-
-    // The template reports negative gross fees, not just the portion paid to the miner.
-    let template = TransactionTemplate::new_coinbase_with_parent_pools(
-        &net,
-        height,
-        &miner_params,
-        fee,
-        Some(nsm_value_balance),
-    )
-    .expect("valid coinbase tx");
-    assert_eq!(
-        template.fee,
-        (-fee)
-            .constrain::<zebra_chain::amount::NegativeOrZero>()
-            .unwrap()
     );
 
     assert!(matches!(
