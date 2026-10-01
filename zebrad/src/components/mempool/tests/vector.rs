@@ -80,6 +80,27 @@ fn early_branch_id_before_nu6_3_has_no_mempool_score() {
     );
 }
 
+/// An NU7 branch ID keeps its peer score on Mainnet while NU7 has no activation height.
+#[test]
+fn nu7_branch_id_keeps_mempool_score_without_mainnet_activation() {
+    let network = Network::Mainnet;
+    let height = (NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height")
+        + 1_000)
+        .expect("NU6.3 activates far below Height::MAX");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu7),
+            height,
+            &network,
+        ),
+        100,
+    );
+}
+
 /// A stale NU6.2 branch ID at a maximum-height NU6.3 activation does not panic.
 #[test]
 fn stale_branch_id_at_max_nu6_3_height_has_no_mempool_score() {
