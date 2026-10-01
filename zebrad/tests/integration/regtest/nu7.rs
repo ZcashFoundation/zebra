@@ -1545,3 +1545,231 @@ async fn nu7_funding_streams_at_boundary_activation() -> Result<()> {
     })
     .await?
 }
+
+/// A second node downloads and fully verifies a chain crossing NU7 from a peer, then follows
+/// new blocks by gossip, ending with the same tip, pools and subsidies as the mining node.
+#[tokio::test(flavor = "multi_thread")]
+async fn nu7_sync_from_peer_across_activation() -> Result<()> {
+    use zebra_chain::parameters::testnet::{ConfiguredFundingStreams, RegtestParameters};
+    use zebra_test::net::random_known_port;
+
+    const NU7: u32 = 105;
+
+    async fn json(
+        client: &RpcRequestClient,
+        method: &str,
+        params: String,
+    ) -> Result<serde_json::Value> {
+        client
+            .json_result_from_call(method, params)
+            .await
+            .map_err(|err| eyre!(err))
+    }
+
+    /// Waits until the node's best chain reaches `height`.
+    async fn synced_to(client: &RpcRequestClient, height: u32) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                if let Ok(info) = chain_info(client).await {
+                    if info["blocks"].as_u64() >= Some(u64::from(height)) {
+                        return Ok(());
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        })
+        .await
+        .map_err(|_| eyre!("the node did not sync to height {height}"))?
+    }
+
+    /// Asserts both nodes return the same result for an RPC, and returns it.
+    async fn same_on_both(
+        a: &RpcRequestClient,
+        b: &RpcRequestClient,
+        method: &str,
+        params: String,
+    ) -> Result<serde_json::Value> {
+        let (on_a, on_b) = (
+            json(a, method, params.clone()).await?,
+            json(b, method, params).await?,
+        );
+        assert_eq!(on_a, on_b, "{method}");
+        Ok(on_a)
+    }
+
+    /// Mines the next template once it includes `tx`, which must already be in the mempool.
+    async fn mine_with(
+        client: &RpcRequestClient,
+        network: &Network,
+        tx: &Transaction,
+    ) -> Result<Block> {
+        let block = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let (block, _) = client.block_from_template(network).await?;
+                if block
+                    .transactions
+                    .iter()
+                    .any(|candidate| candidate.hash() == tx.hash())
+                {
+                    return Ok::<_, color_eyre::Report>(block);
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await??;
+        client.submit_block(block.clone()).await?;
+        mempool(client, &[]).await?;
+        Ok(block)
+    }
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let p2sh = |byte: u8| {
+            transparent::Address::from_script_hash(NetworkKind::Testnet, [byte; 20]).to_string()
+        };
+        let network = Network::new_regtest(RegtestParameters {
+            activation_heights: ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(4),
+                nu6_1: Some(5),
+                nu6_2: Some(6),
+                nu6_3: Some(7),
+                nu7: Some(NU7),
+                ..Default::default()
+            },
+            funding_streams: Some(vec![ConfiguredFundingStreams {
+                height_range: Some(Height(4)..Height(200)),
+                recipients: Some(vec![
+                    stream_recipient(FundingStreamReceiver::Deferred, 12, None),
+                    stream_recipient(
+                        FundingStreamReceiver::MajorGrants,
+                        8,
+                        Some(vec![p2sh(1), p2sh(2)]),
+                    ),
+                ]),
+            }]),
+            extend_funding_stream_addresses_as_required: Some(true),
+            should_allow_unshielded_coinbase_spends: Some(true),
+            ..Default::default()
+        });
+        // The spends below need the P2SH OP_TRUE miner address used by `spend()`.
+        let miner = transparent::Address::from_script_hash(
+            NetworkKind::Testnet,
+            hex_literal::hex!("da1745e9b549bd0bfa1a569971c77eba30cd5a4b"),
+        );
+
+        // Node A mines; its P2P port is chosen up front so node B can be configured with it.
+        let p2p_addr = format!("127.0.0.1:{}", random_known_port());
+        let mut config_a = os_assigned_rpc_port_config(false, &network)?;
+        config_a.network.listen_addr = p2p_addr.parse()?;
+        config_a.network.initial_testnet_peers = [].into();
+        config_a.mempool.debug_enable_at_height = Some(0);
+        config_a.mining.miner_address = Some(miner.to_string().parse()?);
+        let mut node_a = testdir()?
+            .with_config(&mut config_a)?
+            .spawn_child(args!["start"])?;
+        let rpc_a = read_listen_addr_from_logs(&mut node_a, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let a = RpcRequestClient::new(rpc_a);
+
+        let mut coinbases = Vec::new();
+        for height in 1..NU7 - 1 {
+            let (block, _, _) = mine_checked(&a, &network, &miner, height).await?;
+            if height <= 2 {
+                coinbases.push(block.transactions[0].clone());
+            }
+        }
+        // One transparent spend on each side of activation: V4 before, V5 after.
+        let v4 = spend(&coinbases[0], false, 10_001)?;
+        send(&a, &v4).await?;
+        mempool(&a, &[v4.hash()]).await?;
+        assert_eq!(
+            mine_with(&a, &network, &v4).await?.coinbase_height(),
+            Some(Height(NU7 - 1))
+        );
+        mine_checked(&a, &network, &miner, NU7).await?;
+        let v5 = spend_expiring(&coinbases[1], true, 10_001, Height(0))?;
+        send(&a, &v5).await?;
+        mempool(&a, &[v5.hash()]).await?;
+        assert_eq!(
+            mine_with(&a, &network, &v5).await?.coinbase_height(),
+            Some(Height(NU7 + 1))
+        );
+        let mut tip = NU7 + 1;
+
+        // Node B connects only to node A, after A's chain exists, and syncs it from genesis.
+        let mut config_b = os_assigned_rpc_port_config(false, &network)?;
+        config_b.network.initial_testnet_peers = [p2p_addr].into();
+        config_b.network.peerset_initial_target_size = 1;
+        let mut node_b = testdir()?
+            .with_config(&mut config_b)?
+            .spawn_child(args!["start"])?;
+        let rpc_b = read_listen_addr_from_logs(&mut node_b, OPENED_RPC_ENDPOINT_MSG)?;
+        let b = RpcRequestClient::new(rpc_b);
+        tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                if let Ok(peers) = json(&b, "getpeerinfo", "[]".into()).await {
+                    if peers.as_array().is_some_and(|peers| !peers.is_empty()) {
+                        return Ok::<_, color_eyre::Report>(());
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        })
+        .await??;
+        synced_to(&b, tip).await?;
+
+        // The expected lockbox pool is the sum of the lockbox stream over the mined heights.
+        let expected_lockbox: u64 = (1..=tip)
+            .map(|height| -> Result<u64> {
+                let subsidy = scheduled_block_subsidy(Height(height), &network)?;
+                let values = funding_stream_values(Height(height), &network, subsidy)?;
+                Ok(values
+                    .get(&FundingStreamReceiver::Deferred)
+                    .map_or(0, |v| u64::from(*v)))
+            })
+            .sum::<Result<u64>>()?;
+        same_on_both(&a, &b, "getbestblockhash", "[]".into()).await?;
+        for height in [NU7 - 1, NU7, tip] {
+            same_on_both(&a, &b, "getblock", format!(r#"["{height}", 0]"#)).await?;
+        }
+        same_on_both(&a, &b, "getblocksubsidy", format!("[{NU7}]")).await?;
+        let nu7_branch =
+            hex::encode(u32::from(NetworkUpgrade::Nu7.branch_id().expect("set")).to_be_bytes());
+        let info_b = chain_info(&b).await?;
+        assert_eq!(info_b["upgrades"][&nu7_branch]["status"], "active");
+        assert_eq!(info_b["consensus"]["chaintip"], nu7_branch);
+        assert_eq!(lockbox_pool(&b).await?, expected_lockbox);
+        assert_eq!(lockbox_pool(&a).await?, expected_lockbox);
+
+        // Blocks mined after B synced reach it by gossip rather than by the initial sync.
+        for _ in 0..3 {
+            tip += 1;
+            mine_checked(&a, &network, &miner, tip).await?;
+        }
+        synced_to(&b, tip).await?;
+        let best = same_on_both(&a, &b, "getbestblockhash", "[]".into()).await?;
+
+        // A rejects an overpaying post-NU7 block and never relays it, so B is unaffected.
+        let (block, height) = a.block_from_template(&network).await?;
+        assert_eq!(height, Height(tip + 1));
+        let mut outputs = block.transactions[0].outputs();
+        outputs[0].value = (outputs[0].value + Amount::try_from(1)?)?;
+        let overpaid = with_coinbase_outputs(&block, outputs);
+        assert!(!rejected(&a, &overpaid).await?.is_empty());
+        assert!(a.submit_block(overpaid).await.is_err());
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert_eq!(chain_info(&b).await?["blocks"], tip);
+        assert_eq!(json(&b, "getbestblockhash", "[]".into()).await?, best);
+
+        for mut node in [node_a, node_b] {
+            node.kill(false)?;
+            let output = node.wait_with_output()?;
+            output.assert_was_killed()?;
+            output.assert_failure()?;
+        }
+        Ok(())
+    })
+    .await?
+}
