@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-10-01
+## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
 
 ### Breaking Changes
 
@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Custom Testnets isolate state, non-finalized backups, and peer caches by network name and wire magic. Existing unsuffixed custom-network caches are not reused: resynchronize after upgrading. Reserved names are case-insensitive; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
 - Public and custom Testnet mining now requires synchronization. Unlike Mainnet, a synchronized Testnet can resume mining from a tip older than 125 minutes. Networks with Proof-of-Work disabled bypass synchronization and freshness checks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
 - Custom networks with nonzero genesis transparent outputs exclude those unspendable outputs from issued supply. Rebuild any existing state created with the old accounting, including experimental v29 state; public-network genesis balances are unchanged ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
-- Activate NU7 on public Testnet at height 4,465,026. The adjusted third halving is at 4,497,948, and NSM reissuance begins at 7,305,222. Explicit public-Testnet activation schedules without NU7 and the old funding-stream end height 4,476,000 are rejected; remove those consensus overrides from `[network.testnet_parameters]` to inherit the updated public defaults. Custom networks must use distinct `network_magic` and non-public peers. Mainnet NU7 activation remains unassigned ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- Activate NU7 on public Testnet at height 4,465,026. The adjusted third halving is at 4,497,948, and NSM reissuance begins at 7,305,222. Explicit public-Testnet activation schedules without NU7 and the old funding-stream end height 4,476,000 are rejected; remove those consensus overrides from `[network.testnet_parameters]` to inherit the updated public defaults. Custom networks must use distinct `network_magic` and non-public peers. No Mainnet activation height is set yet ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
 - Reject Testnet and Regtest funding-stream configurations whose nonempty height ranges overlap after NU7 defaults are applied. Use disjoint ranges; adjacent and empty ranges remain accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
 - Reject TEX funding-stream recipients on Testnet and Regtest before startup rather than failing when mining a coinbase. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
 
