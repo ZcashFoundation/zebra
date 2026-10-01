@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: "`client::Input::NonCoinbase` gains a `prevout` field and `client::TransactionObject::new` takes it as an additional parameter, for `getblock` verbosity 3. Code constructing these types literally must add it. ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472))"
+time: 2026-10-01T11:47:46.000000000Z
