@@ -650,9 +650,11 @@ jobs:
 
           LINES=$(wc -l < "${OUT}")
           echo "Retrieved ${LINES} checkpoint lines into ${OUT}"
+          # An empty file is expected when the test skips because the chain tip is still too
+          # close to the last compiled-in checkpoint. We still upload it, so checkpoint-update.yml
+          # always finds both artifacts; it appends nothing and opens no PR.
           if [ "$LINES" -eq 0 ]; then
-            echo "ERROR: checkpoint file empty on instance"
-            exit 1
+            echo "::notice::No new checkpoints were generated for ${TEST_ID}"
           fi
 
       - name: Upload checkpoint artifact

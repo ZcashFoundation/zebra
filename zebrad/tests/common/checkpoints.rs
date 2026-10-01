@@ -47,6 +47,18 @@ use super::{
 /// We use a constant so the compiler detects typos.
 pub const LOG_ZEBRAD_CHECKPOINTS: &str = "LOG_ZEBRAD_CHECKPOINTS";
 
+/// The gap that `zebra-checkpoints` leaves between the network chain tip and the last checkpoint
+/// it generates.
+///
+/// `zebra-checkpoints` ignores the blocks in Zebra's rollback window (`MAX_BLOCK_REORG_HEIGHT`),
+/// then needs a full `MAX_CHECKPOINT_HEIGHT_GAP` of settled blocks before it prints a checkpoint.
+/// So it only generates a checkpoint if the tip is more than this many blocks above the last
+/// compiled-in checkpoint.
+fn min_checkpoint_generation_gap() -> HeightDiff {
+    HeightDiff::from(MAX_BLOCK_REORG_HEIGHT)
+        + HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff")
+}
+
 /// The test entry point.
 #[allow(clippy::print_stdout)]
 pub async fn run(network: Network) -> Result<()> {
@@ -146,6 +158,35 @@ pub async fn run(network: Network) -> Result<()> {
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
     let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
+
+    // Skip the test if the chain tip is too close to the last compiled-in checkpoint.
+    //
+    // `zebra-checkpoints` only considers blocks below `tip - MAX_BLOCK_REORG_HEIGHT`, and the
+    // highest block it can turn into a checkpoint is one below that limit. So it exits without
+    // printing anything, which is correct, but leaves this test with no output to check.
+    //
+    // This happens for about a day after each checkpoint list update, until the network produces
+    // enough new blocks.
+    let last_checkpoint_height = last_checkpoint
+        .try_into_height()
+        .expect("zebrad logs its last checkpoint as a height");
+    let new_blocks = zebra_tip_height - last_checkpoint_height;
+    let min_new_blocks = min_checkpoint_generation_gap();
+
+    if new_blocks <= min_new_blocks {
+        tracing::info!(
+            ?network,
+            ?zebra_tip_height,
+            ?last_checkpoint_height,
+            ?new_blocks,
+            ?min_new_blocks,
+            "skipping zebra_checkpoints test: there are not enough new blocks for \
+             zebra-checkpoints to generate a checkpoint yet",
+        );
+
+        return Ok(());
+    }
+
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -399,8 +440,7 @@ pub fn wait_for_zebra_checkpoints_generation<
     test_type: TestType,
     show_zebrad_logs: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let last_checkpoint_gap = HeightDiff::from(MAX_BLOCK_REORG_HEIGHT)
-        + HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
+    let last_checkpoint_gap = min_checkpoint_generation_gap();
     let expected_final_checkpoint_height =
         (zebra_tip_height - last_checkpoint_gap).expect("network tip is high enough");
 
