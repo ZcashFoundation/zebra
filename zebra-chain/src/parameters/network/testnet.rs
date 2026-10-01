@@ -372,6 +372,8 @@ fn check_funding_streams(funding_streams: &[FundingStreams]) -> Result<(), Param
     for (index, streams) in funding_streams.iter().enumerate() {
         let range = streams.height_range();
         if !range.is_empty() {
+            // Pairwise checks avoid allocating for these small startup-only schedules;
+            // sort ranges if configurations grow to contain many funding stream groups.
             if let Some(previous) = funding_streams[..index].iter().find(|previous| {
                 let previous = previous.height_range();
                 !previous.is_empty() && previous.start < range.end && range.start < previous.end
