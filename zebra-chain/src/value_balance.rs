@@ -20,14 +20,8 @@ use ValueBalanceError::*;
 
 /// The number of bytes in a serialized [`ValueBalance`]: eight bytes per chain value pool.
 ///
-/// The `nsm` pool adds eight bytes with `zcash_unstable = "zip234"`. Records written without it
-/// stay parsable, see [`ValueBalance::from_bytes`].
-#[cfg(zcash_unstable = "zip234")]
+/// Legacy records without trailing pools stay parsable, see [`ValueBalance::from_bytes`].
 pub const SERIALIZED_SIZE: usize = 56;
-
-/// The number of bytes in a serialized [`ValueBalance`]: eight bytes per chain value pool.
-#[cfg(not(zcash_unstable = "zip234"))]
-pub const SERIALIZED_SIZE: usize = 48;
 
 /// A balance in each chain value pool or transaction value pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -41,9 +35,7 @@ pub struct ValueBalance<C> {
     /// The NSM value balance, `NSMValueBalance`: value removed from circulation and not yet
     /// reissued through block subsidies.
     ///
-    /// It is tracked alongside the chain value pools, but it is not one of them: it holds value
-    /// that is not in circulation, so it is not part of the issued supply (see [`Self::total`]).
-    #[cfg(zcash_unstable = "zip234")]
+    /// It is not in circulation and is excluded from the issued supply (see [`Self::total`]).
     nsm: Amount<C>,
 }
 
@@ -166,13 +158,11 @@ where
     }
 
     /// Returns the Network Sustainability Mechanism amount, `NSMValueBalance`.
-    #[cfg(zcash_unstable = "zip234")]
     pub fn nsm_amount(&self) -> Amount<C> {
         self.nsm
     }
 
     /// Sets the Network Sustainability Mechanism amount without affecting other amounts.
-    #[cfg(zcash_unstable = "zip234")]
     pub fn set_nsm_amount(&mut self, nsm_amount: Amount<C>) -> &Self {
         self.nsm = nsm_amount;
         self
@@ -188,7 +178,6 @@ where
             orchard: zero,
             deferred: zero,
             ironwood: zero,
-            #[cfg(zcash_unstable = "zip234")]
             nsm: zero,
         }
     }
@@ -226,7 +215,6 @@ where
             orchard: self.orchard.constrain().map_err(Orchard)?,
             deferred: self.deferred.constrain().map_err(Deferred)?,
             ironwood: self.ironwood.constrain().map_err(Ironwood)?,
-            #[cfg(zcash_unstable = "zip234")]
             nsm: self.nsm.constrain().map_err(Nsm)?,
         })
     }
@@ -382,7 +370,7 @@ impl ValueBalance<NonNegative> {
         // > as a result of accepting a block at height, then all nodes MUST reject the block as
         // > invalid.
         //
-        // https://github.com/zcash/zips/pull/1354
+        // https://zips.z.cash/zip-0237
         //
         // The `nsm` balance is constrained non-negative here with the pools. The additional block
         // subsidy is at most the balance it is calculated from, so this cannot fail by construction.
@@ -425,37 +413,31 @@ impl ValueBalance<NonNegative> {
         fake_value_pool
     }
 
-    /// To byte array
+    /// To byte array.
     ///
-    /// Each new pool is appended after the previous ones, so that records written by earlier Zebra
+    /// Each new pool is appended after the previous ones, so records written by earlier Zebra
     /// versions (32 bytes without `deferred`, 40 bytes with it, or 48 bytes with `ironwood`)
     /// remain parsable by [`Self::from_bytes`].
     pub fn to_bytes(self) -> [u8; SERIALIZED_SIZE] {
-        match [
-            self.transparent.to_bytes(),
-            self.sprout.to_bytes(),
-            self.sapling.to_bytes(),
-            self.orchard.to_bytes(),
-            self.deferred.to_bytes(),
-            self.ironwood.to_bytes(),
-            #[cfg(zcash_unstable = "zip234")]
-            self.nsm.to_bytes(),
-        ]
-        .concat()
-        .try_into()
-        {
-            Ok(bytes) => bytes,
-            _ => unreachable!(
-                "each pool's [u8; 8] should always concat into a single [u8; SERIALIZED_SIZE]"
-            ),
+        let mut bytes = [0; SERIALIZED_SIZE];
+        for (destination, amount) in bytes.chunks_exact_mut(8).zip([
+            self.transparent,
+            self.sprout,
+            self.sapling,
+            self.orchard,
+            self.deferred,
+            self.ironwood,
+            self.nsm,
+        ]) {
+            destination.copy_from_slice(&amount.to_bytes());
         }
+        bytes
     }
 
-    /// From byte array
+    /// From byte array.
     ///
-    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), and 48-byte records, and
-    /// 56-byte (with `nsm`) records with `zcash_unstable = "zip234"`; missing trailing pools
-    /// default to zero.
+    /// Accepts 32-byte (pre-`deferred`), 40-byte (pre-`ironwood`), 48-byte (pre-`nsm`),
+    /// and 56-byte records; missing trailing pools default to zero.
     #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let bytes_length = bytes.len();
@@ -514,7 +496,6 @@ impl ValueBalance<NonNegative> {
             .map_err(Ironwood)?,
         };
 
-        #[cfg(zcash_unstable = "zip234")]
         let nsm = match bytes_length {
             56 => Amount::from_bytes(
                 bytes[48..56]
@@ -532,7 +513,6 @@ impl ValueBalance<NonNegative> {
             orchard,
             deferred,
             ironwood,
-            #[cfg(zcash_unstable = "zip234")]
             nsm,
         })
     }
@@ -560,7 +540,6 @@ pub enum ValueBalanceError {
     Ironwood(amount::Error),
 
     /// NSM amount error {0}
-    #[cfg(zcash_unstable = "zip234")]
     Nsm(amount::Error),
 
     /// total amount error {0}
@@ -579,7 +558,6 @@ impl fmt::Display for ValueBalanceError {
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
             Ironwood(e) => format!("ironwood amount err: {e}"),
-            #[cfg(zcash_unstable = "zip234")]
             Nsm(e) => format!("NSM amount err: {e}"),
             Total(e) => format!("total amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
@@ -600,7 +578,6 @@ where
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
             ironwood: (self.ironwood + rhs.ironwood).map_err(Ironwood)?,
-            #[cfg(zcash_unstable = "zip234")]
             nsm: (self.nsm + rhs.nsm).map_err(Nsm)?,
         })
     }
@@ -652,7 +629,6 @@ where
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
             deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
             ironwood: (self.ironwood - rhs.ironwood).map_err(Ironwood)?,
-            #[cfg(zcash_unstable = "zip234")]
             nsm: (self.nsm - rhs.nsm).map_err(Nsm)?,
         })
     }
@@ -724,7 +700,6 @@ where
             orchard: self.orchard.neg(),
             deferred: self.deferred.neg(),
             ironwood: self.ironwood.neg(),
-            #[cfg(zcash_unstable = "zip234")]
             nsm: self.nsm.neg(),
         }
     }

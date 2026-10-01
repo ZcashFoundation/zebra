@@ -115,9 +115,8 @@ fn contextual_header_ancestry_preserves_parent_height_and_error_order() {
 /// Tests for the contextual block subsidy checks once the [halving-preserving issuance ZIP][zip] is
 /// active.
 ///
-/// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
-mod zip234 {
+/// [zip]: https://zips.z.cash/zip-0237
+mod nsm {
     use std::collections::HashMap;
 
     use zebra_chain::{
@@ -125,8 +124,8 @@ mod zip234 {
         block::Height,
         parameters::{
             subsidy::{
-                additional_block_subsidy, nsm_fee_contribution, nsm_value_balance_change,
-                scheduled_block_subsidy, CoinbaseTransactionError, SubsidyError,
+                additional_block_subsidy, nsm_fee_contribution, scheduled_block_subsidy,
+                CoinbaseTransactionError, SubsidyError,
             },
             testnet::{ConfiguredActivationHeights, RegtestParameters},
         },
@@ -149,8 +148,7 @@ mod zip234 {
         zatoshis.try_into().expect("valid amount")
     }
 
-    /// Returns the part of `FEE` the coinbase transaction at `height` can claim: all of it, or what
-    /// ZIP 235 leaves in builds with the `zip235` cfg.
+    /// Returns all of `FEE` before NU7, or the miner's share after fee contributions activate.
     fn miner_fees(height: Height, network: &Network) -> Amount<NonNegative> {
         (amount(FEE) - nsm_fee_contribution(height, network, amount(FEE))).unwrap()
     }
@@ -165,6 +163,7 @@ mod zip234 {
                 ..Default::default()
             },
             initial_nsm_value_balance: Some(amount(INITIAL_NSM_VALUE_BALANCE)),
+            nsm_reissuance_height: Some(Height(NU7_HEIGHT)),
             ..Default::default()
         })
     }
@@ -231,18 +230,14 @@ mod zip234 {
             transparent::OrderedUtxo::new(spent_output, Height(1), 1),
         )]);
 
-        let mut contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             Arc::new(block).prepare(),
             spent_outputs,
             DeferredPoolBalanceChange::zero(),
+            network,
+            parent_pools,
         )
-        .expect("valid value balances");
-        contextual.chain_value_pool_change.set_nsm_amount(
-            nsm_value_balance_change(height, network, parent_pools, amount(FEE))
-                .expect("valid NSM value balance change"),
-        );
-
-        contextual
+        .expect("valid value balances")
     }
 
     fn subsidy_error(result: Result<(), ValidateContextError>) -> SubsidyError {
@@ -279,12 +274,12 @@ mod zip234 {
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+        check::nsm_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the coinbase pays the subsidy and the fees");
 
         // The same block is invalid after a parent with an empty NSM value balance.
         assert_eq!(
-            subsidy_error(check::zip234_subsidy_is_valid(
+            subsidy_error(check::nsm_subsidy_is_valid(
                 &valid,
                 &network,
                 ValueBalance::zero(),
@@ -301,7 +296,7 @@ mod zip234 {
             &network,
         );
         assert_eq!(
-            subsidy_error(check::zip234_subsidy_is_valid(
+            subsidy_error(check::nsm_subsidy_is_valid(
                 &invalid,
                 &network,
                 parent_pools,
@@ -313,7 +308,7 @@ mod zip234 {
         // A coinbase that doesn't claim the fees is invalid from NU6 onward.
         let invalid = block(height, subsidy, parent_pools, &network);
         assert_eq!(
-            subsidy_error(check::zip234_subsidy_is_valid(
+            subsidy_error(check::nsm_subsidy_is_valid(
                 &invalid,
                 &network,
                 parent_pools,
@@ -345,7 +340,7 @@ mod zip234 {
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+        check::nsm_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the activation block reissues from INITIAL_NSM_VALUE_BALANCE");
 
         // The block credits the balance with the seed and the fees removed from circulation, and
@@ -363,7 +358,6 @@ mod zip234 {
 
     /// From NU7 activation the coinbase can only claim the fees ZIP 235 leaves to the miner, and the
     /// rest is credited to the NSM value balance.
-    #[cfg(zcash_unstable = "zip235")]
     #[test]
     fn fee_contribution_is_removed_from_the_coinbase() {
         let _init_guard = zebra_test::init();
@@ -387,7 +381,7 @@ mod zip234 {
                 &network,
             );
             assert_eq!(
-                subsidy_error(check::zip234_subsidy_is_valid(
+                subsidy_error(check::nsm_subsidy_is_valid(
                     &invalid,
                     &network,
                     parent_pools,
@@ -403,7 +397,7 @@ mod zip234 {
             parent_pools,
             &network,
         );
-        check::zip234_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
+        check::nsm_subsidy_is_valid(&valid, &network, parent_pools, amount(FEE))
             .expect("the coinbase claims the miner's share of the fees");
 
         // The issued supply and the NSM value balance together grow by the scheduled subsidy.
@@ -543,4 +537,201 @@ fn ironwood_block_auth_commitment_accepts_honest_body_and_detects_a_forgery() {
         100,
         "a forged Ironwood body must score the serving peer at the ban threshold"
     );
+}
+
+/// Reserve-funded payout checks start at reissuance, not at NU7, and use the exact parent.
+#[test]
+fn reserve_funded_payouts_follow_reissuance_and_parent() -> Result<(), BoxError> {
+    use std::collections::HashMap;
+
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::{
+            subsidy::FundingStreamReceiver,
+            testnet::{
+                ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams, Parameters,
+            },
+        },
+        transaction::{Hash as TransactionHash, LockTime, Transaction},
+        transparent,
+        value_balance::ValueBalance,
+    };
+
+    use crate::{
+        service::finalized_state::calculate_deferred_pool_balance_change, ContextuallyVerifiedBlock,
+    };
+
+    let reissuance = block::Height(1_001);
+    let network = Parameters::build()
+        .with_slow_start_interval(block::Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        })?
+        .with_nsm_reissuance_height(reissuance)
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(block::Height(1_000)..block::Height(1_010)),
+            recipients: Some(vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ]),
+        }])
+        .to_network()?;
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000u64)?;
+    let mut parent_pools = ValueBalance::zero();
+    parent_pools.set_nsm_amount(reserve);
+    let header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    let outpoint = transparent::OutPoint::from_usize(TransactionHash([0; 32]), 0);
+    let utxos = HashMap::from([(
+        outpoint,
+        transparent::OrderedUtxo::from_utxo(
+            transparent::Utxo::new(
+                transparent::Output::new(100.try_into()?, transparent::Script::new(&[])),
+                block::Height(999),
+                false,
+            ),
+            0,
+        ),
+    )]);
+    let spend = Arc::new(Transaction::test_v1(
+        vec![transparent::Input::PrevOut {
+            outpoint,
+            unlock_script: transparent::Script::new(&[]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            89.try_into()?,
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    ));
+    let make_block = |height, miner, grant| Block {
+        header: Arc::new(header),
+        transactions: vec![
+            Arc::new(Transaction::test_v1(
+                vec![transparent::Input::Coinbase {
+                    height,
+                    data: vec![0],
+                    sequence: u32::MAX,
+                }],
+                vec![
+                    transparent::Output::new(miner, transparent::Script::new(&[])),
+                    transparent::Output::new(
+                        grant,
+                        subsidy::funding_stream_address(
+                            height,
+                            &network,
+                            FundingStreamReceiver::MajorGrants,
+                        )
+                        .expect("the funding stream has a configured address")
+                        .script(),
+                    ),
+                ],
+                LockTime::unlocked(),
+            )),
+            spend.clone(),
+        ],
+    };
+
+    for height in [block::Height(1_000), reissuance, block::Height(1_002)] {
+        let total = subsidy::block_subsidy_with_parent_pools(height, &network, parent_pools)?;
+        let funding = subsidy::funding_stream_values(height, &network, total)?;
+        let grant = funding[&FundingStreamReceiver::MajorGrants];
+        let deferred = funding[&FundingStreamReceiver::Deferred];
+        let deferred_change =
+            calculate_deferred_pool_balance_change(height, &network, parent_pools)?;
+        assert_eq!(
+            deferred_change,
+            DeferredPoolBalanceChange::new(deferred.constrain()?),
+        );
+        // Of the 11 zatoshi in gross fees, 6 go to the reserve and 5 to the miner.
+        let miner = (total - grant - deferred + Amount::try_from(5)?)?;
+        for delta in [-1, 0, 1] {
+            let block = make_block(height, (miner.zatoshis() + delta).try_into()?, grant);
+            let (contextual, fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+                Arc::new(block).into(),
+                utxos.clone(),
+                deferred_change,
+                &network,
+                parent_pools,
+            )?;
+            let fees = fees.expect("all test blocks are at or after NU7");
+            if height < reissuance {
+                // Before reissuance the semantic verifier owns the payout checks.
+                continue;
+            }
+            let result = nsm_subsidy_is_valid(&contextual, &network, parent_pools, fees);
+            if delta == 0 {
+                result?;
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ValidateContextError::InvalidSubsidy {
+                        subsidy_error: CoinbaseTransactionError::Subsidy(
+                            SubsidyError::InvalidMinerFees
+                        ),
+                        ..
+                    }),
+                ));
+            }
+
+            if delta == 0 {
+                let mut other_parent = parent_pools;
+                other_parent.set_nsm_amount((reserve * 2)?);
+                assert!(matches!(
+                    nsm_subsidy_is_valid(&contextual, &network, other_parent, fees),
+                    Err(ValidateContextError::InvalidSubsidy {
+                        subsidy_error: CoinbaseTransactionError::Subsidy(
+                            SubsidyError::FundingStreamNotFound
+                        ),
+                        ..
+                    }),
+                ));
+            }
+        }
+
+        if height >= reissuance {
+            // Preserve the total payout, but omit the reserve-funded part of the grant.
+            let scheduled_grant = subsidy::funding_stream_values(
+                height,
+                &network,
+                subsidy::scheduled_block_subsidy(height, &network)?,
+            )?[&FundingStreamReceiver::MajorGrants];
+            let block = make_block(height, (miner + grant - scheduled_grant)?, scheduled_grant);
+            let (contextual, fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+                Arc::new(block).into(),
+                utxos.clone(),
+                deferred_change,
+                &network,
+                parent_pools,
+            )?;
+            assert!(matches!(
+                nsm_subsidy_is_valid(
+                    &contextual,
+                    &network,
+                    parent_pools,
+                    fees.expect("all test blocks are at or after NU7"),
+                ),
+                Err(ValidateContextError::InvalidSubsidy {
+                    subsidy_error: CoinbaseTransactionError::Subsidy(
+                        SubsidyError::FundingStreamNotFound
+                    ),
+                    ..
+                }),
+            ));
+        }
+    }
+
+    Ok(())
 }

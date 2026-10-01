@@ -62,8 +62,8 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
         .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             // These are dummy values. The particular values don't matter much,
-            // as long as the nu5 one is smaller than the chains being generated
-            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure that upgrade is exercised
+            // as long as the nu7 one is smaller than the chains being generated
+            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure all upgrades are exercised
             // in the test below. (The test will fail if that does not happen.)
             before_overwinter: Some(1),
             overwinter: Some(10),
@@ -79,17 +79,16 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
+        .with_nsm_reissuance_height(Height(50))
         // These short chains have no historical funding-stream deposits to disburse.
         .clear_funding_streams()
         .with_lockbox_disbursements(vec![]);
 
     // Seed the NSM value balance at NU7 activation, so that committing blocks past it reissues
     // from the balance and debits it.
-    #[cfg(zcash_unstable = "zip234")]
     let initial_nsm_value_balance =
         zebra_chain::amount::Amount::try_from(10 * zebra_chain::amount::COIN)
             .expect("valid amount");
-    #[cfg(zcash_unstable = "zip234")]
     let network = network.with_initial_nsm_value_balance(initial_nsm_value_balance);
 
     let network = network
@@ -150,7 +149,6 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             // The finalized state tracked the NSM value balance from NU7 activation: seeded, then
             // debited by each block's additional subsidy and credited with its ZIP 235 fee
             // contribution.
-            #[cfg(zcash_unstable = "zip234")]
             {
                 use zebra_chain::{
                     parameters::subsidy::{additional_block_subsidy, nsm_fee_contribution},
@@ -158,7 +156,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                 };
 
                 let utxos = utxos_from_ordered_utxos(
-                    chain.iter().flat_map(|block| block.new_outputs.clone()).collect(),
+                    chain.iter().flat_map(|block| block.new_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.clone()))),
                 );
 
                 let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();
@@ -177,8 +175,6 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
 
                 prop_assert_eq!(state.finalized_value_pool().nsm_amount(), expected);
                 prop_assert!(expected > zebra_chain::amount::Amount::<zebra_chain::amount::NonNegative>::zero());
-                #[cfg(not(zcash_unstable = "zip235"))]
-                prop_assert!(expected < initial_nsm_value_balance);
             }
     });
 

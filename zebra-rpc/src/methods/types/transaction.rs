@@ -20,7 +20,10 @@ use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, nsm_fee_contribution},
+        subsidy::{
+            block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
+            nsm_fee_contribution,
+        },
         Network, NetworkUpgrade,
     },
     primitives::ed25519,
@@ -29,7 +32,7 @@ use zebra_chain::{
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::{error::TransactionError, funding_stream_address};
+use zebra_consensus::error::TransactionError;
 use zebra_script::Sigops;
 
 use super::zec::Zec;
@@ -60,7 +63,7 @@ where
     /// The transactions in this block template that this transaction depends upon.
     /// These are 1-based indexes in the `transactions` list.
     ///
-    /// Zebra's mempool does not support transaction dependencies, so this list is always empty.
+    /// Populated when the selected transactions are assembled into a block template.
     ///
     /// We use `u16` because 2 MB blocks are limited to around 39,000 transactions.
     pub(crate) depends: Vec<u16>,
@@ -99,7 +102,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
                 .auth_digest()
                 .unwrap_or(AUTH_DIGEST_PLACEHOLDER),
 
-            // Always empty, not supported by Zebra's mempool.
+            // Indexes require the final selected transaction order.
             depends: Vec::new(),
 
             fee: tx.miner_fee,
@@ -121,7 +124,10 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
-    /// Constructs a transaction template for a coinbase transaction.
+    /// Constructs a transaction template for a coinbase without parent-dependent reissuance.
+    ///
+    /// `txs_fee` is the gross transaction fee total. The payout claims only the miner's share,
+    /// while the template's negative `fee` reports the full total required by getblocktemplate.
     pub fn new_coinbase(
         net: &Network,
         height: Height,
@@ -134,8 +140,9 @@ impl TransactionTemplate<NegativeOrZero> {
     /// Constructs a transaction template for a coinbase transaction in a block whose parent leaves
     /// `parent_nsm_value_balance` in the NSM value balance.
     ///
-    /// The parent's NSM value balance is required from the ZIP 234 deployment height, because it
+    /// The parent's NSM value balance is required from the NSM reissuance height, because it
     /// determines the block subsidy.
+    /// The payout includes only net miner fees, but `fee` reports the negative gross `txs_fee`.
     pub fn new_coinbase_with_parent_pools(
         net: &Network,
         height: Height,
@@ -144,7 +151,6 @@ impl TransactionTemplate<NegativeOrZero> {
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Result<Self, TransactionError> {
         let block_subsidy = match parent_nsm_value_balance {
-            #[cfg(zcash_unstable = "zip234")]
             Some(parent_nsm_value_balance) => {
                 zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
                     height,
@@ -152,7 +158,7 @@ impl TransactionTemplate<NegativeOrZero> {
                     parent_nsm_value_balance,
                 )?
             }
-            _ => block_subsidy(height, net)?,
+            None => block_subsidy(height, net)?,
         };
         // From NU7 activation, the coinbase can't claim the fees ZIP 235 removes from circulation.
         let miner_fees = (txs_fee - nsm_fee_contribution(height, net, txs_fee))?;
@@ -284,7 +290,7 @@ impl TransactionTemplate<NegativeOrZero> {
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),
-            fee: (-miner_fees).constrain()?,
+            fee: (-txs_fee).constrain()?,
             sigops: tx.sigops()?,
             required: true,
         })

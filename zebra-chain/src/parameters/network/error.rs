@@ -47,11 +47,11 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidHeightZero,
 
-    #[error("halving interval must be in 1..=Height::MAX and produce supported halving indices and heights; configured funding streams require a nonzero address period")]
+    #[error("halving interval must be in 1..=Height::MAX and produce supported halving indices and heights; configured funding streams require a nonzero address period, and reissuance requires a positive NSM coefficient")]
     #[non_exhaustive]
     InvalidHalvingInterval,
 
-    #[error("scheduled issuance through the maximum supported height must not exceed MAX_MONEY, excluding the unspendable genesis subsidy; early spacing upgrades may require slow_start_interval = 0")]
+    #[error("scheduled issuance through the maximum supported height, excluding unspendable genesis issuance, must not exceed MAX_MONEY; early spacing upgrades may require slow_start_interval = 0")]
     #[non_exhaustive]
     InvalidSubsidySchedule,
 
@@ -109,8 +109,7 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InsufficientCheckpointCoverage,
 
-    #[error("the ZIP 234 deployment height must be at or after the NU7 activation height")]
+    #[error("the NSM reissuance height must be at or after the NU7 activation height")]
     #[non_exhaustive]
-    #[cfg(zcash_unstable = "zip234")]
-    Zip234DeploymentHeightBeforeNu7,
+    NsmReissuanceHeightBeforeNu7,
 }

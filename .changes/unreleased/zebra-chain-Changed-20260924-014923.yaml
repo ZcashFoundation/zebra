@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`parameters::subsidy::subsidy_is_valid` requires fixed lockbox disbursements even when the total block subsidy is zero, without requiring zero-valued proportional funding outputs.'
+time: 2026-09-24T01:49:23.958956522+02:00

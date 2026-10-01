@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Configured networks must include fixed lockbox disbursements even when the block subsidy is zero.
+time: 2026-09-24T01:49:25.014399293+02:00

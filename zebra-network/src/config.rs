@@ -17,6 +17,7 @@ use zebra_chain::{
     common::atomic_write,
     parameters::{
         constants::magics,
+        subsidy::TESTNET_INITIAL_NSM_VALUE_BALANCE,
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
             ConfiguredLockboxDisbursement, RegtestParameters,
@@ -613,11 +614,16 @@ struct DTestnetParameters {
     disable_pow: Option<bool>,
     genesis_hash: Option<String>,
     activation_heights: Option<ConfiguredActivationHeights>,
+    /// Override for the first NSM reissuance height; omission uses ZIP 237's crossover.
+    nsm_reissuance_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     /// Omission retains the default streams; an explicitly empty list disables them.
     /// An empty list cannot be combined with either legacy funding stream field.
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Must yield a supported first halving height and a schedule within the monetary cap.
+    /// Configured reissuance needs a positive coefficient; funding streams need a nonzero
+    /// address-change interval.
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     #[serde(default)]
@@ -635,7 +641,6 @@ struct DTestnetParameters {
 
     /// Regtest and configured Testnets only: the NSM value balance seeded at NU7 activation
     /// under the halving-preserving issuance ZIP.
-    #[cfg(zcash_unstable = "zip234")]
     initial_nsm_value_balance:
         Option<zebra_chain::amount::Amount<zebra_chain::amount::NonNegative>>,
 }
@@ -708,10 +713,10 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
+            nsm_reissuance_height: params.configured_nsm_reissuance_height(),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
-            #[cfg(zcash_unstable = "zip234")]
-            initial_nsm_value_balance: Some(params.initial_nsm_value_balance()),
+            initial_nsm_value_balance: params.configured_initial_nsm_value_balance(),
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
                 params
@@ -920,6 +925,7 @@ where
         disable_pow,
         genesis_hash,
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -929,7 +935,6 @@ where
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
         should_allow_unshielded_coinbase_spends,
-        #[cfg(zcash_unstable = "zip234")]
         initial_nsm_value_balance,
     } = params;
 
@@ -942,8 +947,11 @@ where
 
     let mut params_builder = testnet::Parameters::build();
 
-    #[cfg(zcash_unstable = "zip234")]
-    if let Some(initial_nsm_value_balance) = initial_nsm_value_balance {
+    // A redundant public seed must not turn public Testnet into a configured network.
+    if let Some(initial_nsm_value_balance) = initial_nsm_value_balance.filter(|seed| {
+        network_magic.map(Magic).unwrap_or(magics::TESTNET) != magics::TESTNET
+            || u64::from(*seed) != TESTNET_INITIAL_NSM_VALUE_BALANCE
+    }) {
         params_builder = params_builder.with_initial_nsm_value_balance(initial_nsm_value_balance);
     }
 
@@ -991,6 +999,10 @@ where
             .map_err(de::Error::custom)?
     }
 
+    if let Some(height) = nsm_reissuance_height {
+        params_builder = params_builder.with_nsm_reissuance_height(height);
+    }
+
     if let Some(halving_interval) = pre_blossom_halving_interval {
         params_builder = params_builder
             .with_halving_interval(halving_interval.into())
@@ -1029,6 +1041,11 @@ where
         );
     }
 
+    // Preserve the canonical public Testnet representation when no parameters changed.
+    if network_name.is_none() && params_builder == testnet::Parameters::build() {
+        return Ok(Network::new_default_testnet());
+    }
+
     if !params_builder.is_compatible_with_default_parameters() {
         // Keep the diagnostic for explicitly configured public seeds, even with isolated magic.
         if initial_testnet_peers
@@ -1049,17 +1066,13 @@ where
         }
     }
 
-    // Return the default Testnet if no network name was configured and all parameters match the default Testnet
-    if network_name.is_none() && params_builder == testnet::Parameters::build() {
-        Ok(Network::new_default_testnet())
-    } else {
-        Ok(params_builder.to_network().map_err(de::Error::custom)?)
-    }
+    params_builder.to_network().map_err(de::Error::custom)
 }
 
 fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters, &'static str> {
     let DTestnetParameters {
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -1067,13 +1080,13 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         checkpoints,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
-        #[cfg(zcash_unstable = "zip234")]
         initial_nsm_value_balance,
         ..
     } = params;
 
     Ok(RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
+        nsm_reissuance_height,
         funding_streams: merge_funding_streams(
             funding_streams,
             pre_nu6_funding_streams,
@@ -1083,11 +1096,7 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         checkpoints: Some(checkpoints),
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
-        #[cfg(zcash_unstable = "zip234")]
         initial_nsm_value_balance,
-        // Reissuance starts at NU7 activation on Regtest; tests set a later height in code.
-        #[cfg(zcash_unstable = "zip234")]
-        zip234_deployment_height: None,
     })
 }
 

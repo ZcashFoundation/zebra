@@ -21,14 +21,12 @@ use crate::{
     BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
-#[cfg(zcash_unstable = "zip234")]
 use zebra_chain::{
     amount::{Amount, NonNegative},
     parameters::subsidy::{self, CoinbaseTransactionError, SubsidyError},
     value_balance::ValueBalance,
 };
 
-#[cfg(zcash_unstable = "zip234")]
 use crate::ContextuallyVerifiedBlock;
 
 // use self as check
@@ -420,15 +418,14 @@ pub(crate) fn initial_contextual_validity(
 }
 
 /// Checks the block subsidy, funding streams, and miner fees paid by `contextual`'s coinbase
-/// transaction, from the ZIP 234 deployment height.
+/// transaction, from the NSM reissuance height.
 ///
 /// The block verifier checks the subsidy, funding streams and miner fees before the deployment
 /// height. From then on the block subsidy depends on the NSM value balance after the parent block,
 /// which is only known during contextual validation, so the checks run here instead.
 ///
-/// [zip]: https://github.com/zcash/zips/pull/1354
-#[cfg(zcash_unstable = "zip234")]
-pub(crate) fn zip234_subsidy_is_valid(
+/// [zip]: https://zips.z.cash/zip-0237
+pub(crate) fn nsm_subsidy_is_valid(
     contextual: &ContextuallyVerifiedBlock,
     network: &Network,
     parent_chain_value_pools: ValueBalance<NonNegative>,

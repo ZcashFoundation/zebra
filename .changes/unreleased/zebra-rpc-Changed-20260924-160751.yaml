@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getblocktemplate` transaction dependency lists contain unique, 1-based indexes into the final selected transaction order instead of always being empty.'
+time: 2026-09-24T16:07:51.148597846+02:00

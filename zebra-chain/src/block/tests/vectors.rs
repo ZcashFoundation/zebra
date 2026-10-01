@@ -18,6 +18,7 @@ use crate::{
     },
     transaction::{LockTime, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 use super::generate; // TODO: this should be rewritten as strategies
@@ -110,10 +111,323 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
 
     assert!(
         block
-            .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero())
+            .chain_value_pool_change(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &Network::Mainnet,
+                ValueBalance::zero()
+            )
             .is_err(),
         "block-level aggregation should propagate transaction value-balance errors"
     );
+}
+
+/// Unspendable genesis outputs are not issued supply, even on a custom monetary schedule.
+#[test]
+fn genesis_transparent_outputs_are_not_issued_supply() {
+    use crate::parameters::testnet::{ConfiguredActivationHeights, Parameters};
+
+    let _init_guard = zebra_test::init();
+    for bytes in [
+        &*zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES,
+        &*zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES,
+    ] {
+        let genesis: Block = bytes.zcash_deserialize_into().unwrap();
+        assert!(genesis.transactions[0]
+            .outputs()
+            .iter()
+            .all(|output| output.value.is_zero()));
+    }
+
+    let network = Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![])
+        .to_network()
+        .unwrap();
+    let genesis: Block = zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    for value in [0, 1, MAX_MONEY] {
+        let mut genesis = genesis.clone();
+        let transaction = Arc::make_mut(&mut genesis.transactions[0]);
+        let mut outputs = transaction.outputs();
+        outputs[0].value = value.try_into().unwrap();
+        transaction.set_outputs(outputs);
+        for network in [&network, &Network::Mainnet] {
+            let change = genesis
+                .chain_value_pool_change(
+                    &HashMap::new(),
+                    DeferredPoolBalanceChange::zero(),
+                    network,
+                    ValueBalance::zero(),
+                )
+                .unwrap();
+            let pools = ValueBalance::zero()
+                .add_chain_value_pool_change(change)
+                .unwrap();
+            assert!(pools.transparent_amount().is_zero());
+            assert!(pools.nsm_amount().is_zero());
+            assert!(pools.total().unwrap().is_zero());
+        }
+    }
+}
+
+/// From NU7, 60% of a block's transaction fees accrue to the NSM reserve instead of being
+/// claimed by the miner, so they appear in the block's chain value pool change.
+#[test]
+fn chain_value_pool_change_accrues_the_nsm_reserve() {
+    use crate::{
+        parameters::testnet::ConfiguredActivationHeights, transaction::Hash as TransactionHash,
+        transparent::OutPoint,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let height = Height(1_000);
+    let spent_value: Amount<NonNegative> = 100_000.try_into().expect("valid amount");
+    let change: Amount<NonNegative> = 90_000.try_into().expect("valid amount");
+    // The one non-coinbase transaction below pays a fee of 10,000 zatoshi.
+
+    let coinbase = Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: 0xFFFF_FFFF,
+        }],
+        vec![transparent::Output::new(
+            change,
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    );
+
+    let outpoint = OutPoint::from_usize(TransactionHash([0; 32]), 0);
+    let spend = Transaction::test_v1(
+        vec![transparent::Input::PrevOut {
+            outpoint,
+            unlock_script: transparent::Script::new(&[]),
+            sequence: 0,
+        }],
+        vec![transparent::Output::new(
+            change,
+            transparent::Script::new(&[]),
+        )],
+        LockTime::unlocked(),
+    );
+
+    let utxos = HashMap::from([(
+        outpoint,
+        transparent::Utxo::new(
+            transparent::Output::new(spent_value, transparent::Script::new(&[])),
+            Height(999),
+            false,
+        ),
+    )]);
+
+    let header: Header = zebra_test::vectors::DUMMY_HEADER
+        .zcash_deserialize_into()
+        .expect("dummy header should deserialize");
+    let block = Block {
+        header: Arc::new(header),
+        transactions: vec![Arc::new(coinbase), Arc::new(spend)],
+    };
+
+    for (nu7, expected_reserve) in [(None, 0), (Some(height.0), 6_000), (Some(999), 6_000)] {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(3),
+                nu6_1: Some(4),
+                nu6_2: Some(5),
+                nu6_3: Some(6),
+                nu7,
+                ..Default::default()
+            }
+            .into(),
+        );
+        let (change, fees) = block
+            .chain_value_pool_change_and_fees(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+                ValueBalance::zero(),
+            )
+            .expect("chain value pool change should be calculable");
+        assert_eq!(change.nsm_amount().zatoshis(), expected_reserve);
+        assert_eq!(fees.map(|fees| fees.zatoshis()), nu7.map(|_| 10_000));
+    }
+}
+
+/// Seed, reissue, fund and roll back using the same contextual accounting used by state commits.
+#[test]
+fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::{
+        amount::NegativeAllowed,
+        parameters::{
+            subsidy::{
+                block_subsidy_with_parent_pools, funding_stream_address, funding_stream_values,
+                scheduled_block_subsidy, subsidy_is_valid, CoinbaseTransactionError,
+                FundingStreamReceiver, SubsidyError,
+            },
+            testnet::{
+                ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams, Parameters,
+            },
+        },
+    };
+    use std::ops::Neg;
+
+    let height = Height(1_000);
+    let reserve = Amount::<NonNegative>::try_from(10_000_000_000u64)?;
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(0))
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(height.0),
+            ..Default::default()
+        })?
+        .with_initial_nsm_value_balance(reserve)
+        .with_nsm_reissuance_height(height)
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(height..Height(1_010)),
+            recipients: Some(vec![
+                ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 12,
+                    addresses: None,
+                },
+            ]),
+        }])
+        .to_network()?;
+    let before_seed = ValueBalance::zero();
+    let header: Header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+    let make_block = |height, outputs| Block {
+        header: Arc::new(header),
+        transactions: vec![Arc::new(Transaction::test_v1(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            outputs,
+            LockTime::unlocked(),
+        ))],
+    };
+    let before_activation = make_block(
+        Height(999),
+        vec![transparent::Output::new(
+            scheduled_block_subsidy(Height(999), &network)?,
+            transparent::Script::new(&[]),
+        )],
+    );
+    let pre_activation_change = before_activation.chain_value_pool_change(
+        &HashMap::new(),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        before_seed,
+    )?;
+    let parent = before_seed.add_chain_value_pool_change(pre_activation_change)?;
+    assert!(parent.nsm_amount().is_zero());
+
+    let total = block_subsidy_with_parent_pools(height, &network, parent)?;
+    assert_eq!(
+        (total - scheduled_block_subsidy(height, &network)?)?.zatoshis(),
+        1_375
+    );
+    let funding = funding_stream_values(height, &network, total)?;
+    let grant = funding[&FundingStreamReceiver::MajorGrants];
+    let deferred = funding[&FundingStreamReceiver::Deferred];
+    assert_eq!(grant.zatoshis(), total.zatoshis() * 8 / 100);
+    assert_eq!(deferred.zatoshis(), total.zatoshis() * 12 / 100);
+    let grant_script = funding_stream_address(height, &network, FundingStreamReceiver::MajorGrants)
+        .expect("configured funding address")
+        .script();
+    let miner = (total - grant - deferred)?;
+    let block = make_block(
+        height,
+        vec![
+            transparent::Output::new(miner, transparent::Script::new(&[])),
+            transparent::Output::new(grant, grant_script.clone()),
+        ],
+    );
+    let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
+    let (change, fees) = block.chain_value_pool_change_and_fees(
+        &HashMap::new(),
+        deferred_change,
+        &network,
+        parent,
+    )?;
+    assert_eq!(fees, Some(Amount::zero()));
+    assert_eq!(change.nsm_amount().zatoshis(), 9_999_998_625);
+    let after = parent.add_chain_value_pool_change(change)?;
+    assert_eq!(after.nsm_amount().zatoshis(), 9_999_998_625);
+    assert_eq!(after.total()?, (parent.total()? + total)?);
+    let next = make_block(height.next()?, Vec::new());
+    let next_change = next.chain_value_pool_change(
+        &HashMap::new(),
+        DeferredPoolBalanceChange::zero(),
+        &network,
+        after,
+    )?;
+    assert_eq!(next_change.nsm_amount().zatoshis(), -1_375);
+    assert_eq!(ValueBalance::from_bytes(&after.to_bytes())?, after);
+
+    // Keeping the total correct but paying funding from scheduled issuance alone is invalid.
+    let scheduled_grant =
+        funding_stream_values(height, &network, scheduled_block_subsidy(height, &network)?)?
+            [&FundingStreamReceiver::MajorGrants];
+    let underfunded = make_block(
+        height,
+        vec![
+            transparent::Output::new(
+                (total - scheduled_grant - deferred)?,
+                transparent::Script::new(&[]),
+            ),
+            transparent::Output::new(scheduled_grant, grant_script),
+        ],
+    );
+    assert_eq!(
+        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, parent)?,
+        change,
+        "ledger accounting does not validate funding payouts",
+    );
+    assert!(matches!(
+        subsidy_is_valid(&underfunded, &network, total),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::FundingStreamNotFound
+        )),
+    ));
+    assert_eq!(subsidy_is_valid(&block, &network, total)?, deferred_change);
+    let mut other_parent = after;
+    other_parent.set_nsm_amount((reserve * 2)?);
+    let other_total = block_subsidy_with_parent_pools(height.next()?, &network, other_parent)?;
+    assert!(matches!(
+        subsidy_is_valid(&block, &network, other_total),
+        Err(CoinbaseTransactionError::Subsidy(
+            SubsidyError::FundingStreamNotFound
+        )),
+    ));
+
+    // Both a reissuance reorg and an activation-crossing reorg restore the exact prior pools.
+    assert_eq!(after.add_chain_value_pool_change(change.neg())?, parent);
+    assert_eq!(
+        parent.add_chain_value_pool_change(pre_activation_change.neg())?,
+        before_seed
+    );
+    Ok(())
 }
 
 #[test]
@@ -607,12 +921,49 @@ fn transaction_fees_sum_the_non_coinbase_transactions() {
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize");
 
-    block.transactions = transactions[..1].to_vec();
-    assert_eq!(block.transaction_fees(&utxos), Ok(amount(0)));
+    let network = Network::new_regtest(
+        crate::parameters::testnet::ConfiguredActivationHeights {
+            nu7: Some(height.0),
+            ..Default::default()
+        }
+        .into(),
+    );
+    for (count, fees, contribution) in [(1, 0, 0), (3, 2, 1), (4, 1_002, 601)] {
+        block.transactions = transactions[..count].to_vec();
+        assert_eq!(block.transaction_fees(&utxos), Ok(amount(fees)));
+        let (change, gross_fees) = block
+            .chain_value_pool_change_and_fees(
+                &utxos,
+                DeferredPoolBalanceChange::zero(),
+                &network,
+                ValueBalance::zero(),
+            )
+            .expect("valid transaction balances");
+        assert_eq!(gross_fees, Some(amount(fees)));
+        assert_eq!(change.nsm_amount().zatoshis(), contribution);
+        assert_eq!(change.transparent_amount().zatoshis(), 1_000_000 - fees);
+    }
 
-    block.transactions = transactions[..3].to_vec();
-    assert_eq!(block.transaction_fees(&utxos), Ok(amount(2)));
-
-    block.transactions = transactions;
-    assert_eq!(block.transaction_fees(&utxos), Ok(amount(1_002)));
+    // NU7 rejects an individual negative fee even when other fees would offset it.
+    Arc::make_mut(&mut block.transactions[3]).set_outputs(vec![output(10_001)]);
+    assert!(matches!(
+        block.chain_value_pool_change_and_fees(
+            &utxos,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        ),
+        Err(crate::value_balance::ValueBalanceError::Total(_)),
+    ));
+    let (change, fees) = block
+        .chain_value_pool_change_and_fees(
+            &utxos,
+            DeferredPoolBalanceChange::zero(),
+            &Network::Mainnet,
+            ValueBalance::zero(),
+        )
+        .expect("pre-NU7 accounting leaves fee validation to the verifier");
+    assert_eq!(fees, None);
+    assert_eq!(change.transparent_amount().zatoshis(), 999_999);
+    assert_eq!(change.nsm_amount().zatoshis(), 0);
 }

@@ -443,19 +443,16 @@ fn start_precomputing_coinbase(
     miner_params: &MinerParams,
     height: Height,
 ) {
+    // The future parent does not exist yet, so its NSM balance is unknown.
+    if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network) {
+        return;
+    }
     if next_coinbase
         .as_ref()
         .is_some_and(|(precomputed_height, task)| {
             *precomputed_height == height || !task.is_finished()
         })
     {
-        return;
-    }
-
-    // From the ZIP 234 deployment height, the coinbase depends on the NSM value balance after the
-    // next block, which isn't known until that block arrives.
-    #[cfg(zcash_unstable = "zip234")]
-    if zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, network) {
         return;
     }
 
@@ -489,6 +486,7 @@ async fn store_precomputed_coinbase(
     let (_, coinbase) = next_coinbase
         .take()
         .expect("the precomputed height was checked above");
+    coinbase_cache.select(height, None);
 
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that

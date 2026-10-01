@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: "Ordinary builds use database format v29.0.0 with the NSM value-pool field. Its registered upgrade automatically moves compatible v28 state into `state/v29` when no v29 database exists, without resyncing. Legacy records remain readable with a zero NSM balance; new writes use the wider layout. Retain a v28 backup before upgrading for rollback: disabling `state.delete_old_database` does not preserve the directory that the upgrade moves. Upgrade direct database readers, including Zallet's Zebra backend and Zaino's Zebra read-state backend, to v29-compatible builds together with the node; v28 readers cannot read the wider records. Manual directory renames or symlinks are not a substitute for the supported upgrade ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
+time: 2026-09-23T17:20:18.220400746+02:00

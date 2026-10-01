@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Return an invalid-parameter error for malformed Orchard receivers in `z_listunifiedreceivers` rather than returning an unusable address ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+time: 2026-09-30T21:11:50.077966034+02:00

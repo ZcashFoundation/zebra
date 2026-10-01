@@ -34,7 +34,6 @@ use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
 pub mod request;
-pub mod subsidy;
 
 pub use request::Request;
 
@@ -399,18 +398,15 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            // From the ZIP 234 deployment height, the block subsidy depends on the
+            // From the NSM reissuance height, the block subsidy depends on the
             // NSM value balance after the parent block, which is not committed yet while
             // blocks are verified concurrently. The state checks the subsidy, funding streams,
             // and miner fees during contextual validation instead, where the parent's chain value
             // pools are known.
-            #[cfg(zcash_unstable = "zip234")]
-            let zip234_reissuance_is_active =
-                zebra_chain::parameters::subsidy::zip234_reissuance_is_active(height, &network);
-            #[cfg(not(zcash_unstable = "zip234"))]
-            let zip234_reissuance_is_active = false;
+            let nsm_reissuance_is_active =
+                zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &network);
 
-            let expected_subsidy_and_deferred_pool_balance_change = if zip234_reissuance_is_active {
+            let expected_subsidy_and_deferred_pool_balance_change = if nsm_reissuance_is_active {
                 None
             } else {
                 let expected_block_subsidy =

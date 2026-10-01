@@ -107,6 +107,8 @@ fn funding_streams_serialization_roundtrip() {
 
     let config = Config {
         network: testnet::Parameters::build()
+            .with_network_magic(Magic([0; 4]))
+            .unwrap()
             .with_funding_streams(fs)
             .to_network()
             .expect("failed to build configured network"),
@@ -272,6 +274,108 @@ fn should_allow_unshielded_coinbase_spends_rejected_on_testnet() {
     );
 }
 
+/// A configured reissuance height must survive serialization and reject invalid boundaries.
+#[test]
+fn nsm_reissuance_configuration_is_validated() {
+    let _init_guard = zebra_test::init();
+    let configuration = |height| {
+        format!(
+            "network = 'Regtest'\n\
+             [testnet_parameters]\n\
+             nsm_reissuance_height = {height}\n\
+             [testnet_parameters.activation_heights]\n\
+             NU7 = 9\n"
+        )
+    };
+    let config: Config = toml::from_str(&configuration(12)).unwrap();
+    let config: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    let reserve = zebra_chain::amount::Amount::try_from(100_000_000).unwrap();
+    assert_eq!(
+        zebra_chain::parameters::subsidy::additional_block_subsidy(
+            Height(11),
+            &config.network,
+            reserve
+        )
+        .zatoshis(),
+        0,
+    );
+    assert!(
+        zebra_chain::parameters::subsidy::additional_block_subsidy(
+            Height(12),
+            &config.network,
+            reserve
+        )
+        .zatoshis()
+            > 0
+    );
+
+    assert!(toml::from_str::<Config>(
+        &configuration(12).replace("nsm_reissuance_height", "zip234_deployment_height")
+    )
+    .is_err());
+    for height in [0, 8, u32::MAX] {
+        assert!(toml::from_str::<Config>(&configuration(height)).is_err());
+    }
+    assert!(toml::from_str::<Config>(
+        "network = 'Regtest'\n[testnet_parameters]\nnsm_reissuance_height = 12\n"
+    )
+    .is_err());
+    let config: Config = toml::from_str(
+        "network = 'Regtest'\n[testnet_parameters]\ninitial_nsm_value_balance = 100000000\n\
+         [testnet_parameters.activation_heights]\nNU7 = 9\n",
+    )
+    .unwrap();
+    assert_eq!(config.network.initial_nsm_value_balance(), reserve);
+    let roundtrip: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(roundtrip.network, config.network);
+    assert_eq!(
+        zebra_chain::parameters::subsidy::additional_block_subsidy(
+            Height(9),
+            &roundtrip.network,
+            reserve
+        )
+        .zatoshis(),
+        0,
+    );
+}
+
+#[test]
+fn public_nsm_seed_survives_config_roundtrip_and_rejects_override() {
+    for (configuration, is_public_testnet) in [
+        ("network = 'Testnet'", true),
+        (
+            "network = 'Testnet'\n[testnet_parameters]\ncheckpoints = true\ninitial_nsm_value_balance = 55768414957\n",
+            true,
+        ),
+        (
+            "network = 'Testnet'\n[testnet_parameters]\nnetwork_name = 'MyTestnet'\ncheckpoints = true\n",
+            false,
+        ),
+    ] {
+        let public: Config = toml::from_str(configuration).unwrap();
+        let roundtrip: Config = toml::from_str(&toml::to_string(&public).unwrap()).unwrap();
+        assert_eq!(public.network, roundtrip.network);
+        assert_eq!(roundtrip.network.is_default_testnet(), is_public_testnet);
+        assert_eq!(
+            roundtrip.network.initial_nsm_value_balance().zatoshis(),
+            55_768_414_957
+        );
+    }
+    let configuration = |seed| {
+        format!("network = 'Testnet'\n[testnet_parameters]\ninitial_nsm_value_balance = {seed}\n")
+    };
+    assert!(toml::from_str::<Config>(&configuration(0)).is_err());
+
+    let private: Config = toml::from_str(
+        "network = 'Testnet'\ninitial_testnet_peers = []\n[testnet_parameters]\ncheckpoints = true\nnetwork_magic = [0, 0, 0, 0]\ninitial_nsm_value_balance = 55768414957\n",
+    )
+    .unwrap();
+    assert_eq!(
+        private.network.initial_nsm_value_balance().zatoshis(),
+        55_768_414_957,
+    );
+}
+
 #[test]
 fn incompatible_testnet_requires_isolated_magic() {
     let _init_guard = zebra_test::init();
@@ -308,6 +412,7 @@ fn incompatible_testnet_requires_isolated_magic() {
     )
     .unwrap();
     assert_eq!(private.network.magic(), Magic([0; 4]));
+    assert_eq!(private.network.initial_nsm_value_balance().zatoshis(), 0);
     let Network::Testnet(params) = private.network else {
         panic!("configured Testnet must stay a Testnet");
     };
