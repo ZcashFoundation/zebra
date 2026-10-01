@@ -5008,37 +5008,60 @@ async fn rpc_gettxout() {
 async fn rpc_get_standard_fee() {
     let _init_guard = zebra_test::init();
 
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-    let (tip, _tip_sender) = MockChainTip::new();
-
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _rpc_tx_queue) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(state.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        tip,
-        MockAddressBookPeers::default(),
-        rx,
+    // The fee applies to the block after the tip, so Mainnet switches at a tip one block below
+    // the activation height.
+    let tip_heights = [
         None,
-    );
+        Some(Height(3_589_998)),
+        Some(Height(3_589_999)),
+        Some(Height(3_590_000)),
+    ];
 
-    let response = rpc
-        .get_standard_fee()
-        .await
-        .expect("get_standard_fee should succeed");
+    for (network, expected_fees) in [
+        (Mainnet, [5000, 5000, 1000, 1000]),
+        (Network::new_default_testnet(), [1000; 4]),
+        (Network::new_regtest(Default::default()), [1000; 4]),
+    ] {
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    assert_eq!(response.standard_fee(), 1000);
-    assert_eq!(response.version(), 0);
+        let (tip, tip_sender) = MockChainTip::new();
+
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            network.clone(),
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        for (tip_height, expected_fee) in tip_heights.into_iter().zip(expected_fees) {
+            tip_sender.send_best_tip_height(tip_height);
+
+            let response = rpc
+                .get_standard_fee()
+                .await
+                .expect("get_standard_fee should succeed");
+
+            assert_eq!(
+                response.standard_fee(),
+                expected_fee,
+                "{network} with tip {tip_height:?}"
+            );
+            assert_eq!(response.version(), 0);
+        }
+    }
 }
 
 /// `getblocksubsidy` must report the funding stream metadata era of the height's active upgrade,
