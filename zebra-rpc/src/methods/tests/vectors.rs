@@ -4801,7 +4801,7 @@ async fn rpc_z_listunifiedreceivers() {
 /// [GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3).
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
-    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver};
+    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver, Revision, Uitem};
 
     let _init_guard = zebra_test::init();
 
@@ -4836,7 +4836,7 @@ async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
         Receiver::Sapling(bad_sapling),
         Receiver::Orchard([0xFF; 43]),
     ] {
-        let encoded = UnifiedAddress::try_from_items(vec![receiver])
+        let encoded = UnifiedAddress::try_from_items(Revision::R0, vec![Uitem::Data(receiver)])
             .expect("unified container construction does not validate inner bytes")
             .encode(&NetworkType::Main);
         let error = rpc

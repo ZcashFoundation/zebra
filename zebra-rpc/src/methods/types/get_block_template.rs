@@ -19,7 +19,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
@@ -565,14 +565,14 @@ impl MinerParams {
     /// Randomizes the memo.
     pub fn randomize_memo(&mut self) {
         let mut random = [0u8; 512];
-        OsRng.fill_bytes(&mut random);
+        UnwrapErr(SysRng).fill_bytes(&mut random);
         self.memo = Some(MemoBytes::from_bytes(&random).unwrap());
     }
 
     /// Randomizes the miner data, keeping the `🦓` marker prefix and separator.
     pub fn randomize_data(&mut self) {
         let mut random = [0u8; 32];
-        OsRng.fill_bytes(&mut random);
+        UnwrapErr(SysRng).fill_bytes(&mut random);
         self.data = push_value(&coinbase_data(&random));
     }
 }

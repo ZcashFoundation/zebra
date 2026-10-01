@@ -12,8 +12,8 @@ mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-use bellman::groth16::PreparedVerifyingKey;
 use bls12_381::Bls12;
+use groth16::PreparedVerifyingKey;
 
 use zcash_primitives::transaction::components::sprout::JsDescription;
 use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};

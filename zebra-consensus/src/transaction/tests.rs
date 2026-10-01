@@ -4265,7 +4265,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     let second_nullifier = sprout::note::Nullifier([1u8; 32].into());
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
-        x25519::PublicKey::from(&x25519::EphemeralSecret::random_from_rng(rand::thread_rng()));
+        x25519::PublicKey::from(&x25519::EphemeralSecret::random_from_rng(&mut rand::rng()));
     let random_seed = sprout::RandomSeed::from([0u8; 32]);
     let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
         .expect("Failure to deserialize dummy MAC");
@@ -4287,7 +4287,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     // Create a usable signing key
-    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let signing_key = ed25519::SigningKey::new(rand::rng());
     let verification_key = ed25519::VerificationKey::from(&signing_key);
 
     // Populate join split data with the dummy join split.
@@ -4363,7 +4363,7 @@ fn modify_joinsplit_bytes_and_resign(
     // The sighash commits to `joinSplitPubKey` (but not to `joinSplitSig`), so write the new
     // public key before computing the sighash to sign below. In a V4 transaction with JoinSplits,
     // `joinSplitPubKey` is the 32 bytes preceding the final 64-byte `joinSplitSig`.
-    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let signing_key = ed25519::SigningKey::new(rand::rng());
     let verification_key = ed25519::VerificationKey::from(&signing_key);
     let pub_key_offset = tx_bytes.len() - 96;
     tx_bytes[pub_key_offset..pub_key_offset + 32]

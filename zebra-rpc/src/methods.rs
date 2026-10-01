@@ -3311,16 +3311,22 @@ where
         for item in unified_address.items() {
             match item {
                 zcash_address::unified::Receiver::Orchard(data) => {
-                    let addr = Option::<orchard::Address>::from(
-                        orchard::Address::from_raw_address_bytes(&data),
-                    )
+                    Option::<orchard::Address>::from(orchard::Address::from_raw_address_bytes(
+                        &data,
+                    ))
                     .ok_or("Unified Address contains an invalid Orchard receiver")
                     .map_error(server::error::LegacyCode::InvalidParameter)?;
-                    orchard = Some(
-                        zcash_keys::address::Receiver::Orchard(addr)
-                            .to_zcash_address(network)
-                            .encode(),
-                    );
+
+                    // `zcash_keys` encodes unified addresses as ZIP 316 Revision 2, but
+                    // zcashd returns the Revision 0 (`u`-prefixed) encoding.
+                    let addr = zcash_address::unified::Address::try_from_items(
+                        zcash_address::unified::Revision::R0,
+                        vec![zcash_address::unified::Uitem::Data(
+                            zcash_address::unified::Receiver::Orchard(data),
+                        )],
+                    )
+                    .expect("a single Orchard receiver is a valid Revision 0 unified address");
+                    orchard = Some(addr.encode(&network));
                 }
                 zcash_address::unified::Receiver::Sapling(data) => {
                     let addr = zebra_chain::primitives::Address::try_from_sapling(network, data)
