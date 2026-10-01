@@ -488,6 +488,36 @@ impl NetworkUpgrade {
         })
     }
 
+    /// Returns the total target block spacing of the blocks after `from` up to and including
+    /// `to`, charging each block the spacing at its own height. Negative when `to` is below `from`.
+    pub fn duration_between_heights(
+        network: &Network,
+        from: block::Height,
+        to: block::Height,
+    ) -> Duration {
+        let low = i64::from(from.0.min(to.0));
+        let high = i64::from(from.0.max(to.0));
+
+        let target_spacings: Vec<_> = NetworkUpgrade::target_spacings(network).collect();
+        let seconds: i64 = target_spacings
+            .iter()
+            .enumerate()
+            .map(|(index, (start_height, target_spacing))| {
+                // The heights in `low + 1..=high` that use this target spacing.
+                let first = i64::from(start_height.0).max(low + 1);
+                let last = target_spacings
+                    .get(index + 1)
+                    .map_or(high, |(next_height, _)| {
+                        (i64::from(next_height.0) - 1).min(high)
+                    });
+
+                (last - first + 1).max(0) * target_spacing.num_seconds()
+            })
+            .sum();
+
+        Duration::seconds(if to < from { -seconds } else { seconds })
+    }
+
     /// Returns the minimum difficulty block spacing for `network` and `height`.
     /// Returns `None` if the testnet minimum difficulty consensus rule is not active.
     ///

@@ -502,3 +502,60 @@ fn minimum_difficulty_spacing_boundaries() {
         }
     }
 }
+
+/// The closed-form duration between heights matches a per-block sum across spacing changes.
+#[test]
+fn duration_between_heights_matches_per_block_sum() {
+    use chrono::Duration;
+
+    use super::testnet::{ConfiguredActivationHeights, Parameters};
+
+    let _init_guard = zebra_test::init();
+    let testnet = Parameters::build()
+        .with_slow_start_interval(block::Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(300_000),
+            nu7: Some(400_000),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("configured Testnet parameters are valid");
+
+    let per_block_sum = |low: u32, high: u32| {
+        (low + 1..=high)
+            .map(|h| NetworkUpgrade::target_spacing_for_height(&testnet, block::Height(h)))
+            .fold(Duration::zero(), |sum, spacing| sum + spacing)
+    };
+    let between = |low, high| {
+        NetworkUpgrade::duration_between_heights(&testnet, block::Height(low), block::Height(high))
+    };
+
+    // Pre-Blossom, across Blossom, across NU7, and across both.
+    for (low, high) in [
+        (100_000, 100_010),
+        (299_990, 300_010),
+        (399_990, 400_010),
+        (299_990, 400_010),
+    ] {
+        assert_eq!(
+            between(low, high),
+            per_block_sum(low, high),
+            "{low}..={high}"
+        );
+    }
+    assert_eq!(between(400_010, 299_990), -per_block_sum(299_990, 400_010));
+    assert_eq!(between(400_000, 400_000), Duration::zero());
+
+    // Mainnet has no NU7 height, so 84 days is exactly 84 * 1152 post-Blossom blocks.
+    let release = block::Height(3_444_000);
+    assert_eq!(
+        NetworkUpgrade::duration_between_heights(
+            &Mainnet,
+            release,
+            block::Height(release.0 + 84 * 1152)
+        ),
+        Duration::days(84)
+    );
+}

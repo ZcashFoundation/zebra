@@ -2,24 +2,19 @@
 
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use color_eyre::Report;
 
 use zebra_chain::{
     block::Height,
-    chain_tip::ChainTip,
-    parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
+    chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
+    parameters::Network,
 };
 
 use crate::application::release_version;
 
 /// The estimated height that this release will be published.
 pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_444_000;
-
-/// The estimated number of blocks per day, with the post-Blossom 75-second target spacing.
-///
-/// All Zebra releases ship after Blossom, so this matches the spacing `check()` sees at any
-/// reachable tip height.
-pub const ESTIMATED_BLOCKS_PER_DAY: u32 = 24 * 60 * 60 / POST_BLOSSOM_POW_TARGET_SPACING;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.
@@ -74,23 +69,24 @@ pub async fn start(
 /// the tip goes past it. This matches zcashd, where `end_of_service.block_height` is also the
 /// threshold rather than the first halted block.
 pub fn end_of_support_height(network: &Network) -> Option<Height> {
-    if network != &Network::Mainnet {
-        return None;
-    }
+    (network == &Network::Mainnet).then(|| estimated_height_after_release(network, EOS_PANIC_AFTER))
+}
 
-    Some(Height(
-        ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY),
-    ))
+/// Returns the estimated height `days` after [`ESTIMATED_RELEASE_HEIGHT`] on `network`,
+/// following the target block spacing in force at each height.
+pub fn estimated_height_after_release(network: &Network, days: u32) -> Height {
+    // Only the elapsed time matters, so any reference time works.
+    let release_time = DateTime::<Utc>::UNIX_EPOCH;
+    NetworkChainTipHeightEstimator::new(release_time, Height(ESTIMATED_RELEASE_HEIGHT), network)
+        .estimate_height_at(release_time + chrono::Duration::days(days.into()))
 }
 
 /// Check if the current release is too old and panic if so.
-pub fn check(tip_height: Height, _network: &Network) {
+pub fn check(tip_height: Height, network: &Network) {
     info!("Checking if Zebra release is inside support range ...");
 
-    let panic_height =
-        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_PANIC_AFTER * ESTIMATED_BLOCKS_PER_DAY));
-    let warn_height =
-        Height(ESTIMATED_RELEASE_HEIGHT + (EOS_WARN_AFTER * ESTIMATED_BLOCKS_PER_DAY));
+    let panic_height = estimated_height_after_release(network, EOS_PANIC_AFTER);
+    let warn_height = estimated_height_after_release(network, EOS_WARN_AFTER);
 
     if tip_height > panic_height {
         panic!(

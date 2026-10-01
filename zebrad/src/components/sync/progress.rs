@@ -15,7 +15,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     fmt::humantime_seconds,
-    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
+    parameters::{Network, NetworkUpgrade},
 };
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
@@ -89,29 +89,16 @@ pub async fn show_block_chain_progress(
         .add(min_after_checkpoint_blocks)
         .expect("hard-coded checkpoint height is far below Height::MAX");
 
-    let target_block_spacing = NetworkUpgrade::target_spacing_for_height(&network, Height::MAX);
-    let max_block_spacing =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, Height::MAX);
-
-    // We expect the state height to increase at least once in this interval.
-    //
-    // Most chain forks are 1-7 blocks long.
-    //
-    // TODO: remove the target_block_spacing multiplier,
-    //       after fixing slow syncing near tip (#3375)
-    let min_state_block_interval = max_block_spacing.unwrap_or(target_block_spacing * 4) * 2;
-
-    // Formatted strings for logging.
-    let target_block_spacing = humantime_seconds(
-        target_block_spacing
-            .to_std()
-            .expect("constant fits in std::Duration"),
+    // The blocks after a checkpoint update are mined just above the highest checkpoint.
+    let min_minutes_after_checkpoint_update = div_ceil(
+        i64::from(MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE)
+            * NetworkUpgrade::target_spacing_for_height(
+                &network,
+                network.checkpoint_list().max_height(),
+            )
+            .num_seconds(),
+        60,
     );
-    let max_block_spacing = max_block_spacing
-        .map(|duration| {
-            humantime_seconds(duration.to_std().expect("constant fits in std::Duration"))
-        })
-        .unwrap_or_else(|| "None".to_string());
 
     // The last time we downloaded and verified at least one block.
     //
@@ -197,6 +184,33 @@ pub async fn show_block_chain_progress(
                 last_log_time = instant_now;
             }
 
+            // Use the spacing at the estimated network tip, which changes at NU7 (ZIP 218).
+            let target_block_spacing =
+                NetworkUpgrade::target_spacing_for_height(&network, estimated_height);
+            let max_block_spacing =
+                NetworkUpgrade::minimum_difficulty_spacing_for_height(&network, estimated_height);
+
+            // We expect the state height to increase at least once in this interval.
+            //
+            // Most chain forks are 1-7 blocks long.
+            //
+            // TODO: remove the target_block_spacing multiplier,
+            //       after fixing slow syncing near tip (#3375)
+            let min_state_block_interval =
+                max_block_spacing.unwrap_or(target_block_spacing * 4) * 2;
+
+            // Formatted strings for logging.
+            let target_block_spacing = humantime_seconds(
+                target_block_spacing
+                    .to_std()
+                    .expect("constant fits in std::Duration"),
+            );
+            let max_block_spacing = max_block_spacing
+                .map(|duration| {
+                    humantime_seconds(duration.to_std().expect("constant fits in std::Duration"))
+                })
+                .unwrap_or_else(|| "None".to_string());
+
             // TODO: split logging / status updates into their own function.
 
             // Work out the sync progress towards the estimated tip.
@@ -260,11 +274,6 @@ pub async fn show_block_chain_progress(
             } else if is_syncer_stopped && current_height <= after_checkpoint_height {
                 // We've stopped syncing blocks,
                 // but we're below the minimum height estimated from our checkpoints.
-                let min_minutes_after_checkpoint_update = div_ceil(
-                    MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE * POST_BLOSSOM_POW_TARGET_SPACING,
-                    60,
-                );
-
                 warn!(
                     %sync_percent,
                     ?current_height,
