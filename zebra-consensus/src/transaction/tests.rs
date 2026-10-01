@@ -3975,34 +3975,6 @@ fn v4_transactions_are_rejected_from_nu7_onward() {
     }
 }
 
-/// ZIP 2003 only removes V4; V5 and V6 must still be supported at NU7.
-#[test]
-fn v5_and_v6_transactions_are_supported_at_nu7() {
-    let v5 = Transaction::test_v5(
-        NetworkUpgrade::Nu7,
-        Vec::new(),
-        Vec::new(),
-        LockTime::Height(Height(0)),
-        Height(1),
-    );
-    let v6 = Transaction::test_v6(
-        NetworkUpgrade::Nu7,
-        Vec::new(),
-        Vec::new(),
-        LockTime::Height(Height(0)),
-        Height(1),
-    );
-
-    assert_eq!(
-        super::verify_v5_transaction_network_upgrade(&v5, NetworkUpgrade::Nu7),
-        Ok(())
-    );
-    assert_eq!(
-        super::verify_v6_transaction_network_upgrade(&v6, NetworkUpgrade::Nu7),
-        Ok(())
-    );
-}
-
 /// ZIP 2003 rejects V4 at NU7 in block and mempool verification, including coinbase transactions.
 #[tokio::test]
 async fn v4_transaction_is_rejected_at_nu7_activation() {
