@@ -194,14 +194,34 @@ impl NonFinalizedState {
             );
         }
 
+        // Ensure the backup directory exists and is usable before restoring from
+        // or writing to it. If it can't be created or read — for example, the
+        // path already exists as a regular file, or as a directory we can't read
+        // — log a clear, actionable error and start without the non-finalized
+        // backup rather than aborting. (`create_dir_all` succeeds for a directory
+        // that already exists but is unreadable, so we also probe it with
+        // `read_dir`, matching the access `restore_backup` needs next.) The
+        // backup is a resilience optimisation, not required for correct
+        // operation, and `panic = "abort"` would otherwise turn a recoverable
+        // filesystem state into a startup crash loop. See #10544.
+        let backup_dir_usable = std::fs::create_dir_all(&backup_dir_path)
+            .and_then(|()| std::fs::read_dir(&backup_dir_path).map(drop));
+        if let Err(error) = backup_dir_usable {
+            tracing::error!(
+                ?backup_dir_path,
+                %error,
+                "the non-finalized state backup directory could not be created or read; starting \
+                 without the non-finalized state backup. If this path exists as a file, or is a \
+                 directory Zebra cannot read, remove or relocate it and restart zebrad to re-enable \
+                 backups",
+            );
+            return with_watch_channel(self);
+        }
+
         let non_finalized_state = {
             let backup_dir_path = backup_dir_path.clone();
             let finalized_state = finalized_state.clone();
             tokio::task::spawn_blocking(move || {
-                // Create a new backup directory if none exists
-                std::fs::create_dir_all(&backup_dir_path)
-                    .expect("failed to create non-finalized state backup directory");
-
                 if should_restore_backup {
                     backup::restore_backup(self, &backup_dir_path, &finalized_state)
                 } else {
