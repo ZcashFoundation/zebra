@@ -25,7 +25,7 @@ Below is a simplified Mermaid diagram showing the current workflows, their key t
 graph TB
   %% Triggers
   subgraph Triggers
-    PR[Pull Request] & Push[Push to main] & ReleaseEvent[GitHub Release] & Schedule[Weekly] & Manual[Manual]
+    PR[Pull Request] & Push[Push to main or a release branch] & ReleaseEvent[GitHub Release] & Schedule[Weekly] & Manual[Manual]
   end
 
   %% Reusable build
@@ -224,7 +224,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
-- **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
+- **Release** (`release.yml`): Creates or updates Release PRs with release-plz on `main` and on every `release/X.Y` branch, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
