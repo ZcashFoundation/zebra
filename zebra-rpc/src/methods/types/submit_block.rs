@@ -108,3 +108,33 @@ impl Default for SubmitBlockChannel {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for #10571: an accepted `submitblock` response serializes
+    /// to an explicit JSON `null`, so the JSON-RPC response carries `"result":
+    /// null` rather than omitting the `result` member. (The report was not
+    /// reproducible; the serialization is correct.)
+    #[test]
+    fn accepted_serializes_to_null() {
+        assert_eq!(
+            serde_json::to_value(SubmitBlockResponse::Accepted).expect("serializes"),
+            serde_json::Value::Null,
+        );
+    }
+
+    /// A non-accepted `submitblock` response serializes to its kebab-case string
+    /// reason (not `null`), matching the Zcash RPC contract.
+    #[test]
+    fn error_response_serializes_to_string() {
+        assert_eq!(
+            serde_json::to_value(SubmitBlockResponse::ErrorResponse(
+                SubmitBlockErrorResponse::Rejected
+            ))
+            .expect("serializes"),
+            serde_json::json!("rejected"),
+        );
+    }
+}
