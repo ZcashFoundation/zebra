@@ -21,7 +21,7 @@ where
     let mut results = FuturesOrdered::new();
     for i in 0..n {
         let span = tracing::trace_span!("sig", i);
-        let sk = SigningKey::new(thread_rng());
+        let sk = SigningKey::new(rand::rng());
         let vk_bytes = VerificationKeyBytes::from(&sk);
         let msg = b"BatchVerifyTest";
         let sig = if Some(i) == bad_index {

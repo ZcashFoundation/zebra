@@ -143,6 +143,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU6_1, Nu6_1),
         (NU6_2, Nu6_2),
         (NU6_3, Nu6_3),
+        (NU7, Nu7),
     ]
 };
 

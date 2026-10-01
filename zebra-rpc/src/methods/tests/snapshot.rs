@@ -47,16 +47,13 @@ use zebra_network::{
 };
 use zebra_node_services::{mempool, BoxError};
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
-use zebra_test::{
-    mock_service::{MockService, PanicAssertion},
-    vectors::BLOCK_MAINNET_1_BYTES,
-};
+use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::{
-        get_block_template::GetBlockTemplateRequestMode,
+        get_block_template::{BlockProposalResponse, GetBlockTemplateRequestMode},
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
         subsidy::GetBlockSubsidyResponse,
@@ -1120,7 +1117,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         state,
         read_state,
-        block_verifier_router.clone(),
+        block_verifier_router,
         mock_sync_status.clone(),
         mock_tip.clone(),
         mock_address_book,
@@ -1183,11 +1180,19 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("tip_height", get_block_subsidy, &settings);
 
-    let get_block_subsidy = rpc
-        .get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT))
-        .await
-        .expect("We should have a success response");
-    snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+    let get_block_subsidy = rpc.get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT)).await;
+    if network.is_default_testnet() {
+        // Post-D subsidy depends on the unavailable future parent's NSM reserve.
+        assert_eq!(
+            get_block_subsidy
+                .expect_err("future post-D subsidy requires an existing parent block")
+                .code(),
+            i32::from(server::error::LegacyCode::Misc),
+        );
+    } else {
+        let get_block_subsidy = get_block_subsidy.expect("We should have a success response");
+        snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+    }
 
     // `getnetworkinfo`
     let get_network_info = rpc
@@ -1266,20 +1271,21 @@ pub async fn test_mining_rpcs<State, ReadState>(
     // send tip hash and time needed for getblocktemplate rpc
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
 
+    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
     let (rpc_mock_state, _) = RpcImpl::new(
         network.clone(),
-        mining_conf.clone(),
+        mining_conf,
         false,
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         read_state.clone(),
-        block_verifier_router,
-        mock_sync_status.clone(),
-        mock_tip.clone(),
+        mock_block_verifier_router.clone(),
+        mock_sync_status,
+        mock_tip,
         MockAddressBookPeers::default(),
-        rx.clone(),
+        rx,
         None,
     );
 
@@ -1380,49 +1386,40 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
 
-    // the following snapshots use a mock read_state and block_verifier_router
-
-    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
-    let (rpc_mock_state_verifier, _) = RpcImpl::new(
-        network.clone(),
-        mining_conf,
-        false,
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool, 1),
-        state.clone(),
-        read_state.clone(),
-        mock_block_verifier_router.clone(),
-        mock_sync_status,
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    let get_block_template_fut =
-        rpc_mock_state_verifier.get_block_template(Some(GetBlockTemplateParameters {
-            mode: GetBlockTemplateRequestMode::Proposal,
-            data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
-            ..Default::default()
-        }));
-
-    let mock_block_verifier_router_request_handler = async move {
-        mock_block_verifier_router
-            .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
-            .await
-            .respond(Hash::from([0; 32]));
-    };
-
-    let (get_block_template, ..) = tokio::join!(
-        get_block_template_fut,
-        mock_block_verifier_router_request_handler,
-    );
-
-    let get_block_template =
-        get_block_template.expect("unexpected error in getblocktemplate RPC call");
-
-    snapshot_rpc_getblocktemplate("proposal", get_block_template, None, &settings);
+    // Mainnet still accepts verifier-approved proposals without the reserve preflight.
+    // Public Testnet requires the live parent even before NU7, because reissuance is scheduled.
+    let proposal = network.blockchain_map()[&1].to_vec();
+    let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
+        mode: GetBlockTemplateRequestMode::Proposal,
+        data: Some(HexData(proposal)),
+        ..Default::default()
+    }));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        if network.is_mainnet() {
+            let verifier_response = async {
+                mock_block_verifier_router
+                    .expect_request_that(|request| matches!(request, Request::CheckProposal(_)))
+                    .await
+                    .respond(Hash::from([0; 32]));
+            };
+            let (response, ()) = tokio::join!(get_block_template, verifier_response);
+            assert_eq!(
+                response.unwrap(),
+                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+            );
+            read_state.clone().expect_no_requests().await;
+        } else {
+            let (response, ()) =
+                tokio::join!(get_block_template, make_mock_read_state_request_handler());
+            assert!(matches!(
+                response.unwrap(),
+                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
+            ));
+            mock_block_verifier_router.expect_no_requests().await;
+        }
+    })
+    .await
+    .expect("proposal validation must not stall");
 
     // These RPC snapshots use the populated state
 

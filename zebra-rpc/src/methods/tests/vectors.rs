@@ -50,6 +50,7 @@ use crate::methods::{
         constants::{CAPABILITIES_FIELD, NONCE_RANGE_FIELD},
         CoinbaseCache, GetBlockTemplateRequestMode,
     },
+    types::transaction::Input,
 };
 
 use super::super::*;
@@ -790,6 +791,35 @@ async fn rpc_getblock() {
             }
         } else {
             panic!("Expected GetBlock::Object");
+        }
+    }
+
+    // Make height calls with verbosity=3 and check response. These early blocks only contain
+    // coinbase transactions, so every transaction must have no fee and its coinbase input must
+    // have no prevout.
+    for i in 0..blocks.len() {
+        let get_block = rpc
+            .get_block(i.to_string(), Some(3u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        let GetBlockResponse::Object(obj) = &get_block else {
+            panic!("Expected GetBlock::Object");
+        };
+
+        for actual_tx in obj.tx.iter() {
+            let GetBlockTransaction::Object(tx_object) = actual_tx else {
+                panic!("verbosity 3 must return transaction objects");
+            };
+
+            // Every transaction in these blocks is a coinbase, so there is no fee and no prevout.
+            assert_eq!(tx_object.fee(), None);
+            for input in &tx_object.inputs {
+                assert!(
+                    matches!(input, Input::Coinbase { .. }),
+                    "these blocks only contain coinbase inputs",
+                );
+            }
         }
     }
 
@@ -2921,7 +2951,11 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                     .iter()
                     .map(|transaction| transaction.fee.zatoshis())
                     .sum::<i64>();
-                assert_eq!(template.coinbase_txn.fee.zatoshis(), -reported_fees);
+                assert_eq!(reported_fees, fees);
+                assert_eq!(
+                    template.coinbase_txn.fee.zatoshis(),
+                    -(fees - fees * 60 / 100)
+                );
                 assert_eq!(template.mutable, ["time"]);
             }
         }
@@ -4767,7 +4801,7 @@ async fn rpc_z_listunifiedreceivers() {
 /// [GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3).
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
-    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver};
+    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver, Revision, Uitem};
 
     let _init_guard = zebra_test::init();
 
@@ -4802,7 +4836,7 @@ async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
         Receiver::Sapling(bad_sapling),
         Receiver::Orchard([0xFF; 43]),
     ] {
-        let encoded = UnifiedAddress::try_from_items(vec![receiver])
+        let encoded = UnifiedAddress::try_from_items(Revision::R0, vec![Uitem::Data(receiver)])
             .expect("unified container construction does not validate inner bytes")
             .encode(&NetworkType::Main);
         let error = rpc
@@ -4978,37 +5012,60 @@ async fn rpc_gettxout() {
 async fn rpc_get_standard_fee() {
     let _init_guard = zebra_test::init();
 
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-    let (tip, _tip_sender) = MockChainTip::new();
-
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _rpc_tx_queue) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(state.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        tip,
-        MockAddressBookPeers::default(),
-        rx,
+    // The fee applies to the block after the tip, so Mainnet switches at a tip one block below
+    // the activation height.
+    let tip_heights = [
         None,
-    );
+        Some(Height(3_589_998)),
+        Some(Height(3_589_999)),
+        Some(Height(3_590_000)),
+    ];
 
-    let response = rpc
-        .get_standard_fee()
-        .await
-        .expect("get_standard_fee should succeed");
+    for (network, expected_fees) in [
+        (Mainnet, [5000, 5000, 1000, 1000]),
+        (Network::new_default_testnet(), [1000; 4]),
+        (Network::new_regtest(Default::default()), [1000; 4]),
+    ] {
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    assert_eq!(response.standard_fee(), 1000);
-    assert_eq!(response.version(), 0);
+        let (tip, tip_sender) = MockChainTip::new();
+
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            network.clone(),
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        for (tip_height, expected_fee) in tip_heights.into_iter().zip(expected_fees) {
+            tip_sender.send_best_tip_height(tip_height);
+
+            let response = rpc
+                .get_standard_fee()
+                .await
+                .expect("get_standard_fee should succeed");
+
+            assert_eq!(
+                response.standard_fee(),
+                expected_fee,
+                "{network} with tip {tip_height:?}"
+            );
+            assert_eq!(response.version(), 0);
+        }
+    }
 }
 
 /// `getblocksubsidy` must report the funding stream metadata era of the height's active upgrade,

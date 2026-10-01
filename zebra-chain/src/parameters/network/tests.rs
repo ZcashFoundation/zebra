@@ -11,8 +11,8 @@ use crate::{
     block::Height,
     parameters::{
         subsidy::{
-            block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving, halving_divisor,
-            height_for_halving, scheduled_block_subsidy, ParameterSubsidy as _,
+            block_subsidy, halving, halving_divisor, height_for_halving, scheduled_block_subsidy,
+            ParameterSubsidy as _,
         },
         testnet::ConfiguredActivationHeights,
         NetworkUpgrade,
@@ -83,6 +83,176 @@ fn funding_stream_p2pkh_recipient_is_matched_exactly() -> Result<(), Report> {
 }
 
 #[test]
+fn funding_stream_overlaps_are_rejected() {
+    use crate::parameters::{
+        network::error::ParametersBuilderError,
+        subsidy::FundingStreamReceiver,
+        testnet::{
+            ConfiguredFundingStreamRecipient, ConfiguredFundingStreams, Parameters,
+            RegtestParameters,
+        },
+    };
+
+    // The overlapping groups are not adjacent in configuration order.
+    let streams: Vec<_> = [(20, 22), (40, 41), (21, 23)]
+        .into_iter()
+        .map(|(start, end)| ConfiguredFundingStreams {
+            height_range: Some(Height(start)..Height(end)),
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Deferred,
+                numerator: 20,
+                addresses: None,
+            }]),
+        })
+        .collect();
+    let expected = ParametersBuilderError::OverlappingFundingStreamRanges {
+        first: Height(20)..Height(22),
+        second: Height(21)..Height(23),
+    };
+    assert_eq!(
+        Parameters::build()
+            .with_funding_streams(streams.clone())
+            .to_network()
+            .unwrap_err(),
+        expected,
+    );
+    assert_eq!(
+        Parameters::new_regtest(RegtestParameters {
+            funding_streams: Some(streams),
+            ..Default::default()
+        })
+        .unwrap_err(),
+        expected,
+    );
+}
+
+#[test]
+fn funding_stream_inherited_nu7_overlap_is_rejected() -> Result<(), Report> {
+    use crate::parameters::{
+        network::error::ParametersBuilderError,
+        subsidy::{constants::testnet, FundingStreamReceiver},
+        testnet::{ConfiguredFundingStreamRecipient, ConfiguredFundingStreams, Parameters},
+    };
+
+    let extra = ConfiguredFundingStreams {
+        height_range: Some(Height(4_476_000)..Height(4_476_001)),
+        recipients: Some(vec![ConfiguredFundingStreamRecipient {
+            numerator: 1,
+            ..ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::Ecc)
+        }]),
+    };
+    let inherited = Parameters::build().with_funding_streams(vec![
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        extra.clone(),
+    ]);
+    assert!(matches!(
+        inherited.to_network(),
+        Err(ParametersBuilderError::OverlappingFundingStreamRanges { first, second })
+            if first.contains(&Height(4_476_000))
+                && second == (Height(4_476_000)..Height(4_476_001))
+    ));
+
+    // Explicit legacy end heights are not stretched by NU7 and can be followed by another group.
+    let mut explicit: Vec<_> = testnet::FUNDING_STREAMS.iter().map(Into::into).collect();
+    explicit.push(extra);
+    let network = Parameters::build()
+        .with_funding_streams(explicit)
+        .to_network()?;
+    assert_eq!(
+        network
+            .funding_streams(Height(4_476_000))
+            .unwrap()
+            .recipient(FundingStreamReceiver::Ecc)
+            .unwrap()
+            .numerator(),
+        1,
+    );
+    Ok(())
+}
+
+#[test]
+fn funding_stream_disjoint_and_empty_ranges_are_accepted() -> Result<(), Report> {
+    use crate::parameters::{
+        subsidy::FundingStreamReceiver,
+        testnet::{ConfiguredFundingStreamRecipient, ConfiguredFundingStreams, Parameters},
+    };
+
+    // Unsorted adjacent groups and an empty range within a live group remain unambiguous.
+    let streams = [(22, 24, 2), (21, 21, 0), (20, 22, 1), (0, 0, 0)]
+        .into_iter()
+        .map(|(start, end, numerator)| ConfiguredFundingStreams {
+            height_range: Some(Height(start)..Height(end)),
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Deferred,
+                numerator,
+                addresses: None,
+            }]),
+        })
+        .collect();
+    let network = Parameters::build()
+        .with_funding_streams(streams)
+        .to_network()?;
+    for (height, numerator) in [(20, 1), (21, 1), (22, 2), (23, 2)] {
+        assert_eq!(
+            network
+                .funding_streams(Height(height))
+                .unwrap()
+                .recipient(FundingStreamReceiver::Deferred)
+                .unwrap()
+                .numerator(),
+            numerator,
+        );
+    }
+    assert!(network.funding_streams(Height(0)).is_none());
+    assert!(network.funding_streams(Height(24)).is_none());
+    Ok(())
+}
+
+#[test]
+fn funding_stream_tex_recipient_is_rejected() -> Result<(), Report> {
+    use crate::parameters::{
+        network::error::ParametersBuilderError,
+        subsidy::FundingStreamReceiver,
+        testnet::{
+            ConfiguredFundingStreamRecipient, ConfiguredFundingStreams, Parameters,
+            RegtestParameters,
+        },
+    };
+
+    let address = "textest1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqggnfr9";
+    let streams = vec![ConfiguredFundingStreams {
+        height_range: Some(Height(4_465_026)..Height(4_465_027)),
+        recipients: Some(vec![ConfiguredFundingStreamRecipient {
+            receiver: FundingStreamReceiver::MajorGrants,
+            numerator: 8,
+            addresses: Some(vec![address.to_string()]),
+        }]),
+    }];
+    let expected = ParametersBuilderError::UnsupportedFundingStreamAddress {
+        receiver: FundingStreamReceiver::MajorGrants,
+        address: address.parse()?,
+    };
+    assert_eq!(
+        Parameters::build()
+            .with_funding_streams(streams.clone())
+            .to_network()
+            .unwrap_err(),
+        expected,
+    );
+    assert_eq!(
+        Parameters::new_regtest(RegtestParameters {
+            funding_streams: Some(streams),
+            ..Default::default()
+        })
+        .unwrap_err(),
+        expected,
+    );
+    Ok(())
+}
+
+#[test]
 fn halving_test() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
     for network in Network::iter() {
@@ -116,82 +286,24 @@ fn halving_for_network(network: &Network) -> Result<(), Report> {
         halving_divisor((first_halving_height + 1).unwrap(), network).unwrap()
     );
 
-    assert_eq!(
-        4,
-        halving_divisor(
-            (first_halving_height + POST_BLOSSOM_HALVING_INTERVAL).unwrap(),
-            network
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        8,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 2)).unwrap(),
-            network
-        )
-        .unwrap()
-    );
-
-    assert_eq!(
-        1024,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 9)).unwrap(),
-            network
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        1024 * 1024,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 19)).unwrap(),
-            network
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        1024 * 1024 * 1024,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
-            network
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        1024 * 1024 * 1024 * 1024,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 39)).unwrap(),
-            network
-        )
-        .unwrap()
-    );
-
-    // The largest possible integer divisor
-    assert_eq!(
-        (i64::MAX as u64 + 1),
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
-            network
-        )
-        .unwrap(),
-    );
-
-    // Very large divisors which should also result in zero amounts
-    assert_eq!(
-        None,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 63)).unwrap(),
-            network,
-        ),
-    );
-
-    assert_eq!(
-        None,
-        halving_divisor(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 64)).unwrap(),
-            network,
-        ),
-    );
+    for (index, divisor) in [
+        (2, Some(4)),
+        (3, Some(8)),
+        (10, Some(1024)),
+        (20, Some(1_048_576)),
+        (30, Some(1_073_741_824)),
+        (40, Some(1_099_511_627_776)),
+        (63, Some(9_223_372_036_854_775_808)),
+        (64, None),
+        (65, None),
+    ] {
+        let height = height_for_halving(index, network).unwrap();
+        assert_eq!(
+            divisor,
+            halving_divisor(height, network),
+            "halving divisor at index {index}",
+        );
+    }
 
     assert_eq!(
         None,
@@ -248,110 +360,43 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
         block_subsidy(first_halving_height, network)?
     );
 
-    // After the 2nd halving, the block subsidy is reduced to 1.5625 ZEC
-    // See "7.8 Calculation of Block Subsidy and Founders' Reward"
-    assert_eq!(
-        Amount::<NonNegative>::try_from(156_250_000)?,
-        block_subsidy(
-            (first_halving_height + POST_BLOSSOM_HALVING_INTERVAL).unwrap(),
-            network,
-        )?
-    );
+    // Preserve rounding and exhaustion checks across the NU7 spacing change. Reissuance
+    // depends on the parent's NSM balance, so these vectors check only scheduled issuance.
+    for (index, pre_nu7_amount) in [
+        (2, 156_250_000_i64),
+        (7, 4_882_812),
+        (29, 1),
+        (30, 0),
+        (40, 0),
+        (50, 0),
+        (60, 0),
+        (63, 0),
+        (64, 0),
+        (65, 0),
+    ] {
+        let height = height_for_halving(index, network).unwrap();
+        let expected = if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu7 {
+            pre_nu7_amount / 3
+        } else {
+            pre_nu7_amount
+        };
+        assert_eq!(
+            Amount::<NonNegative>::try_from(expected)?,
+            scheduled_block_subsidy(height, network)?,
+            "scheduled subsidy at halving index {index}",
+        );
+    }
 
-    // After the 7th halving, the block subsidy is reduced to 0.04882812 ZEC
-    // Check that the block subsidy rounds down correctly, and there are no errors
-    assert_eq!(
-        Amount::<NonNegative>::try_from(4_882_812)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 6)).unwrap(),
-            network,
-        )?
-    );
-
-    // After the 29th halving, the block subsidy is 1 zatoshi
-    // Check that the block subsidy is calculated correctly at the limit
-    assert_eq!(
-        Amount::<NonNegative>::try_from(1)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 28)).unwrap(),
-            network,
-        )?
-    );
-
-    // After the 30th halving, there is no block subsidy
-    // Check that there are no errors
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
-            network,
-        )?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 39)).unwrap(),
-            network,
-        )?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 49)).unwrap(),
-            network,
-        )?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 59)).unwrap(),
-            network,
-        )?
-    );
-
-    // The largest possible integer divisor
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
-            network,
-        )?
-    );
-
-    // Other large divisors which should also result in zero
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 63)).unwrap(),
-            network,
-        )?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(
-            (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 64)).unwrap(),
-            network,
-        )?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(Height(Height::MAX_AS_U32 / 4), network)?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(Height(Height::MAX_AS_U32 / 2), network)?
-    );
-
-    assert_eq!(
-        Amount::<NonNegative>::try_from(0)?,
-        block_subsidy(Height::MAX, network)?
-    );
+    for height in [
+        Height(Height::MAX_AS_U32 / 4),
+        Height(Height::MAX_AS_U32 / 2),
+        Height::MAX,
+    ] {
+        assert_eq!(
+            Amount::<NonNegative>::zero(),
+            scheduled_block_subsidy(height, network)?,
+        );
+    }
 
     Ok(())
 }
@@ -359,7 +404,7 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
 #[test]
 fn check_height_for_num_halvings() {
     for network in Network::iter() {
-        for h in 1..1000 {
+        for h in 1..=halving(Height::MAX, &network) {
             let Some(height_for_halving) = height_for_halving(h, &network) else {
                 panic!("could not find height for halving {h}");
             };
@@ -538,13 +583,10 @@ fn check_nsm_block_subsidy_with_parent_pools() -> Result<(), Report> {
     let network = nsm_mainnet_like_testnet(activation.0);
     let initial = network.initial_nsm_value_balance();
 
-    // Mainnet and the default Testnet have no NU7 activation height and no deployment height, so
-    // the balance is never tracked and the ZIP never reissues there.
-    for network in [Network::Mainnet, Network::new_default_testnet()] {
-        assert!(!nsm_value_balance_is_tracked(activation, &network));
-        assert!(!nsm_reissuance_is_active(activation, &network));
-        assert_eq!(network.nsm_reissuance_height(), None);
-    }
+    // Mainnet has no NU7 activation or deployment height, so it never tracks or reissues the balance.
+    assert!(!nsm_value_balance_is_tracked(activation, &Network::Mainnet));
+    assert!(!nsm_reissuance_is_active(activation, &Network::Mainnet));
+    assert_eq!(Network::Mainnet.nsm_reissuance_height(), None);
 
     // This fixture explicitly accelerates reissuance to NU7 activation.
     assert_eq!(network.nsm_reissuance_height(), Some(activation));
@@ -979,8 +1021,8 @@ fn check_zip235_nsm_value_balance_change_overflow() -> Result<(), Report> {
     Ok(())
 }
 
-/// Builds a Regtest network with NU7 activating at `nu7_height`, so [ZIP 218]'s post-NU7 era can
-/// be exercised while NU7 is unscheduled on Mainnet and the default Testnet.
+/// Builds a Regtest network with NU7 activating at `nu7_height` to exercise [ZIP 218]'s
+/// post-NU7 era with a short halving interval.
 ///
 /// [ZIP 218]: https://zips.z.cash/zip-0218
 fn nu7_network(nu7_height: u32) -> Network {

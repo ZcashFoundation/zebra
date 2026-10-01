@@ -585,7 +585,7 @@ async fn limit_initial_peers(
     for better_peers in preferred_peers.values() {
         let mut better_peers = better_peers.clone();
         let (chosen_peers, _unused_peers) = better_peers.partial_shuffle(
-            &mut rand::thread_rng(),
+            &mut rand::rng(),
             config.peerset_initial_target_size - initial_peers.len(),
         );
 

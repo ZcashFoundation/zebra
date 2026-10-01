@@ -126,7 +126,7 @@ use types::{
     get_mempool_info::GetMempoolInfoResponse,
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
-    get_standard_fee::GetStandardFeeResponse,
+    get_standard_fee::{standard_fee, GetStandardFeeResponse},
     long_poll::{LongPollId, LongPollInput},
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
@@ -293,11 +293,17 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
-    /// - `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
+    /// - `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, 2 for a json object with transaction data, and 3 for a json object with transaction data including prevout information for inputs.
     ///
     /// # Notes
     ///
-    /// The `size` field is only returned with verbosity=2.
+    /// The `size` field is only returned with verbosity>=2.
+    ///
+    /// Verbosity 3 adds a `prevout` object to each transparent input and a `fee` field to each
+    /// non-coinbase transaction, matching Bitcoin Core's `getblock` verbosity 3.
+    ///
+    /// Verbosity 3 resolves each spent output by reading its parent transaction, so it is more
+    /// expensive than lower verbosities.
     ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblock")]
@@ -680,8 +686,10 @@ pub trait Rpc {
 
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
-    /// Currently returns a static fee with `version` 0; this will be replaced by
-    /// a dynamic estimate without changing the parameters or result shape.
+    /// Currently returns the ZIP 317 marginal fee for the next block, with `version` 0:
+    /// 5000 zatoshis before Mainnet height 3,590,000, and 1000 zatoshis from that height
+    /// and on test networks. This will be replaced by a dynamic estimate without changing
+    /// the parameters or result shape.
     ///
     /// method: post
     /// tags: wallet
@@ -1551,7 +1559,7 @@ where
                 }
                 _ => unreachable!("unmatched response to a block request"),
             }
-        } else if matches!(verbosity, 1 | 2) {
+        } else if matches!(verbosity, 1..=3) {
             // Reuse the already-resolved `hash_or_height` (rather than the
             // caller-supplied string) so `get_block_header` resolves to the same
             // block this call resolved above, even for tip-relative inputs like a
@@ -1594,7 +1602,7 @@ where
             let hash_or_height = hash.into();
             let transactions_request = match verbosity {
                 1 => zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
-                2 => zebra_state::ReadRequest::BlockAndSize(hash_or_height),
+                2 | 3 => zebra_state::ReadRequest::BlockAndSize(hash_or_height),
                 _other => panic!("get_block_header_fut should be none"),
             };
 
@@ -1602,6 +1610,27 @@ where
             // best chain. Avoid panicking on `try_into()` in the verbosity-2 path,
             // and label such transactions as not in the active chain.
             let in_active_chain = confirmations >= 0;
+
+            // Verbosity 3 adds each input's prevout and the transaction fee, resolved from the
+            // outputs spent by this block in the best chain. Fetch them before the `futs` batch
+            // below: issuing this read while those requests are in flight would contend with them
+            // for a bounded `read_state` buffer's slot and deadlock, because `futs` is not polled
+            // while this future is awaited. A spent output not found in the best chain is absent
+            // from the map, so its input gets no `prevout` and its transaction gets no `fee`.
+            let spent_outputs = if verbosity == 3 {
+                let response = self
+                    .read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::SpentOutputs(hash_or_height))
+                    .await
+                    .map_misc_error()?;
+                let zebra_state::ReadResponse::SpentOutputs(spent_outputs) = response else {
+                    unreachable!("unmatched response to a SpentOutputs request");
+                };
+                spent_outputs.unwrap_or_default()
+            } else {
+                HashMap::new()
+            };
 
             let requests = vec![
                 // Get transaction IDs from the transaction index by block hash
@@ -1640,24 +1669,26 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
-                    let transactions = block
-                        .transactions
-                        .iter()
-                        .map(|tx| {
-                            GetBlockTransaction::Object(Box::new(
-                                TransactionObject::from_transaction(
-                                    tx.clone(),
-                                    Some(height),
-                                    Some(confirmations),
-                                    &network,
-                                    Some(block_time),
-                                    Some(hash),
-                                    Some(in_active_chain),
-                                    tx.hash(),
-                                ),
-                            ))
-                        })
-                        .collect();
+
+                    let mut transactions = Vec::with_capacity(block.transactions.len());
+                    for tx in block.transactions.iter() {
+                        let mut object = TransactionObject::from_transaction(
+                            tx.clone(),
+                            Some(height),
+                            Some(confirmations),
+                            &network,
+                            Some(block_time),
+                            Some(hash),
+                            Some(in_active_chain),
+                            tx.hash(),
+                        );
+
+                        if verbosity == 3 {
+                            object.add_prevouts(tx, &spent_outputs, &network);
+                        }
+
+                        transactions.push(GetBlockTransaction::Object(Box::new(object)));
+                    }
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -3142,11 +3173,19 @@ where
     }
 
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse> {
-        use zebra_chain::transaction::zip317::MARGINAL_FEE;
-
         const VERSION: u32 = 0;
 
-        Ok(GetStandardFeeResponse::new(MARGINAL_FEE, VERSION))
+        // Wallets build transactions for the next block, which is the genesis block if the
+        // state is empty.
+        let next_block_height = match self.latest_chain_tip.best_tip_height() {
+            Some(tip_height) => tip_height.next().map_misc_error()?,
+            None => Height::MIN,
+        };
+
+        Ok(GetStandardFeeResponse::new(
+            standard_fee(&self.network, next_block_height),
+            VERSION,
+        ))
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
@@ -3270,16 +3309,22 @@ where
         for item in unified_address.items() {
             match item {
                 zcash_address::unified::Receiver::Orchard(data) => {
-                    let addr = Option::<orchard::Address>::from(
-                        orchard::Address::from_raw_address_bytes(&data),
-                    )
+                    Option::<orchard::Address>::from(orchard::Address::from_raw_address_bytes(
+                        &data,
+                    ))
                     .ok_or("Unified Address contains an invalid Orchard receiver")
                     .map_error(server::error::LegacyCode::InvalidParameter)?;
-                    orchard = Some(
-                        zcash_keys::address::Receiver::Orchard(addr)
-                            .to_zcash_address(network)
-                            .encode(),
-                    );
+
+                    // `zcash_keys` encodes unified addresses as ZIP 316 Revision 2, but
+                    // zcashd returns the Revision 0 (`u`-prefixed) encoding.
+                    let addr = zcash_address::unified::Address::try_from_items(
+                        zcash_address::unified::Revision::R0,
+                        vec![zcash_address::unified::Uitem::Data(
+                            zcash_address::unified::Receiver::Orchard(data),
+                        )],
+                    )
+                    .expect("a single Orchard receiver is a valid Revision 0 unified address");
+                    orchard = Some(addr.encode(&network));
                 }
                 zcash_address::unified::Receiver::Sapling(data) => {
                     let addr = zebra_chain::primitives::Address::try_from_sapling(network, data)

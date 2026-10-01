@@ -2,13 +2,10 @@
 
 use std::fmt;
 
-use bellman::{
-    gadgets::multipack,
-    groth16::{batch, PreparedVerifyingKey, VerifyingKey},
-    VerificationError,
-};
+use bellman::{gadgets::multipack, VerificationError};
 use bls12_381::Bls12;
 use futures::{future::BoxFuture, FutureExt};
+use groth16::{batch, PreparedVerifyingKey, VerifyingKey};
 use once_cell::sync::Lazy;
 
 use tokio::sync::watch;
@@ -166,7 +163,7 @@ pub fn joinsplit_to_item(
         )
     })?;
 
-    let proof = bellman::groth16::Proof::read(&proof_bytes[..])
+    let proof = groth16::Proof::read(&proof_bytes[..])
         .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?;
 
     Ok(Item::from((proof, primary_inputs)))

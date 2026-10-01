@@ -203,7 +203,7 @@ fn arbitrary_transaction_versions_cover_each_era() -> Result<()> {
         (NetworkUpgrade::Nu6_1, &[4, 5]),
         (NetworkUpgrade::Nu6_2, &[4, 5]),
         (NetworkUpgrade::Nu6_3, &[4, 5, 6]),
-        (NetworkUpgrade::Nu7, &[4, 5, 6]),
+        (NetworkUpgrade::Nu7, &[5, 6]),
     ];
 
     // A deterministic RNG makes the "every version appears" assertions reliable: with 64

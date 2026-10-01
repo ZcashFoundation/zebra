@@ -28,6 +28,10 @@ proptest! {
             .expect("Blossom activation height is missing");
         let blossom_parent_height = (blossom_activation_height - 1)
             .expect("Blossom activates after genesis");
+        let nu7_parent_height = NetworkUpgrade::Nu7
+            .activation_height(&network)
+            .map(|height| height.previous().expect("NU7 activates after genesis"))
+            .unwrap_or(block::Height::MAX);
 
         block_heights.sort();
         let current_height = block_heights[0];
@@ -45,9 +49,15 @@ proptest! {
             )
             // Include the interval ending at Blossom activation in the new spacing.
             + estimate_time_difference(
-                current_height.max(blossom_parent_height),
-                network_height.max(blossom_parent_height),
+                current_height.max(blossom_parent_height).min(nu7_parent_height),
+                network_height.max(blossom_parent_height).min(nu7_parent_height),
                 NetworkUpgrade::Blossom,
+            )
+            // The interval ending at NU7 activation uses its 25-second spacing.
+            + estimate_time_difference(
+                current_height.max(nu7_parent_height),
+                network_height.max(nu7_parent_height),
+                NetworkUpgrade::Nu7,
             );
 
         let time_displacement = calculate_time_displacement(

@@ -3980,23 +3980,10 @@ fn v4_transactions_are_rejected_from_nu7_onward() {
 async fn v4_transaction_is_rejected_at_nu7_activation() {
     let _init_guard = zebra_test::init();
 
-    // NU7 is unscheduled on Mainnet and the default Testnet.
-    let network = Network::new_regtest(
-        ConfiguredActivationHeights {
-            canopy: Some(1),
-            nu5: Some(2),
-            nu6: Some(3),
-            nu6_1: Some(4),
-            nu6_2: Some(5),
-            nu6_3: Some(6),
-            nu7: Some(1_000_000),
-            ..Default::default()
-        }
-        .into(),
-    );
+    let network = Network::new_default_testnet();
     let nu7_height = NetworkUpgrade::Nu7
         .activation_height(&network)
-        .expect("NU7 activation height is configured");
+        .expect("NU7 activation height is scheduled on Testnet");
     let pre_nu7_height = (nu7_height - 1).expect("NU7 does not activate at the genesis height");
 
     // Pay a ZIP 317 conventional fee so mempool admission reaches the version check.
@@ -4278,7 +4265,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     let second_nullifier = sprout::note::Nullifier([1u8; 32].into());
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
-        x25519::PublicKey::from(&x25519::EphemeralSecret::random_from_rng(rand::thread_rng()));
+        x25519::PublicKey::from(&x25519::EphemeralSecret::random_from_rng(&mut rand::rng()));
     let random_seed = sprout::RandomSeed::from([0u8; 32]);
     let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
         .expect("Failure to deserialize dummy MAC");
@@ -4300,7 +4287,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     // Create a usable signing key
-    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let signing_key = ed25519::SigningKey::new(rand::rng());
     let verification_key = ed25519::VerificationKey::from(&signing_key);
 
     // Populate join split data with the dummy join split.
@@ -4376,7 +4363,7 @@ fn modify_joinsplit_bytes_and_resign(
     // The sighash commits to `joinSplitPubKey` (but not to `joinSplitSig`), so write the new
     // public key before computing the sighash to sign below. In a V4 transaction with JoinSplits,
     // `joinSplitPubKey` is the 32 bytes preceding the final 64-byte `joinSplitSig`.
-    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let signing_key = ed25519::SigningKey::new(rand::rng());
     let verification_key = ed25519::VerificationKey::from(&signing_key);
     let pub_key_offset = tx_bytes.len() - 96;
     tx_bytes[pub_key_offset..pub_key_offset + 32]
