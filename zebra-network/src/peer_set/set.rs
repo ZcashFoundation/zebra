@@ -173,17 +173,6 @@ enum StallOutcome {
     Clear,
 }
 
-fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
-    match result {
-        Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHashes { .. }) => Some(StallOutcome::Clear),
-        Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
-        Ok(_) => None,
-        Err(_) => Some(StallOutcome::Stall),
-    }
-}
-
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
 /// # Security
@@ -1068,11 +1057,7 @@ where
             if track_stalls {
                 let stall_tx = self.stall_event_tx.clone();
                 return async move {
-                    let result = fut.await;
-                    if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
-                    }
-                    result.map_err(Into::into)
+                    Self::handle_tracked_find_response(fut.await, p2c_key, stall_tx)
                 }
                 .boxed();
             }
@@ -1093,6 +1078,30 @@ where
         }
         .map_err(Into::into)
         .boxed()
+    }
+
+    /// Classifies a tracked find response and sends its immediate stall outcome.
+    fn handle_tracked_find_response(
+        result: Result<Response, SharedPeerError>,
+        peer: PeerSocketAddr,
+        stall_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
+    ) -> Result<Response, BoxError> {
+        let outcome = match &result {
+            Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => {
+                Some(StallOutcome::Stall)
+            }
+            Ok(Response::BlockHashes { .. }) => Some(StallOutcome::Clear),
+            Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
+            Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
+            Ok(_) => None,
+            Err(_) => Some(StallOutcome::Stall),
+        };
+
+        if let Some(outcome) = outcome {
+            let _ = stall_tx.send((peer, outcome));
+        }
+
+        result.map_err(Into::into)
     }
 
     /// Tries to route a request to a ready peer that advertised that inventory,
