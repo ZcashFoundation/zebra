@@ -94,26 +94,27 @@ jobs:
       # Disk images in GCP are required to be in lowercase, but the blockchain network
       # uses sentence case, so we need to downcase ${{ inputs.network }}.
       #
-      # Disk image names in GCP are limited to 63 characters, so we need to limit
-      # branch names to 12 characters.
+      # Disk image names in GCP are limited to 63 characters, so the ref segment is
+      # limited to 12.
       # Check the `create-state-image` in `zfnd-deploy-integration-tests-gcp.yml` for more details in image names.
       # More info: https://cloud.google.com/compute/docs/naming-resources#resource-name-format
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
-      - name: Format network name and branch name for disks
+      # Passes the cache image ref segment to subsequent steps using $REF_SEGMENT.
+      - name: Format network name and ref segment for disks
         env:
           NETWORK_INPUT: ${{ inputs.network }}
           REF_SLUG: ${{ env.GITHUB_REF_POINT_SLUG_URL }}
         run: |
           echo "NETWORK=${NETWORK_INPUT,,}" >> "$GITHUB_ENV"
-          echo "SHORT_GITHUB_REF=${REF_SLUG:0:12}" >> "$GITHUB_ENV"
+          REF_SEGMENT="$(./.github/workflows/scripts/gcp-cache-image-ref-segment.sh)"
+          echo "REF_SEGMENT=${REF_SEGMENT}" >> "$GITHUB_ENV"
 
       # Check if there are cached state disks available for subsequent jobs to use.
       - name: Check if cached state disks exists
         id: get-available-disks
         env:
-          GITHUB_REF: ${{ env.SHORT_GITHUB_REF }}
+          REF_SEGMENT: ${{ env.REF_SEGMENT }}
           NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
           DISK_PREFIX: ${{ inputs.disk_prefix }}
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
