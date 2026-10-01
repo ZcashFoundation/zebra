@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: Updated `sapling-crypto` to 0.9, whose `Node` appears in `ReadResponse::SaplingSubtrees`.
-time: 2026-10-01T13:23:16.282600+00:00

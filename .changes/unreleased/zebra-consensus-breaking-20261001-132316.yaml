@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: breaking
-body: Updated `zcash_primitives` and `zcash_proofs` to 0.31.0-pre.0 for NU7, along with `orchard` 0.16, `sapling-crypto` 0.9, `halo2_proofs` 0.4, `bellman` 0.15, `bls12_381` 0.9, `jubjub` 0.11, `reddsa` 0.6, `redjubjub` 0.9, `zcash_script` 0.6 and `libzcash_script` 0.2. Groth16 types now come from the `groth16` 0.2 crate instead of `bellman::groth16`, so `groth16::Item` converts from `groth16::batch::Item` and `groth16::SPROUT` holds `groth16` verifying keys. `ed25519::Item` is built from `ed25519-zebra` 5.0.0 types.
-time: 2026-10-01T13:23:16.282600+00:00

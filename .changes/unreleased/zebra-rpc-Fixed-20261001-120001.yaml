@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Fixed
-body: "`getdeprecationinfo` sums the target spacing of each remaining block, so `estimated_time` stays correct across Blossom and NU7 target spacing changes ([#11483](https://github.com/ZcashFoundation/zebra/issues/11483))."
-time: 2026-10-01T12:00:01.000000000-03:00

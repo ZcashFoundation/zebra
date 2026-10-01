@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: "`ContextuallyVerifiedBlock::with_block_and_spent_utxos` now also requires the network and parent chain value pools. It performs accounting, not coinbase payout validation; callers must separately apply the contextual subsidy checks. Deferred-pool calculation propagates subsidy errors through `ValidateContextError::InvalidSubsidy` rather than substituting zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-23T14:46:02.131629644+02:00

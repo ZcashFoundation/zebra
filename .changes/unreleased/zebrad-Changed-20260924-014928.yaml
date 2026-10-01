@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: Incompatible configured Testnets reject public Testnet magic even when public seeds are omitted. Public seed matching now ignores hostname case, trailing dots, and ports. Configure distinct `network_magic` and non-public peers for incompatible consensus rules. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
-time: 2026-09-24T01:49:28.183345599+02:00

@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: Public and custom Testnet mining now requires synchronization. Unlike Mainnet, a synchronized Testnet can resume mining from a tip older than 125 minutes. Networks with Proof-of-Work disabled bypass synchronization and freshness checks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
-time: 2026-09-25T16:43:48.674836155+02:00

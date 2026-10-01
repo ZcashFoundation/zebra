@@ -1,4 +1,0 @@
-project: zebrad
-kind: breaking
-body: Activate NU7 on public Testnet at height 4,465,026. The adjusted third halving is at 4,497,948, and NSM reissuance begins at 7,305,222. Explicit public-Testnet activation schedules without NU7 and the old funding-stream end height 4,476,000 are rejected; remove those consensus overrides from `[network.testnet_parameters]` to inherit the updated public defaults. Custom networks must use distinct `network_magic` and non-public peers. Mainnet NU7 activation remains unassigned ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
-time: 2026-10-01T14:29:20.792596085+02:00

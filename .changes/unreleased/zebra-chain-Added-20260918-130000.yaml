@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Added
-body: "`Block::transaction_fees` and `parameters::subsidy::{nsm_value_balance_is_tracked, nsm_fee_contribution}` support NU7 fee accounting without experimental cfg flags. From NU7 activation, the NSM receives 60% of aggregate block transaction fees, rounded down, and `miner_fees_are_valid` excludes that contribution from the miner payout ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-18T13:00:00.000000000-06:00

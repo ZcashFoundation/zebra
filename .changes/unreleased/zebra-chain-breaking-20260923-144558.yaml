@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: "`Block::chain_value_pool_change` now requires the network and parent chain value pools. `Block::chain_value_pool_change_and_fees` returns the same accounting delta and optional aggregate fees in one traversal; neither method validates the coinbase payout. `ValueBalance` serialization uses a fixed 56-byte representation including the NSM balance, even when zero. `transparent::utxos_from_ordered_utxos` accepts an iterator of owned entries, avoiding an intermediate map ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-23T14:45:58.813078036+02:00

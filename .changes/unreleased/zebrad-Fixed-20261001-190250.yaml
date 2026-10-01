@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: Testnet and Regtest peer routing and mempool readiness no longer recalculate the default Testnet NSM schedule on each network identity check ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
-time: 2026-10-01T19:02:50.970529188+02:00

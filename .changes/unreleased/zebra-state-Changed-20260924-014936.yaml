@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: '`ReadRequest::ChainInfo` bounds timestamps by network-specific median-time rules and the local two-hour future limit, rejecting empty ranges. Testnet minimum-difficulty timestamps follow the candidate upgrade: six target spacings before NU7 and eighteen from NU7, requiring a gap strictly greater than 450 seconds under the approved amendment in [zips#1382](https://github.com/zcash/zips/pull/1382). Templates retain standard difficulty when the threshold exceeds the timestamp representation.'
-time: 2026-09-24T01:49:36.621706512+02:00

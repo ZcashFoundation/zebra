@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: '[ZIP 2008](https://zips.z.cash/zip-2008) rotates the Mainnet FPF recipient from `t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow` to the P2PKH address `t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG` at the first address period after the period containing the last pre-NU7 block. Funding-output validation accepts the assigned P2PKH recipient. Mainnet NU7 activation remains unassigned. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))'
-time: 2026-09-30T08:01:54.59193016+02:00
