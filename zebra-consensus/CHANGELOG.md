@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity violations. The score reported by `router::RouterError`, `VerifyBlockError`, and `VerifyCheckpointError` for this error changes from 0 to 100 ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
 - `VerifyCheckpointError::misbehavior_score()` now unwraps the boxed `CommitCheckpointVerifiedError`, mirroring `is_duplicate_request()`, so misbehaviour scores from contextual validation reach the syncer during checkpoint sync. Checkpoint verification only checks the block hash, so a block body forged to keep that hash reaches contextual validation on the checkpoint path too, and its score was previously lost ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
 
+### Fixed
+
+- The batch verifiers (`redjubjub`, `ed25519`, `halo2`, `redpallas`, and `sapling`) now block until
+  verification completes when flushed on drop, using `rayon::scope` instead of `rayon::spawn_fifo`.
+  Previously the flush returned before the spawned work ran, so pending batched verification could
+  be abandoned on shutdown; this was latent because the process exits before the abandonment is
+  observable ([#10598](https://github.com/ZcashFoundation/zebra/issues/10598)).
+
 ## [15.0.0] - 2026-08-10
 
 ### Breaking Changes
