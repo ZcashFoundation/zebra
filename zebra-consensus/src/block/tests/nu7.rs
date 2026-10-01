@@ -51,8 +51,7 @@ fn network() -> Network {
         .clear_funding_streams()
         .with_lockbox_disbursements(Vec::new());
     // Keep subsidy validation in the semantic verifier even in ZIP 234 builds.
-    #[cfg(zcash_unstable = "zip234")]
-    let params = params.with_zip234_deployment_height(Height::MAX);
+    let params = params.with_nsm_reissuance_height(Height::MAX);
     params.to_network().unwrap()
 }
 
