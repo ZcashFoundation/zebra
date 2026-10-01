@@ -44,6 +44,15 @@ use crate::common::{
 // A standard P2SH output whose redeem script is OP_TRUE. These spends still pass through the
 // real UTXO, maturity, standardness, script, fee, and transaction-version checks.
 fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
+    spend_expiring(previous, nu7, fee, Height(if nu7 { 105 } else { 200 }))
+}
+
+fn spend_expiring(
+    previous: &Transaction,
+    nu7: bool,
+    fee: u64,
+    expiry: Height,
+) -> Result<Transaction> {
     let input = transparent::Input::PrevOut {
         outpoint: transparent::OutPoint {
             hash: previous.hash(),
@@ -60,10 +69,10 @@ fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
             vec![input],
             vec![output],
             LockTime::unlocked(),
-            Height(105),
+            expiry,
         )
     } else {
-        Transaction::test_v4(vec![input], vec![output], LockTime::unlocked(), Height(200))
+        Transaction::test_v4(vec![input], vec![output], LockTime::unlocked(), expiry)
     })
 }
 
@@ -561,6 +570,14 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
     .await?
 }
 
+/// The kebab-cased reason a block proposal was rejected for.
+async fn rejected(client: &RpcRequestClient, block: &Block) -> Result<String> {
+    match proposal(client, block).await? {
+        BlockProposalResponse::Rejected(reason) => Ok(reason),
+        BlockProposalResponse::Valid => Err(eyre!("the proposal was accepted")),
+    }
+}
+
 fn stream_recipient(
     receiver: FundingStreamReceiver,
     numerator: u64,
@@ -865,6 +882,176 @@ async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
         assert_eq!(streams(STREAM_END).count(), 3);
         assert_eq!(streams(STREAM_END + 1).count(), 0);
         assert_eq!(zat(at(STREAM_END + 1).miner()), total(STREAM_END + 1));
+
+        child.kill(false)?;
+        let output = child.wait_with_output()?;
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+        Ok(())
+    })
+    .await?
+}
+
+/// ZIP 2003 and ZIP 218 block rules at NU7 activation, and coinbase maturity across it.
+#[tokio::test(flavor = "multi_thread")]
+async fn nu7_block_rules_at_activation() -> Result<()> {
+    use zebra_chain::{
+        parameters::testnet::RegtestParameters,
+        transaction::arbitrary::{
+            fake_orchard_bundle, fake_v6_transaction, insert_fake_orchard_shielded_data,
+        },
+    };
+    use zebra_rpc::server::error::LegacyCode;
+
+    const NU7: u32 = 105;
+    // `OrchardProtocolBlockActionLimit` in ZIP 218, pinned here rather than imported.
+    const ORCHARD_BLOCK_ACTION_LIMIT: usize = 330;
+
+    /// A V6 transaction with `actions` dummy Orchard actions: the ZIP 218 limits are counted
+    /// before any proof or state check, so no valid proofs are needed.
+    fn orchard_actions(actions: usize, seed: u64) -> Transaction {
+        let one =
+            insert_fake_orchard_shielded_data(fake_v6_transaction(NetworkUpgrade::Nu7, None, None));
+        let bundle = one.orchard_bundle().expect("inserted above");
+        let bundle = fake_orchard_bundle(
+            *bundle.flags(),
+            *bundle.value_balance(),
+            actions,
+            seed,
+            bundle.bundle_version(),
+        );
+        one.with_orchard_bundle(Some(bundle))
+    }
+
+    fn with_transactions(block: &Block, extra: Vec<Transaction>) -> Block {
+        let mut block = block.clone();
+        block.transactions.extend(extra.into_iter().map(Arc::new));
+        Arc::make_mut(&mut block.header).merkle_root = block.transactions.iter().collect();
+        block
+    }
+
+    /// The `sendrawtransaction` error code and message for a transaction the mempool rejects.
+    async fn send_error(client: &RpcRequestClient, tx: &Transaction) -> Result<(i64, String)> {
+        let data = hex::encode(tx.zcash_serialize_to_vec()?);
+        let response: serde_json::Value = serde_json::from_str(
+            &client
+                .text_from_call("sendrawtransaction", format!(r#"["{data}"]"#))
+                .await?,
+        )?;
+        let code = response["error"]["code"].as_i64();
+        let message = response["error"]["message"].as_str().unwrap_or_default();
+        Ok((
+            code.ok_or_else(|| eyre!("accepted: {response}"))?,
+            message.to_string(),
+        ))
+    }
+
+    async fn mine(client: &RpcRequestClient, network: &Network, height: u32) -> Result<Block> {
+        let (block, template_height) = client.block_from_template(network).await?;
+        assert_eq!(template_height, Height(height));
+        client.submit_block(block.clone()).await?;
+        Ok(block)
+    }
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let network = Network::new_regtest(RegtestParameters {
+            activation_heights: ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(4),
+                nu6_1: Some(5),
+                nu6_2: Some(6),
+                nu6_3: Some(7),
+                nu7: Some(NU7),
+                ..Default::default()
+            },
+            should_allow_unshielded_coinbase_spends: Some(true),
+            ..Default::default()
+        });
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.mempool.debug_enable_at_height = Some(0);
+        config.mining.miner_address = Some(
+            transparent::Address::from_script_hash(
+                network.kind(),
+                hex_literal::hex!("da1745e9b549bd0bfa1a569971c77eba30cd5a4b"),
+            )
+            .to_string()
+            .parse()?,
+        );
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+        let verify_code = i64::from(i32::from(LegacyCode::Verify));
+
+        let mature_coinbase = mine(&client, &network, 1).await?.transactions[0].clone();
+        for height in 2..NU7 {
+            mine(&client, &network, height).await?;
+        }
+        let (activation, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(NU7));
+
+        // ZIP 2003: a V4 transaction is rejected in the activation block, before its inputs matter.
+        let v4 = spend(&mature_coinbase, false, 10_001)?;
+        let reason = rejected(&client, &with_transactions(&activation, vec![v4])).await?;
+        assert!(
+            reason.contains("unsupportedbynetworkupgrade-4-nu7"),
+            "{reason}"
+        );
+
+        // ZIP 218, mempool side: one transaction over the Orchard action limit for the next block.
+        let over = orchard_actions(ORCHARD_BLOCK_ACTION_LIMIT + 1, 1);
+        let (code, message) = send_error(&client, &over).await?;
+        assert_eq!(code, verify_code, "{message}");
+        let expected = format!("{} Orchard actions", ORCHARD_BLOCK_ACTION_LIMIT + 1);
+        assert!(message.contains(&expected), "{message}");
+        mempool(&client, &[]).await?;
+
+        // ZIP 218, block side: two transactions within the limit exceed it together.
+        let half = ORCHARD_BLOCK_ACTION_LIMIT / 2 + 1;
+        let pair = vec![orchard_actions(half, 2), orchard_actions(half, 3)];
+        let reason = rejected(&client, &with_transactions(&activation, pair)).await?;
+        assert!(reason.contains("toomanyshieldedactions"), "{reason}");
+        client.submit_block(activation).await?;
+
+        // MIN_TRANSPARENT_COINBASE_MATURITY (100 blocks) is unchanged by NU7: a coinbase mined
+        // at NU7 + 1 is spendable from NU7 + 101, not NU7 + 100.
+        let post_nu7_coinbase = mine(&client, &network, NU7 + 1).await?.transactions[0].clone();
+        for height in NU7 + 2..NU7 + 100 {
+            mine(&client, &network, height).await?;
+        }
+        let early = spend_expiring(&post_nu7_coinbase, true, 10_001, Height(0))?;
+        let (code, message) = send_error(&client, &early).await?;
+        assert_eq!(code, verify_code, "{message}");
+        assert!(
+            message.contains("immature transparent coinbase spend"),
+            "{message}"
+        );
+        mempool(&client, &[]).await?;
+        mine(&client, &network, NU7 + 100).await?;
+        let mature = spend_expiring(&post_nu7_coinbase, true, 10_002, Height(0))?;
+        send(&client, &mature).await?;
+        mempool(&client, &[mature.hash()]).await?;
+        let block = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let (block, _) = client.block_from_template(&network).await?;
+                if block
+                    .transactions
+                    .iter()
+                    .any(|tx| tx.hash() == mature.hash())
+                {
+                    return Ok::<_, color_eyre::Report>(block);
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await??;
+        assert_eq!(block.coinbase_height(), Some(Height(NU7 + 101)));
+        client.submit_block(block).await?;
+        mempool(&client, &[]).await?;
 
         child.kill(false)?;
         let output = child.wait_with_output()?;
