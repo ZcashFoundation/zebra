@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: "`Zec` amounts parsed from JSON floats are rounded to the nearest zatoshi instead of being rejected when the float times `COIN` is not an integer. About one in six amounts Zebra itself serializes failed to parse back into `GetBlockchainInfoResponse`, `GetBlockSubsidyResponse` and `getrawmempool` objects. ([#11562](https://github.com/ZcashFoundation/zebra/pull/11562))"
+time: 2026-10-01T18:00:00.000000000Z
