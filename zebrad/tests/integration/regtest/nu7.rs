@@ -11,7 +11,7 @@ use tower::ServiceExt;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{Block, Height},
+    block::{genesis::regtest_genesis_block, Block, Height},
     parameters::{
         subsidy::{
             funding_stream_address, funding_stream_values, miner_subsidy, scheduled_block_subsidy,
@@ -693,6 +693,74 @@ async fn checked_coinbase(
     Ok(())
 }
 
+/// Mines the template for `height` after checking `getblocksubsidy`, checks the stored coinbase,
+/// and returns the block, the subsidy and the lockbox pool after the block.
+async fn mine_checked(
+    client: &RpcRequestClient,
+    network: &Network,
+    miner: &transparent::Address,
+    height: u32,
+) -> Result<(Block, GetBlockSubsidyResponse, u64)> {
+    let subsidy = checked_subsidy(client, network, height).await?;
+    let (block, template_height) = client.block_from_template(network).await?;
+    assert_eq!(template_height, Height(height));
+    client.submit_block(block.clone()).await?;
+    checked_coinbase(client, miner, height, &subsidy, &[]).await?;
+    Ok((block, subsidy, lockbox_pool(client).await?))
+}
+
+/// A Regtest with a lockbox stream from NU6, a P2PKH and a P2SH stream recipient, NU6.1 at 10,
+/// NU7 at 14, and the given one-time lockbox disbursements.
+fn disbursement_network(disbursements: &[(transparent::Address, u64)]) -> Network {
+    use zebra_chain::parameters::testnet::{
+        ConfiguredFundingStreams, ConfiguredLockboxDisbursement, RegtestParameters,
+    };
+
+    let p2pkh =
+        |byte: u8| transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [byte; 20]);
+    let p2sh = |byte: u8| transparent::Address::from_script_hash(NetworkKind::Testnet, [byte; 20]);
+    Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(4),
+            nu6_1: Some(10),
+            nu6_2: Some(11),
+            nu6_3: Some(12),
+            nu7: Some(14),
+            ..Default::default()
+        },
+        funding_streams: Some(vec![ConfiguredFundingStreams {
+            height_range: Some(Height(4)..Height(41)),
+            recipients: Some(vec![
+                stream_recipient(FundingStreamReceiver::Deferred, 12, None),
+                // ZIP 2008 assigns a P2PKH recipient, which must be paid with a P2PKH script.
+                stream_recipient(
+                    FundingStreamReceiver::MajorGrants,
+                    8,
+                    Some(vec![p2pkh(1).to_string(), p2pkh(2).to_string()]),
+                ),
+                stream_recipient(
+                    FundingStreamReceiver::ZcashFoundation,
+                    5,
+                    Some(vec![p2sh(3).to_string(), p2sh(4).to_string()]),
+                ),
+            ]),
+        }]),
+        lockbox_disbursements: Some(
+            disbursements
+                .iter()
+                .map(|(address, amount)| ConfiguredLockboxDisbursement {
+                    address: address.to_string(),
+                    amount: Amount::try_from(*amount).expect("a valid amount"),
+                })
+                .collect(),
+        ),
+        extend_funding_stream_addresses_as_required: Some(true),
+        ..Default::default()
+    })
+}
+
 /// ZIP 218 subsidy, ZIP 207/214 funding streams and the stretched address period across NU7.
 #[tokio::test(flavor = "multi_thread")]
 async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
@@ -1052,6 +1120,422 @@ async fn nu7_block_rules_at_activation() -> Result<()> {
         assert_eq!(block.coinbase_height(), Some(Height(NU7 + 101)));
         client.submit_block(block).await?;
         mempool(&client, &[]).await?;
+
+        child.kill(false)?;
+        let output = child.wait_with_output()?;
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+        Ok(())
+    })
+    .await?
+}
+
+/// Configured one-time lockbox disbursements are paid exactly once, in the NU6.1 activation
+/// coinbase, out of the accumulated lockbox pool; a P2PKH stream recipient is paid with its script.
+#[tokio::test(flavor = "multi_thread")]
+async fn lockbox_disbursements_at_activation_and_p2pkh_funding_stream() -> Result<()> {
+    const NU6_1: u32 = 10;
+    const NU7: u32 = 14;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let p2pkh =
+            |byte: u8| transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [byte; 20]);
+        let p2sh =
+            |byte: u8| transparent::Address::from_script_hash(NetworkKind::Testnet, [byte; 20]);
+        // 1.5 ZEC in total: more than one block's 0.75 ZEC lockbox stream, less than the 4.5 ZEC
+        // accumulated over heights 4..=9, so the payout must come from the pool.
+        let disbursements = [(p2pkh(0x21), 100_000_000), (p2sh(0x22), 50_000_000)];
+        let network = disbursement_network(&disbursements);
+        let miner = transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [0xda; 20]);
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.mining.miner_address = Some(miner.to_string().parse()?);
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+
+        let mut pool = 0;
+        for height in 1..NU6_1 {
+            let (_, subsidy, after) = mine_checked(&client, &network, &miner, height).await?;
+            assert_eq!(
+                after - pool,
+                zat(subsidy.lockbox_total()),
+                "lockbox at {height}"
+            );
+            pool = after;
+        }
+
+        // The activation template pays each disbursement with the script of its address.
+        let subsidy = checked_subsidy(&client, &network, NU6_1).await?;
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(NU6_1));
+        let outputs = block.transactions[0].outputs();
+        let position = |(address, value): &(transparent::Address, u64)| -> Result<usize> {
+            let output = transparent::Output::new(Amount::try_from(*value)?, address.script());
+            (outputs.iter().position(|candidate| *candidate == output))
+                .ok_or_else(|| eyre!("no disbursement output for {address}"))
+        };
+        let [first, second] = [position(&disbursements[0])?, position(&disbursements[1])?];
+        // OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG, and OP_HASH160 <20 bytes> OP_EQUAL.
+        assert_eq!(
+            outputs[first].lock_script.as_raw_bytes()[..3],
+            [0x76, 0xa9, 0x14]
+        );
+        assert_eq!(
+            outputs[second].lock_script.as_raw_bytes()[..2],
+            [0xa9, 0x14]
+        );
+
+        // Omitting a disbursement, paying it one zatoshi off, or to another address is invalid.
+        let mut omitted = outputs.clone();
+        omitted.remove(first);
+        let mut off_by_one = outputs.clone();
+        off_by_one[first].value = (off_by_one[first].value + Amount::try_from(1)?)?;
+        let mut redirected = outputs.clone();
+        redirected[first].lock_script = p2pkh(0x33).script();
+        for outputs in [omitted, off_by_one, redirected] {
+            let reason = rejected(&client, &with_coinbase_outputs(&block, outputs)).await?;
+            assert!(
+                reason.contains("onetimelockboxdisbursementnotfound"),
+                "{reason}"
+            );
+        }
+
+        client.submit_block(block).await?;
+        checked_coinbase(&client, &miner, NU6_1, &subsidy, &disbursements).await?;
+        let disbursed: u64 = disbursements.iter().map(|(_, value)| value).sum();
+        let after = lockbox_pool(&client).await?;
+        assert_eq!(after, pool + zat(subsidy.lockbox_total()) - disbursed);
+        pool = after;
+
+        // Later blocks, including the NU7 activation block, pay no disbursements, and the P2PKH
+        // recipient keeps being paid at one of its configured addresses.
+        for height in NU6_1 + 1..=NU7 {
+            let (_, subsidy, after) = mine_checked(&client, &network, &miner, height).await?;
+            assert_eq!(
+                after - pool,
+                zat(subsidy.lockbox_total()),
+                "lockbox at {height}"
+            );
+            pool = after;
+            let p2pkh_stream = (subsidy.funding_streams().iter())
+                .find(|stream| {
+                    stream
+                        .address
+                        .is_some_and(|address| !address.is_script_hash())
+                })
+                .expect("the P2PKH stream is active");
+            let address = p2pkh_stream.address.expect("transparent");
+            assert!([p2pkh(1), p2pkh(2)].contains(&address), "{address}");
+        }
+
+        child.kill(false)?;
+        let output = child.wait_with_output()?;
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+        Ok(())
+    })
+    .await?
+}
+
+/// No parameter validation bounds a disbursement by the lockbox pool: the template pays it, and
+/// the block is rejected when committing it would make the pool negative.
+#[tokio::test(flavor = "multi_thread")]
+async fn lockbox_disbursement_above_the_pool_is_rejected() -> Result<()> {
+    const NU6_1: u32 = 10;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let recipient = transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [0x21; 20]);
+        // 6 ZEC: more than the 4.5 ZEC pool plus the activation block's own 0.75 ZEC stream.
+        let network = disbursement_network(&[(recipient, 600_000_000)]);
+        let miner = transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [0xda; 20]);
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.mining.miner_address = Some(miner.to_string().parse()?);
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+
+        for height in 1..NU6_1 {
+            mine_checked(&client, &network, &miner, height).await?;
+        }
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(NU6_1));
+        let output = transparent::Output::new(Amount::try_from(600_000_000)?, recipient.script());
+        assert!(block.transactions[0].outputs().contains(&output));
+        assert!(client.submit_block(block).await.is_err());
+        assert_eq!(chain_info(&client).await?["blocks"], NU6_1 - 1);
+        let missing = client.text_from_call("getblock", format!(r#"["{NU6_1}", 1]"#));
+        let missing: serde_json::Value = serde_json::from_str(&missing.await?)?;
+        assert!(missing["error"].is_object(), "{missing}");
+
+        child.kill(false)?;
+        let output = child.wait_with_output()?;
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+        Ok(())
+    })
+    .await?
+}
+
+/// ZIP 218 stretches the first halving by the NU7 spacing ratio: on a short schedule the halving
+/// due at 47 happens at 113, where the subsidy and every stream halve, and nowhere else.
+#[tokio::test(flavor = "multi_thread")]
+async fn nu7_stretched_first_halving() -> Result<()> {
+    use zebra_chain::{
+        parameters::{
+            subsidy::{halving, height_for_halving, ParameterSubsidy},
+            testnet::{self, ConfiguredFundingStreams},
+            Magic,
+        },
+        work::difficulty::U256,
+    };
+
+    const NU7: u32 = 14;
+    const PRE_BLOSSOM_HALVING_INTERVAL: u32 = 24;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let p2sh = |byte: u8| {
+            transparent::Address::from_script_hash(NetworkKind::Testnet, [byte; 20]).to_string()
+        };
+        // Regtest fixes its halving interval, so this is a Regtest-like configured Testnet.
+        let network = testnet::Parameters::build()
+            .with_network_name("ShortHalvingTestnet")?
+            .with_network_magic(Magic([0x5a; 4]))?
+            .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")?
+            .clear_checkpoints()?
+            .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))?
+            .with_disable_pow(true)
+            .with_slow_start_interval(Height::MIN)
+            .with_lockbox_disbursements(vec![])
+            .with_activation_heights(ConfiguredActivationHeights {
+                overwinter: Some(1),
+                sapling: Some(1),
+                blossom: Some(1),
+                heartwood: Some(1),
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(4),
+                nu6_1: Some(5),
+                nu6_2: Some(6),
+                nu6_3: Some(7),
+                nu7: Some(NU7),
+                ..Default::default()
+            })?
+            .with_halving_interval(PRE_BLOSSOM_HALVING_INTERVAL.into())?
+            .with_funding_streams(vec![ConfiguredFundingStreams {
+                height_range: Some(Height(4)..Height(200)),
+                recipients: Some(vec![
+                    stream_recipient(FundingStreamReceiver::Deferred, 12, None),
+                    stream_recipient(
+                        FundingStreamReceiver::MajorGrants,
+                        8,
+                        Some(vec![p2sh(1), p2sh(2)]),
+                    ),
+                ]),
+            }])
+            .extend_funding_streams()?
+            .to_network()?;
+
+        // With slow start 0 and Blossom at 1, the first halving is due at 1 + 2·(24 − 1) = 47
+        // (ZIP 208); ZIP 218 stretches the blocks after NU7 by three, to 14 + 3·(47 − 14) = 113.
+        let blossom = NetworkUpgrade::Blossom
+            .activation_height(&network)
+            .expect("configured")
+            .0;
+        let scheduled = blossom + 2 * (PRE_BLOSSOM_HALVING_INTERVAL - blossom);
+        let stretched = NU7 + 3 * (scheduled - NU7);
+        assert_eq!((scheduled, stretched), (47, 113));
+        assert_eq!(height_for_halving(1, &network), Some(Height(stretched)));
+        assert_eq!(network.height_for_first_halving(), Height(stretched));
+        assert_eq!(halving(Height(scheduled), &network), 0);
+        assert_eq!(halving(Height(stretched - 1), &network), 0);
+        assert_eq!(halving(Height(stretched), &network), 1);
+
+        let miner = transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [0xda; 20]);
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.network.initial_testnet_peers = [].into();
+        // Off Regtest, templates need an active mempool, which otherwise waits for a sync.
+        config.mempool.debug_enable_at_height = Some(0);
+        config.mining.miner_address = Some(miner.to_string().parse()?);
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+        // Only Regtest commits its genesis block itself; configured Testnets get it from peers.
+        client
+            .submit_block(Arc::unwrap_or_clone(regtest_genesis_block()))
+            .await?;
+
+        let mut subsidies = Vec::new();
+        let mut pool = 0;
+        for height in 1..=stretched + 1 {
+            let (_, subsidy, after) = mine_checked(&client, &network, &miner, height).await?;
+            assert_eq!(
+                after - pool,
+                zat(subsidy.lockbox_total()),
+                "lockbox at {height}"
+            );
+            pool = after;
+            subsidies.push(subsidy);
+        }
+        let at = |height: u32| &subsidies[height as usize - 1];
+        let total = |height: u32| zat(at(height).total_block_subsidy());
+        let streams =
+            |height: u32| (at(height).funding_streams().iter()).chain(at(height).lockbox_streams());
+
+        // Nothing halves at the scheduled height; at the stretched one the subsidy halves exactly
+        // and each stream share is floored after that division.
+        assert_eq!(total(scheduled), total(NU7));
+        assert_eq!(total(stretched - 1), total(NU7));
+        assert_eq!(total(stretched), total(stretched - 1) / 2);
+        assert_eq!(total(stretched + 1), total(stretched));
+        assert_eq!(streams(stretched).count(), 2);
+        for (before, after) in streams(scheduled - 1).zip(streams(scheduled)) {
+            assert_eq!(before.value_zat, after.value_zat);
+        }
+        for (before, after) in streams(stretched - 1).zip(streams(stretched)) {
+            assert_eq!(before.recipient, after.recipient);
+            let (half, post) = (u64::from(before.value_zat) / 2, u64::from(after.value_zat));
+            assert!(post <= half && half - post <= 1, "{half} vs {post}");
+        }
+
+        child.kill(false)?;
+        let output = child.wait_with_output()?;
+        output.assert_was_killed()?;
+        output.assert_failure()?;
+        Ok(())
+    })
+    .await?
+}
+
+/// NU7 activating exactly on an address-period boundary starts a whole 18-block period, and a
+/// stream whose range ends inside that period stops at its configured end.
+#[tokio::test(flavor = "multi_thread")]
+async fn nu7_funding_streams_at_boundary_activation() -> Result<()> {
+    use zebra_chain::parameters::{
+        subsidy::{funding_stream_address_period, ParameterSubsidy},
+        testnet::{ConfiguredFundingStreams, RegtestParameters},
+    };
+
+    // With NU7 at an odd height the pre-NU7 6-block periods are 1..=6 and 7..=12, so activation
+    // starts a period with no pre-NU7 part, which ZIP 207 makes 3·6 blocks long: 13..=30.
+    const NU7: u32 = 13;
+    const SHORT_END: u32 = NU7 + 4;
+    const STREAM_END: u32 = 40;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        let p2sh = |byte: u8| {
+            transparent::Address::from_script_hash(NetworkKind::Testnet, [byte; 20]).to_string()
+        };
+        let stream = |range: std::ops::Range<u32>, recipient| ConfiguredFundingStreams {
+            height_range: Some(Height(range.start)..Height(range.end)),
+            recipients: Some(vec![
+                stream_recipient(FundingStreamReceiver::Deferred, 12, None),
+                recipient,
+            ]),
+        };
+        let network = Network::new_regtest(RegtestParameters {
+            activation_heights: ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(2),
+                nu6: Some(4),
+                nu6_1: Some(5),
+                nu6_2: Some(6),
+                nu6_3: Some(7),
+                nu7: Some(NU7),
+                ..Default::default()
+            },
+            funding_streams: Some(vec![
+                stream(
+                    4..SHORT_END + 1,
+                    stream_recipient(
+                        FundingStreamReceiver::ZcashFoundation,
+                        5,
+                        Some(vec![p2sh(3), p2sh(4)]),
+                    ),
+                ),
+                stream(
+                    SHORT_END + 1..STREAM_END + 1,
+                    stream_recipient(
+                        FundingStreamReceiver::MajorGrants,
+                        8,
+                        Some(vec![p2sh(1), p2sh(2)]),
+                    ),
+                ),
+            ]),
+            extend_funding_stream_addresses_as_required: Some(true),
+            ..Default::default()
+        });
+        let period = |height: u32| funding_stream_address_period(Height(height), &network);
+        assert_eq!(network.funding_stream_address_change_interval(), 6);
+        assert_eq!(period(NU7), period(NU7 - 1) + 1);
+        assert_eq!(period(NU7 + 17), period(NU7));
+        assert_eq!(period(NU7 + 18), period(NU7) + 1);
+
+        let miner = transparent::Address::from_pub_key_hash(NetworkKind::Testnet, [0xda; 20]);
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.mining.miner_address = Some(miner.to_string().parse()?);
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+        tokio::time::sleep(LAUNCH_DELAY).await;
+        let client = RpcRequestClient::new(rpc_address);
+
+        let mut subsidies = Vec::new();
+        let mut pool = 0;
+        for height in 1..=STREAM_END + 1 {
+            let (_, subsidy, after) = mine_checked(&client, &network, &miner, height).await?;
+            assert_eq!(
+                after - pool,
+                zat(subsidy.lockbox_total()),
+                "lockbox at {height}"
+            );
+            pool = after;
+            subsidies.push(subsidy);
+        }
+        let at = |height: u32| &subsidies[height as usize - 1];
+        let recipients = |height: u32| -> Vec<&str> {
+            (at(height).funding_streams().iter())
+                .map(|stream| stream.recipient.as_str())
+                .collect()
+        };
+        let address = |height: u32| at(height).funding_streams()[0].address;
+
+        // The first stream stops exactly at its configured end, inside the stretched period.
+        assert_eq!(recipients(SHORT_END), ["Zcash Foundation"]);
+        assert_eq!(recipients(SHORT_END + 1), ["Zcash Community Grants NU6"]);
+        assert_eq!(at(SHORT_END).lockbox_streams().len(), 1);
+        assert_eq!(at(SHORT_END + 1).lockbox_streams().len(), 1);
+        assert_eq!(recipients(STREAM_END + 1), [] as [&str; 0]);
+        assert!(at(STREAM_END + 1).lockbox_streams().is_empty());
+
+        // The first stream spans the periods 4..=6, 7..=12 and 13..=17 (cut by its end).
+        assert_ne!(address(6), address(7));
+        assert_ne!(address(12), address(NU7));
+        assert_eq!(address(NU7), address(SHORT_END));
+        // The second stream shares the activation period until 30; the old 6-block rule would
+        // have changed addresses at 19 and 25.
+        for height in [19, 25, NU7 + 17] {
+            assert_eq!(
+                address(height),
+                address(SHORT_END + 1),
+                "address at {height}"
+            );
+        }
+        assert_ne!(address(NU7 + 17), address(NU7 + 18));
+        assert_eq!(address(NU7 + 18), address(STREAM_END));
 
         child.kill(false)?;
         let output = child.wait_with_output()?;
