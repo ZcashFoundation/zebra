@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: "`ReadRequest` and `ReadResponse`, which are not `#[non_exhaustive]`, gain `SpentOutputs` variants that return the transparent outputs spent by a block's non-coinbase inputs. Consumers that match on them exhaustively must handle the new variants. ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472))"
+time: 2026-10-01T11:47:46.000000000Z
