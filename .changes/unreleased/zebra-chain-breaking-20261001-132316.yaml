@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: Updated `zcash_primitives` to 0.31.0-pre.0, `zcash_protocol` to 0.11.0-pre.0, `zcash_address` to 0.14.0-pre.0 and `zcash_transparent` to 0.11.0-pre.0 for NU7, along with `orchard` 0.16, `sapling-crypto` 0.9, `halo2_proofs` 0.4, `reddsa` 0.6, `redjubjub` 0.9, `jubjub` 0.11, `incrementalmerkletree` 0.9, `zcash_note_encryption` 0.5, `zcash_script` 0.6 and `secp256k1` 0.33. Their types appear in the public API, including the `primitives::{reddsa, redjubjub}` and `transaction::TxVersion` re-exports, `Transaction::orchard_flags`, and the `transaction::compat` conversions.
+time: 2026-10-01T13:23:16.282600+00:00

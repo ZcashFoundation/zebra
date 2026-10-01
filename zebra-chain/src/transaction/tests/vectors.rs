@@ -5,7 +5,7 @@ use arbitrary::v5_transactions;
 use chrono::DateTime;
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
-use rand::{seq::IteratorRandom, thread_rng};
+use rand::seq::IteratorRandom;
 use zcash_protocol::{consensus::BranchId, value::ZatBalance};
 
 use std::sync::Arc;
@@ -1118,7 +1118,7 @@ fn consensus_branch_id() {
 
             let any_other_nu = NetworkUpgrade::iter()
                 .filter(|&nu| nu != tx_nu)
-                .choose(&mut thread_rng())
+                .choose(&mut rand::rng())
                 .expect("there must be a network upgrade other than the tx one");
 
             // All computations should succeed under the tx nu.

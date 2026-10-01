@@ -39,7 +39,8 @@ fuzzing = []
 blake2b_simd = { workspace = true }
 bellman = { workspace = true }
 bls12_381 = { workspace = true }
-halo2 = { package = "halo2_proofs", version = "0.3" }
+groth16 = { workspace = true }
+halo2 = { package = "halo2_proofs", version = "0.4" }
 jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }

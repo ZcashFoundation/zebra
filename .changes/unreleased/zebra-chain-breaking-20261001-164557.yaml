@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: Updated `ed25519-zebra` to 5.0.0, `x25519-dalek` to 3 and `rand_core` to 0.10. The first two are re-exported as `primitives::{ed25519, x25519}`, and `orchard::Diversifier::new`, `orchard::Note::new`, `orchard::ValueCommitment::randomized` and `sapling::Diversifier::new` now take a `rand_core` 0.10 `Rng + CryptoRng`.
+time: 2026-10-01T16:45:57.140062+00:00

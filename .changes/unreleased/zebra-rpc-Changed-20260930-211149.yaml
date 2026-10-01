@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: Use the SDK receiver encoder in `z_list_unified_receivers`, allowing the RPC crate to build with the NU7 wallet SDK cohort. Malformed Orchard receivers now return `InvalidParameter`, matching Sapling receiver validation ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+body: Malformed Orchard receivers in `z_list_unified_receivers` now return `InvalidParameter`, matching Sapling receiver validation ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
 time: 2026-09-30T21:11:49.869804632+02:00

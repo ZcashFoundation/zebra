@@ -325,7 +325,7 @@ impl AddressBook {
             .filter(|addr| addr.is_active_for_gossip(now))
             .collect();
 
-        peers.shuffle(&mut rand::thread_rng());
+        peers.shuffle(&mut rand::rng());
 
         peers
     }
