@@ -838,7 +838,7 @@ async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
         for height in [NU7 - 1, NU7] {
             early.push(checked_subsidy(&client, &network, height).await?);
         }
-        let mut subsidies = Vec::new();
+        let mut subsidies: Vec<GetBlockSubsidyResponse> = Vec::new();
         let mut lockbox_pools = Vec::new();
         for height in 1..=STREAM_END + 1 {
             let response = checked_subsidy(&client, &network, height).await?;
@@ -849,13 +849,15 @@ async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
             assert_eq!(template_height, Height(height));
 
             if height == NU7 {
-                // A coinbase paying the pre-NU7 amounts (three times the NU7 subsidy) is invalid.
+                // A coinbase still paying the miner the pre-NU7 amount (three times the NU7 one),
+                // with the NU7 funding stream outputs, overpays and is invalid.
                 let mut outputs = block.transactions[0].outputs();
-                for output in &mut outputs {
-                    output.value = (output.value * 3)?;
-                }
-                let overpaid = with_coinbase_outputs(&block, outputs);
-                assert!(!proposal(&client, &overpaid).await?.is_valid());
+                let miner_output = (outputs.iter_mut())
+                    .find(|output| output.lock_script == miner.script())
+                    .expect("the coinbase pays the miner");
+                miner_output.value = subsidies[height as usize - 2].miner().into();
+                let reason = rejected(&client, &with_coinbase_outputs(&block, outputs)).await?;
+                assert!(reason.contains("invalidminerfees"), "{reason}");
             }
             if height == STRETCHED_BOUNDARY {
                 // Paying the previous address period's address after the boundary is invalid.
@@ -873,8 +875,8 @@ async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
                 {
                     output.lock_script = stale.1.script();
                 }
-                let stale_address = with_coinbase_outputs(&block, outputs);
-                assert!(!proposal(&client, &stale_address).await?.is_valid());
+                let reason = rejected(&client, &with_coinbase_outputs(&block, outputs)).await?;
+                assert!(reason.contains("fundingstreamnotfound"), "{reason}");
             }
 
             let (hash, coinbase_id) = (block.hash(), block.transactions[0].hash());
@@ -1211,6 +1213,26 @@ async fn lockbox_disbursements_at_activation_and_p2pkh_funding_stream() -> Resul
         assert_eq!(after, pool + zat(subsidy.lockbox_total()) - disbursed);
         pool = after;
 
+        // ZIP 2008 adds the first P2PKH recipient: paying its hash through a P2SH script instead
+        // of its exact script is invalid.
+        let subsidy = checked_subsidy(&client, &network, NU6_1 + 1).await?;
+        let p2pkh_address = (subsidy.funding_streams().iter())
+            .find_map(|stream| stream.address.filter(|address| !address.is_script_hash()))
+            .expect("the P2PKH stream is active");
+        let (block, height) = client.block_from_template(&network).await?;
+        assert_eq!(height, Height(NU6_1 + 1));
+        let mut outputs = block.transactions[0].outputs();
+        let stream_output = (outputs.iter_mut())
+            .find(|output| output.lock_script == p2pkh_address.script())
+            .expect("the coinbase pays the P2PKH stream");
+        stream_output.lock_script = transparent::Address::from_script_hash(
+            NetworkKind::Testnet,
+            p2pkh_address.hash_bytes(),
+        )
+        .script();
+        let reason = rejected(&client, &with_coinbase_outputs(&block, outputs)).await?;
+        assert!(reason.contains("fundingstreamnotfound"), "{reason}");
+
         // Later blocks, including the NU7 activation block, pay no disbursements, and the P2PKH
         // recipient keeps being paid at one of its configured addresses.
         for height in NU6_1 + 1..=NU7 {
@@ -1269,6 +1291,12 @@ async fn lockbox_disbursement_above_the_pool_is_rejected() -> Result<()> {
         assert_eq!(height, Height(NU6_1));
         let output = transparent::Output::new(Amount::try_from(600_000_000)?, recipient.script());
         assert!(block.transactions[0].outputs().contains(&output));
+        // Proposals run the contextual checks on a copy of the state, so the pool error surfaces.
+        let reason = rejected(&client, &block).await?;
+        assert!(
+            reason.contains("addvaluepool") && reason.contains("deferred"),
+            "{reason}"
+        );
         assert!(client.submit_block(block).await.is_err());
         assert_eq!(chain_info(&client).await?["blocks"], NU6_1 - 1);
         let missing = client.text_from_call("getblock", format!(r#"["{NU6_1}", 1]"#));
@@ -1757,7 +1785,8 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
         let mut outputs = block.transactions[0].outputs();
         outputs[0].value = (outputs[0].value + Amount::try_from(1)?)?;
         let overpaid = with_coinbase_outputs(&block, outputs);
-        assert!(!rejected(&a, &overpaid).await?.is_empty());
+        let reason = rejected(&a, &overpaid).await?;
+        assert!(reason.contains("invalidminerfees"), "{reason}");
         assert!(a.submit_block(overpaid).await.is_err());
         tokio::time::sleep(Duration::from_secs(3)).await;
         assert_eq!(chain_info(&b).await?["blocks"], tip);
