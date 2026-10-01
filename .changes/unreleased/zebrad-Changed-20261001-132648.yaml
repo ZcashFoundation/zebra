@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: '`getstandardfee` on Mainnet reports 5000 zatoshis per logical action until the next block is at height 3,590,000, and 1000 from then on, following the deployment schedule in [zcash/zips#1352](https://github.com/zcash/zips/pull/1352), so wallets switch to the lower fee together after nodes that drop it reach end of support. Test networks report 1000 at every height. The mempool still accepts 1000 zatoshis per logical action ([#11557](https://github.com/ZcashFoundation/zebra/pull/11557)).'
-time: 2026-10-01T13:26:48.000000000Z

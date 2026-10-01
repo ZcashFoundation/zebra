@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: Updated `zcash_primitives` to 0.31.0-pre.0, `zcash_protocol` to 0.11.0-pre.0, `zcash_address` to 0.14.0-pre.0 and `zcash_transparent` to 0.11.0-pre.0 for NU7, along with `orchard` 0.16, `sapling-crypto` 0.9 and `zcash_script` 0.6, and `zcash_keys` to 0.17.0-pre.0, whose `address::Address` is returned by `MinerParams::addr`.
-time: 2026-10-01T13:23:16.282600+00:00

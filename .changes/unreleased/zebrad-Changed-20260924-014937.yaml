@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Block templates honor network-specific median-time rules and the local two-hour future limit, including cached and on-demand work after clock rollback. Long polls notify miners once when a live timestamp range expires; polling the same already-expired work waits for a change rather than causing a busy loop. Cached Testnet difficulty respects the candidate-height rules, and empty timestamp ranges return an error. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
-time: 2026-09-24T01:49:37.67734367+02:00

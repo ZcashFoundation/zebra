@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: '`parameters::testnet::{ParametersBuilder::to_network, Parameters::new_regtest}` reject overlapping nonempty funding-stream height ranges after inherited NU7 defaults are applied. Update custom parameters to use disjoint ranges; adjacent and empty ranges remain accepted, including empty recipient lists when automatically extending an empty range ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).'
-time: 2026-10-01T14:29:21.849066759+02:00

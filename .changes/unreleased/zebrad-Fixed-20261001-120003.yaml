@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: "End of support heights and the sync progress stall warning now follow the target block spacing in force at each height, so a release whose support window straddles the NU7 activation height still halts after the intended number of days, and pre-NU7 stall warnings keep the 75-second interval ([#11483](https://github.com/ZcashFoundation/zebra/issues/11483))."
-time: 2026-10-01T12:00:00.000000000-03:00

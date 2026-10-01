@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [14.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- Explicitly empty funding-stream lists disable defaults on configured Testnets and survive configuration round-trips, as they already did on Regtest. Testnet and Regtest reject combining an empty list with either legacy funding field; remove both legacy fields to disable streams, or omit the empty list to retain legacy payouts. Omitted settings retain network defaults, and legacy post-NU6 streams use post-NU6 defaults independently of the pre-NU6 field. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Incompatible configured Testnets reject public Testnet magic even when public seeds are omitted. Public seed matching now ignores hostname case, trailing dots, and ports. Configure distinct `network_magic` and non-public peers for incompatible consensus rules. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `config::CacheDir::peer_cache_file_path` includes configured Testnet wire magic in peer cache names. Existing unsuffixed custom-network caches are not reused; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Configured Testnets using public Testnet magic inherit the historical public NSM seed when omitted. Explicitly matching that seed leaves network identity and state paths unchanged. A different seed requires distinct `network_magic` and non-public peers; Regtest and distinct-magic networks default to zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `Config` deserialization rejects custom Testnet subsidy schedules that exceed the monetary cap, including early spacing upgrades with the default slow-start interval. Set `slow_start_interval = 0` for accelerated test networks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- `Config` deserialization rejects overlapping nonempty funding-stream height ranges on Testnet and Regtest, including overlaps introduced by inherited NU7 defaults. Use disjoint ranges; adjacent and empty ranges remain accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- `Config` deserialization rejects TEX funding-stream recipients on Testnet and Regtest before node startup. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+
+### Added
+
+- `initial_nsm_value_balance` and `nsm_reissuance_height` under `[network.testnet_parameters]` are available for Regtest and configured Testnets in ordinary builds. Serialization preserves omitted settings. The effective reissuance height follows ZIP 237's scheduled-issuance crossover, with explicit overrides for accelerated testing ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+
+### Changed
+
+- [ZIP 259](https://zips.z.cash/zip-0259) NU7 peer-version checks require 170180 on Testnet and Regtest and 170190 on Mainnet. Zebra advertises 170180 until a Mainnet activation height is scheduled. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `Config` rejects explicitly out-of-order upgrade heights even when coincident activations previously hid the invalid ordering.
+- Serializing and deserializing a Regtest `Config` preserves the effective activation heights of coincident upgrades instead of applying earlier defaults.
+- Peer-service requirements and stall detection use the local tip timestamp for freshness, preserving the elapsed-time allowance when NU7 shortens block spacing.
+- Regtest skips public DNS seeders before resolving initial peers, while retaining explicitly configured local peers. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+
 ## [13.0.0] - 2026-09-23
 
 ### Breaking Changes

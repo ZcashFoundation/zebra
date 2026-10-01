@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: Block-template transaction selection shares the NU7 budget of 330 across Orchard actions, Ironwood actions, Sapling inputs and outputs, and twice the JoinSplit count, with per-pool limits of 330 Orchard actions, 330 Ironwood actions, 300 Sapling inputs plus outputs, and zero Sprout JoinSplits. It reserves the coinbase shielded-action budget before selecting mempool transactions, including Sapling coinbases.
-time: 2026-09-23T14:46:10.983688852+02:00

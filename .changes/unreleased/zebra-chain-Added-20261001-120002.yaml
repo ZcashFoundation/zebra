@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Added
-body: "`NetworkUpgrade::duration_between_heights`, the target block time between two heights with each block charged the target spacing at its own height ([#11483](https://github.com/ZcashFoundation/zebra/issues/11483))."
-time: 2026-10-01T12:00:02.000000000-03:00

@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "13.0.1"
+version = "14.0.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true

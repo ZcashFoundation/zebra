@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: breaking
-body: Exhaustive matches on `error::TransactionError` must handle the new `TooManyShieldedActions { pool, count, limit }` variant. NU7 mempool admission rejects transactions exceeding a ZIP 218 block budget before state access or proof verification; these policy rejections have zero peer misbehavior score ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
-time: 2026-09-30T18:22:51.538967741+02:00

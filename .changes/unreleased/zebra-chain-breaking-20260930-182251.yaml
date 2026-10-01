@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: '`parameters::subsidy::{MAINNET_INITIAL_NSM_VALUE_BALANCE, TESTNET_INITIAL_NSM_VALUE_BALANCE}` specify the historical public reserve seeds: 36,858,445,520 and 55,768,414,957 zatoshis. Testnets using public Testnet magic inherit its seed when omitted, regardless of network name or checkpoints; other Testnets and Regtest default to zero. `parameters::testnet::Parameters::configured_initial_nsm_value_balance` returns only the explicit setting ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).'
-time: 2026-09-30T18:22:51.024422956+02:00
