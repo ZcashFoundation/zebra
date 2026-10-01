@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`Config` deserialization rejects TEX funding-stream recipients on Testnet and Regtest before node startup. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11552](https://github.com/ZcashFoundation/zebra/issues/11552)).'
+time: 2026-10-01T14:29:26.072260024+02:00

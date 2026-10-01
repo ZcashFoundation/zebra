@@ -3980,23 +3980,10 @@ fn v4_transactions_are_rejected_from_nu7_onward() {
 async fn v4_transaction_is_rejected_at_nu7_activation() {
     let _init_guard = zebra_test::init();
 
-    // NU7 is unscheduled on Mainnet and the default Testnet.
-    let network = Network::new_regtest(
-        ConfiguredActivationHeights {
-            canopy: Some(1),
-            nu5: Some(2),
-            nu6: Some(3),
-            nu6_1: Some(4),
-            nu6_2: Some(5),
-            nu6_3: Some(6),
-            nu7: Some(1_000_000),
-            ..Default::default()
-        }
-        .into(),
-    );
+    let network = Network::new_default_testnet();
     let nu7_height = NetworkUpgrade::Nu7
         .activation_height(&network)
-        .expect("NU7 activation height is configured");
+        .expect("NU7 activation height is scheduled on Testnet");
     let pre_nu7_height = (nu7_height - 1).expect("NU7 does not activate at the genesis height");
 
     // Pay a ZIP 317 conventional fee so mempool admission reaches the version check.

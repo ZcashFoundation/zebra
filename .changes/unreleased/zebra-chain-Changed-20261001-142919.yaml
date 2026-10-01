@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: '`parameters::constants::activation_heights::testnet::NU7` exposes the assigned height 4,465,026, and `parameters::Network::new_default_testnet` activates NU7 there. The adjusted third halving is at 4,497,948, and [ZIP 237](https://zips.z.cash/zip-0237) derives the first NSM reissuance height as 7,305,222. Mainnet NU7 activation remains unassigned ([#11552](https://github.com/ZcashFoundation/zebra/issues/11552)).'
+time: 2026-10-01T14:29:19.737657286+02:00

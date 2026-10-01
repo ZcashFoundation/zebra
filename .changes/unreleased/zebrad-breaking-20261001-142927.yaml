@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Reject TEX funding-stream recipients on Testnet and Regtest before startup rather than failing when mining a coinbase. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11552](https://github.com/ZcashFoundation/zebra/issues/11552)).
+time: 2026-10-01T14:29:27.127545088+02:00

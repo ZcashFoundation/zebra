@@ -1209,9 +1209,6 @@ fn state_auth_commitment_errors_score_the_serving_peer() {
 }
 
 /// Returns a Regtest network with NU7 activating at `nu7_height`.
-///
-/// NU7 is unscheduled on Mainnet and the default Testnet, so the ZIP 218 action limits are
-/// unreachable there.
 fn nu7_network(nu7_height: u32) -> Network {
     Network::new_regtest(
         zebra_chain::parameters::testnet::ConfiguredActivationHeights {

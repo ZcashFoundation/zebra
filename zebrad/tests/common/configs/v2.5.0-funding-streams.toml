@@ -218,8 +218,8 @@ addresses = ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjBy
 [[network.testnet_parameters.funding_streams]]
 
 [network.testnet_parameters.funding_streams.height_range]
-start = 2976000
-end = 3216000
+start = 3396000
+end = 3636000
 
 [[network.testnet_parameters.funding_streams.recipients]]
 receiver = "MajorGrants"

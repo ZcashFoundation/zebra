@@ -310,6 +310,10 @@ fn num_funding_stream_addresses_required_for_height_range(
     height_range: &std::ops::Range<Height>,
     network: &Network,
 ) -> usize {
+    if height_range.is_empty() {
+        return 0;
+    }
+
     // The two periods are only meaningful relative to each other, so the subtraction is done in
     // signed arithmetic: see `funding_stream_address_period()`.
     let last_period = funding_stream_address_period(
@@ -360,6 +364,43 @@ fn check_funding_stream_address_period(
         }
     }
 
+    Ok(())
+}
+
+/// Checks effective funding stream ranges and recipient types for Testnet and Regtest.
+fn check_funding_streams(funding_streams: &[FundingStreams]) -> Result<(), ParametersBuilderError> {
+    for (index, streams) in funding_streams.iter().enumerate() {
+        let range = streams.height_range();
+        if !range.is_empty() {
+            // ponytail: pairwise checks avoid allocating for these small startup-only schedules;
+            // sort ranges if configurations grow to contain many funding stream groups.
+            if let Some(previous) = funding_streams[..index].iter().find(|previous| {
+                let previous = previous.height_range();
+                !previous.is_empty() && previous.start < range.end && range.start < previous.end
+            }) {
+                return Err(ParametersBuilderError::OverlappingFundingStreamRanges {
+                    first: previous.height_range().clone(),
+                    second: range.clone(),
+                });
+            }
+        }
+
+        for (&receiver, recipient) in streams.recipients() {
+            if receiver == FundingStreamReceiver::Deferred {
+                continue;
+            }
+            if let Some(&address) = recipient
+                .addresses()
+                .iter()
+                .find(|address| matches!(address, transparent::Address::Tex { .. }))
+            {
+                return Err(ParametersBuilderError::UnsupportedFundingStreamAddress {
+                    receiver,
+                    address,
+                });
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1054,14 +1095,16 @@ impl ParametersBuilder {
     /// genesis subsidy is excluded. Reissuance also requires a post-NU7 halving interval no
     /// greater than [`LN2_SCALED`],
     /// so its integer coefficient is nonzero.
+    /// Effective funding stream ranges must not overlap, and non-deferred recipients must use
+    /// P2SH or P2PKH addresses.
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
         self.check_nsm_reissuance_height()?;
         let mut network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
+        check_funding_streams(&self.funding_streams)?;
         for fs in &self.funding_streams {
-            // Check that the funding streams are valid for the configured Testnet parameters.
             check_funding_stream_address_period(fs, &network)?;
         }
 
@@ -1219,6 +1262,8 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
+    /// Returns an error for overlapping effective funding stream ranges or unsupported
+    /// non-deferred recipient addresses, as on configured Testnets.
     pub fn new_regtest(
         RegtestParameters {
             activation_heights,
@@ -1263,6 +1308,7 @@ impl Parameters {
         }
 
         parameters.check_nsm_reissuance_height()?;
+        check_funding_streams(&parameters.funding_streams)?;
 
         Self {
             network_name: "Regtest".to_string(),

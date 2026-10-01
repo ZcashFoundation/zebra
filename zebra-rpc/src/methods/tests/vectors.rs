@@ -2951,7 +2951,11 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                     .iter()
                     .map(|transaction| transaction.fee.zatoshis())
                     .sum::<i64>();
-                assert_eq!(template.coinbase_txn.fee.zatoshis(), -reported_fees);
+                assert_eq!(reported_fees, fees);
+                assert_eq!(
+                    template.coinbase_txn.fee.zatoshis(),
+                    -(fees - fees * 60 / 100)
+                );
                 assert_eq!(template.mutable, ["time"]);
             }
         }

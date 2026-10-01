@@ -349,6 +349,7 @@ fn nsm_reissuance_starts_at_the_first_reference_crossing() -> Result<(), Report>
     for (public, activation, expected) in [
         (Network::Mainnet, 3_543_000, 8_940_474),
         (Network::new_default_testnet(), 4_200_000, 7_835_274),
+        (Network::new_default_testnet(), 4_465_026, 7_305_222),
     ] {
         let network = Parameters::build()
             .with_activation_heights(ConfiguredActivationHeights {
@@ -401,6 +402,97 @@ fn nsm_reissuance_starts_at_the_first_reference_crossing() -> Result<(), Report>
     Ok(())
 }
 
+/// ZIP 218/237 reference values independently obtained by summing the specified subsidy at
+/// every height, using 150/75/25-second elapsed-time units rather than production helpers.
+#[test]
+fn nu7_monetary_reference_vectors() -> Result<(), Report> {
+    let mainnet_example = Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(3_543_000),
+            ..Network::Mainnet.activation_list().into()
+        })?
+        .clear_funding_streams()
+        .with_lockbox_disbursements(Vec::new())
+        .to_network()?;
+    // (height, scheduled subsidy, cumulative scheduled issuance through height - 1,
+    //  ceiling reference NSM subsidy). The Mainnet activation is illustrative, not assigned.
+    for (network, third_halving, reissuance, vectors) in [
+        (
+            Network::new_default_testnet(),
+            4_497_948,
+            7_305_222,
+            [
+                (
+                    4_465_025,
+                    156_250_000u64,
+                    1_835_785_156_250_000u64,
+                    36_329_542u128,
+                ),
+                (4_465_026, 52_083_333, 1_835_785_312_500_000, 36_329_520),
+                (4_497_947, 52_083_333, 1_837_499_947_905_693, 36_093_758),
+                (4_497_948, 26_041_666, 1_837_499_999_989_026, 36_093_751),
+                (7_305_221, 26_041_666, 1_910_606_065_825_844, 26_041_666),
+                (7_305_222, 26_041_666, 1_910_606_091_867_510, 26_041_663),
+                (7_305_223, 26_041_666, 1_910_606_117_909_176, 26_041_659),
+            ],
+        ),
+        (
+            mainnet_example,
+            6_133_200,
+            8_940_474,
+            [
+                (3_542_999, 156_250_000, 1_702_593_593_750_000, 54_643_381),
+                (3_543_000, 52_083_333, 1_702_593_750_000_000, 54_643_360),
+                (6_133_199, 52_083_333, 1_837_499_947_053_267, 36_093_758),
+                (6_133_200, 26_041_666, 1_837_499_999_136_600, 36_093_751),
+                (8_940_473, 26_041_666, 1_910_606_064_973_418, 26_041_667),
+                (8_940_474, 26_041_666, 1_910_606_091_015_084, 26_041_663),
+                (8_940_475, 26_041_666, 1_910_606_117_056_750, 26_041_659),
+            ],
+        ),
+    ] {
+        assert_eq!(height_for_halving(3, &network), Some(Height(third_halving)));
+        assert_eq!(network.nsm_reissuance_height(), Some(Height(reissuance)));
+        for (height, scheduled, cumulative, reference) in vectors {
+            let height = Height(height);
+            assert_eq!(
+                u64::from(scheduled_block_subsidy(height, &network)?),
+                scheduled
+            );
+            let issued = cumulative_scheduled_issuance_zatoshis(height.previous()?, &network)?;
+            assert_eq!(issued, cumulative);
+            assert_eq!(
+                ((2_100_000_000_000_000u128 - u128::from(issued)) * 1_375).div_ceil(10_000_000_000),
+                reference,
+            );
+            if height.0 >= third_halving {
+                assert_eq!(reference < u128::from(scheduled), height.0 >= reissuance);
+            }
+        }
+        for (reserve, additional) in [
+            (0u64, 0u64),
+            (1, 1),
+            (10_000_000_000, 1_375),
+            (10_000_000_001, 1_376),
+        ] {
+            let reserve = reserve.try_into()?;
+            assert_eq!(
+                additional_block_subsidy(Height(reissuance - 1), &network, reserve).zatoshis(),
+                0,
+            );
+            assert_eq!(
+                u64::from(additional_block_subsidy(
+                    Height(reissuance),
+                    &network,
+                    reserve
+                )),
+                additional,
+            );
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn public_nsm_seeds_match_historical_unclaimed_issuance() -> Result<(), Report> {
     // Historical chain value pools at the last pre-NU6 heights, in zatoshi:
@@ -441,6 +533,11 @@ fn public_nsm_seeds_match_historical_unclaimed_issuance() -> Result<(), Report> 
 fn reissuance_height_requires_nu7_and_a_valid_height() {
     assert_eq!(
         Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                nu7: None,
+                ..Network::new_default_testnet().activation_list().into()
+            })
+            .unwrap()
             .with_funding_streams(Vec::new())
             .with_nsm_reissuance_height(Height(1))
             .to_network()

@@ -468,7 +468,7 @@ fn empty_funding_streams_reject_legacy_declarations() {
 }
 
 #[test]
-fn legacy_funding_streams_keep_precedence_over_nonempty_lists() {
+fn legacy_funding_streams_combine_with_disjoint_nonempty_lists() {
     let _init_guard = zebra_test::init();
 
     for network in ["Testnet", "Regtest"] {
@@ -480,8 +480,8 @@ fn legacy_funding_streams_keep_precedence_over_nonempty_lists() {
              checkpoints = {checkpoints}\n\
              network_magic = [0, 0, 0, 0]\n\
              pre_nu6_funding_streams = {{ height_range = {{ start = 1, end = 4 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n\
-             post_nu6_funding_streams = {{ height_range = {{ start = 2, end = 5 }}, recipients = [{{ receiver = 'Deferred', numerator = 2 }}] }}\n\
-             funding_streams = [{{ height_range = {{ start = 3, end = 6 }}, recipients = [{{ receiver = 'Deferred', numerator = 3 }}] }}]\n"
+             post_nu6_funding_streams = {{ height_range = {{ start = 4, end = 5 }}, recipients = [{{ receiver = 'Deferred', numerator = 2 }}] }}\n\
+             funding_streams = [{{ height_range = {{ start = 5, end = 6 }}, recipients = [{{ receiver = 'Deferred', numerator = 3 }}] }}]\n"
         ))
         .unwrap();
 
