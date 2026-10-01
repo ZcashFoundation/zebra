@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: "Mempool peers are no longer scored for relaying transactions with the adjacent network upgrade's consensus branch ID around any activation height, including NU7; the grace window keeps its 50-minute length under 25-second blocks ([#11100](https://github.com/ZcashFoundation/zebra/issues/11100))."
+body: "Mempool peers are no longer scored for relaying transactions with the adjacent network upgrade's consensus branch ID around any activation height, including NU7; the grace window keeps its 50-minute length under 25-second blocks ([#11100](https://github.com/ZcashFoundation/zebra/issues/11100), [#11563](https://github.com/ZcashFoundation/zebra/pull/11563))."
 time: 2026-10-01T12:00:00.000000000-03:00
