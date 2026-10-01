@@ -1275,17 +1275,15 @@ where
                     .latest_chain_tip
                     .best_tip_height()
                     .unwrap_or_else(|| self.network.checkpoint_list().max_height());
-                // Use the spacing at the end of support height: it is always post-Blossom, so
-                // this stays correct even when the tip is missing or before Blossom.
-                let target_block_spacing =
-                    NetworkUpgrade::target_spacing_for_height(&self.network, end_of_support_height);
-                // If the tip is already past the end of support height, the estimate is in the
-                // past, but never negative.
-                let remaining_blocks = i64::from(end_of_support_height.0) - i64::from(tip_height.0);
                 let estimated_time = Utc::now()
                     .timestamp()
                     .saturating_add(
-                        remaining_blocks.saturating_mul(target_block_spacing.num_seconds()),
+                        NetworkUpgrade::duration_between_heights(
+                            &self.network,
+                            tip_height,
+                            end_of_support_height,
+                        )
+                        .num_seconds(),
                     )
                     .saturating_sub(END_OF_SERVICE_ESTIMATE_SAFETY_MARGIN)
                     .max(0);

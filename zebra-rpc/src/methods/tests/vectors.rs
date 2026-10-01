@@ -205,11 +205,11 @@ async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
         None,
     );
 
-    let end_of_support_height = Height(3_546_440);
+    let end_of_support_height = Height(3_100_000);
     let rpc = rpc.with_end_of_support_height(Some(end_of_support_height));
 
-    // Both heights are after Blossom, so every remaining block is expected to take 75 seconds,
-    // and the estimate is reported 24 hours early.
+    // Both heights are after Blossom and before NU7, so every remaining block is expected to
+    // take 75 seconds, and the estimate is reported 24 hours early.
     let remaining_blocks = i64::from(end_of_support_height.0 - tip_height.0);
     let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
 
