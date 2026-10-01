@@ -22,10 +22,12 @@ use std::{
     collections::HashSet,
     future::Future,
     iter,
+    ops::Bound,
     pin::{pin, Pin},
     task::{Context, Poll},
 };
 
+use chrono::Duration;
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
@@ -86,8 +88,9 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
-/// The number of NU6.3 heights where stale NU6.2 branch IDs receive no peer score.
-const NU6_3_BRANCH_ID_GRACE_PERIOD: i64 = 40;
+/// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
+/// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
+const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
 
 /// Returns the mempool peer score after applying branch ID activation policy.
 fn adjusted_mempool_misbehavior_score(
@@ -96,29 +99,42 @@ fn adjusted_mempool_misbehavior_score(
     verification_height: Height,
     network: &Network,
 ) -> u32 {
-    let is_nu6_3_grace_mismatch = matches!(error, TransactionError::WrongConsensusBranchId)
-        && NetworkUpgrade::Nu6_3
-            .activation_height(network)
-            .is_some_and(|activation_height| {
-                let expected_upgrade = NetworkUpgrade::current(network, verification_height);
-                let height_offset = verification_height - activation_height;
+    let is_grace_mismatch = matches!(error, TransactionError::WrongConsensusBranchId)
+        && transaction_upgrade.is_some_and(|transaction_upgrade| {
+            is_in_branch_id_grace_period(transaction_upgrade, verification_height, network)
+        });
 
-                match (transaction_upgrade, expected_upgrade) {
-                    (Some(NetworkUpgrade::Nu6_2), NetworkUpgrade::Nu6_3) => {
-                        (0..NU6_3_BRANCH_ID_GRACE_PERIOD).contains(&height_offset)
-                    }
-                    (Some(NetworkUpgrade::Nu6_3), NetworkUpgrade::Nu6_2) => {
-                        (-NU6_3_BRANCH_ID_GRACE_PERIOD..0).contains(&height_offset)
-                    }
-                    _ => false,
-                }
-            });
-
-    if is_nu6_3_grace_mismatch {
+    if is_grace_mismatch {
         0
     } else {
         error.mempool_misbehavior_score()
     }
+}
+
+/// Returns `true` if `transaction_upgrade` activates immediately before or after the upgrade
+/// current at `height` on `network`, and `height` is within the grace window of that boundary.
+fn is_in_branch_id_grace_period(
+    transaction_upgrade: NetworkUpgrade,
+    height: Height,
+    network: &Network,
+) -> bool {
+    let activations = network.activation_list();
+    let Some((&current_height, &current)) = activations.range(..=height).next_back() else {
+        return false;
+    };
+    let grace_blocks =
+        BRANCH_ID_GRACE_PERIOD.num_seconds() / current.target_spacing().num_seconds();
+
+    let previous = activations.range(..current_height).next_back();
+    let next = activations
+        .range((Bound::Excluded(height), Bound::Unbounded))
+        .next();
+
+    previous.is_some_and(|(_, &previous)| {
+        previous == transaction_upgrade && height - current_height < grace_blocks
+    }) || next.is_some_and(|(&next_height, &next)| {
+        next == transaction_upgrade && next_height - height <= grace_blocks
+    })
 }
 
 /// The state of the mempool.
