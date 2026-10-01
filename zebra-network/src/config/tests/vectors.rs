@@ -434,6 +434,93 @@ fn incompatible_testnet_requires_isolated_magic() {
 }
 
 #[test]
+fn legacy_public_testnet_overrides_require_migration() {
+    let public: Config = toml::from_str(
+        "network = 'Testnet'\ninitial_testnet_peers = []\n\
+         [testnet_parameters]\ncheckpoints = true\n",
+    )
+    .unwrap();
+    assert!(public.network.is_default_testnet());
+
+    let mut without_nu7 = public.clone();
+    let mut activation_heights: testnet::ConfiguredActivationHeights =
+        public.network.activation_list().into();
+    activation_heights.nu7 = None;
+    without_nu7.network = testnet::Parameters::build()
+        .with_activation_heights(activation_heights)
+        .unwrap()
+        .to_network()
+        .unwrap();
+
+    let mut legacy_funding = public.clone();
+    let mut streams: Vec<ConfiguredFundingStreams> = public
+        .network
+        .all_funding_streams()
+        .iter()
+        .map(Into::into)
+        .collect();
+    streams
+        .last_mut()
+        .unwrap()
+        .height_range
+        .as_mut()
+        .unwrap()
+        .end = Height(4_476_000);
+    legacy_funding.network = testnet::Parameters::build()
+        .with_funding_streams(streams)
+        .to_network()
+        .unwrap();
+
+    for legacy in [without_nu7, legacy_funding] {
+        let mut serialized: toml::Value =
+            toml::from_str(&toml::to_string(&legacy).unwrap()).unwrap();
+        assert!(serialized.clone().try_into::<Config>().is_err());
+        serialized["network"].as_table_mut().unwrap().insert(
+            "network_magic".to_string(),
+            toml::Value::Array([0, 0, 0, 0].into_iter().map(toml::Value::Integer).collect()),
+        );
+        let isolated: Config = serialized.try_into().unwrap();
+        assert_eq!(isolated.network.magic(), Magic([0; 4]));
+        assert!(!isolated.network.is_default_testnet());
+    }
+}
+
+#[test]
+fn empty_funding_ranges_allow_address_auto_extension() {
+    for network in ["Testnet", "Regtest"] {
+        let config: Config = toml::from_str(&format!(
+            "network = '{network}'\n\
+             initial_testnet_peers = []\n\
+             [testnet_parameters]\n\
+             checkpoints = {}\n\
+             network_magic = [0, 0, 0, 0]\n\
+             extend_funding_stream_addresses_as_required = true\n\
+             funding_streams = [\
+               {{ height_range = {{ start = 0, end = 0 }}, recipients = [{{ receiver = 'ECC', numerator = 7, addresses = [] }}] }},\
+               {{ height_range = {{ start = 1, end = 2 }}, recipients = [{{ receiver = 'Deferred', numerator = 12 }}] }}\
+             ]\n",
+            network == "Testnet",
+        ))
+        .unwrap();
+        assert!(config.network.funding_streams(Height(0)).is_none());
+        assert_eq!(
+            config
+                .network
+                .funding_streams(Height(1))
+                .unwrap()
+                .recipients()[&FundingStreamReceiver::Deferred]
+                .numerator(),
+            12,
+        );
+        assert!(
+            config.network.all_funding_streams()[0].recipients()[&FundingStreamReceiver::Ecc]
+                .addresses()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn empty_funding_streams_reject_legacy_declarations() {
     let _init_guard = zebra_test::init();
 

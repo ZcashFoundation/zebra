@@ -1,6 +1,10 @@
 //! Types and implementation for Testnet consensus parameters
 
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::{Arc, LazyLock},
+};
 
 use crate::{
     amount::{Amount, NonNegative, MAX_MONEY},
@@ -1241,15 +1245,20 @@ pub struct Parameters {
     temporary_orchard_disabling_soft_fork_height: Option<Height>,
 }
 
+/// Build directly from the uncached builder so initialization never re-enters this cache.
+static DEFAULT_TESTNET_PARAMETERS: LazyLock<Parameters> = LazyLock::new(|| {
+    Parameters {
+        network_name: "Testnet".to_string(),
+        ..Parameters::build().finish()
+    }
+    .with_calculated_reissuance_height()
+    .expect("the hard-coded public Testnet subsidy schedule is valid")
+});
+
 impl Default for Parameters {
     /// Returns an instance of the default public testnet [`Parameters`].
     fn default() -> Self {
-        Self {
-            network_name: "Testnet".to_string(),
-            ..Self::build().finish()
-        }
-        .with_calculated_reissuance_height()
-        .expect("the hard-coded public Testnet subsidy schedule is valid")
+        DEFAULT_TESTNET_PARAMETERS.clone()
     }
 }
 
@@ -1320,7 +1329,7 @@ impl Parameters {
 
     /// Returns true if the instance of [`Parameters`] represents the default public Testnet.
     pub fn is_default_testnet(&self) -> bool {
-        self == &Self::default()
+        self == &*DEFAULT_TESTNET_PARAMETERS
     }
 
     /// Returns true if the instance of [`Parameters`] represents Regtest.

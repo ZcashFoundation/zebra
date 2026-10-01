@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: '`parameters::testnet::Parameters::default` reuses cached public Testnet issuance parameters, and `Parameters::is_default_testnet` compares against the cache without allocating ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).'
+time: 2026-10-01T19:02:50.947724897+02:00

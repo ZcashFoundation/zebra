@@ -1053,7 +1053,11 @@ where
             .any(|peer| is_default_initial_peer(peer))
         {
             return Err(de::Error::custom(
-                "cannot use default initial peers with incompatible testnet",
+                "cannot use default initial peers with incompatible testnet; \
+                 for public Testnet, remove explicit consensus overrides from \
+                 [network.testnet_parameters] to use the updated public defaults, including NU7; \
+                 for a custom network, configure its own initial_testnet_peers and \
+                 network_magic distinct from public Testnet",
             ));
         }
 
@@ -1061,7 +1065,11 @@ where
         // can all reach public Testnet. Incompatible consensus rules require distinct wire magic.
         if network_magic.map(Magic).unwrap_or(magics::TESTNET) == magics::TESTNET {
             return Err(de::Error::custom(
-                "incompatible testnet parameters require network_magic distinct from public Testnet",
+                "incompatible testnet parameters require network_magic distinct from public Testnet; \
+                 for public Testnet, remove explicit consensus overrides from \
+                 [network.testnet_parameters] (including activation_heights and funding_streams) \
+                 to use the updated public defaults, including NU7; for a custom network, configure its own \
+                 network_magic and initial_testnet_peers",
             ));
         }
     }

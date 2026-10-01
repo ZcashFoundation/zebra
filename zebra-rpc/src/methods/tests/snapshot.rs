@@ -53,7 +53,7 @@ use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::{
-        get_block_template::GetBlockTemplateRequestMode,
+        get_block_template::{BlockProposalResponse, GetBlockTemplateRequestMode},
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
         subsidy::GetBlockSubsidyResponse,
@@ -1117,7 +1117,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         state,
         read_state,
-        block_verifier_router.clone(),
+        block_verifier_router,
         mock_sync_status.clone(),
         mock_tip.clone(),
         mock_address_book,
@@ -1271,6 +1271,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
     // send tip hash and time needed for getblocktemplate rpc
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
 
+    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
     let (rpc_mock_state, _) = RpcImpl::new(
         network.clone(),
         mining_conf,
@@ -1280,7 +1281,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         read_state.clone(),
-        block_verifier_router,
+        mock_block_verifier_router.clone(),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -1384,6 +1385,41 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .expect("unexpected error in getblocktemplate RPC call");
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
+
+    // Mainnet still accepts verifier-approved proposals without the reserve preflight.
+    // Public Testnet requires the live parent even before NU7, because reissuance is scheduled.
+    let proposal = network.blockchain_map()[&1].to_vec();
+    let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
+        mode: GetBlockTemplateRequestMode::Proposal,
+        data: Some(HexData(proposal)),
+        ..Default::default()
+    }));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        if network.is_mainnet() {
+            let verifier_response = async {
+                mock_block_verifier_router
+                    .expect_request_that(|request| matches!(request, Request::CheckProposal(_)))
+                    .await
+                    .respond(Hash::from([0; 32]));
+            };
+            let (response, ()) = tokio::join!(get_block_template, verifier_response);
+            assert_eq!(
+                response.unwrap(),
+                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+            );
+            read_state.clone().expect_no_requests().await;
+        } else {
+            let (response, ()) =
+                tokio::join!(get_block_template, make_mock_read_state_request_handler());
+            assert!(matches!(
+                response.unwrap(),
+                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
+            ));
+            mock_block_verifier_router.expect_no_requests().await;
+        }
+    })
+    .await
+    .expect("proposal validation must not stall");
 
     // These RPC snapshots use the populated state
 

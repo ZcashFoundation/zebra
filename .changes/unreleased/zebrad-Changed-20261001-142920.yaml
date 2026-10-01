@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Activate NU7 on public Testnet at height 4,465,026. The adjusted third halving is at 4,497,948, and NSM reissuance begins at 7,305,222. Mainnet NU7 activation remains unassigned ([#11552](https://github.com/ZcashFoundation/zebra/issues/11552)).
-time: 2026-10-01T14:29:20.792596085+02:00
