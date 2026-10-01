@@ -29,6 +29,8 @@ Every Zebra version released by the Zcash Foundation is supported up to a specif
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 
+The current stable release line can receive a bug fix as a patch release, without waiting for the next minor or major release. See [Patch releases from a release branch](#patch-releases-from-a-release-branch).
+
 Our process is similar to `zcashd`: <https://zcash.github.io/zcash/user/release-support.html>
 
 Older Zebra versions that only support previous network upgrades will never be supported, because they are operating on an unsupported Zcash chain fork.
@@ -127,7 +129,7 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`, then the Release workflow batches them into versioned entries for the versions release-plz picked and regenerates every changelog, writing a mechanical dependency entry for a package that is being released only because a local dependency moved. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`, then the Release workflow batches them into versioned entries for the versions release-plz picked and regenerates every changelog, writing a mechanical dependency entry for a package that is being released only because a local dependency moved. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on the base branch.
 
 A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
 
@@ -135,7 +137,7 @@ Approve and merge only after every required check passes and every checkbox is c
 
 ### What Release Readiness Reports
 
-Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
+Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes the current base branch, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
 
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 
@@ -184,3 +186,108 @@ gh workflow run release.yml --ref main \
 Do not retry immutable contradictions: a crate archive from another source commit, a tag that points to another commit, or a GitHub Release with a conflicting channel must stop for maintainer review. Do not manually repeat publication or overwrite external state.
 
 If the automated workflow remains unavailable and a maintainer authorizes a break-glass manual release, follow the [manual release checklist](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist-legacy.md).
+
+## Patch releases from a release branch
+
+A patch release ships a published version plus a fix, and nothing else. It is built on a `release/X.Y` branch instead of `main`, so operators take the fix without taking anything else that has landed since.
+
+The reasoning behind this process is recorded in [ADR 0009](https://github.com/ZcashFoundation/zebra/blob/main/docs/decisions/devops/0009-release-branches.md).
+
+### Which line receives patches
+
+Patches go to the current stable release line, the line of the latest published stable release. It does not matter which version an unmerged Release PR on `main` proposes. If 6.3.1 is the latest published stable release, the patch target is `release/6.3`.
+
+Supporting an older line is a separate decision that maintainers make explicitly. Do not assume it.
+
+Everything else still goes to `main` and ships in the next feature release.
+
+### Create the release branch
+
+`release/X.Y` is an ordinary public branch. A maintainer creates it when the line first needs a patch, starting from the latest published stable release on that line. For `release/6.3`, that is `v6.3.1` when `v6.3.1` is the newest 6.3 tag, and `v6.3.0` otherwise:
+
+```sh
+git fetch origin --tags
+git switch -c release/6.3 v6.3.1
+git push origin release/6.3
+```
+
+The `Release branches` ruleset covers `refs/heads/release/**`. It applies the same requirements as `PR Requirements` on `main`, and also blocks deletion and force-pushes. It does not include a merge queue: GitHub rejects merge queues on wildcard refs. A per-line merge-queue ruleset is an optional later admin step once a concrete `release/X.Y` exists.
+
+### Bring the release pipeline up to date
+
+A tag can predate changes to the release pipeline. When it does, the first pull request into the new branch is a narrowly reviewed infrastructure update. Copy over only what this release needs:
+
+- the scripts, workflow files, and configuration the release runs
+- changelog history, initialized only through the stable release the branch started from
+
+Three things this pull request never does:
+
+- copy `main`'s whole `.changes/unreleased/` directory
+- replace all of `.github/` wholesale
+- merge `main` into the release branch
+
+Every file it touches has to be reviewable as part of this release. Open it before the fix, so the fix reviews on its own.
+
+### Develop the fix on the release branch
+
+Open the fix pull request against `release/X.Y` directly. It is reviewed and tested against the tree operators run, so what reviewers read is what ships.
+
+If the same fix already exists on `main`, reuse it instead of rewriting it:
+
+```sh
+git switch release/6.3
+git switch -c fix-peer-timeout-6.3
+git cherry-pick -x -m 1 <merge commit of the main PR>
+```
+
+`-m 1` takes the merge commit's whole change as one commit. `-x` records the source commit in the message, so a reader can trace the branch commit back to its `main` pull request. This is a shortcut, not a requirement. When there is nothing to reuse, or the reused patch does not apply, write the fix on the branch and say what differs from `main` and why.
+
+The pull request gets the same review and the same required checks as any other.
+
+### Land the release metadata
+
+Two pieces of release metadata are reviewed explicitly on the branch.
+
+Versions and changelog entries come from the Release PR, generated the same way they are on `main`. Commit a change fragment under `.changes/unreleased/` with the fix, and let the Release workflow batch it.
+
+`ESTIMATED_RELEASE_HEIGHT` in `zebrad/src/components/sync/end_of_support.rs` sets the support window for the version this patch publishes. Land a commit on the branch that sets it to the height the patch is expected to publish at. Renewing that height keeps the node running. It does not make the node follow the right chain, so it is not a substitute for the network-upgrade parameters a feature release carries.
+
+### Release the patch
+
+Publication works exactly as it does on `main`. release-plz opens `chore: release vX.Y.Z` against the release branch, a maintainer reviews and merges it, and the rest is automated. Review it with the [Release PR checklist](#review-the-release-pr) and read [What Happens After Merge](#what-happens-after-merge).
+
+Release PR head branches are namespaced by base branch, so `main` gets `release-plz-main-*` and `release/6.3` gets `release-plz-6.3-*`. The workflow sets this from the branch it runs on. Without the namespacing, one branch's Release PR would suppress the other's, because release-plz deduplicates open Release PRs by head-branch prefix across every base branch.
+
+Recovery uses the same dispatch as `main`, pointed at the branch:
+
+```sh
+gh workflow run release.yml --ref release/X.Y \
+  -f operation=check \
+  -f release_pr_number=<PR>
+```
+
+```sh
+gh workflow run release.yml --ref release/X.Y \
+  -f operation=resume \
+  -f release_pr_number=<PR>
+```
+
+### What a patch publishes when it is not Latest
+
+`ZcashFoundation/cargo-release` decides whether a release is marked Latest on GitHub. The binaries and deploy workflows always publish the immutable `X.Y.Z` artifacts, then recheck GitHub's latest-release marker immediately before mutating Docker Hub `latest` or deploying production.
+
+A patch that is not marked Latest still publishes crates, tags, the GitHub Release, signed binaries, and the Docker Hub `X.Y.Z` tag. Operators who pin `zfnd/zebra:6.3.1` get the patch.
+
+### Carry the fix into `main`
+
+Every fix on a release branch must also reach `main`, through a forward-port pull request that someone tracks. A fix that stays on the branch disappears at the next feature release.
+
+Open it as a normal pull request into `main`. When `main` has changed around the fix, adapt it there and let review cover the adaptation.
+
+The next feature release from `main` has to include every applicable released fix and the correct network-upgrade parameters.
+
+### Retire the release branch
+
+Retiring a branch takes an explicit support decision. Do not infer it from the version `main` proposes, and do not infer it from a renewed end-of-support height.
+
+Once maintainers decide the line is no longer supported, delete the branch. The tags, releases, crates, and images it published stay where they are.
