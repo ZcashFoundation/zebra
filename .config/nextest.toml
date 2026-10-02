@@ -30,11 +30,15 @@ filter = 'test(/^integration::sync::/)'
 test-group = 'serial-live-mainnet'
 
 # These tests sync mainnet to genesis from live peers; they normally finish in
-# ~10-30s, but a slow/unreachable peer can stall them. Fail fast after 10m and
-# retry instead of hanging near the old 30m hard limit, where they flaked.
+# ~10-30s, but a slow/unreachable peer can stall them indefinitely: they pass
+# `MempoolBehavior::ShouldNotActivate`, so `sync_until` collects the whole output
+# with `wait_with_output`, which `TestChild::with_timeout` does not bound (see
+# `zebra-test/src/command.rs`). Nextest is therefore the only limit, so keep it
+# close to the runtime the tests actually need: a stalled attempt costs 2m and is
+# retried, instead of holding the serial live-mainnet group for 10m.
 [[profile.ci.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
-slow-timeout = { period = "5m", terminate-after = 2 }
+slow-timeout = { period = "60s", terminate-after = 2 }
 retries = 2
 
 [[profile.ci.overrides]]
