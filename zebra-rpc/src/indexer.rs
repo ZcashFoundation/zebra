@@ -5,6 +5,7 @@ use std::sync::Arc;
 use zebra_chain::{
     block,
     serialization::{BytesInDisplayOrder, ZcashDeserializeInto, ZcashSerialize},
+    transaction::Transaction,
 };
 
 #[cfg(test)]
@@ -42,6 +43,22 @@ impl BlockHashAndHeight {
     }
 }
 
+impl TransactionIdentifier {
+    /// Creates a new [`TransactionIdentifier`] from a parsed [`Transaction`].
+    ///
+    /// Both identifiers use the same display-order encoding as [`MempoolChangeMessage`], and the
+    /// auth digest is empty for V1 to V4 transactions.
+    pub fn new(transaction: &Transaction) -> Self {
+        TransactionIdentifier {
+            txid: transaction.hash().bytes_in_display_order().to_vec(),
+            auth_digest: transaction
+                .auth_digest()
+                .map(|auth_digest| auth_digest.bytes_in_display_order().to_vec())
+                .unwrap_or_default(),
+        }
+    }
+}
+
 impl BlockAndHash {
     /// Creates a new [`BlockAndHash`] from a [`block::Hash`] and [`block::Height`].
     ///
@@ -54,6 +71,11 @@ impl BlockAndHash {
             data: block
                 .zcash_serialize_to_vec()
                 .expect("block serialization should not fail"),
+            transaction_identifiers: block
+                .transactions
+                .iter()
+                .map(|transaction| TransactionIdentifier::new(transaction))
+                .collect(),
         }
     }
 
