@@ -106,7 +106,10 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
     let mut prev_key = None;
     let mut prev_tree: Option<Arc<HistoryTree>> = None;
 
-    for (key, tree) in db.history_trees_full_tip() {
+    for (key, tree) in db
+        .try_history_trees_full_tip()
+        .map_err(|error| format!("cannot rebuild stored history tree snapshots: {error}"))?
+    {
         // The tip tree should be indexed by `()` (which serializes to an empty array).
         if !key.raw_bytes().is_empty() {
             result = Err(format!(

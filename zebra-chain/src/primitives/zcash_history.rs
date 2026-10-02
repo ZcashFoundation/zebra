@@ -38,6 +38,11 @@ pub trait Version: zcash_history::Version {
     /// Convert a Block into the NodeData for this version.
     ///
     /// The Ironwood root in `roots` is ignored by all versions before V3 (NU6.3).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the block's network upgrade has no consensus branch ID; the
+    /// `Tree` constructors reject those upgrades before node data is built.
     fn block_to_history_node(
         block: Arc<Block>,
         network: &Network,
@@ -128,6 +133,9 @@ impl<V: Version> Tree<V> {
     /// Note that the length is usually larger than the length of `peaks` and `extra`, since
     /// you don't need to pass every node, just the peaks of the tree (plus extra).
     ///
+    /// Returns an error if `network_upgrade` has no consensus branch ID in this
+    /// build, because its history tree cannot be built or rebuilt.
+    ///
     /// # Panics
     ///
     /// Will panic if `peaks` is empty.
@@ -139,9 +147,11 @@ impl<V: Version> Tree<V> {
         peaks: &BTreeMap<u32, Entry>,
         extra: &BTreeMap<u32, Entry>,
     ) -> Result<Self, io::Error> {
-        let branch_id = network_upgrade
-            .branch_id()
-            .expect("unexpected pre-Overwinter MMR history tree");
+        // A network upgrade without a consensus branch ID in this build cannot
+        // have a history tree, so reject it instead of panicking.
+        let branch_id = network_upgrade.branch_id().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "missing consensus branch ID")
+        })?;
         let mut peaks_vec = Vec::new();
         for (idx, entry) in peaks {
             let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
@@ -173,6 +183,14 @@ impl<V: Version> Tree<V> {
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(network, height);
+        // Reject upgrades without a consensus branch ID before building the
+        // leaf, which would otherwise panic on the same check.
+        if network_upgrade.branch_id().is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "missing consensus branch ID",
+            ));
+        }
         let entry0 = Entry::new_leaf::<V>(block, network, roots);
         let mut peaks = BTreeMap::new();
         peaks.insert(0u32, entry0);
@@ -261,9 +279,12 @@ impl Version for zcash_history::V1 {
             .coinbase_height()
             .expect("block must have coinbase height during contextual verification");
         let network_upgrade = NetworkUpgrade::current(network, height);
+        // The `Tree` constructors reject upgrades without a consensus branch ID,
+        // and `append_leaf` asserts that the block's upgrade matches the tree's,
+        // so this upgrade always has a branch ID.
         let branch_id = network_upgrade
             .branch_id()
-            .expect("must have branch ID for chain history network upgrades");
+            .expect("history trees only exist for network upgrades with a branch ID");
         let block_hash = block.hash().0;
         let time: u32 = block
             .header

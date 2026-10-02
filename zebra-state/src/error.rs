@@ -95,6 +95,25 @@ pub enum StateInitError {
          delete it; set `ephemeral = false`, or do not request a read-only state"
     )]
     ReadOnlyEphemeralConflict,
+
+    /// The stored history tree was written for a network upgrade whose consensus
+    /// branch ID is missing from this build, so it cannot be rebuilt.
+    ///
+    /// This happens when a database written by a build with different network
+    /// upgrade parameters (for example, a `zebra-test` build with the NU7
+    /// placeholder branch ID) is opened by a build without them.
+    #[error(
+        "cannot open state: the finalized history tree in {path:?} cannot be rebuilt by this \
+         build: {source}. \
+         Hint: the database was last written by a build with different network upgrade \
+         parameters; use a matching build or resynchronize the database"
+    )]
+    UnreadableHistoryTree {
+        /// The finalized database path.
+        path: PathBuf,
+        /// The history tree rebuild error.
+        source: HistoryTreeError,
+    },
 }
 
 /// An error describing why a block could not be queued to be committed to the state.

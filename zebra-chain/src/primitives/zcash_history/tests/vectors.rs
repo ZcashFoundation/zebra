@@ -95,3 +95,57 @@ fn tree_for_network_upgrade(network: &Network, network_upgrade: NetworkUpgrade) 
 
     Ok(())
 }
+
+/// Network upgrades without a consensus branch ID cannot have history tree
+/// nodes, so the tree constructors must return an error instead of panicking.
+///
+/// `BeforeOverwinter` has no branch ID in any build, which exercises the same
+/// code path as a post-Heartwood upgrade missing from `CONSENSUS_BRANCH_IDS`
+/// (for example, NU7 in builds without its branch ID).
+#[test]
+fn constructors_reject_missing_branch_ids() -> Result<()> {
+    let network = Network::Mainnet;
+
+    assert!(
+        matches!(
+            Tree::<V1>::new_from_cache(
+                &network,
+                NetworkUpgrade::BeforeOverwinter,
+                1,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .map_err(|error| error.kind()),
+            Err(io::ErrorKind::InvalidInput)
+        ),
+        "a branchless upgrade must fail before cache decoding"
+    );
+
+    // The genesis block's network upgrade also has no branch ID.
+    let (blocks, _) = network.block_sapling_roots_map();
+    let block = Arc::new(
+        blocks
+            .get(&0)
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+    assert!(
+        matches!(
+            Tree::<V1>::new_from_block(
+                &network,
+                block,
+                BlockCommitmentTreeRoots {
+                    sapling: &Default::default(),
+                    orchard: &Default::default(),
+                    ironwood: &Default::default(),
+                },
+            )
+            .map_err(|error| error.kind()),
+            Err(io::ErrorKind::InvalidInput)
+        ),
+        "a branchless upgrade must fail before building a leaf"
+    );
+
+    Ok(())
+}

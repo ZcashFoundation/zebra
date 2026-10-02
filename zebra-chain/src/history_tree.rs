@@ -33,6 +33,9 @@ pub enum HistoryTreeError {
 
     #[error("I/O error: {0}")]
     IOError(#[from] io::Error),
+
+    #[error("{0:?} has no consensus branch ID in this build, so it cannot have a history tree")]
+    MissingBranchId(NetworkUpgrade),
 }
 
 impl PartialEq for HistoryTreeError {
@@ -94,6 +97,13 @@ impl NonEmptyHistoryTree {
             | NetworkUpgrade::Sapling
             | NetworkUpgrade::Blossom => {
                 panic!("HistoryTree does not exist for pre-Heartwood upgrades")
+            }
+            // Every history tree node commits to its network upgrade's consensus
+            // branch ID, so a post-Heartwood upgrade that has no branch ID in this
+            // build cannot have a history tree. (For example, an NU7 activation on
+            // a configured Testnet or Regtest in a build without the NU7 branch ID.)
+            _ if network_upgrade.branch_id().is_none() => {
+                return Err(HistoryTreeError::MissingBranchId(network_upgrade));
             }
             NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 let tree = Tree::<PreOrchard>::new_from_cache(
@@ -172,6 +182,12 @@ impl NonEmptyHistoryTree {
             | NetworkUpgrade::Sapling
             | NetworkUpgrade::Blossom => {
                 panic!("HistoryTree does not exist for pre-Heartwood upgrades")
+            }
+            // A post-Heartwood upgrade that has no consensus branch ID in this
+            // build cannot have a history tree, so reject it with an error
+            // instead of panicking when building the tree's node data.
+            _ if network_upgrade.branch_id().is_none() => {
+                return Err(HistoryTreeError::MissingBranchId(network_upgrade));
             }
             NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 let (tree, entry) = Tree::<PreOrchard>::new_from_block(network, block, roots)?;

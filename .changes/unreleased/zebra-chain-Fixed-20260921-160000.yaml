@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: '`history_tree::HistoryTreeError` has a new `MissingBranchId` variant, and `NonEmptyHistoryTree::from_cache`, `from_block` and the block-append path return it instead of panicking when the current network upgrade has no consensus branch ID in this build (for example, NU7 activated on a configured Testnet or Regtest) ([#11482](https://github.com/ZcashFoundation/zebra/issues/11482)).'
+time: 2026-09-21T16:00:00.000000000Z

@@ -17,8 +17,13 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
-    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
+    amount::NonNegative,
+    block::Height,
+    block_info::BlockInfo,
+    history_tree::{HistoryTree, HistoryTreeError},
+    serialization::ZcashSerialize as _,
+    transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -114,7 +119,27 @@ impl ZebraDb {
     ///
     /// If history trees have not been activated yet (pre-Heartwood), or the state is empty,
     /// returns an empty history tree.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stored history tree cannot be rebuilt by this build. See
+    /// [`Self::try_history_tree`] for the fallible variant.
     pub fn history_tree(&self) -> Arc<HistoryTree> {
+        self.try_history_tree()
+            .expect("stored history trees should be rebuildable by this build")
+    }
+
+    /// Returns the tip history tree from the database, or an error if it cannot
+    /// be rebuilt by this build.
+    ///
+    /// A history tree stored for a network upgrade whose consensus branch ID is
+    /// missing from this build (for example, an NU7 tree written by a
+    /// `zebra-test` build) cannot be rebuilt, so this method returns
+    /// [`HistoryTreeError::MissingBranchId`] instead of panicking.
+    ///
+    /// If history trees have not been activated yet (pre-Heartwood), or the state is empty,
+    /// returns an empty history tree.
+    pub(crate) fn try_history_tree(&self) -> Result<Arc<HistoryTree>, HistoryTreeError> {
         let history_tree_cf = self.history_tree_cf();
 
         // # Backwards Compatibility
@@ -144,27 +169,29 @@ impl ZebraDb {
                 .map(|(_height_key, tree_value)| tree_value);
         }
 
-        let history_tree = history_tree_parts.map(|parts| {
-            parts.with_network(&self.db.network()).expect(
-                "deserialization format should match the serialization format used by IntoDisk",
-            )
-        });
-        Arc::new(HistoryTree::from(history_tree))
+        let history_tree = history_tree_parts
+            .map(|parts| parts.with_network(&self.db.network()))
+            .transpose()?;
+        Ok(Arc::new(HistoryTree::from(history_tree)))
     }
 
     /// Returns all the history tip trees.
     /// We only store the history tree for the tip, so this method is only used in tests and
     /// upgrades.
-    pub(crate) fn history_trees_full_tip(&self) -> BTreeMap<RawBytes, Arc<HistoryTree>> {
+    ///
+    /// Returns an error if a stored history tree cannot be rebuilt by this
+    /// build (for example, a tree stored for a network upgrade whose consensus
+    /// branch ID is missing from this build).
+    pub(crate) fn try_history_trees_full_tip(
+        &self,
+    ) -> Result<BTreeMap<RawBytes, Arc<HistoryTree>>, HistoryTreeError> {
         let raw_history_tree_cf = self.raw_history_tree_cf();
 
         raw_history_tree_cf
             .zs_forward_range_iter(..)
             .map(|(raw_key, history_tree_parts)| {
-                let history_tree = history_tree_parts.with_network(&self.db.network()).expect(
-                    "deserialization format should match the serialization format used by IntoDisk",
-                );
-                (raw_key, Arc::new(HistoryTree::from(history_tree)))
+                let history_tree = history_tree_parts.with_network(&self.db.network())?;
+                Ok((raw_key, Arc::new(HistoryTree::from(history_tree))))
             })
             .collect()
     }

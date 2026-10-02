@@ -178,6 +178,17 @@ impl ZebraDb {
             db: disk_db,
         };
 
+        // A history tree written for a network upgrade whose consensus branch ID is
+        // missing from this build (for example, an NU7 tree written by a `zebra-test`
+        // build) cannot be rebuilt, so fail now with a clear error instead of
+        // panicking on first access.
+        if let Err(source) = db.try_history_tree() {
+            return Err(StateInitError::UnreadableHistoryTree {
+                path: db.path().to_owned(),
+                source,
+            });
+        }
+
         // One entry is enough to detect the corruption, and the height range has to start at
         // zero, because the corrupt entries are exactly the ones at the zero address location.
         let zero_location_utxos = db.address_utxo_locations(
