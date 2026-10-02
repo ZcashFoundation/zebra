@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Tracked non-empty `FindBlocks` responses now carry `FindResponseFeedback`; consumers report usefulness or stalls, which the peer set attributes to the responding peer in request order. Dropping an unclassified response or cancelling its response future releases tracking neutrally so later outcomes can be processed ([#11569](https://github.com/ZcashFoundation/zebra/pull/11569)).
+time: 2026-10-01T22:33:00.045074855Z

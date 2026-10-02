@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: While catching up with the chain, peers that repeatedly return block-hash responses rejected by the syncer are now disconnected instead of having their stall history reset merely because the responses are non-empty ([#11569](https://github.com/ZcashFoundation/zebra/pull/11569)).
+time: 2026-10-01T22:33:00.007369609Z
