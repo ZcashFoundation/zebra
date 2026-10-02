@@ -3,9 +3,38 @@ description: 'Install libclang, protoc, and RocksDB as system libraries'
 runs:
   using: 'composite'
   steps:
-    - name: Install libclang, protoc, and librocksdb-dev on Ubuntu
+    # The Azure Ubuntu mirror regularly trickles the ~42 MB of `.deb`s below for
+    # minutes at a time, so they are cached. apt-install.sh checks every cached
+    # file against the signed package index before using it, and the cache is
+    # rewritten whenever the set of `.deb`s changes, e.g. after an Ubuntu update.
+    - name: Compute apt package cache key
+      id: apt-cache-key
       if: runner.os == 'Linux'
       shell: bash
+      env:
+        PACKAGES: clang libclang-dev protobuf-compiler librocksdb-dev
+      run: |
+        echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+        echo "prefix=apt-archives-v1-${ImageOS:-unknown}-${RUNNER_ARCH}-$(sha256sum <<< "$PACKAGES" | cut -c1-8)" >> "$GITHUB_OUTPUT"
+
+    # Nothing is ever saved under the bare prefix, so this restores the most
+    # recent `<prefix>-<plan-hash>` entry from this branch or main.
+    - name: Restore apt package cache
+      id: apt-cache-restore
+      if: runner.os == 'Linux'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
+      with:
+        path: ${{ runner.temp }}/apt-archives
+        key: ${{ steps.apt-cache-key.outputs.prefix }}
+        restore-keys: ${{ steps.apt-cache-key.outputs.prefix }}-
+
+    - name: Install libclang, protoc, and librocksdb-dev on Ubuntu
+      id: apt-install
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        APT_ARCHIVES_CACHE_DIR: ${{ runner.temp }}/apt-archives
+        PACKAGES: ${{ steps.apt-cache-key.outputs.packages }}
       run: |
         # libclang is needed at build time: librocksdb-sys always runs bindgen
         # (via clang-sys) to generate FFI bindings, even when linking the system
@@ -14,5 +43,19 @@ runs:
         # The install is wrapped so a stalling Ubuntu mirror fails fast instead
         # of burning the whole job timeout. Composite action steps cannot set
         # `timeout-minutes`, so the bound has to come from the script.
-        "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" clang libclang-dev protobuf-compiler librocksdb-dev
+        # shellcheck disable=SC2086 # PACKAGES is a space-separated list
+        "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" $PACKAGES
         echo "ROCKSDB_LIB_DIR=/usr/lib/" >> $GITHUB_ENV
+
+    # Only main saves, like the Rust caches (see .github/workflows/README.md),
+    # and only when the restored entry is not already this exact set of `.deb`s.
+    - name: Save apt package cache
+      if: >-
+        runner.os == 'Linux' &&
+        github.ref == 'refs/heads/main' &&
+        steps.apt-install.outputs.plan-hash != '' &&
+        steps.apt-cache-restore.outputs.cache-matched-key != format('{0}-{1}', steps.apt-cache-key.outputs.prefix, steps.apt-install.outputs.plan-hash)
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
+      with:
+        path: ${{ runner.temp }}/apt-archives
+        key: ${{ steps.apt-cache-key.outputs.prefix }}-${{ steps.apt-install.outputs.plan-hash }}
