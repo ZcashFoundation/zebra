@@ -25,17 +25,19 @@ filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
 slow-timeout = { period = "5m", terminate-after = 2 }
 
-[[profile.ci.overrides]]
-filter = 'test(/^integration::sync::/)'
-test-group = 'serial-live-mainnet'
-
-# These tests sync mainnet to genesis from live peers; they normally finish in
-# ~10-30s, but a slow/unreachable peer can stall them. Fail fast after 10m and
-# retry instead of hanging near the old 30m hard limit, where they flaked.
+# These tests sync the Mainnet genesis block from a local `GenesisPeer`, and
+# finish in a few seconds. They pass `MempoolBehavior::ShouldNotActivate`, so
+# `sync_until_with_peers` waits for `zebrad` to exit with `wait_with_output`,
+# which `TestChild::with_timeout` does not bound: nextest is the only limit if a
+# sync stalls, so fail fast. No live peers are involved, but `zebrad` never
+# retries an initial peer whose first handshake failed (#11504), so a single
+# failed localhost handshake would stall the test. Retry once for that case;
+# nextest still reports it as FLAKY. Keep this in sync with the
+# 'profile.default' copy below.
 [[profile.ci.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
-slow-timeout = { period = "5m", terminate-after = 2 }
-retries = 2
+slow-timeout = { period = "60s", terminate-after = 2 }
+retries = 1
 
 [[profile.ci.overrides]]
 filter = "test(=peer_set::set::tests::vectors::peer_set_ready_multiple_connections) or test(=peer_set::set::tests::vectors::peer_set_ready_single_connection) or test(=peer_set::set::tests::vectors::peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set::set::tests::vectors::peer_set_route_inv_advertised_registry)"
@@ -67,23 +69,22 @@ serial-live-testnet = { max-threads = 1 }
 # under a parallel profile invoked with --run-ignored=all.
 serial-zcashd-compat = { max-threads = 1 }
 
-# Force tests that start fresh live Mainnet nodes to run serially in local
-# parallel test runs. The CI overrides above assign the same test group while
-# preserving their profile-specific retries and timeouts.
+# The coverage workflow runs the default profile, which never terminates slow
+# tests, so bound the local-peer sync tests here as well. See the 'profile.ci'
+# copy above.
 [[profile.default.overrides]]
-filter = 'test(/^integration::sync::/)'
-test-group = 'serial-live-mainnet'
+filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
+slow-timeout = { period = "60s", terminate-after = 2 }
+retries = 1
 
 # Force live Testnet peer-limit tests to run serially with each other, while
 # allowing them to run concurrently with live Mainnet tests.
 #
 # This split is only safe while no other running test dials live Testnet peers.
 # `integration::sync::sync_one_checkpoint_testnet` and the Testnet half of
-# `integration::sync::restart_stop_at_height` are currently disabled; if they are
-# re-enabled, they join 'serial-live-mainnet' via the filter above and can then
-# contend with this group for Testnet connections. A test can only belong to one
-# group, and `restart_stop_at_height` syncs both networks, so re-enabling them
-# means merging these two groups back into one live-peer group.
+# `integration::sync::restart_stop_at_height` are currently disabled. They sync
+# from a local `GenesisPeer` like the Mainnet tests, so re-enabling them doesn't
+# add any live Testnet connections.
 #
 # Keep the 'profile.default' and 'profile.ci' copies of each filter below in
 # sync: nextest is invoked with '--profile ci' by the test workflows, and with
