@@ -33,6 +33,9 @@ use crate::service::{
     non_finalized_state::Chain,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// The maximum size of the parent error map.
 ///
 /// We allow enough space for multiple concurrent chain forks with errors.
