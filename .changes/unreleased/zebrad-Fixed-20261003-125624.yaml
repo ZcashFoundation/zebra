@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Zebra no longer stalls on a losing branch when an equal-work fork arrives while 10 forks are already tracked, as during Testnet minimum-difficulty bursts. A block received after its siblings is no longer dropped as soon as it is committed, and a dropped block is downloaded again when the network builds on it ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+time: 2026-10-03T12:56:24.000000+00:00

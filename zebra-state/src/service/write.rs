@@ -136,6 +136,9 @@ struct WriteBlockWorkerTask {
     /// Without this, a rejected same-hash block locks out a later honest
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
+    ///
+    /// Also carries the parent hash of a block whose parent was evicted from the
+    /// non-finalized state, so the parent can be downloaded again.
     non_finalized_rejected_sender: UnboundedSender<block::Hash>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
@@ -431,6 +434,14 @@ impl WriteBlockWorkerTask {
                 // down), ignore the error: the lockout cannot matter once the
                 // service exits.
                 let _ = non_finalized_rejected_sender.send(child_hash);
+
+                // A missing parent that is in no chain was evicted from the non-finalized
+                // state, so let the StateService forget it and download it again.
+                if matches!(error, ValidateContextError::NotReadyToBeCommitted)
+                    && !non_finalized_state.any_chain_contains(&parent_hash)
+                {
+                    let _ = non_finalized_rejected_sender.send(parent_hash);
+                }
 
                 // Update the caller with the error.
                 let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));

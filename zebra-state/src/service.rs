@@ -165,6 +165,9 @@ pub(crate) struct StateService {
     /// Without this, a rejected same-hash block locks out a later honest
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
+    ///
+    /// Also receives the parent hash of a block whose parent was evicted from the
+    /// non-finalized state, so the parent can be downloaded again.
     non_finalized_rejected_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
 
     // Pending UTXO Request Tracking
