@@ -273,13 +273,26 @@ impl NonFinalizedState {
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
     {
-        self.chain_set.insert(chain);
+        self.chain_set.insert(chain.clone());
 
         chain_filter(&mut self.chain_set);
 
         while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
-            // The first chain is the chain with the lowest work.
-            self.chain_set.pop_first();
+            // The first chain is the chain with the lowest work. If that is the chain that was
+            // just inserted, and it ties with the next chain, evict the next chain instead:
+            // otherwise a late equal-work block is evicted before its children arrive.
+            let mut lowest = self.chain_set.iter();
+            let first = lowest.next().expect("chain set is not empty").clone();
+            let evicted = match lowest.next() {
+                Some(next)
+                    if Arc::ptr_eq(&first, &chain)
+                        && next.partial_cumulative_work == first.partial_cumulative_work =>
+                {
+                    next.clone()
+                }
+                _ => first,
+            };
+            self.chain_set.remove(&evicted);
         }
 
         self.update_metrics_bars();

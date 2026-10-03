@@ -1569,3 +1569,59 @@ fn equal_work_ties_prefer_first_received() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// Fills the chain set with equal-work sibling forks, then commits one more sibling that
+/// was received last. That sibling must stay in the chain set long enough for its child
+/// to commit, instead of being evicted as soon as it is inserted.
+#[test]
+fn late_equal_work_sibling_is_not_evicted_on_insert() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    let received = std::time::Instant::now();
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+
+    for i in 0..max_forks {
+        let mut prepared = sibling(i).prepare();
+        prepared.received_time = Some(received + Duration::from_secs(i.into()));
+        state.commit_block(prepared, &finalized_state)?;
+    }
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+
+    let late = sibling(max_forks);
+    let mut prepared = late.clone().prepare();
+    prepared.received_time = Some(received + Duration::from_secs(max_forks.into()));
+    state.commit_block(prepared, &finalized_state)?;
+
+    assert!(
+        state.any_chain_contains(&late.hash()),
+        "the newly inserted sibling must not be evicted"
+    );
+
+    let late_child = late.make_fake_child().set_work(10);
+    state.commit_block(late_child.clone().prepare(), &finalized_state)?;
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        late_child.hash(),
+    );
+
+    Ok(())
+}

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: When the non-finalized state is at its fork limit, a newly committed chain that ties on work with the lowest chain is no longer the one evicted, and `StateService` forgets an evicted block once a child of it arrives, so the evicted block can be committed again ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+time: 2026-10-03T12:56:24.000000+00:00

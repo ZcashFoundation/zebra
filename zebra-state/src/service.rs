@@ -158,14 +158,14 @@ pub(crate) struct StateService {
     // TODO: add tests for finalized and non-finalized resets (#2654)
     invalid_block_write_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
 
-    /// Receives the hash of every non-finalized block that the write task
-    /// rejected, so the corresponding entry can be removed from
-    /// `non_finalized_block_write_sent_hashes`.
+    /// Receives hashes of sent non-finalized blocks that are in no chain, so their
+    /// entries can be removed from `non_finalized_block_write_sent_hashes`:
+    /// - blocks the write task rejected, and
+    /// - evicted parents of blocks that the write task could not commit.
     ///
-    /// Without this, a rejected same-hash block locks out a later honest
-    /// re-delivery of a block at the same hash as a "duplicate" until restart
-    /// or reorg.
-    non_finalized_rejected_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+    /// Without this, a later re-delivery of a block at the same hash is treated as a
+    /// "duplicate" until restart or reorg.
+    non_finalized_forget_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
 
     // Pending UTXO Request Tracking
     //
@@ -243,7 +243,7 @@ impl Drop for StateService {
         // This makes the block write thread exit the next time it checks the channels.
         // We want to do this here so we get any errors or panics from the block write task before it shuts down.
         self.invalid_block_write_reset_receiver.close();
-        self.non_finalized_rejected_receiver.close();
+        self.non_finalized_forget_receiver.close();
 
         std::mem::drop(self.block_write_sender.finalized.take());
         std::mem::drop(self.block_write_sender.non_finalized.take());
@@ -399,7 +399,7 @@ impl StateService {
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
-            non_finalized_rejected_receiver,
+            non_finalized_forget_receiver,
             block_write_task,
         ) = write::BlockWriteSender::spawn(
             finalized_state_for_writing,
@@ -438,7 +438,7 @@ impl StateService {
             finalized_block_write_last_sent_hash,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
-            non_finalized_rejected_receiver,
+            non_finalized_forget_receiver,
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
@@ -635,11 +635,11 @@ impl StateService {
         }
     }
 
-    /// Drains every hash queued on `non_finalized_rejected_receiver` and
+    /// Drains every hash queued on `non_finalized_forget_receiver` and
     /// removes it from `non_finalized_block_write_sent_hashes`.
     ///
-    /// This closes the lockout window where a rejected block keeps its hash
-    /// recorded as "sent", so a subsequent honest re-delivery of a block at
+    /// This closes the lockout window where a rejected or evicted block keeps its
+    /// hash recorded as "sent", so a subsequent honest re-delivery of a block at
     /// the same hash is not short-circuited as a false "duplicate".
     ///
     /// # Correctness & Performance
@@ -647,18 +647,18 @@ impl StateService {
     /// Like the other drain methods on `StateService`, this must not block,
     /// access the database, or perform CPU-intensive work, because it is
     /// called directly from the tokio executor's Future threads.
-    fn drain_non_finalized_rejected_hashes(&mut self) {
+    fn drain_non_finalized_forgotten_hashes(&mut self) {
         use tokio::sync::mpsc::error::TryRecvError;
 
         loop {
-            match self.non_finalized_rejected_receiver.try_recv() {
+            match self.non_finalized_forget_receiver.try_recv() {
                 Ok(hash) => {
                     self.non_finalized_block_write_sent_hashes.remove(&hash);
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     info!(
-                        "Block commit task closed the non-finalized rejected hash channel. \
+                        "Block commit task closed the non-finalized forgotten hash channel. \
                          Is Zebra shutting down?"
                     );
                     break;
@@ -728,11 +728,11 @@ impl StateService {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
 
-        // Drop hashes of any blocks the write task has rejected before checking
+        // Drop hashes of any blocks the write task has forgotten before checking
         // the SentHashes membership below. Without this, a rejected same-hash
         // block would lock out a later honest re-delivery of a block at the
         // same hash as a false "duplicate".
-        self.drain_non_finalized_rejected_hashes();
+        self.drain_non_finalized_forgotten_hashes();
 
         if self
             .non_finalized_block_write_sent_hashes
@@ -1190,7 +1190,7 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
-                self.drain_non_finalized_rejected_hashes();
+                self.drain_non_finalized_forgotten_hashes();
 
                 if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
@@ -1252,7 +1252,7 @@ impl Service<Request> for StateService {
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
 
-                self.drain_non_finalized_rejected_hashes();
+                self.drain_non_finalized_forgotten_hashes();
 
                 let known_sent_hash = self.known_sent_hash(&hash);
                 let known_queued = self
