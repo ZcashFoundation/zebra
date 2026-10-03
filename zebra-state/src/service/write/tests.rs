@@ -31,7 +31,7 @@ fn evicted_parent_is_reported_when_its_child_arrives() {
     let (non_finalized_state_sender, non_finalized_state_receiver) =
         watch::channel(NonFinalizedState::new(&network));
 
-    let (block_write_sender, _invalid_block_reset_receiver, mut rejected_receiver, _task) =
+    let (block_write_sender, _invalid_block_reset_receiver, mut forget_receiver, _task) =
         BlockWriteSender::spawn(
             finalized_state,
             non_finalized_state,
@@ -87,7 +87,7 @@ fn evicted_parent_is_reported_when_its_child_arrives() {
     let child = evicted.make_fake_child();
     commit(child.clone(), None).expect_err("the child's parent is not in any chain");
 
-    let reported: HashSet<_> = std::iter::from_fn(|| rejected_receiver.try_recv().ok()).collect();
+    let reported: HashSet<_> = std::iter::from_fn(|| forget_receiver.try_recv().ok()).collect();
     assert_eq!(
         HashSet::from([child.hash(), evicted.hash()]),
         reported,
