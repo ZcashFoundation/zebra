@@ -20,7 +20,7 @@ concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-      github.event.label.name != 'release' &&
+      !startsWith(github.event.label.name, 'release') &&
       'ignored-label' ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
@@ -39,12 +39,12 @@ env:
 
 jobs:
   changes:
-    # Only the release label affects gate results, and only a title or base edit
+    # Only the release labels affect gate results, and only a title or base edit
     # can change the declaration this gate reads. Every other label and edit event
     # is a no-op, so it must not spend a runner or replace the required check.
     if: >-
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
+      startsWith(github.event.label.name, 'release')) &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
     runs-on: ubuntu-latest
@@ -167,13 +167,18 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
+      startsWith(github.event.label.name, 'release')) &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null) &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest-xl
     timeout-minutes: 90
+    permissions:
+      checks: read # find the stateful test check on the release base
+      contents: read
+      issues: read # list open bugs and read the PR labels
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,6 +207,14 @@ jobs:
           BASE_SHA: ${{ steps.release-target.outputs.base_sha }}
           TARGET_SHA: ${{ github.event.pull_request.head.sha }}
         run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Check release safety
+        id: safety
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ steps.release-target.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/check-release-safety.sh "${BASE_SHA}" "${PR_NUMBER}"
       - name: Install Cargo 1.91
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
@@ -225,12 +238,14 @@ jobs:
           CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
           PLAN: ${{ steps.cargo-release.outputs.plan }}
           REPORT: ${{ steps.cargo-release.outputs.report }}
+          SAFETY_RESULT: ${{ steps.safety.outcome }}
         run: |
           {
             echo "## Release readiness"
             echo "| Validation | Result |"
             echo "| --- | --- |"
             echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Release safety | \`${SAFETY_RESULT}\` |"
             echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
             if [[ -n "${PLAN}" ]]; then
               echo '### Plan'
@@ -250,8 +265,9 @@ jobs:
         env:
           CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
           CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+          SAFETY_RESULT: ${{ steps.safety.outcome }}
         run: |
-          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${SAFETY_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
             echo "::error title=Release readiness failed::Review each failed validation step and the job summary."
             exit 1
           fi
@@ -262,7 +278,7 @@ jobs:
     name: >-
       ${{
         (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-        github.event.label.name != 'release' &&
+        !startsWith(github.event.label.name, 'release') &&
         'Label does not affect the PR gate' ||
         github.event.action == 'edited' &&
         github.event.changes.title == null &&
@@ -274,7 +290,7 @@ jobs:
     if: >-
       always() &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
+      startsWith(github.event.label.name, 'release')) &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
     needs: [changes, semver-checks, changelog-gate, release-readiness]

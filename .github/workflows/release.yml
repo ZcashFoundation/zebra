@@ -294,7 +294,9 @@ jobs:
     runs-on: ubuntu-latest-xl
     timeout-minutes: 90
     permissions:
+      checks: read # find the stateful test check on the release base
       contents: read
+      issues: read # list open bugs and read the PR labels
     concurrency:
       group: release-check-${{ needs.release-target.outputs.pr_number }}
       cancel-in-progress: true
@@ -314,6 +316,15 @@ jobs:
           BASE_SHA: ${{ needs.release-target.outputs.base_sha }}
           TARGET_SHA: ${{ needs.release-target.outputs.target_sha }}
         run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Check release safety
+        id: safety
+        continue-on-error: true
+        working-directory: release-source
+        env:
+          BASE_SHA: ${{ needs.release-target.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.release-target.outputs.pr_number }}
+        run: .github/scripts/check-release-safety.sh "${BASE_SHA}" "${PR_NUMBER}"
       - name: Install Cargo 1.91
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
         with:
@@ -341,12 +352,14 @@ jobs:
           CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
           PLAN: ${{ steps.cargo-release.outputs.plan }}
           REPORT: ${{ steps.cargo-release.outputs.report }}
+          SAFETY_RESULT: ${{ steps.safety.outcome }}
         run: |
           {
             echo "## Cargo Release check"
             echo "| Validation | Result |"
             echo "| --- | --- |"
             echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
+            echo "| Release safety | \`${SAFETY_RESULT}\` |"
             echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
             if [[ -n "${PLAN}" ]]; then
               echo '### Plan'
@@ -366,8 +379,9 @@ jobs:
         env:
           CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
           CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
+          SAFETY_RESULT: ${{ steps.safety.outcome }}
         run: |
-          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+          if [[ "${CHANGELOG_RESULT}" != "success" || "${SAFETY_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
             echo "::error title=Release check failed::Review each failed validation step and the job summary."
             exit 1
           fi

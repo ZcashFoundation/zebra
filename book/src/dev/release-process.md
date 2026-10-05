@@ -137,6 +137,13 @@ Approve and merge only after every required check passes and every checkbox is c
 
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
 
+Release readiness also enforces release safety with two checks:
+
+- **Stateful sync-update test.** The `Zebra tip update / Run sync-update-mainnet test` check of `Integration Tests on GCP` must have passed on the base commit, or on an earlier first-parent commit of `main` back to the last commit that changed a file affecting the node: Rust sources, checkpoint lists, Cargo manifests and lockfiles, the Rust toolchain, `.cargo` configuration, and `docker/`.
+- **Open bugs.** No open issue of type Bug labelled `security` or `urgent` may have been created after the commit of the previous `vX.Y.Z` release tag. Issues that were already open at the previous release do not block.
+
+A maintainer can override a failed safety check by applying the `release-override-safety` label to the Release PR. The failures are then reported as warnings, and the PR timeline shows who applied the label.
+
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 
 ### What Happens After Merge
@@ -156,6 +163,8 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | --- | --- |
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing fragment on `main` with `changie new -j <project>`, then let release-plz refresh the PR. A dependency-only failure indicates a changelog batching regression; do not edit the generated branch. |
+| The stateful sync-update test has not passed since the last node change | Wait for the `Integration Tests on GCP` run on `main` to finish, or start one with `gh workflow run zfnd-ci-integration-tests-gcp.yml --ref main`. Then rerun the job. |
+| A Bug issue labelled `security` or `urgent` was opened after the previous release | Fix or close the issue, then rerun the job. To release with the issue open, apply the `release-override-safety` label; adding or removing it reruns the gate. |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 

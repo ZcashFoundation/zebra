@@ -28,7 +28,7 @@ title prefix (`fix:`, `feat:`, `ci:`, `docs:`, and so on).
 | `security` | Security-relevant, any severity | Also use the private security issue template; never put exploit details in a public issue |
 | `consensus` | Consensus-critical code: validation, cryptography, script | Reviews need a consensus-aware reviewer |
 | `devops` | Build, CI, test infrastructure, release process | Applied automatically by the devops issue template |
-| `urgent` | Needs attention today, not this sprint | Has no automation behind it. A truly urgent fix is admin-merged |
+| `urgent` | Needs attention today, not this sprint | On a Bug issue, also blocks the next release (see [Labels wired into automation](#labels-wired-into-automation)). A truly urgent fix is admin-merged |
 | `blocked` | Waiting on something outside the issue or PR | The comment that applies it must say _what_ it is blocked on and give a **re-check date**; a label that is never revisited goes on describing a condition that fixed itself |
 | `do-not-merge` | Must not merge yet, even if approved and green | Removed by whoever applied it |
 | `needs-issue` | A PR that should have an issue behind it | Ask the author to open one, or open it for them |
@@ -48,6 +48,9 @@ condition just goes false. Change the workflow in the same PR.
 | Label | Read by | Effect |
 |---|---|---|
 | `release` | `pr-gate.yml`, `tests-unit.yml`, `release.yml`, `checkpoint-update.yml`, `release-plz.toml` | Marks release PRs; gates release readiness checks. Applied by release-plz and by the release templates |
+| `security` | `pr-gate.yml`, `release.yml` | An open Bug issue with this label, created after the previous release, fails the release safety check on a Release PR |
+| `urgent` | `pr-gate.yml`, `release.yml` | Same as `security` |
+| `release-override-safety` | `pr-gate.yml`, `release.yml` | Overrides a failed release safety check on a Release PR; the PR timeline shows who applied it |
 | `run-stateful-tests` | `zfnd-ci-integration-tests-gcp.yml` | Adding it to a PR runs the stateful GCP integration tests for that PR |
 | `run-benchmarks` | `benchmarks.yml` | Adding it to a PR runs the benchmark comparison against the base branch |
 
