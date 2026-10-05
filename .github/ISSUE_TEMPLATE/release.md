@@ -32,17 +32,17 @@ For performance and security, we want to update the Zebra checkpoints in every r
 
 - [ ] Double-check if the current service length is appropriate and change it
   (`EOS_PANIC_AFTER` in `end_of_support.rs`) if required. Consider:
-  - If there is an upcoming network ugprade and the EoS would happen _after_ the
+  - If there is an upcoming network upgrade and the EoS would happen _after_ the
     rough planned mainnet activation, then reduce the length so EoS happens before
     it.
   - If the length was reduced for the previous reason and you're now releasing a
-    NU mainet-supporting release, then restore the previous length being used.
+    NU mainnet-supporting release, then restore the previous length being used.
 - [ ] Change `ESTIMATED_RELEASE_HEIGHT` in `end_of_support.rs` to the
   approximate height of the chain at the predicted release time
 
 # Network Upgrade checks
 
-If it is a testnet or mainet network upgrade support release, check:
+If it is a testnet or mainnet network upgrade support release, check:
 
 - [ ] Network-upgrade activation heights, consensus branch IDs and the minimum
   network protocol version are correct
@@ -75,7 +75,7 @@ If the release includes security fixes, do the following:
       after you created a new branch. Other alternative is to squash merge each
       other PR, e.g. `git merge --squash branch-1` (repeat for other branches).
 - [ ] In the combination PR, ensure the changelogs reflect all the changes
-      introduced the security PRs
+      introduced by the security PRs
 - [ ] Make note of any version bumps that might be required by the combination PR
       which are not in the release PR in the public repo.
 - [ ] Wait for CI to pass in the combination PR
@@ -103,10 +103,10 @@ Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/
     - A major bump in e.g. `zebra-chain` requires a major bump in most of its
       users (because they re-export types from it)
     - zebrad should get major bumps only on breaking changes for _users_ (e.g.
-      config file format; RPC arguments, etc.; or for network ugprades)
+      config file format; RPC arguments, etc.; or for network upgrades)
     - Crate changelogs should mostly report API changes and fixes. No need to
-      include stuff that do not impact crate users (e.g. refactorings)
-    - Do not includes entries for e.g. bugs introduced and fixed _after_ the
+      include stuff that does not impact crate users (e.g. refactorings)
+    - Do not include entries for e.g. bugs introduced and fixed _after_ the
       last release. The changelog needs to reflect changes from the last
       release.
 - [ ] Approve and merge the release PR.

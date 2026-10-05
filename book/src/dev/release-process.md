@@ -127,11 +127,8 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`, then the Release workflow batches them into versioned entries for the versions release-plz picked and regenerates every changelog, writing a mechanical dependency entry for a package that is being released only because a local dependency moved. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Track each release in an issue created from the [release issue template](https://github.com/ZcashFoundation/zebra/issues/new?template=release.md), and follow its checklist. It covers the preparation steps and the review of the Release PR's version bumps and changelogs.
 
-A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
-
-Approve and merge only after every required check passes and every checkbox is complete. A later release-plz update invalidates the earlier review and checklist.
 
 ### What Release Readiness Reports
 
