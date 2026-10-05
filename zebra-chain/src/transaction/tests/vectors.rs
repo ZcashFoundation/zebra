@@ -1821,8 +1821,10 @@ fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
 /// Tests that dropping every transparent input from a transaction with no transparent
 /// outputs leaves no transparent bundle, so its txid matches its serialized form.
 ///
-/// ZIP-244 hashes an empty transparent bundle differently from an absent one, but both
-/// serialize to the same bytes, which always parse as absent.
+/// ZIP-244 defines a single transparent digest for a transaction with no transparent
+/// inputs or outputs, but librustzcash only produces it for an absent bundle: a present
+/// bundle with empty `vin` and `vout` hashes differently. Both serialize to the same
+/// bytes, which always parse as absent.
 #[test]
 fn with_transparent_inputs_drops_empty_bundle() {
     let _test_guard = zebra_test::init();

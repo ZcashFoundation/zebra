@@ -5,12 +5,6 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
-
-### Fixed
-
-- With the `proptest-impl` feature, `Transaction::with_transparent_inputs` no longer leaves an empty transparent bundle when a transaction ends up with no transparent inputs or outputs. ZIP-244 hashes that bundle differently from the absent bundle its bytes parse as, so the transaction's txid did not match its serialized form, including in transactions from `fix_generated_transaction` and `Block::partial_chain_strategy`.
-
 ## [14.0.0] - 2026-10-01
 
 ### Breaking Changes
