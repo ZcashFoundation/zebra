@@ -1,6 +1,9 @@
 project: zebrad
 kind: Changed
 body: 'Empty discovery replies no longer trigger stalled-peer disconnections.
-  Chain discovery rotates across ready peers instead of favoring fast empty responders
+  Chain discovery rotates across peers that serve blocks instead of favoring fast
+  empty responders. When those peers are busy, discovery waits up to 1.5 seconds
+  and takes priority over queued downloads before falling back to other peers,
+  avoiding sync pauses caused by idle peers that do not serve blocks
   ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).'
 time: 2026-09-21T15:55:24.404170412+02:00
