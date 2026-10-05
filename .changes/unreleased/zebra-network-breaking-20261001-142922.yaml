@@ -1,4 +1,0 @@
-project: zebra-network
-kind: breaking
-body: '`Config` deserialization rejects overlapping nonempty funding-stream height ranges on Testnet and Regtest, including overlaps introduced by inherited NU7 defaults. Use disjoint ranges; adjacent and empty ranges remain accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).'
-time: 2026-10-01T14:29:22.904986896+02:00

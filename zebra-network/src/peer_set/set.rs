@@ -927,7 +927,7 @@ where
             len => {
                 // Choose 2 random peers, then return the least loaded of those 2 peers.
                 let (a, b) = {
-                    let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
+                    let idxs = rand::seq::index::sample(&mut rand::rng(), len, 2);
                     let a = idxs.index(0);
                     let b = idxs.index(1);
 
@@ -972,7 +972,7 @@ where
         self.ready_services
             .keys()
             .copied()
-            .choose_multiple(&mut rand::thread_rng(), max_peers)
+            .sample(&mut rand::rng(), max_peers)
     }
 
     /// Randomly chooses ready peers for a sidecar broadcast, always including
@@ -992,7 +992,7 @@ where
                 .keys()
                 .filter(|key| !self.zcashd_compat_peer_keys.contains(key))
                 .copied()
-                .choose_multiple(&mut rand::thread_rng(), max_peers),
+                .sample(&mut rand::rng(), max_peers),
         );
 
         selected_peers

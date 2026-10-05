@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "13.0.1"
+version = "14.0.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true
@@ -84,7 +84,7 @@ bech32 = { workspace = true }
 zcash_script.workspace = true
 
 # ECC deps
-halo2 = { package = "halo2_proofs", version = "0.3" }
+halo2 = { package = "halo2_proofs", version = "0.4" }
 orchard.workspace = true
 nonempty = { workspace = true, optional = true }
 zcash_encoding.workspace = true

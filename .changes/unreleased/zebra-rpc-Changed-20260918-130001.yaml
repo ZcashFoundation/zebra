@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: "From NU7 activation, `getblocktemplate` coinbases claim only the miner share after withholding 60% of aggregate fees, rounded down. The coinbase `fee` metadata is the negative net miner share, excluding the NSM contribution. Non-coinbase transaction fees remain gross, and cached responses distinguish gross totals that round to the same miner payout ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-18T13:00:01.000000000-06:00

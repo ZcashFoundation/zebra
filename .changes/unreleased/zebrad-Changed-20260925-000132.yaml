@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: NU7 uses ZIP 218's 25-second target block spacing and triples the remaining halving intervals, dividing scheduled block rewards by three to preserve issuance per unit of time. ZIP 207 likewise triples the remaining partial funding-address period, then uses 105,000-block periods on the public schedule. Canonical ZIP 214 revision-2 streams active at NU7 end at the adjusted third halving; expired streams remain expired and explicit custom ranges are preserved.
-time: 2026-09-25T00:01:32.486558588+02:00

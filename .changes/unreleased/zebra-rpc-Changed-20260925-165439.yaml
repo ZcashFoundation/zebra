@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: "Discard late coinbase precomputations from an older height or parent-reserve context, keep the active cache bounded under context churn, and retain the zero-fee entry needed for transaction-selection sizing ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-25T16:54:39.360907388+02:00

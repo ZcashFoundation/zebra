@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: "Halving-preserving NU7 issuance is enabled in ordinary builds: from the configured NSM reissuance height, each block reissues a fraction of the parent NSM reserve, rounded up, in addition to its scheduled subsidy. Mainnet activation and reissuance heights remain unassigned ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-15T15:00:03.000000000-06:00

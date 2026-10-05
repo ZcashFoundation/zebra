@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
-use rand::rngs::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use zcash_script::script::Asm;
 
 use zcash_keys::address::Address;
@@ -275,7 +275,7 @@ impl TransactionTemplate<NegativeOrZero> {
             &Default::default(),
             Default::default(),
             Default::default(),
-            OsRng,
+            UnwrapErr(SysRng),
             sapling_prover,
             sapling_prover,
             &FeeRule::non_standard(Zatoshis::ZERO),
@@ -850,7 +850,7 @@ fn orchard_shaped_object(
             rk: action.rk().into(),
             cm_x: action.cmx().to_bytes(),
             ephemeral_key: action.encrypted_note().epk_bytes,
-            enc_ciphertext: action.encrypted_note().enc_ciphertext,
+            enc_ciphertext: action.encrypted_note().enc_ciphertext.0,
             spend_auth_sig: action.authorization().into(),
             out_ciphertext: action.encrypted_note().out_ciphertext,
         })

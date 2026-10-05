@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: "Enable parent-dependent NU7 mining templates and subsidy queries in ordinary builds. Proposal preflight requires the current parent hash and exact next height, so a forged pre-NU7 coinbase height cannot bypass parent-reserve validation ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))."
-time: 2026-09-23T14:46:05.450736496+02:00

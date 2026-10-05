@@ -206,11 +206,11 @@ async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
         None,
     );
 
-    let end_of_support_height = Height(3_546_440);
+    let end_of_support_height = Height(3_100_000);
     let rpc = rpc.with_end_of_support_height(Some(end_of_support_height));
 
-    // Both heights are after Blossom, so every remaining block is expected to take 75 seconds,
-    // and the estimate is reported 24 hours early.
+    // Both heights are after Blossom and before NU7, so every remaining block is expected to
+    // take 75 seconds, and the estimate is reported 24 hours early.
     let remaining_blocks = i64::from(end_of_support_height.0 - tip_height.0);
     let expected_offset = remaining_blocks * 75 - 24 * 60 * 60;
 
@@ -4801,7 +4801,7 @@ async fn rpc_z_listunifiedreceivers() {
 /// [GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3).
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
-    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver};
+    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver, Revision, Uitem};
 
     let _init_guard = zebra_test::init();
 
@@ -4836,7 +4836,7 @@ async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
         Receiver::Sapling(bad_sapling),
         Receiver::Orchard([0xFF; 43]),
     ] {
-        let encoded = UnifiedAddress::try_from_items(vec![receiver])
+        let encoded = UnifiedAddress::try_from_items(Revision::R0, vec![Uitem::Data(receiver)])
             .expect("unified container construction does not validate inner bytes")
             .encode(&NetworkType::Main);
         let error = rpc

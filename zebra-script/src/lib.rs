@@ -250,9 +250,9 @@ impl CachedFfiTransaction {
                 // This shim can be removed once libzcash_script propagates
                 // callback failure to the C++ verifier.
                 Some(computed.unwrap_or_else(|| {
-                    use rand::RngCore;
+                    use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
                     let mut bytes = [0u8; 32];
-                    rand::rngs::OsRng.fill_bytes(&mut bytes);
+                    UnwrapErr(SysRng).fill_bytes(&mut bytes);
                     bytes
                 }))
             };

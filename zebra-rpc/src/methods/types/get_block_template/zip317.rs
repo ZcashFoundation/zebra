@@ -8,10 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rand::{
-    distributions::{Distribution, WeightedIndex},
-    prelude::thread_rng,
-};
+use rand::distr::{weighted::WeightedIndex, Distribution};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -475,7 +472,7 @@ fn choose_transaction_weighted_random(
     candidate_txs: &mut Vec<VerifiedUnminedTx>,
     weighted_index: WeightedIndex<f32>,
 ) -> (Option<WeightedIndex<f32>>, VerifiedUnminedTx) {
-    let candidate_position = weighted_index.sample(&mut thread_rng());
+    let candidate_position = weighted_index.sample(&mut rand::rng());
     let candidate_tx = candidate_txs.swap_remove(candidate_position);
 
     // We have to regenerate this index each time we choose a transaction, due to floating-point sum inaccuracies.

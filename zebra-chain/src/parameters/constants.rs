@@ -25,6 +25,9 @@ pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
 ///
 /// This is a local-only node policy; it is not part of consensus. The window is
 /// sized as a defence-in-depth measure against sustained consensus splits.
+///
+/// ZIP 218 keeps this block count unchanged, so it covers about 20.8 hours before NU7 and
+/// about 6.9 hours of 25-second blocks after it.
 //
 // TODO: change to HeightDiff
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = 1000;
