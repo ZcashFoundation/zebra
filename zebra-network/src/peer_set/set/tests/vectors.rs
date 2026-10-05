@@ -28,7 +28,7 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
+        CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP, FIND_BUSY_PEER_WAIT_TIMEOUT,
         INVENTORY_BUSY_PEER_WAIT_TIMEOUT, REQUEST_TIMEOUT,
     },
     peer::{
@@ -1531,6 +1531,32 @@ fn block_request(byte: u8) -> Request {
     Request::BlocksByHash(iter::once(block::Hash([byte; 32])).collect())
 }
 
+/// Both discovery requests and their corresponding nonempty responses.
+fn find_requests_and_responses() -> [(Request, Response); 2] {
+    let block: block::Block = zebra_test::vectors::BLOCK_MAINNET_10_BYTES
+        .zcash_deserialize_into()
+        .expect("test block is valid");
+
+    [
+        (
+            Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            },
+            Response::BlockHashes(vec![block::Hash::from(&block)]),
+        ),
+        (
+            Request::FindHeaders {
+                known_blocks: vec![],
+                stop: None,
+            },
+            Response::BlockHeaders(vec![block::CountedHeader {
+                header: block.header,
+            }]),
+        ),
+    ]
+}
+
 /// Makes the first mock peer in the peer set busy, by queuing 2 block requests for it.
 ///
 /// Block requests prefer serving peers, so the first peer must be the only serving peer.
@@ -1583,6 +1609,428 @@ fn assert_not_found_registry(response: Result<Response, BoxError>) {
         error.inner_debug().contains("NotFoundRegistry"),
         "unexpected error: {error:?}"
     );
+}
+
+/// Discovery must not rotate onto a non-serving peer while a serving peer is ready.
+#[test]
+fn peer_set_routes_find_requests_to_ready_serving_peer() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
+
+        for (request, response) in find_requests_and_responses() {
+            assert_eq!(
+                respond_to_request(
+                    &mut peer_set,
+                    &mut handles[0],
+                    request,
+                    Ok(response.clone()),
+                )
+                .await
+                .expect("the serving peer answers discovery"),
+                response,
+            );
+            assert_eq!(received_request(&mut handles[1]), None);
+        }
+    });
+}
+
+/// A busy serving peer must get queued discovery before a ready non-serving peer does.
+#[test]
+fn peer_set_routes_queued_find_request_to_serving_peer_once_ready() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, response) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let mut queued_fut = peer_set
+                .ready()
+                .await
+                .expect("the non-serving peer keeps the peer set ready")
+                .call(request.clone());
+
+            assert_eq!(received_request(&mut handles[1]), None);
+            assert!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
+                    .await
+                    .is_err(),
+                "discovery must wait rather than fail while the serving peer is busy",
+            );
+            assert_eq!(received_request(&mut handles[1]), None);
+
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+            peer_set
+                .ready()
+                .await
+                .expect("the serving peer is ready again");
+
+            let client_request = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("the serving peer receives queued discovery as soon as it is ready");
+            assert_eq!(client_request.request, request);
+            assert_eq!(received_request(&mut handles[1]), None);
+            client_request
+                .tx
+                .send(Ok(response.clone()))
+                .expect("queued discovery is still pending");
+            assert_eq!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                    .await
+                    .expect("queued discovery must not hang")
+                    .expect("the serving peer answers discovery"),
+                response,
+            );
+        }
+    });
+}
+
+/// Readiness wakes queued discovery behind `Buffer` without another user request.
+#[test]
+fn peer_set_routes_queued_find_request_behind_buffer_without_other_requests() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, response) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
+            let mut queued_fut = peer_set
+                .ready()
+                .await
+                .expect("the buffer has room")
+                .call(request.clone());
+
+            assert!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
+                    .await
+                    .is_err(),
+                "buffered discovery must wait while the serving peer is busy",
+            );
+            assert_eq!(received_request(&mut handles[1]), None);
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+
+            // No more calls or readiness polls: only the peer's wakeup can route discovery.
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            let client_request = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("the peer readiness wakeup routes buffered discovery");
+            assert_eq!(client_request.request, request);
+            assert_eq!(received_request(&mut handles[1]), None);
+            client_request
+                .tx
+                .send(Ok(response.clone()))
+                .expect("queued discovery is still pending");
+            assert_eq!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                    .await
+                    .expect("buffered discovery must not hang")
+                    .expect("the serving peer answers discovery"),
+                response,
+            );
+        }
+    });
+}
+
+/// With no serving peers, discovery is sent immediately rather than waiting for the deadline.
+#[test]
+fn peer_set_routes_find_request_immediately_without_serving_peers() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&[PeerServices::empty()]);
+
+        for (request, response) in find_requests_and_responses() {
+            assert_eq!(
+                respond_to_request(
+                    &mut peer_set,
+                    &mut handles[0],
+                    request,
+                    Ok(response.clone()),
+                )
+                .await
+                .expect("a non-serving peer can answer discovery"),
+                response,
+            );
+        }
+    });
+}
+
+/// A queued block must not keep later discovery in `Buffer` or take its newly ready peer.
+#[test]
+fn peer_set_routes_queued_find_before_earlier_block_behind_buffer() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, response) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
+            let block_fut = peer_set
+                .ready()
+                .await
+                .expect("the buffer has room")
+                .call(block_request(2));
+            let find_fut = peer_set
+                .ready()
+                .await
+                .expect("the buffer has room for discovery after the block")
+                .call(request.clone());
+
+            // Let both requests reach PeerSet while the serving peer remains busy.
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            assert_eq!(received_request(&mut handles[1]), None);
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+
+            let client_request = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("discovery gets the newly ready serving peer before the earlier block");
+            assert_eq!(client_request.request, request);
+            client_request
+                .tx
+                .send(Ok(response.clone()))
+                .expect("queued discovery is still pending");
+            assert_eq!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, find_fut)
+                    .await
+                    .expect("prioritized discovery must not hang")
+                    .expect("the serving peer answers discovery"),
+                response,
+            );
+
+            // The earlier block is still routed, after discovery.
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            let client_request = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("the earlier block remains queued behind discovery");
+            assert_eq!(client_request.request, block_request(2));
+            client_request
+                .tx
+                .send(Ok(Response::Nil))
+                .expect("the earlier block is still pending");
+            assert_eq!(
+                timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, block_fut)
+                    .await
+                    .expect("the earlier block must not hang")
+                    .expect("the serving peer answers the earlier block"),
+                Response::Nil,
+            );
+            assert_eq!(received_request(&mut handles[1]), None);
+        }
+    });
+}
+
+/// The deadline starts when discovery is queued, even if its response future is never polled.
+#[test]
+fn peer_set_routes_queued_find_to_non_serving_peer_after_wait_timeout() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, response) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let queued_fut = peer_set
+                .ready()
+                .await
+                .expect("the non-serving peer keeps the peer set ready")
+                .call(request.clone());
+
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2).await;
+            peer_set
+                .ready()
+                .await
+                .expect("the non-serving peer is ready");
+            assert_eq!(received_request(&mut handles[1]), None);
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2 + Duration::from_millis(1)).await;
+            peer_set
+                .ready()
+                .await
+                .expect("the non-serving peer is ready");
+
+            let client_request = handles[1]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("discovery falls back to a ready non-serving peer after its deadline");
+            assert_eq!(client_request.request, request);
+            client_request
+                .tx
+                .send(Ok(response.clone()))
+                .expect("queued discovery is still pending");
+            assert_eq!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                    .await
+                    .expect("fallback discovery must not hang")
+                    .expect("the fallback peer answers discovery"),
+                response,
+            );
+
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+            peer_set
+                .ready()
+                .await
+                .expect("the serving peer is ready again");
+            assert_eq!(received_request(&mut handles[0]), None);
+            assert_eq!(received_request(&mut handles[1]), None);
+        }
+    });
+}
+
+/// Expiry alone wakes queued discovery behind `Buffer`, without polling the response future.
+#[test]
+fn peer_set_routes_queued_find_after_timeout_behind_buffer_without_other_requests() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, response) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
+            let queued_fut = peer_set
+                .ready()
+                .await
+                .expect("the buffer has room")
+                .call(request.clone());
+
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2).await;
+            assert_eq!(received_request(&mut handles[1]), None);
+            // Neither the busy peer nor any new user request can wake the peer set.
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2 + Duration::from_millis(1)).await;
+            let client_request = handles[1]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("the timer wakeup routes buffered discovery to the fallback peer");
+            assert_eq!(client_request.request, request);
+            client_request
+                .tx
+                .send(Ok(response.clone()))
+                .expect("queued discovery is still pending");
+            assert_eq!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                    .await
+                    .expect("buffered fallback discovery must not hang")
+                    .expect("the fallback peer answers discovery"),
+                response,
+            );
+        }
+    });
+}
+
+/// Dropping an unpolled queued response must prevent routing on readiness and later expiry.
+#[test]
+fn peer_set_does_not_route_cancelled_queued_find_request() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, _) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let queued_fut = peer_set
+                .ready()
+                .await
+                .expect("the non-serving peer keeps the peer set ready")
+                .call(request);
+            drop(queued_fut);
+
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+            peer_set
+                .ready()
+                .await
+                .expect("the serving peer is ready again");
+            assert_eq!(received_request(&mut handles[0]), None);
+            assert_eq!(received_request(&mut handles[1]), None);
+
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT + Duration::from_millis(1)).await;
+            peer_set.ready().await.expect("both peers are still ready");
+            assert_eq!(received_request(&mut handles[0]), None);
+            assert_eq!(received_request(&mut handles[1]), None);
+            assert!(handles
+                .iter_mut()
+                .all(|handle| handle.wants_connection_heartbeats()));
+        }
+    });
+}
+
+/// Losing the last serving peer allows immediate fallback, without waiting for expiry.
+#[test]
+fn peer_set_routes_queued_find_after_serving_peer_disconnects() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        for (request, response) in find_requests_and_responses() {
+            let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+            let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
+            let mut queued_fut = peer_set
+                .ready()
+                .await
+                .expect("the buffer has room")
+                .call(request.clone());
+            assert!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
+                    .await
+                    .is_err(),
+                "discovery waits while the serving peer is connected",
+            );
+            assert_eq!(received_request(&mut handles[1]), None);
+
+            handles[0].close_outbound_client_request_receiver();
+            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            let client_request = handles[1]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("losing the serving peer wakes queued discovery before its deadline");
+            assert_eq!(client_request.request, request);
+            client_request
+                .tx
+                .send(Ok(response.clone()))
+                .expect("queued discovery is still pending");
+            assert_eq!(
+                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                    .await
+                    .expect("discovery after disconnection must not hang")
+                    .expect("the fallback peer answers discovery"),
+                response,
+            );
+        }
+    });
 }
 
 /// Check that block requests that no peer advertised go to a peer that can serve historic blocks,

@@ -170,6 +170,13 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 /// limit.
 pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
+/// How long a find-blocks or find-headers request waits for a busy serving peer before it can
+/// fall back to any ready peer.
+///
+/// This wait starts when the request enters the peer set and counts towards the syncer's
+/// six-second request timeout, leaving time for the fallback peer to respond.
+pub(crate) const FIND_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
+
 /// The default peer address crawler interval.
 ///
 /// This should be at least [`HANDSHAKE_TIMEOUT`] lower than all other crawler

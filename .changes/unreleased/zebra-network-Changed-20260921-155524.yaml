@@ -1,6 +1,9 @@
 project: zebra-network
 kind: Changed
-body: '`Request::{FindBlocks, FindHeaders}` rotate fairly across ready connections.
+body: '`Request::{FindBlocks, FindHeaders}` rotate fairly across ready block-serving
+  connections. When all serving peers are busy, discovery waits up to 1.5 seconds
+  and takes priority over queued block downloads, then falls back to any ready peer.
+  With no serving peers connected, any ready peer is eligible immediately.
   Successful replies, including empty ones, reset failure counts. Completed failures
   count regardless of sync state; configured zcashd-compat sidecars remain exempt
   ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).'
