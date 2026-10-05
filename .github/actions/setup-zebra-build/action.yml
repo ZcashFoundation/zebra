@@ -3,10 +3,9 @@ description: 'Install libclang, protoc, and RocksDB as system libraries'
 runs:
   using: 'composite'
   steps:
-    # The Azure Ubuntu mirror regularly trickles the ~42 MB of `.deb`s below for
-    # minutes at a time, so they are cached. apt-install.sh checks every cached
-    # file against the signed package index before using it, and the cache is
-    # rewritten whenever the set of `.deb`s changes, e.g. after an Ubuntu update.
+    # The Azure Ubuntu mirror regularly trickles these ~42 MB of `.deb`s for
+    # minutes at a time, so they are cached. See apt-install.sh for how cached
+    # files are verified and when the cache is refreshed.
     - name: Compute apt package cache key
       id: apt-cache-key
       if: runner.os == 'Linux'
@@ -18,9 +17,8 @@ runs:
         echo "prefix=apt-archives-v1-${ImageOS:-unknown}-${RUNNER_ARCH}-$(sha256sum <<< "$PACKAGES" | cut -c1-8)" >> "$GITHUB_OUTPUT"
 
     # Nothing is ever saved under the bare prefix, so this restores the most
-    # recent `<prefix>-<plan-hash>` entry from this branch or main.
+    # recent `<prefix>-<commit>` entry from this branch or main.
     - name: Restore apt package cache
-      id: apt-cache-restore
       if: runner.os == 'Linux'
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
       with:
@@ -47,15 +45,15 @@ runs:
         "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" $PACKAGES
         echo "ROCKSDB_LIB_DIR=/usr/lib/" >> $GITHUB_ENV
 
-    # Only main saves, like the Rust caches (see .github/workflows/README.md),
-    # and only when the restored entry is not already this exact set of `.deb`s.
+    # Only main saves, like the Rust caches (see .github/workflows/README.md).
+    # The commit is in the key so the parallel jobs of one push share one entry,
+    # and the restore above picks the newest.
     - name: Save apt package cache
       if: >-
         runner.os == 'Linux' &&
         github.ref == 'refs/heads/main' &&
-        steps.apt-install.outputs.plan-hash != '' &&
-        steps.apt-cache-restore.outputs.cache-matched-key != format('{0}-{1}', steps.apt-cache-key.outputs.prefix, steps.apt-install.outputs.plan-hash)
+        steps.apt-install.outputs.refreshed == 'true'
       uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
       with:
         path: ${{ runner.temp }}/apt-archives
-        key: ${{ steps.apt-cache-key.outputs.prefix }}-${{ steps.apt-install.outputs.plan-hash }}
+        key: ${{ steps.apt-cache-key.outputs.prefix }}-${{ github.sha }}

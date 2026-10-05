@@ -19,9 +19,10 @@
 # there is checked against the hash in the freshly updated, signed package index
 # and only matching files are handed to apt, so a stale or tampered cache can
 # only cost a download, never change what gets installed. After a successful
-# install the directory is rewritten to hold exactly the `.deb`s this install
-# used, and `plan-hash` is written to $GITHUB_OUTPUT so the caller can tell
-# whether the cache it restored already matches.
+# install, if anything had to be downloaded, the directory is rewritten to hold
+# exactly the `.deb`s this install used and `refreshed=true` is written to
+# $GITHUB_OUTPUT, so the caller knows to save it. A cache that was missing,
+# stale or damaged is therefore replaced, and a complete one is left alone.
 #
 # Exit codes:
 #   0 - packages installed
@@ -72,6 +73,7 @@ apt_get 90s -q update ||
 ARCHIVES=/var/cache/apt/archives
 CACHE_DIR="${APT_ARCHIVES_CACHE_DIR:-}"
 PLAN=""
+CACHE_COMPLETE=false
 
 # Lines of `<filename> <sha256>` for every `.deb` this install needs, where
 # `<filename>` is the name apt stores the download under in $ARCHIVES.
@@ -118,12 +120,19 @@ seed_archives() {
     fi
   done <<< "$PLAN"
   echo "Reusing $hits of $total package archives from the cache"
+  if [ "$hits" -eq "$total" ]; then
+    CACHE_COMPLETE=true
+  fi
 }
 
-# Writes `plan-hash` only once every planned file is in place, so the caller
-# never saves a partial set under a key that claims to be complete.
+# Writes `refreshed` only once every planned file is in place, so the caller
+# never saves a partial set.
 save_archives() {
   local file
+  if [ "$CACHE_COMPLETE" = "true" ]; then
+    return 0
+  fi
+
   mkdir -p "$CACHE_DIR"
   rm -f "$CACHE_DIR"/*.deb
   while read -r file _; do
@@ -131,7 +140,7 @@ save_archives() {
   done <<< "$PLAN"
 
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
-    echo "plan-hash=$(sha256sum <<< "$PLAN" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+    echo "refreshed=true" >> "$GITHUB_OUTPUT"
   fi
 }
 
