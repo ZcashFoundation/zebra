@@ -281,6 +281,8 @@ jobs:
       # Builds a throwaway cargo workspace, so it needs the runner image's cargo.
       - name: Test PR changelog validator
         run: .github/scripts/test-validate-pr-changelogs.sh
+      - name: Test release safety check
+        run: .github/scripts/test-check-release-safety.sh
       # No `args`, so this only installs changie and puts it on PATH, which is
       # what the test needs. Pinned to the version release.yml batches with.
       - uses: miniscruff/changie-action@3223cb29b92a0972dedc864ace3da01e04780ae4 # v3.0.1
