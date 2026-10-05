@@ -131,6 +131,8 @@ Track each release in an issue created from the [release issue template](https:/
 
 To check the bumps, read the "Public API diff since zebrad vX" comment on the Release PR. `PR Gate / release-api-diff` refreshes it on every Release PR update with each crate's public API and dependency changes since the last zebrad release, and names any crate whose own last release is older.
 
+To correct a Release PR by hand, freeze `main` in Merge Freeze first, push the corrections to the Release PR branch, merge it with **Unblock 1 pull request**, then unfreeze.
+
 ### What Release Readiness Reports
 
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
