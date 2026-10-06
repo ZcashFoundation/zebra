@@ -92,7 +92,7 @@ check_versions() {
       failed=true
       continue
     fi
-    echo "::error title=Unplanned version::${project} moves from ${base} to ${actual}, but its fragments plan ${planned}. If a fragment is wrong, fix it on main. Otherwise set ${project}/Cargo.toml to ${planned} and update its requirement in each released dependent." >&2
+    echo "::error title=Unplanned version::${project} moves from ${base} to ${actual}, but its fragments plan ${planned}. If a fragment is wrong, fix it on main. Otherwise apply the plan with: .github/scripts/plan-release-versions.sh ${base_revision} > releases.tsv && .github/scripts/apply-release-plan.sh ${base_revision} releases.tsv" >&2
     failed=true
   done < <(projects)
 
