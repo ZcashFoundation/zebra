@@ -14,6 +14,16 @@
 #
 # Usage: .github/scripts/apt-install.sh <package>...
 #
+# Optional package cache: set APT_ARCHIVES_CACHE_DIR to a directory the caller
+# restores and saves with actions/cache. Before installing, every `.deb` found
+# there is checked against the hash in the freshly updated, signed package index
+# and only matching files are handed to apt, so a stale or tampered cache can
+# only cost a download, never change what gets installed. After a successful
+# install, if anything had to be downloaded, the directory is rewritten to hold
+# exactly the `.deb`s this install used and `refreshed=true` is written to
+# $GITHUB_OUTPUT, so the caller knows to save it. A cache that was missing,
+# stale or damaged is therefore replaced, and a complete one is left alone.
+#
 # Exit codes:
 #   0 - packages installed
 #   1 - no packages given, or the install failed twice
@@ -60,6 +70,90 @@ apt_get() {
 apt_get 90s -q update ||
   echo "::warning::apt-get update timed out or failed; continuing with the package index from the runner image"
 
+ARCHIVES=/var/cache/apt/archives
+CACHE_DIR="${APT_ARCHIVES_CACHE_DIR:-}"
+PLAN=""
+CACHE_COMPLETE=false
+
+# Lines of `<filename> <sha256>` for every `.deb` this install needs, where
+# `<filename>` is the name apt stores the download under in $ARCHIVES.
+#
+# `--print-uris` resolves the transaction without downloading anything, but only
+# reports MD5 sums, so the SHA256 comes from the package index apt just fetched.
+# The two are joined on the pool file name: the URI's last path segment,
+# URL-decoded, is the basename of the record's `Filename:` field. A package
+# whose hash cannot be found is left out, so it is downloaded and never cached.
+plan_downloads() {
+  local uris index uri file base sha
+  uris="$(apt_get 60s -qq install -y --no-install-recommends --print-uris "$@" | grep "^'")" ||
+    return 1
+
+  # shellcheck disable=SC2046 # one package name per word
+  index="$(apt-cache show $(awk '{ sub(/_.*/, "", $2); print $2 }' <<< "$uris") 2> /dev/null |
+    awk -v RS= -F '\n' '{
+      f = ""; s = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^Filename: /) { f = $i; sub(/.*\//, "", f) }
+        if ($i ~ /^SHA256: /) { s = $i; sub(/^SHA256: /, "", s) }
+      }
+      if (f != "" && s != "") print f, s
+    }')" || true
+
+  while read -r uri file _; do
+    base="${uri//\'/}"
+    base="${base##*/}"
+    base="$(printf '%b' "${base//%/\\x}")"
+    sha="$(awk -v f="$base" '$1 == f { print $2; exit }' <<< "$index")"
+    if [ -n "$sha" ]; then
+      echo "$file $sha"
+    fi
+  done <<< "$uris" | sort
+}
+
+seed_archives() {
+  local file sha hits=0 total=0
+  while read -r file sha; do
+    total=$((total + 1))
+    if [ -f "$CACHE_DIR/$file" ] &&
+      sha256sum --check --status <<< "$sha  $CACHE_DIR/$file"; then
+      sudo cp "$CACHE_DIR/$file" "$ARCHIVES/$file" && hits=$((hits + 1))
+    fi
+  done <<< "$PLAN"
+  echo "Reusing $hits of $total package archives from the cache"
+  if [ "$hits" -eq "$total" ]; then
+    CACHE_COMPLETE=true
+  fi
+}
+
+# Writes `refreshed` only once every planned file is in place, so the caller
+# never saves a partial set.
+save_archives() {
+  local file
+  if [ "$CACHE_COMPLETE" = "true" ]; then
+    return 0
+  fi
+
+  mkdir -p "$CACHE_DIR"
+  rm -f "$CACHE_DIR"/*.deb
+  while read -r file _; do
+    cp "$ARCHIVES/$file" "$CACHE_DIR/$file" || return 1
+  done <<< "$PLAN"
+
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    echo "refreshed=true" >> "$GITHUB_OUTPUT"
+  fi
+}
+
+# The cache is an optimisation: any failure here leaves the install to download
+# as if there were no cache, and is never fatal.
+if [ -n "$CACHE_DIR" ]; then
+  APT_OPTS+=(-o APT::Keep-Downloaded-Packages=true)
+  PLAN="$(plan_downloads "$@")" || PLAN=""
+  if [ -n "$PLAN" ]; then
+    seed_archives || echo "::warning::could not seed apt archives from $CACHE_DIR"
+  fi
+fi
+
 # These packages are required, so retry once -- a second attempt redoes the
 # mirror failover -- then fail loudly, instead of leaving a later step to break
 # on a missing header or binary.
@@ -69,6 +163,9 @@ apt_get 90s -q update ||
 # the `Get:` and `Unpacking`/`Setting up` lines that pin it down.
 for attempt in 1 2; do
   if apt_get 240s -q install -y --no-install-recommends "$@"; then
+    if [ -n "$PLAN" ]; then
+      save_archives || echo "::warning::could not save apt archives to $CACHE_DIR"
+    fi
     exit 0
   fi
 
