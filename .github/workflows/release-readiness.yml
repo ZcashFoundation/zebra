@@ -1,0 +1,99 @@
+# Release PR readiness, shared by the PR Gate and the manual `operation=check`
+# dispatch in release.yml so both run exactly the same validations.
+name: Release readiness
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: Branch the Release PR targets
+        required: true
+        type: string
+      target-sha:
+        description: Release PR head commit
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest-xl
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.target-sha }}
+      - name: Resolve release comparison
+        id: release-target
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
+          TARGET_SHA: ${{ inputs.target-sha }}
+        run: |
+          base_tip="$(git rev-parse "origin/${BASE_REF}")"
+          base_sha="$(git merge-base "${base_tip}" "${TARGET_SHA}")"
+          if [[ "${base_sha}" != "${base_tip}" ]]; then
+            echo "::error title=Release PR is behind ${BASE_REF}::Wait for release-plz to update this PR before review."
+            exit 1
+          fi
+          echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Check versions, manifests, and changelogs
+        id: repository
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ steps.release-target.outputs.base_sha }}
+          TARGET_SHA: ${{ inputs.target-sha }}
+        run: .github/scripts/check-release-readiness.sh "${BASE_SHA}" "${TARGET_SHA}"
+      - name: Install Cargo 1.91
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.91.0
+          cache-on-failure: true
+      - name: Install libclang for librocksdb-sys bindgen
+        run: .github/scripts/apt-install.sh libclang-dev
+      - name: Check desired release state
+        id: cargo-release
+        continue-on-error: true
+        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e # v0.1.0
+        with:
+          phase: check
+          base-sha: ${{ steps.release-target.outputs.base_sha }}
+          target-sha: ${{ inputs.target-sha }}
+          github-token: ${{ github.token }}
+      - name: Summarize Cargo release check
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          PLAN: ${{ steps.cargo-release.outputs.plan }}
+          REPORT: ${{ steps.cargo-release.outputs.report }}
+        run: |
+          {
+            echo "### Cargo release: \`${CARGO_RELEASE_RESULT}\`"
+            if [[ -n "${PLAN}" ]]; then
+              echo '#### Plan'
+              echo '```json'
+              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
+              echo '```'
+            fi
+            if [[ -n "${REPORT}" ]]; then
+              echo '#### External state'
+              echo '```json'
+              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Require successful release checks
+        if: always()
+        env:
+          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
+          REPOSITORY_RESULT: ${{ steps.repository.outcome }}
+        run: |
+          if [[ "${REPOSITORY_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
+            echo "::error title=Release readiness failed::Review each failed validation step and the job summary."
+            exit 1
+          fi
