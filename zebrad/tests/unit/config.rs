@@ -181,8 +181,6 @@ fn persistent_mode_state_cache() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let mut config = persistent_test_config(&Mainnet)?;
-    // This test doesn't need peers, and dialing them makes it depend on the public network.
-    config.network.initial_mainnet_peers = [].into();
 
     let testdir = testdir()?.with_config(&mut config)?;
     let testdir = &testdir;
@@ -218,10 +216,9 @@ fn persistent_mode_state_cache() -> Result<()> {
 fn persistent_mode_peer_cache() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // The peer node only accepts connections: it must never dial the public network.
-    // `default_test_config()` already listens on an OS-assigned port on IPv4 localhost.
+    // The peer node only accepts connections. `default_test_config()` has no initial peers,
+    // and listens on an OS-assigned port on IPv4 localhost.
     let mut peer_config = default_test_config(&Mainnet);
-    peer_config.network.initial_mainnet_peers = [].into();
 
     let mut peer = testdir()?
         .with_config(&mut peer_config)?
