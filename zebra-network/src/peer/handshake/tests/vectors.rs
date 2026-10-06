@@ -115,7 +115,7 @@ fn chain_tip_at_network_tip() -> (
 ) {
     let (chain_tip, sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
     sender.send_best_tip_height(block::Height(3_000_000));
-    sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    sender.send_best_tip_block_time(chrono::Utc::now());
     (chain_tip, sender)
 }
 

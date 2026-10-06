@@ -34,7 +34,6 @@ use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
 pub mod request;
-pub mod subsidy;
 
 pub use request::Request;
 
@@ -182,6 +181,107 @@ fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
 /// [§7.6]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
+/// The [ZIP 218] per-pool and global shielded action limits, which apply from NU7 activation.
+///
+/// `GlobalShieldedBudget`, `OrchardProtocolBlockActionLimit`, `SaplingBlockIOLimit` and
+/// `SproutBlockJoinSplitLimit` in the ZIP. Orchard and Ironwood share the global budget and
+/// have the same per-pool action limit. Sprout JoinSplits are prohibited.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const GLOBAL_SHIELDED_BUDGET: usize = 330;
+/// The per-pool action limit for both Orchard and Ironwood. See [`GLOBAL_SHIELDED_BUDGET`].
+pub const ORCHARD_BLOCK_ACTION_LIMIT: usize = 330;
+/// See [`GLOBAL_SHIELDED_BUDGET`].
+pub const SAPLING_BLOCK_IO_LIMIT: usize = 300;
+/// See [`GLOBAL_SHIELDED_BUDGET`].
+pub const SPROUT_BLOCK_JOIN_SPLIT_LIMIT: usize = 0;
+
+/// The shielded components that the [ZIP 218] action limits count.
+///
+/// Shared by the block verifier's limit check and by `getblocktemplate` transaction selection, so
+/// that a template can not be built from transactions the verifier would then reject.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShieldedActionCounts {
+    /// The number of Orchard actions.
+    pub orchard_actions: usize,
+    /// The number of Ironwood actions.
+    pub ironwood_actions: usize,
+    /// The number of Sapling inputs plus outputs.
+    pub sapling_io: usize,
+    /// The number of Sprout JoinSplits.
+    pub joinsplits: usize,
+}
+
+impl ShieldedActionCounts {
+    /// Returns the counts for `transaction`.
+    pub fn from_transaction(transaction: &zebra_chain::transaction::Transaction) -> Self {
+        Self {
+            orchard_actions: transaction.orchard_actions().count(),
+            ironwood_actions: transaction.ironwood_actions().count(),
+            sapling_io: transaction
+                .sapling_spends_count()
+                .saturating_add(transaction.sapling_outputs().count()),
+            joinsplits: transaction.joinsplit_count(),
+        }
+    }
+
+    /// Returns these counts plus `other`.
+    ///
+    /// Saturating, so that a malformed count can not wrap back below a limit.
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self {
+            orchard_actions: self.orchard_actions.saturating_add(other.orchard_actions),
+            ironwood_actions: self.ironwood_actions.saturating_add(other.ironwood_actions),
+            sapling_io: self.sapling_io.saturating_add(other.sapling_io),
+            joinsplits: self.joinsplits.saturating_add(other.joinsplits),
+        }
+    }
+
+    /// Returns the total shielded cost, which each JoinSplit contributes twice to, because it
+    /// produces two shielded outputs.
+    pub fn shielded_cost(&self) -> usize {
+        self.orchard_actions
+            .saturating_add(self.ironwood_actions)
+            .saturating_add(self.sapling_io)
+            .saturating_add(self.joinsplits.saturating_mul(2))
+    }
+
+    /// Returns the first limit these counts exceed, as `(pool, count, limit)`.
+    pub fn exceeded_limit(&self) -> Option<(&'static str, usize, usize)> {
+        [
+            (
+                "Orchard actions",
+                self.orchard_actions,
+                ORCHARD_BLOCK_ACTION_LIMIT,
+            ),
+            (
+                "Ironwood actions",
+                self.ironwood_actions,
+                ORCHARD_BLOCK_ACTION_LIMIT,
+            ),
+            (
+                "Sapling inputs and outputs",
+                self.sapling_io,
+                SAPLING_BLOCK_IO_LIMIT,
+            ),
+            (
+                "Sprout JoinSplits",
+                self.joinsplits,
+                SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+            ),
+            (
+                "shielded actions across all pools",
+                self.shielded_cost(),
+                GLOBAL_SHIELDED_BUDGET,
+            ),
+        ]
+        .into_iter()
+        .find(|&(_, count, limit)| count > limit)
+    }
+}
+
 impl<S, V> SemanticBlockVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -298,12 +398,29 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
+            // From the NSM reissuance height, the block subsidy depends on the
+            // NSM value balance after the parent block, which is not committed yet while
+            // blocks are verified concurrently. The state checks the subsidy, funding streams,
+            // and miner fees during contextual validation instead, where the parent's chain value
+            // pools are known.
+            let nsm_reissuance_is_active =
+                zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &network);
 
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let deferred_pool_balance_change =
-                check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+            let expected_subsidy_and_deferred_pool_balance_change = if nsm_reissuance_is_active {
+                None
+            } else {
+                let expected_block_subsidy =
+                    zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
+
+                // See [ZIP-1015](https://zips.z.cash/zip-1015).
+                let deferred_pool_balance_change =
+                    check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+
+                Some((expected_block_subsidy, deferred_pool_balance_change))
+            };
+
+            // Bound shielded work before output recovery or proof verification.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
 
             // Now do the slower checks
 
@@ -375,14 +492,18 @@ where
                     source: amount_error,
                 })?;
 
-            check::miner_fees_are_valid(
-                &coinbase_tx,
-                height,
-                block_miner_fees,
-                expected_block_subsidy,
-                deferred_pool_balance_change,
-                &network,
-            )?;
+            if let Some((expected_block_subsidy, deferred_pool_balance_change)) =
+                expected_subsidy_and_deferred_pool_balance_change
+            {
+                check::miner_fees_are_valid(
+                    &coinbase_tx,
+                    height,
+                    block_miner_fees,
+                    expected_block_subsidy,
+                    deferred_pool_balance_change,
+                    &network,
+                )?;
+            }
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)

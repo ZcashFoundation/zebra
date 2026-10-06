@@ -10,11 +10,12 @@ use std::{
 
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::{self, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
+    parameters::Network,
     serialization::SerializationError,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
@@ -516,13 +517,40 @@ impl ContextuallyVerifiedBlock {
     /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
-    /// Note: a [`ContextuallyVerifiedBlock`] isn't actually contextually valid until
-    /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) returns success.
+    /// `previous_value_pools` and `deferred_pool_balance_change` must use the exact parent.
+    /// This constructor calculates ledger changes, but does not validate coinbase payouts or
+    /// funding outputs. The state service checks parent-dependent subsidy and miner fees before
+    /// pushing the block onto the non-finalized chain.
+    ///
+    /// A [`ContextuallyVerifiedBlock`] is only contextually valid after all state service
+    /// validation succeeds; construction or
+    /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) alone is not sufficient.
     pub fn with_block_and_spent_utxos(
+        semantically_verified: SemanticallyVerifiedBlock,
+        spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<Self, ValueBalanceError> {
+        Self::with_block_spent_utxos_and_fees(
+            semantically_verified,
+            spent_outputs,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+        .map(|(contextually_verified, _transaction_fees)| contextually_verified)
+    }
+
+    /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's gross transaction
+    /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
+    pub(crate) fn with_block_spent_utxos_and_fees(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
-    ) -> Result<Self, ValueBalanceError> {
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(Self, Option<Amount<NonNegative>>), ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
             hash,
@@ -538,19 +566,30 @@ impl ContextuallyVerifiedBlock {
         // TODO: fix the tests, and stop adding unrelated outputs.
         spent_outputs.extend(new_outputs.clone());
 
-        Ok(Self {
-            block: block.clone(),
-            hash,
-            height,
-            new_outputs,
-            spent_outputs: spent_outputs.clone(),
-            transaction_hashes,
-            chain_value_pool_change: block.chain_value_pool_change(
-                &utxos_from_ordered_utxos(spent_outputs),
-                deferred_pool_balance_change,
-            )?,
-            received_time,
-        })
+        let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
+            &utxos_from_ordered_utxos(
+                spent_outputs
+                    .iter()
+                    .map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
+            ),
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )?;
+
+        Ok((
+            Self {
+                block,
+                hash,
+                height,
+                new_outputs,
+                spent_outputs,
+                transaction_hashes,
+                chain_value_pool_change,
+                received_time,
+            },
+            transaction_fees,
+        ))
     }
 }
 
@@ -1208,6 +1247,22 @@ pub enum ReadRequest {
     /// [`block::Height`] using `.into()`.
     BlockHeader(HashOrHeight),
 
+    /// Looks up the transparent outputs spent by the non-coinbase inputs of a
+    /// block, using a block hash or height, in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SpentOutputs(Some(_))`](ReadResponse::SpentOutputs) with the spent
+    ///   outputs keyed by the spending [`OutPoint`](transparent::OutPoint) if the block is in
+    ///   the best chain;
+    /// * [`ReadResponse::SpentOutputs(None)`](ReadResponse::SpentOutputs) otherwise.
+    ///
+    /// An outpoint whose spent output cannot be found in the best chain is omitted from the
+    /// map, so callers must treat a missing outpoint as "prevout unknown", not an error.
+    ///
+    /// Used by the `getblock` RPC at verbosity 3.
+    SpentOutputs(HashOrHeight),
+
     /// Looks up a transaction by hash in the current best chain.
     ///
     /// Returns
@@ -1470,7 +1525,7 @@ pub enum ReadRequest {
 
     /// Looks up the balance of a set of transparent addresses.
     ///
-    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
+    /// Returns an [`Amount`] with the total
     /// balance of the set of addresses.
     AddressBalance(HashSet<transparent::Address>),
 
@@ -1546,8 +1601,9 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::SolutionRate`]
     SolutionRate {
-        /// The number of blocks to calculate the average difficulty for.
-        num_blocks: usize,
+        /// The number of blocks to calculate the average difficulty for, or `None`
+        /// to use the averaging window at the effective (tip-clamped) height.
+        num_blocks: Option<usize>,
         /// Optionally estimate the network solution rate at the time when this height was mined.
         /// Otherwise, estimate at the current tip height.
         height: Option<block::Height>,
@@ -1595,6 +1651,7 @@ impl ReadRequest {
             ReadRequest::Block(_) => "block",
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
+            ReadRequest::SpentOutputs(_) => "spent_outputs",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",

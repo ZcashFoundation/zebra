@@ -80,10 +80,32 @@ fn early_branch_id_before_nu6_3_has_no_mempool_score() {
     );
 }
 
+/// An NU7 branch ID keeps its peer score on Mainnet while NU7 has no activation height.
+#[test]
+fn nu7_branch_id_keeps_mempool_score_without_mainnet_activation() {
+    let network = Network::Mainnet;
+    let height = (NetworkUpgrade::Nu6_3
+        .activation_height(&network)
+        .expect("NU6.3 has a mainnet activation height")
+        + 1_000)
+        .expect("NU6.3 activates far below Height::MAX");
+
+    assert_eq!(
+        adjusted_mempool_misbehavior_score(
+            &TransactionError::WrongConsensusBranchId,
+            Some(NetworkUpgrade::Nu7),
+            height,
+            &network,
+        ),
+        100,
+    );
+}
+
 /// A stale NU6.2 branch ID at a maximum-height NU6.3 activation does not panic.
 #[test]
 fn stale_branch_id_at_max_nu6_3_height_has_no_mempool_score() {
     let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             before_overwinter: Some(1),
             overwinter: Some(2),
@@ -726,6 +748,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     // vectors is `BeforeOverwinter` (height 1), whose reset fires at the genesis block (height
     // 0). That reset is consumed while enabling the mempool, so it can't cancel a later download.
     let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             before_overwinter: Some(1),
             overwinter: Some(2),
@@ -742,6 +765,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         })
         .expect("activation heights are valid")
         .extend_funding_streams()
+        .expect("halving height and funding stream address interval are valid")
         .to_network()
         .expect("configured network is valid");
 
@@ -870,6 +894,7 @@ async fn mempool_reset_keeps_active_state_when_sync_status_falls_behind() -> Res
     // upgrade activation height, because that next height is what the next block
     // is verified against (see [`ChainTipChange::action`]).
     let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             before_overwinter: Some(1),
             overwinter: Some(2),
@@ -886,6 +911,7 @@ async fn mempool_reset_keeps_active_state_when_sync_status_falls_behind() -> Res
         })
         .expect("activation heights are valid")
         .extend_funding_streams()
+        .expect("halving height and funding stream address interval are valid")
         .to_network()
         .expect("configured network is valid");
 

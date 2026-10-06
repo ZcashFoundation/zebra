@@ -599,21 +599,46 @@ impl NonFinalizedState {
             &prepared,
         );
 
-        // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-            prepared.clone(),
-            spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(prepared.height, &self.network),
+        let (height, block_hash) = (prepared.height, prepared.hash);
+        let transaction_count = prepared.block.transactions.len();
+        let spent_utxo_count = spent_utxos.len();
+        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
+            height,
+            &self.network,
+            new_chain.chain_value_pools,
+        )
+        .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
+            subsidy_error: subsidy_error.into(),
+            height,
+            block_hash,
+        })?;
+
+        let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            prepared,
+            spent_utxos,
+            deferred_pool_balance_change,
+            &self.network,
+            new_chain.chain_value_pools,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {
                 value_balance_error,
-                height: prepared.height,
-                block_hash: prepared.hash,
-                transaction_count: prepared.block.transactions.len(),
-                spent_utxo_count: spent_utxos.len(),
+                height,
+                block_hash,
+                transaction_count,
+                spent_utxo_count,
             }
         })?;
+
+        // The semantic verifier defers parent-dependent payouts to this exact-parent check.
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &self.network) {
+            check::nsm_subsidy_is_valid(
+                &contextual,
+                &self.network,
+                new_chain.chain_value_pools,
+                block_fees.expect("reissuance starts no earlier than NU7 fee accounting"),
+            )?;
+        }
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }

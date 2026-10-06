@@ -1475,6 +1475,11 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            // Used by the get_block (verbosity 3) RPC.
+            ReadRequest::SpentOutputs(hash_or_height) => Ok(ReadResponse::SpentOutputs(
+                read::spent_outputs_for_block(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
+
             // Used by the get_block (verbose) RPC and the StateService.
             ReadRequest::BlockHeader(hash_or_height) => {
                 let best_chain = state.latest_best_chain();
@@ -1793,15 +1798,19 @@ impl Service<ReadRequest> for ReadStateService {
                         None => return Ok(ReadResponse::SolutionRate(None)),
                     };
 
-                let start_hash = match height {
-                    Some(height) if height < tip_height => read::hash_by_height(
+                let start_height = height.map_or(tip_height, |height| height.min(tip_height));
+                let start_hash = if start_height < tip_height {
+                    read::hash_by_height(
                         latest_non_finalized_state.best_chain(),
                         &state.db,
-                        height,
-                    ),
-                    // use the chain tip hash if height is above it or not provided.
-                    _ => Some(tip_hash),
+                        start_height,
+                    )
+                } else {
+                    Some(tip_hash)
                 };
+                let num_blocks = num_blocks.unwrap_or_else(|| {
+                    NetworkUpgrade::averaging_window_for_height(&state.network, start_height)
+                });
 
                 let solution_rate = start_hash.and_then(|start_hash| {
                     read::difficulty::solution_rate(

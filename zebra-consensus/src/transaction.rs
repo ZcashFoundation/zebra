@@ -485,6 +485,17 @@ where
                 return Err(TransactionError::CoinbaseInMempool);
             }
 
+            // A mempool transaction must fit in the next block's ZIP 218 shielded budget.
+            // Reject it before state lookups or proof verification; block verification checks
+            // the aggregate budget separately, including the coinbase.
+            if nu >= NetworkUpgrade::Nu7 {
+                if let Some((pool, count, limit)) =
+                    crate::block::ShieldedActionCounts::from_transaction(tx.as_ref()).exceeded_limit()
+                {
+                    return Err(TransactionError::TooManyShieldedActions { pool, count, limit });
+                }
+            }
+
             // Do quick checks first
             check_common_consensus_rules(tx.as_ref(), height, &network)?;
 
@@ -1056,14 +1067,29 @@ fn verify_v4_transaction_network_upgrade(
         | NetworkUpgrade::Nu6_2
         | NetworkUpgrade::Nu6_3 => Ok(()),
 
-        #[cfg(zcash_unstable = "zfuture")]
-        NetworkUpgrade::ZFuture => Ok(()),
-
         // Does not support V4 transactions
+        //
+        // # Consensus
+        //
+        // > [NU7 onward] The transaction version number MUST be 5 or 6.
+        //
+        // <https://zips.z.cash/zip-2003>
+        //
+        // `ZFuture` follows NU7, so it inherits the V4 rejection.
+        //
+        // This rule is deliberately not gated behind `zcash_unstable = "nu7"`: it is a no-op
+        // until NU7 has an activation height on a network, so gating it would only make the
+        // gated and ungated builds diverge without changing behaviour on any live network.
         NetworkUpgrade::Genesis
         | NetworkUpgrade::BeforeOverwinter
         | NetworkUpgrade::Overwinter
         | NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            transaction.version(),
+            network_upgrade,
+        )),
+
+        #[cfg(zcash_unstable = "zfuture")]
+        NetworkUpgrade::ZFuture => Err(TransactionError::UnsupportedByNetworkUpgrade(
             transaction.version(),
             network_upgrade,
         )),
