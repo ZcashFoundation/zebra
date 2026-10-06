@@ -14,7 +14,7 @@ use zebra_chain::{
         },
         Block, Height,
     },
-    parameters::{subsidy::block_subsidy, NetworkUpgrade},
+    parameters::NetworkUpgrade,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
@@ -22,9 +22,12 @@ use zebra_chain::{
 use zebra_script::Sigops;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{block::check::subsidy_is_valid, transaction};
+use crate::transaction;
 
+use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
+
+mod nu7;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
@@ -306,10 +309,14 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         // TODO: first halving, second halving, third halving, and very large halvings
         if height >= canopy_activation_height {
             let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
-                    .expect("valid block subsidy");
+                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                    height,
+                    &network,
+                    Amount::zero(),
+                )
+                .expect("valid block subsidy");
 
-            check::subsidy_is_valid(&block, &network, expected_block_subsidy)
+            subsidy_is_valid(&block, &network, expected_block_subsidy)
                 .expect("subsidies should pass for this block");
         }
     }
@@ -329,13 +336,15 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .expect("block should deserialize");
     let mut block = Arc::try_unwrap(block).expect("block should unwrap");
 
-    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
-        block
-            .coinbase_height()
-            .expect("block should have coinbase height"),
-        &network,
-    )
-    .expect("valid block subsidy");
+    let expected_block_subsidy =
+        zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+            block
+                .coinbase_height()
+                .expect("block should have coinbase height"),
+            &network,
+            Amount::zero(),
+        )
+        .expect("valid block subsidy");
 
     // Remove coinbase transaction
     block.transactions.remove(0);
@@ -345,8 +354,8 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::NoTransactions;
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let expected = BlockError::from(SubsidyError::NoCoinbase);
     assert_eq!(expected, result);
 
     // Get another funding stream block, and delete the coinbase transaction
@@ -355,13 +364,15 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .expect("block should deserialize");
     let mut block = Arc::try_unwrap(block).expect("block should unwrap");
 
-    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
-        block
-            .coinbase_height()
-            .expect("block should have coinbase height"),
-        &network,
-    )
-    .expect("valid block subsidy");
+    let expected_block_subsidy =
+        zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+            block
+                .coinbase_height()
+                .expect("block should have coinbase height"),
+            &network,
+            Amount::zero(),
+        )
+        .expect("valid block subsidy");
 
     // Remove coinbase transaction
     block.transactions.remove(0);
@@ -371,8 +382,8 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::Transaction(TransactionError::CoinbasePosition);
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let expected = BlockError::from(SubsidyError::NoCoinbase);
     assert_eq!(expected, result);
 
     // Get another funding stream, and duplicate the coinbase transaction
@@ -395,15 +406,17 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::Transaction(TransactionError::CoinbaseAfterFirst);
     assert_eq!(expected, result);
 
-    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
-        block
-            .coinbase_height()
-            .expect("block should have coinbase height"),
-        &network,
-    )
-    .expect("valid block subsidy");
+    let expected_block_subsidy =
+        zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+            block
+                .coinbase_height()
+                .expect("block should have coinbase height"),
+            &network,
+            Amount::zero(),
+        )
+        .expect("valid block subsidy");
 
-    check::subsidy_is_valid(&block, &network, expected_block_subsidy)
+    subsidy_is_valid(&block, &network, expected_block_subsidy)
         .expect("subsidy does not check for extra coinbase transactions");
 
     Ok(())
@@ -432,11 +445,15 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
         if height >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
-                    .expect("valid block subsidy");
+                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                    height,
+                    &network,
+                    Amount::zero(),
+                )
+                .expect("valid block subsidy");
 
             // Validate
-            let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
+            let result = subsidy_is_valid(&block, &network, expected_block_subsidy);
             assert!(result.is_ok());
         }
     }
@@ -461,14 +478,12 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
         .map(|transaction| {
             let mut output = transaction.outputs()[0].clone();
             output.value = Amount::try_from(i32::MAX).unwrap();
-            Transaction::V4 {
-                inputs: transaction.inputs().to_vec(),
-                outputs: vec![output],
-                lock_time: transaction.lock_time().unwrap_or_else(LockTime::unlocked),
-                expiry_height: Height(0),
-                joinsplit_data: None,
-                sapling_shielded_data: None,
-            }
+            Transaction::test_v4(
+                transaction.inputs().to_vec(),
+                vec![output],
+                transaction.lock_time().unwrap_or_else(LockTime::unlocked),
+                Height(0),
+            )
         })
         .unwrap();
 
@@ -480,18 +495,18 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
-        block
-            .coinbase_height()
-            .expect("block should have coinbase height"),
-        &network,
-    )
-    .expect("valid block subsidy");
+    let expected_block_subsidy =
+        zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+            block
+                .coinbase_height()
+                .expect("block should have coinbase height"),
+            &network,
+            Amount::zero(),
+        )
+        .expect("valid block subsidy");
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
-    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::FundingStreamNotFound,
-    )));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy);
+    let expected = Err(BlockError::from(SubsidyError::FundingStreamNotFound));
     assert_eq!(expected, result);
 
     Ok(())
@@ -516,7 +531,12 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy = block_subsidy(height, &network)?;
+            let expected_block_subsidy =
+                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                    height,
+                    &network,
+                    Amount::zero(),
+                )?;
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let deferred_pool_balance_change =
                 match NetworkUpgrade::Canopy.activation_height(&network) {
@@ -526,7 +546,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
                     _other => DeferredPoolBalanceChange::zero(),
                 };
 
-            assert!(check::miner_fees_are_valid(
+            assert!(miner_fees_are_valid(
                 &coinbase_tx,
                 height,
                 // Set the miner fees to a high-enough amount.
@@ -549,7 +569,12 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
         .expect("block should deserialize");
     let height = block.coinbase_height().expect("valid coinbase height");
-    let expected_block_subsidy = block_subsidy(height, &network)?;
+    let expected_block_subsidy =
+        zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+            height,
+            &network,
+            Amount::zero(),
+        )?;
     // See [ZIP-1015](https://zips.z.cash/zip-1015).
     let deferred_pool_balance_change = match NetworkUpgrade::Canopy.activation_height(&network) {
         Some(activation_height) if height >= activation_height => {
@@ -559,7 +584,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     };
 
     assert_eq!(
-        check::miner_fees_are_valid(
+        miner_fees_are_valid(
             check::coinbase_is_first(&block)?.as_ref(),
             height,
             // Set the miner fee to an invalid amount.
@@ -568,10 +593,90 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             deferred_pool_balance_change,
             &network
         ),
-        Err(BlockError::Transaction(TransactionError::Subsidy(
-            SubsidyError::InvalidMinerFees,
-        )))
+        Err(BlockError::from(SubsidyError::InvalidMinerFees))
     );
+
+    Ok(())
+}
+
+/// From NU7 activation, the coinbase transaction must claim exactly the fees ZIP 235 leaves in
+/// circulation, which are 40% of the block's fees, rounded up. Before it, it must claim them all.
+
+#[test]
+fn zip235_coinbase_cant_claim_the_nsm_fee_contribution() -> Result<(), Report> {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        parameters::testnet::{self, ConfiguredActivationHeights},
+        transparent,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    const NU7_HEIGHT: u32 = 10;
+
+    // Keep this early-upgrade schedule within the monetary cap.
+    let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(NU7_HEIGHT),
+            ..Default::default()
+        })?
+        .clear_funding_streams()
+        .to_network()?;
+
+    let fees = Amount::<NonNegative>::try_from(1_001)?;
+
+    let miner_fees_are_valid = |height: Height, claimed_fees: i64| {
+        // The rule doesn't depend on the block subsidy.
+        let block_subsidy = Amount::<NonNegative>::try_from(625_000_000).expect("valid amount");
+        let claimed_fees = Amount::<NonNegative>::try_from(claimed_fees).expect("valid amount");
+
+        let coinbase = Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: (block_subsidy + claimed_fees).expect("valid amount"),
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        );
+
+        check::miner_fees_are_valid(
+            &coinbase,
+            height,
+            fees,
+            block_subsidy,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+        )
+    };
+
+    let invalid_miner_fees = Err(BlockError::Transaction(TransactionError::Subsidy(
+        SubsidyError::InvalidMinerFees,
+    )));
+
+    let before_nu7 = Height(NU7_HEIGHT - 1);
+    assert_eq!(miner_fees_are_valid(before_nu7, 1_001), Ok(()));
+    assert_eq!(miner_fees_are_valid(before_nu7, 401), invalid_miner_fees);
+
+    for height in [Height(NU7_HEIGHT), Height(NU7_HEIGHT + 1)] {
+        assert_eq!(miner_fees_are_valid(height, 401), Ok(()));
+
+        for claimed_fees in [400, 402, 1_001] {
+            assert_eq!(
+                miner_fees_are_valid(height, claimed_fees),
+                invalid_miner_fees
+            );
+        }
+    }
 
     Ok(())
 }
@@ -834,6 +939,57 @@ fn block_error_misbehavior_scores() {
         BlockError::MissingHeight(zebra_chain::block::Hash([0; 32])).misbehavior_score(),
         100
     );
+    assert_eq!(BlockError::DuplicateTransaction.misbehavior_score(), 100);
+}
+
+/// A block with duplicate transaction hashes must score misbehaviour through both
+/// verifier paths, because both of them run `merkle_root_validity()`: the semantic
+/// verifier at `block.rs`, and the checkpoint verifier before it queues a block.
+///
+/// The syncer only forwards a score to the misbehaviour channel when it is
+/// non-zero, and it reads that score from the wrapping error, not from
+/// [`BlockError`] itself. So the score has to survive the wrappers to have any
+/// effect on the peer that advertised the block.
+#[test]
+fn duplicate_transaction_scores_misbehavior_through_both_verifier_paths() {
+    use crate::{checkpoint::VerifyCheckpointError, router::RouterError};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES[..])
+        .expect("block should deserialize");
+
+    // Duplicate the coinbase transaction, then recompute the Merkle root from the
+    // duplicated list, so the block passes the `BadMerkleRoot` check and reaches the
+    // duplicate-hash check.
+    let duplicate = block
+        .transactions
+        .first()
+        .expect("block has coinbase")
+        .clone();
+    block.transactions.push(duplicate);
+
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    Arc::make_mut(&mut block.header).merkle_root = transaction_hashes.iter().cloned().collect();
+
+    let block_error = check::merkle_root_validity(&network, &block, &transaction_hashes)
+        .expect_err("duplicate transaction hashes must be rejected");
+    assert_eq!(block_error, BlockError::DuplicateTransaction);
+
+    // The semantic verifier path: `BlockError` -> `VerifyBlockError` -> `RouterError`.
+    let verify_block_error = VerifyBlockError::from(block_error.clone());
+    assert_eq!(verify_block_error.misbehavior_score(), 100);
+    assert_eq!(
+        RouterError::from(verify_block_error).misbehavior_score(),
+        100
+    );
+
+    // The checkpoint verifier path: `BlockError` -> `VerifyCheckpointError` -> `RouterError`.
+    let checkpoint_error = VerifyCheckpointError::from(block_error);
+    assert_eq!(checkpoint_error.misbehavior_score(), 100);
+    assert_eq!(RouterError::from(checkpoint_error).misbehavior_score(), 100);
 }
 
 #[test]
@@ -868,4 +1024,425 @@ fn state_commit_duplicate_errors_are_duplicate_requests() {
     );
     assert!(err.is_duplicate_request());
     assert_eq!(err.misbehavior_score(), 0);
+}
+
+/// From the NSM reissuance height, the block verifier leaves the block subsidy,
+/// funding stream, and miner fee checks to contextual validation in the state, so it sends a block
+/// whose coinbase pays the wrong subsidy to the state to be committed. Before activation it rejects
+/// the same block.
+
+#[tokio::test]
+async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), Report> {
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        parameters::testnet::{self, ConfiguredActivationHeights},
+        transaction::UnminedTxId,
+        transparent,
+    };
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+
+    const NU7_HEIGHT: u32 = 10;
+
+    // A network reissuing from `deployment_height`.
+    let network = |deployment_height: Height| -> Result<Network, Report> {
+        let params = testnet::Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(1),
+                nu6: Some(1),
+                nu6_3: Some(1),
+                nu7: Some(NU7_HEIGHT),
+                ..Default::default()
+            })?
+            .with_slow_start_interval(Height::MIN)
+            .with_nsm_reissuance_height(deployment_height)
+            .with_disable_pow(true)
+            .clear_funding_streams()
+            .with_lockbox_disbursements(Vec::new());
+        Ok(params.to_network()?)
+    };
+
+    // A block at `height` whose coinbase pays 1 zatoshi, which is less than the block subsidy.
+    let block_at = |height: Height| -> Arc<Block> {
+        let mut block =
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..]).unwrap();
+
+        let coinbase = Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: Amount::<NonNegative>::try_from(1).unwrap(),
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        );
+        block.transactions = vec![Arc::new(coinbase)];
+
+        let merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut block.header).merkle_root = merkle_root;
+
+        Arc::new(block)
+    };
+
+    let deployed_at_nu7 = network(Height(NU7_HEIGHT))?;
+    let deployed_later = network(Height(NU7_HEIGHT + 2))?;
+
+    for (network, height, is_active) in [
+        (&deployed_at_nu7, Height(NU7_HEIGHT - 1), false),
+        (&deployed_at_nu7, Height(NU7_HEIGHT), true),
+        // Between NU7 activation and the deployment height the verifier still checks the subsidy.
+        (&deployed_later, Height(NU7_HEIGHT), false),
+        (&deployed_later, Height(NU7_HEIGHT + 1), false),
+        (&deployed_later, Height(NU7_HEIGHT + 2), true),
+    ] {
+        let block = block_at(height);
+        let hash = block.hash();
+
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut transaction_verifier: MockService<_, _, _, BoxError> =
+            MockService::build().for_unit_tests();
+
+        let verifier =
+            SemanticBlockVerifier::new(network, state.clone(), transaction_verifier.clone());
+        let verify = tokio::spawn(verifier.oneshot(Request::Commit(block.clone())));
+
+        state
+            .expect_request(zs::Request::KnownBlock(hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+
+        transaction_verifier
+            .expect_request_that(|_| true)
+            .await
+            .respond(transaction::BlockResponse {
+                tx_id: UnminedTxId::from(block.transactions[0].as_ref()),
+                miner_fee: None,
+                sigops: 0,
+            });
+
+        if is_active {
+            state
+                .expect_request_that(|request| {
+                    matches!(request, zs::Request::CommitSemanticallyVerifiedBlock(_))
+                })
+                .await
+                .respond(zs::Response::Committed(hash));
+
+            assert_eq!(
+                verify
+                    .await?
+                    .expect("the block verifier leaves the subsidy checks to the state"),
+                hash
+            );
+        } else {
+            let err = verify
+                .await?
+                .expect_err("the coinbase pays the wrong subsidy");
+            assert!(
+                matches!(
+                    err,
+                    VerifyBlockError::Block {
+                        source: BlockError::Transaction(TransactionError::Subsidy(
+                            SubsidyError::InvalidMinerFees
+                        ))
+                    }
+                ),
+                "unexpected error: {err:?}"
+            );
+            state.expect_no_requests().await;
+        }
+    }
+
+    Ok(())
+}
+
+/// A same-hash forged block body is only rejected by the state's contextual
+/// authorizing-data commitment check, so that rejection is the one signal that
+/// attributes the forgery to the peer that served it. Check the suggested
+/// misbehaviour score survives every wrapper between the state and the syncer.
+#[test]
+fn state_auth_commitment_errors_score_the_serving_peer() {
+    let commitment_error =
+        zebra_chain::block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+            expected: [1; 32],
+            actual: [2; 32],
+        };
+    let commit_error = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(commitment_error),
+    ));
+
+    // Box the error the same way the state's `CommitSemanticallyVerifiedBlock`
+    // handler does. This mirrors the wrapping manually, so it won't fail
+    // automatically if the state changes its error type — keep it in sync by hand.
+    let source: BoxError = Box::new(zs::CommitSemanticallyVerifiedError::from(commit_error));
+
+    let err = map_commit_error(source, block::Hash([0; 32]));
+
+    assert!(
+        matches!(err, VerifyBlockError::Commit(_)),
+        "state commit errors must be unwrapped into VerifyBlockError::Commit, got: {err:?}"
+    );
+    assert!(
+        !err.is_duplicate_request(),
+        "a forged body is not a duplicate request, so it must not be treated as benign"
+    );
+    assert_eq!(
+        err.misbehavior_score(),
+        100,
+        "an authorizing-data commitment mismatch must score the peer that served the body"
+    );
+
+    // The syncer reads the score through `RouterError`, so it must survive that
+    // wrapper too, otherwise the serving peer is never banned.
+    let router_err = crate::router::RouterError::from(err);
+    assert_eq!(
+        router_err.misbehavior_score(),
+        100,
+        "the score must reach the syncer through RouterError"
+    );
+}
+
+/// Returns a Regtest network with NU7 activating at `nu7_height`.
+fn nu7_network(nu7_height: u32) -> Network {
+    Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(nu7_height),
+            ..Default::default()
+        }
+        .into(),
+    )
+}
+
+/// ZIP 218 limits each shielded pool and their combined cost from NU7 onward.
+#[test]
+fn zip_218_shielded_action_limits() {
+    use zebra_chain::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};
+
+    let _init_guard = zebra_test::init();
+
+    let network = nu7_network(1_000);
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+        .expect("block test vector is valid");
+
+    let orchard_tx =
+        zebra_chain::transaction::arbitrary::v5_transactions(Network::Mainnet.block_iter())
+            .find(|transaction| {
+                transaction.orchard_actions().count() == 2
+                    && transaction.joinsplit_count() == 0
+                    && transaction.sapling_spends_count() == 0
+                    && transaction.sapling_outputs().next().is_none()
+            })
+            .map(Arc::new)
+            .expect("a V5 transaction whose only shielded data is Orchard actions");
+    let ironwood_tx = Arc::new(fake_v6_transaction(
+        NetworkUpgrade::Nu7,
+        None,
+        Some(
+            fake_bundle_for_branch(
+                zcash_protocol::consensus::BranchId::Nu7,
+                orchard::ValuePool::Ironwood,
+                2,
+                1,
+            )
+            .expect("NU7 supports Ironwood"),
+        ),
+    ));
+    let sapling_tx = zebra_chain::transaction::arbitrary::transactions_from_blocks(
+        Network::Mainnet.block_iter(),
+    )
+    .map(|(_, transaction)| transaction)
+    .find(|transaction| {
+        transaction.orchard_actions().count() == 0
+            && transaction.joinsplit_count() == 0
+            && transaction.sapling_spends_count() + transaction.sapling_outputs().count() > 0
+    })
+    .expect("a transaction whose only shielded data is Sapling");
+
+    let orchard_actions = orchard_tx.orchard_actions().count();
+    let sapling_io = sapling_tx.sapling_spends_count() + sapling_tx.sapling_outputs().count();
+    let orchard_limit_count = ORCHARD_BLOCK_ACTION_LIMIT / orchard_actions;
+
+    // Exceed the global budget while remaining below each pool's own limit.
+    let orchard_count = (ORCHARD_BLOCK_ACTION_LIMIT * 3 / 5).div_ceil(orchard_actions);
+    let sapling_count = (SAPLING_BLOCK_IO_LIMIT * 3 / 5).div_ceil(sapling_io);
+    assert!(orchard_count * orchard_actions <= ORCHARD_BLOCK_ACTION_LIMIT);
+    assert!(sapling_count * sapling_io <= SAPLING_BLOCK_IO_LIMIT);
+    assert!(orchard_count * orchard_actions + sapling_count * sapling_io > GLOBAL_SHIELDED_BUDGET);
+
+    for (orchard_count, ironwood_count, sapling_count, height, valid) in [
+        // Orchard-only: over the limit before/at activation, and within it at activation.
+        (orchard_limit_count + 1, 0, 0, Height(999), true),
+        (orchard_limit_count + 1, 0, 0, Height(1_000), false),
+        (orchard_limit_count, 0, 0, Height(1_000), true),
+        // Ironwood-only: 332 actions before/at activation, then exactly 330 actions.
+        (0, 166, 0, Height(999), true),
+        (0, 166, 0, Height(1_000), false),
+        (0, 165, 0, Height(1_000), true),
+        // 200 Orchard plus 200 Ironwood actions exceed their shared global budget.
+        (100, 100, 0, Height(999), true),
+        (100, 100, 0, Height(1_000), false),
+        // Orchard and Sapling: over the budget before/at activation, then remove Sapling.
+        (orchard_count, 0, sapling_count, Height(999), true),
+        (orchard_count, 0, sapling_count, Height(1_000), false),
+        (orchard_count, 0, 0, Height(1_000), true),
+    ] {
+        // Only the transaction components matter here, not the block's merkle root.
+        block.transactions = std::iter::repeat_n(orchard_tx.clone(), orchard_count)
+            .chain(std::iter::repeat_n(ironwood_tx.clone(), ironwood_count))
+            .chain(std::iter::repeat_n(sapling_tx.clone(), sapling_count))
+            .collect();
+        let result =
+            check::shielded_action_limits_are_valid(&block, &network, height, block.hash());
+        if valid {
+            assert_eq!(
+                result,
+                Ok(()),
+                "counts {orchard_count}/{ironwood_count}/{sapling_count}, {height:?}"
+            );
+        } else {
+            assert!(
+                matches!(result, Err(BlockError::TooManyShieldedActions { .. })),
+                "counts {orchard_count}/{ironwood_count}/{sapling_count}, {height:?}: {result:?}",
+            );
+        }
+    }
+}
+
+/// Oversized shielded coinbases must be rejected before attempting output recovery.
+#[tokio::test]
+async fn shielded_limits_precede_coinbase_recovery() {
+    use zebra_chain::{transaction::arbitrary::fake_bundle_for_branch, transparent::Input};
+
+    let _init_guard = zebra_test::init();
+    let network = nu7_network(1_000);
+    let height = Height(1_001);
+    let bundle = fake_bundle_for_branch(
+        zcash_protocol::consensus::BranchId::Nu7,
+        orchard::ValuePool::Ironwood,
+        ORCHARD_BLOCK_ACTION_LIMIT + 2,
+        1,
+    )
+    .expect("NU7 supports Ironwood");
+    let transaction = Transaction::test_v6_with_bundles(
+        NetworkUpgrade::Nu7,
+        vec![Input::Coinbase {
+            height,
+            data: vec![],
+            sequence: u32::MAX,
+        }],
+        vec![],
+        LockTime::unlocked(),
+        height,
+        None,
+        Some(bundle),
+    );
+    assert!(transaction.has_shielded_outputs());
+    assert_eq!(
+        tx::check::coinbase_outputs_are_decryptable(&transaction, &network, height),
+        Err(TransactionError::CoinbaseOutputsNotDecryptable),
+    );
+
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..])
+        .expect("block test vector is valid");
+    block.transactions = vec![Arc::new(transaction)];
+    Arc::make_mut(&mut block.header).merkle_root = block
+        .transactions
+        .iter()
+        .map(|transaction| transaction.hash())
+        .collect();
+    let state = tower::service_fn(|request| async move {
+        assert!(matches!(request, zs::Request::KnownBlock(_)));
+        Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+    });
+    let transactions = tower::service_fn(|_| async {
+        unreachable!("an oversized block must not queue transaction verification")
+    });
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        SemanticBlockVerifier::new(&network, state, transactions)
+            .oneshot(Request::CheckProposal(Arc::new(block))),
+    )
+    .await
+    .expect("cheap shielded limit rejection must not stall");
+    assert!(
+        matches!(
+            result,
+            Err(VerifyBlockError::Block {
+                source: BlockError::TooManyShieldedActions { .. },
+            })
+        ),
+        "{result:?}",
+    );
+}
+
+/// Pin each ZIP 218 limit's boundary and the global budget's weighting.
+#[test]
+fn shielded_action_counts_limits() {
+    let _init_guard = zebra_test::init();
+
+    for (orchard_actions, ironwood_actions, sapling_io, joinsplits, expected_limit) in [
+        (330, 0, 0, 0, None),
+        (331, 0, 0, 0, Some(330)),
+        (0, 330, 0, 0, None),
+        (0, 331, 0, 0, Some(330)),
+        (0, 0, 300, 0, None),
+        (0, 0, 301, 0, Some(300)),
+        (0, 0, 0, 0, None),
+        (0, 0, 0, 1, Some(0)),
+        // Neither pool is over its own limit, but together they exceed the global budget.
+        (200, 200, 0, 0, Some(330)),
+        (200, 0, 200, 0, Some(330)),
+    ] {
+        let counts = ShieldedActionCounts {
+            orchard_actions,
+            ironwood_actions,
+            sapling_io,
+            joinsplits,
+        };
+        assert_eq!(
+            counts.exceeded_limit().map(|(_, _, limit)| limit),
+            expected_limit,
+            "{counts:?}",
+        );
+    }
+
+    // Each JoinSplit costs two, because it produces two shielded outputs.
+    assert_eq!(
+        ShieldedActionCounts {
+            joinsplits: 1,
+            ..Default::default()
+        }
+        .shielded_cost(),
+        2,
+    );
+
+    let saturated = ShieldedActionCounts {
+        orchard_actions: usize::MAX,
+        ironwood_actions: usize::MAX,
+        sapling_io: usize::MAX,
+        joinsplits: usize::MAX,
+    };
+    assert_eq!(
+        saturated.saturating_add(ShieldedActionCounts {
+            orchard_actions: 1,
+            ironwood_actions: 1,
+            sapling_io: 1,
+            joinsplits: 1,
+        }),
+        saturated,
+        "counts must not wrap below a limit",
+    );
+    assert_eq!(saturated.shielded_cost(), usize::MAX);
 }

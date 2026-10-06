@@ -77,6 +77,13 @@ impl fmt::Debug for RpcServer {
 /// The message to log when logging the RPC server's listen address
 pub const OPENED_RPC_ENDPOINT_MSG: &str = "Opened RPC endpoint at ";
 
+/// The message to log when logging the lightwalletd gRPC server's listen address.
+///
+/// Deliberately distinct from [`OPENED_RPC_ENDPOINT_MSG`], and not a superstring of it:
+/// tests find listen addresses by scraping these messages out of the log, and some read
+/// several in a row and rely on their order.
+pub const OPENED_LIGHTWALLETD_ENDPOINT_MSG: &str = "Opened lightwalletd gRPC endpoint at ";
+
 type ServerTask = JoinHandle<Result<(), tower::BoxError>>;
 
 impl RpcServer {
@@ -123,7 +130,6 @@ impl RpcServer {
         // The largest RPC request is submitblock, which sends a full block
         // as a hex string (2x MAX_BLOCK_BYTES) plus a small JSON-RPC wrapper.
         let max_request_body_size = (MAX_BLOCK_BYTES as usize) * 2 + 1024;
-
         let http_middleware_layer = if conf.enable_cookie_auth {
             let cookie = Cookie::default();
             cookie::write_to_disk(&cookie, &conf.cookie_dir)
@@ -145,11 +151,7 @@ impl RpcServer {
             .http_only()
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
-            .max_response_body_size(
-                conf.max_response_body_size
-                    .try_into()
-                    .expect("should be valid"),
-            )
+            .max_response_body_size(conf.max_response_body_size)
             .build(listen_addr)
             .await?;
 

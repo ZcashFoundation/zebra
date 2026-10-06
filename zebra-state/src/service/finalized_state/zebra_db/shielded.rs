@@ -598,9 +598,6 @@ impl ZebraDb {
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s shielded transaction indexes,
     /// and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
     pub fn prepare_shielded_transaction_batch(
         &mut self,
         zebra_db: &ZebraDb,
@@ -647,14 +644,14 @@ impl DiskWriteBatch {
         let insert_value = ();
 
         // Mark sprout, sapling, orchard, and ironwood nullifiers as spent
-        for sprout_nullifier in transaction.sprout_nullifiers() {
-            self.zs_insert(&sprout_nullifiers, sprout_nullifier, insert_value);
+        for nullifier in transaction.sprout_nullifiers() {
+            self.zs_insert(&sprout_nullifiers, nullifier, insert_value);
         }
-        for sapling_nullifier in transaction.sapling_nullifiers() {
-            self.zs_insert(&sapling_nullifiers, sapling_nullifier, insert_value);
+        for nullifier in transaction.sapling_nullifiers() {
+            self.zs_insert(&sapling_nullifiers, nullifier, insert_value);
         }
-        for orchard_nullifier in transaction.orchard_nullifiers() {
-            self.zs_insert(&orchard_nullifiers, orchard_nullifier, insert_value);
+        for nullifier in transaction.orchard_nullifiers() {
+            self.zs_insert(&orchard_nullifiers, nullifier, insert_value);
         }
         for ironwood_nullifier in transaction.ironwood_nullifiers() {
             self.zs_insert(&ironwood_nullifiers, ironwood_nullifier, insert_value);
@@ -663,10 +660,6 @@ impl DiskWriteBatch {
 
     /// Prepare a database batch containing the note commitment and history tree updates
     /// from `finalized.block`, and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_trees_batch(
         &mut self,
         zebra_db: &ZebraDb,

@@ -17,9 +17,8 @@ use zcash_script::{
     solver, Opcode,
 };
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::Height,
-    orchard::Flags,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
     transaction::{LockTime, Transaction},
@@ -183,14 +182,18 @@ pub fn has_enough_ironwood_flags(tx: &Transaction) -> Result<(), TransactionErro
 /// for the Orchard pool in every tx version (only the Ironwood pool permits it). So this is a
 /// defense-in-depth check that also covers an in-memory-constructed bundle.
 pub fn orchard_cross_address_disabled(tx: &Transaction) -> Result<(), TransactionError> {
-    if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-        if orchard_shielded_data
-            .flags
-            .contains(Flags::ENABLE_CROSS_ADDRESS)
-        {
-            return Err(TransactionError::OrchardHasEnableCrossAddress);
-        }
+    // Only the NU6.3-onward Orchard pool (`orchard_v3`) carries `enableCrossAddress` as a wire
+    // flag that must be 0. Earlier Orchard revisions have no such bit — cross-address transfers
+    // are unconditionally permitted and `Flags::cross_address_enabled` reports `true` for every
+    // pre-NU6.3 bundle — so restricting this to `orchard_v3` is what keeps the rule from
+    // rejecting every Orchard transaction already on chain.
+    if tx.orchard_bundle().is_some_and(|bundle| {
+        bundle.bundle_version() == ::orchard::bundle::BundleVersion::orchard_v3()
+            && bundle.flags().cross_address_enabled()
+    }) {
+        return Err(TransactionError::OrchardHasEnableCrossAddress);
     }
+
     Ok(())
 }
 
@@ -215,12 +218,11 @@ pub fn orchard_value_balance_non_negative(
     tx: &Transaction,
     network_upgrade: NetworkUpgrade,
 ) -> Result<(), TransactionError> {
-    if network_upgrade >= NetworkUpgrade::Nu6_3 {
-        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-            if orchard_shielded_data.value_balance() < Amount::<NegativeAllowed>::zero() {
-                return Err(TransactionError::NegativeOrchardValueBalance);
-            }
-        }
+    if network_upgrade >= NetworkUpgrade::Nu6_3
+        && tx.orchard_bundle().is_some()
+        && tx.orchard_value_balance().orchard_amount() < Amount::<NegativeAllowed>::zero()
+    {
+        return Err(TransactionError::NegativeOrchardValueBalance);
     }
 
     Ok(())
@@ -247,7 +249,7 @@ pub fn coinbase_orchard_component_empty(
 ) -> Result<(), TransactionError> {
     if network_upgrade >= NetworkUpgrade::Nu6_3
         && tx.is_coinbase()
-        && tx.orchard_shielded_data().is_some()
+        && tx.has_orchard_shielded_data()
     {
         return Err(TransactionError::CoinbaseHasOrchardActions);
     }
@@ -276,12 +278,12 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
     if tx.is_coinbase() {
         if tx.joinsplit_count() > 0 {
             return Err(TransactionError::CoinbaseHasJoinSplit);
-        } else if tx.sapling_spends_per_anchor().count() > 0 {
+        } else if tx.sapling_spends_count() > 0 {
             return Err(TransactionError::CoinbaseHasSpend);
         }
 
-        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-            if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
+        if let Some(flags) = tx.orchard_flags() {
+            if flags.spends_enabled() {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
             }
         }
@@ -295,10 +297,11 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
         //
         // (`ironwood_shielded_data` is only ever present in v6 transactions, so this is a no-op for
         // earlier versions.)
-        if let Some(ironwood_shielded_data) = tx.ironwood_shielded_data() {
-            if ironwood_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
-                return Err(TransactionError::CoinbaseHasEnableSpendsIronwood);
-            }
+        if tx
+            .ironwood_flags()
+            .is_some_and(|flags| flags.spends_enabled())
+        {
+            return Err(TransactionError::CoinbaseHasEnableSpendsIronwood);
         }
     }
 
@@ -310,18 +313,16 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError> {
-    let zero = Amount::<NonNegative>::zero();
+    let vpub_old_values = tx.output_values_to_sprout();
+    let vpub_new_values = tx.input_values_from_sprout();
 
-    let vpub_pairs = tx
-        .output_values_to_sprout()
-        .zip(tx.input_values_from_sprout());
-    for (vpub_old, vpub_new) in vpub_pairs {
+    for (vpub_old, vpub_new) in vpub_old_values.iter().zip(vpub_new_values.iter()) {
         // # Consensus
         //
         // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
         //
         // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-        if *vpub_old != zero && *vpub_new != zero {
+        if *vpub_old != 0 && *vpub_new != 0 {
             return Err(TransactionError::BothVPubsNonZero);
         }
     }
@@ -349,11 +350,8 @@ pub fn disabled_add_to_sprout_pool(
     //
     // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
-        let zero = Amount::<NonNegative>::zero();
-
-        let tx_sprout_pool = tx.output_values_to_sprout();
-        for vpub_old in tx_sprout_pool {
-            if *vpub_old != zero {
+        for vpub_old in tx.output_values_to_sprout() {
+            if vpub_old != 0 {
                 return Err(TransactionError::DisabledAddToSproutPool);
             }
         }
@@ -384,19 +382,34 @@ pub fn disabled_add_to_sprout_pool(
 pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
     use crate::error::TransactionError::*;
 
-    let transparent_outpoints = transaction.spent_outpoints().map(Cow::Owned);
-    let sprout_nullifiers = transaction.sprout_nullifiers().map(Cow::Borrowed);
-    let sapling_nullifiers = transaction.sapling_nullifiers().map(Cow::Borrowed);
-    let orchard_nullifiers = transaction.orchard_nullifiers().map(Cow::Borrowed);
-    // `ironwood_nullifiers()` yields owned `ironwood::Nullifier`s (the Ironwood-pool newtype), so
-    // they are wrapped as `Cow::Owned`. Ironwood and Orchard nullifiers are disjoint.
-    let ironwood_nullifiers = transaction.ironwood_nullifiers().map(Cow::Owned);
+    // All the nullifier accessors yield owned values, so they are wrapped as `Cow::Owned`.
+    // Ironwood and Orchard nullifiers are disjoint.
+    let transparent_outpoints: Vec<_> = transaction.spent_outpoints().collect();
+    let sprout_nullifiers: Vec<_> = transaction.sprout_nullifiers().collect();
+    let sapling_nullifiers: Vec<_> = transaction.sapling_nullifiers().collect();
+    let orchard_nullifiers: Vec<_> = transaction.orchard_nullifiers().collect();
+    let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
 
-    check_for_duplicates(transparent_outpoints, DuplicateTransparentSpend)?;
-    check_for_duplicates(sprout_nullifiers, DuplicateSproutNullifier)?;
-    check_for_duplicates(sapling_nullifiers, DuplicateSaplingNullifier)?;
-    check_for_duplicates(orchard_nullifiers, DuplicateOrchardNullifier)?;
-    check_for_duplicates(ironwood_nullifiers, DuplicateIronwoodNullifier)?;
+    check_for_duplicates(
+        transparent_outpoints.into_iter().map(Cow::Owned),
+        DuplicateTransparentSpend,
+    )?;
+    check_for_duplicates(
+        sprout_nullifiers.into_iter().map(Cow::Owned),
+        DuplicateSproutNullifier,
+    )?;
+    check_for_duplicates(
+        sapling_nullifiers.into_iter().map(Cow::Owned),
+        DuplicateSaplingNullifier,
+    )?;
+    check_for_duplicates(
+        orchard_nullifiers.into_iter().map(Cow::Owned),
+        DuplicateOrchardNullifier,
+    )?;
+    check_for_duplicates(
+        ironwood_nullifiers.into_iter().map(Cow::Owned),
+        DuplicateIronwoodNullifier,
+    )?;
 
     Ok(())
 }
@@ -457,8 +470,7 @@ pub fn coinbase_outputs_are_decryptable(
     network: &Network,
     height: Height,
 ) -> Result<(), TransactionError> {
-    // Do quick checks first so we can avoid an expensive tx conversion
-    // in `zcash_note_encryption::decrypts_successfully`.
+    // Do quick checks first so we can avoid an expensive tx conversion.
 
     // The consensus rule only applies to coinbase txs with shielded outputs.
     if !transaction.has_shielded_outputs() {
@@ -617,7 +629,7 @@ fn validate_expiry_height_mined(
 /// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
 pub fn tx_transparent_coinbase_spends_maturity(
     network: &Network,
-    tx: Arc<Transaction>,
+    tx: &Transaction,
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,

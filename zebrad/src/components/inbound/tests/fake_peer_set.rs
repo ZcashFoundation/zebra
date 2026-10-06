@@ -17,7 +17,10 @@ use zebra_chain::{
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
-use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
+use zebra_consensus::{
+    error::TransactionError, router::RouterError, transaction, Config as ConsensusConfig,
+    VerifyBlockError,
+};
 use zebra_network::{
     constants::{
         ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
@@ -27,17 +30,23 @@ use zebra_network::{
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
-use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
+use zebra_state::{
+    ChainTipBlock, ChainTipChange, ChainTipSender, CheckpointVerifiedBlock, Config as StateConfig,
+    LatestChainTip, CHAIN_TIP_UPDATE_WAIT_LIMIT,
+};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
-        inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
+        inbound::{
+            downloads::{HeightLimitError, MAX_INBOUND_CONCURRENCY},
+            Inbound, InboundSetupData,
+        },
         mempool::{
             gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
             SameEffectsChainRejectionError, UnboxMempoolError,
         },
-        sync::{self, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY},
+        sync::{self, BlockGossipError, SyncStatus, BLOCK_VERIFY_TIMEOUT, PEER_GOSSIP_DELAY},
     },
     BoxError,
 };
@@ -451,7 +460,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     // Change the expiration height of the transaction to block 3
     let mut tx1 = tx1.clone();
-    *tx1.expiry_height_mut() = zebra_chain::block::Height(3);
+    tx1.set_expiry_height(zebra_chain::block::Height(3));
 
     // Use the second transaction that is not coinbase to trigger `remove_expired_transactions()`
     let tx2 = block.transactions[2].clone();
@@ -473,7 +482,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     // Push test transaction
     let request = inbound_service.clone().oneshot(Request::PushTransaction(
-        tx1.clone().into(),
+        Arc::new(tx1.clone()).into(),
         Some(PeerSocketAddr::from(([192, 168, 180, 9], 10_000))),
     ));
     // Simulate a successful transaction verification
@@ -1197,4 +1206,613 @@ fn add_some_stuff_to_mempool(
         .unwrap();
 
     vec![last_transaction]
+}
+
+/// The semantic block verifier type the [`Inbound`] service is wired with in production.
+///
+/// The concrete service inside the [`BoxService`] is a
+/// [`zebra_consensus::router::BlockVerifierRouter`], so its error type is
+/// [`RouterError`] — a bare [`VerifyBlockError`] never escapes this stack, it only
+/// ever appears nested inside [`RouterError::Block`].
+type SemanticBlockVerifierStub = Buffer<
+    BoxService<zebra_consensus::Request, zebra_chain::block::Hash, RouterError>,
+    zebra_consensus::Request,
+>;
+
+/// Wires up an [`Inbound`] service with a stub semantic block verifier, using the same
+/// service types as production, and returns the misbehaviour report receiver.
+///
+/// Unlike the other tests in this module, the returned receiver is *retained* by the
+/// caller, so misbehaviour reports emitted by the gossiped block download cleanup loop
+/// can be asserted on. See `GHSA-8hh2-hrf2-cqf4`.
+async fn setup_gossiped_block_misbehavior(
+    block_verifier: SemanticBlockVerifierStub,
+) -> (
+    Inbound,
+    MockService<Request, Response, PanicAssertion>,
+    tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+) {
+    let network = Mainnet;
+    let state_config = StateConfig::ephemeral();
+
+    // An empty state, so gossiped blocks are always unknown, and the lookahead limit is
+    // measured from the genesis height.
+    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init(state_config, &network, Height::MAX, 0).await;
+    let state_service = ServiceBuilder::new().buffer(1).service(state);
+
+    setup_gossiped_block_misbehavior_with_state(block_verifier, state_service, latest_chain_tip)
+        .await
+}
+
+/// The buffered state service type the [`Inbound`] service is wired with in production.
+type StateService =
+    Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>;
+
+/// Like [`setup_gossiped_block_misbehavior`], but with the given `state` and `latest_chain_tip`, so
+/// a test can pre-populate the state, or report a chain tip of its choosing.
+async fn setup_gossiped_block_misbehavior_with_state(
+    block_verifier: SemanticBlockVerifierStub,
+    state_service: StateService,
+    latest_chain_tip: LatestChainTip,
+) -> (
+    Inbound,
+    MockService<Request, Response, PanicAssertion>,
+    tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+) {
+    let network = Mainnet;
+
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        &network,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    let address_book = Arc::new(std::sync::Mutex::new(address_book));
+
+    let peer_set = MockService::build()
+        .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+        .for_unit_tests();
+    let buffered_peer_set = Buffer::new(BoxService::new(peer_set.clone()), 10);
+
+    let mempool_service: MockService<mempool::Request, mempool::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let buffered_mempool = Buffer::new(BoxService::new(mempool_service), 10);
+
+    let (setup_tx, setup_rx) = oneshot::channel();
+
+    // The `Inbound` service is used directly, without a `Buffer` or `load_shed` wrapper,
+    // so the test can drive `poll_ready()` — and therefore the download cleanup loop —
+    // deterministically.
+    let inbound = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
+
+    let (misbehavior_sender, misbehavior_rx) = tokio::sync::mpsc::channel(10);
+
+    let setup_data = InboundSetupData {
+        address_book,
+        block_download_peer_set: buffered_peer_set,
+        block_verifier,
+        mempool: buffered_mempool,
+        state: state_service,
+        latest_chain_tip,
+        misbehavior_sender,
+    };
+    let r = setup_tx.send(setup_data);
+    // We can't expect or unwrap because the returned Result does not implement Debug.
+    assert!(r.is_ok(), "unexpected setup channel send failure");
+
+    (inbound, peer_set, misbehavior_rx)
+}
+
+/// Repeatedly polls the [`Inbound`] service, so its gossiped block download cleanup loop
+/// drains any finished downloads, and returns the first misbehaviour report, if any.
+async fn poll_for_misbehavior_report(
+    inbound: &mut Inbound,
+    misbehavior_rx: &mut tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+) -> Option<(PeerSocketAddr, u32)> {
+    for _ in 0..60 {
+        let _ = std::future::poll_fn(|cx| inbound.poll_ready(cx)).await;
+
+        if let Ok(report) = misbehavior_rx.try_recv() {
+            return Some(report);
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    None
+}
+
+/// Sends the gossiped block advertisement, and serves the block to the download task.
+///
+/// The advertisement is attributed to `advertiser`, and the `Blocks` response to
+/// `serving_peer` — the address a misbehaviour report is attached to.
+async fn advertise_and_serve_block(
+    inbound: &mut Inbound,
+    peer_set: &mut MockService<Request, Response, PanicAssertion>,
+    block: Arc<Block>,
+    advertiser: PeerSocketAddr,
+    serving_peer: PeerSocketAddr,
+) -> Result<(), BoxError> {
+    let hash = block.hash();
+
+    let response = inbound
+        .ready()
+        .await?
+        .call(Request::AdvertiseBlock(hash, Some(advertiser)))
+        .await?;
+    assert_eq!(
+        response,
+        Response::Nil,
+        "`AdvertiseBlock` requests should always respond `Ok(Nil)`",
+    );
+
+    peer_set
+        .expect_request(Request::BlocksByHash(iter::once(hash).collect()))
+        .await
+        .respond(Response::Blocks(vec![Available((
+            block,
+            Some(serving_peer),
+        ))]));
+
+    Ok(())
+}
+
+/// The [`RouterError`] served by the misbehaving stub verifier: a misbehaviour-scoring
+/// consensus failure, wrapped exactly like the router wraps it.
+fn invalid_gossiped_block_router_error() -> RouterError {
+    RouterError::Block {
+        source: Box::new(VerifyBlockError::Subsidy(
+            zebra_chain::parameters::subsidy::SubsidyError::NoCoinbase,
+        )),
+    }
+}
+
+/// A peer that serves a consensus-invalid gossiped block must have its misbehaviour score
+/// raised.
+///
+/// The production inbound block verifier is a `BlockVerifierRouter`, so a failed
+/// verification is boxed as a [`RouterError`]. The cleanup loop in `Inbound::poll_ready()`
+/// downcast the boxed error to [`VerifyBlockError`] instead, and `Box<dyn Error>::downcast`
+/// is an exact `TypeId` match, so the downcast always failed and no peer was ever scored
+/// for serving an invalid gossiped block.
+///
+/// Note that this test *retains* the misbehaviour receiver. Every other test in this module
+/// drops it, which is why the bug went unnoticed.
+///
+/// Regression test for `GHSA-8hh2-hrf2-cqf4`.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_router_error_scores_serving_peer() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let peer = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+
+    // Derive the expected score, so the test tracks scoring policy changes. If the sample
+    // error's score ever drops to zero, the guard fails loudly instead of the report
+    // assertion becoming vacuous.
+    let expected_score = invalid_gossiped_block_router_error().misbehavior_score();
+    assert_ne!(
+        expected_score, 0,
+        "the test error must have a non-zero misbehaviour score",
+    );
+
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(|_req: zebra_consensus::Request| async {
+            Err::<zebra_chain::block::Hash, RouterError>(invalid_gossiped_block_router_error())
+        })),
+        10,
+    );
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior(block_verifier).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report,
+        Some((peer, expected_score)),
+        "a peer that serves a consensus-invalid gossiped block must be reported for misbehaviour",
+    );
+
+    Ok(())
+}
+
+/// The misbehaviour report is attached to the peer that served the invalid block, not to
+/// the advertiser that announced it: the download task takes the reported address from the
+/// `Blocks` response, which is set by the connection that actually delivered the bytes.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_scores_serving_peer_not_advertiser() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let advertiser = PeerSocketAddr::from(([192, 168, 180, 12], 10_000));
+    let serving_peer = PeerSocketAddr::from(([192, 168, 180, 13], 10_000));
+
+    let expected_score = invalid_gossiped_block_router_error().misbehavior_score();
+    assert_ne!(
+        expected_score, 0,
+        "the test error must have a non-zero misbehaviour score",
+    );
+
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(|_req: zebra_consensus::Request| async {
+            Err::<zebra_chain::block::Hash, RouterError>(invalid_gossiped_block_router_error())
+        })),
+        10,
+    );
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior(block_verifier).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, advertiser, serving_peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report,
+        Some((serving_peer, expected_score)),
+        "the peer that served the invalid block must be scored, not the advertiser",
+    );
+    assert_eq!(
+        misbehavior_rx.try_recv().ok(),
+        None,
+        "no other peer may be reported for this download",
+    );
+
+    Ok(())
+}
+
+/// A verification failure that is not peer misbehaviour must not raise any score.
+///
+/// Guards against over-banning after the `GHSA-8hh2-hrf2-cqf4` fix: only errors whose
+/// `misbehavior_score()` is non-zero may be reported.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_benign_router_error_does_not_score_serving_peer() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let peer = PeerSocketAddr::from(([192, 168, 180, 10], 10_000));
+
+    // `VerifyBlockError::ValidateProposal` has a misbehaviour score of zero.
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(|_req: zebra_consensus::Request| async {
+            Err::<zebra_chain::block::Hash, RouterError>(RouterError::Block {
+                source: Box::new(VerifyBlockError::ValidateProposal(
+                    "not peer misbehaviour".into(),
+                )),
+            })
+        })),
+        10,
+    );
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior(block_verifier).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report, None,
+        "a verification failure with a zero misbehaviour score must not be reported",
+    );
+
+    Ok(())
+}
+
+/// A block verification timeout must not raise the serving peer's misbehaviour score.
+///
+/// The inbound verifier is wrapped in a tower [`tower::timeout::Timeout`], so a slow
+/// verification produces a boxed `tower::timeout::error::Elapsed`, not a [`RouterError`].
+/// That is a local failure, not evidence that the peer misbehaved.
+///
+/// Negative control for `GHSA-8hh2-hrf2-cqf4`.
+#[tokio::test]
+async fn gossiped_block_verify_timeout_does_not_score_serving_peer() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let peer = PeerSocketAddr::from(([192, 168, 180, 11], 10_000));
+
+    // Signals that the download task has reached the verifier, and is now parked inside
+    // the `Timeout` layer.
+    let (verifier_called_tx, mut verifier_called_rx) = tokio::sync::mpsc::channel(1);
+
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(move |_req: zebra_consensus::Request| {
+            let verifier_called_tx = verifier_called_tx.clone();
+            async move {
+                let _ = verifier_called_tx.send(()).await;
+                std::future::pending::<Result<zebra_chain::block::Hash, RouterError>>().await
+            }
+        })),
+        10,
+    );
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior(block_verifier).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block.clone(), peer, peer).await?;
+
+    verifier_called_rx
+        .recv()
+        .await
+        .expect("the download task should reach the block verifier");
+
+    // Fast-forward past the verification timeout, so tower's `Timeout` layer produces a
+    // real `Elapsed` error at exactly the position a `RouterError` would appear.
+    tokio::time::pause();
+    tokio::time::advance(BLOCK_VERIFY_TIMEOUT + Duration::from_secs(1)).await;
+    tokio::time::resume();
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report, None,
+        "a block verification timeout must not be reported as peer misbehaviour",
+    );
+
+    // Make sure the assertion above isn't vacuous: the timed-out download must actually
+    // have been drained by the cleanup loop. If it were still in flight, the per-IP and
+    // per-hash caps would drop this second advertisement, and no `BlocksByHash` request
+    // would reach the peer set.
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
+
+    Ok(())
+}
+
+/// A real state holding the mainnet genesis block and block 1, with its linked chain tip at height 1.
+///
+/// The height limit tests gossip block 2's header, so the download task can look up block 1 as its
+/// parent, and use its height to decide whether the body's claimed height was rewritten.
+async fn state_holding_genesis_and_block_1() -> (StateService, LatestChainTip) {
+    let blocks: [&[u8]; 2] = [
+        &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES,
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES,
+    ];
+    let blocks = blocks.into_iter().map(|bytes| {
+        bytes
+            .zcash_deserialize_into::<Arc<Block>>()
+            .expect("hard-coded block vector deserializes")
+    });
+
+    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks, &Mainnet).await;
+
+    (state, latest_chain_tip)
+}
+
+/// A chain tip far enough past the reorg limit that a claimed height of 1 is behind the finalized
+/// tip, without committing a hundred blocks to the state.
+///
+/// The state keeps holding block 1, exactly as it would if it had kept syncing, so the download task
+/// can still prove a rewritten height against it. Tests keep the returned sender alive for their whole
+/// run, so the tip is fixed while they run.
+fn far_ahead_chain_tip() -> (ChainTipSender, LatestChainTip) {
+    let tip_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded block vector deserializes");
+    assert!(
+        tip_block
+            .coinbase_height()
+            .expect("block vector has a height")
+            > Height(zebra_state::MAX_BLOCK_REORG_HEIGHT + 1),
+        "the fake tip must put height 1 behind the reorg limit"
+    );
+
+    let (chain_tip_sender, latest_chain_tip, _chain_tip_change) = ChainTipSender::new(
+        ChainTipBlock::from(CheckpointVerifiedBlock::from(tip_block)),
+        &Mainnet,
+    );
+
+    (chain_tip_sender, latest_chain_tip)
+}
+
+/// A stub semantic block verifier that records every request on the returned channel, and fails it
+/// with a benign error, so the height limit tests can check that a dropped block never reached it.
+fn recording_block_verifier() -> (SemanticBlockVerifierStub, tokio::sync::mpsc::Receiver<()>) {
+    let (verifier_called_tx, verifier_called_rx) = tokio::sync::mpsc::channel(1);
+
+    let block_verifier = Buffer::new(
+        BoxService::new(tower::service_fn(move |_req: zebra_consensus::Request| {
+            let verifier_called_tx = verifier_called_tx.clone();
+            async move {
+                let _ = verifier_called_tx.try_send(());
+                Err::<zebra_chain::block::Hash, RouterError>(RouterError::Block {
+                    source: Box::new(VerifyBlockError::ValidateProposal(
+                        "the height limit tests must drop blocks before verification".into(),
+                    )),
+                })
+            }
+        })),
+        10,
+    );
+
+    (block_verifier, verifier_called_rx)
+}
+
+/// Block 2's header with `body`'s transactions: the hash and parent are block 2's, because the hash
+/// covers only the header, but the coinbase claims `body`'s height.
+///
+/// This is the shape of the GHSA-4f6v-mj46-gxg3 attack, without reproducing the hash-preserving
+/// coinbase rewrite itself.
+fn block_2_header_with_body(body: &Block) -> Arc<Block> {
+    let block_2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded block vector deserializes");
+
+    let block = Arc::new(Block {
+        header: block_2.header.clone(),
+        transactions: body.transactions.clone(),
+    });
+    assert_eq!(
+        block.hash(),
+        block_2.hash(),
+        "the block hash covers only the header"
+    );
+    assert_eq!(
+        block.coinbase_height(),
+        body.coinbase_height(),
+        "the body must claim the height the downloader reads"
+    );
+
+    block
+}
+
+/// A peer that serves a gossiped block whose coinbase height was rewritten to fall behind the
+/// finalized tip must have its misbehaviour score raised, when the parent Zebra holds proves the
+/// rewrite.
+///
+/// The download task drops the block before it reaches the verifier, so the verifier can never score
+/// the peer: the drop itself must carry the score through the cleanup loop in
+/// `Inbound::poll_ready()`, like a verification failure does.
+///
+/// End-to-end regression test for `GHSA-4f6v-mj46-gxg3`; the download stream is unit tested in
+/// `inbound::downloads::tests`.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_contradicted_behind_tip_height_scores_serving_peer() -> Result<(), BoxError>
+{
+    let _init_guard = zebra_test::init();
+
+    let advertiser = PeerSocketAddr::from(([192, 168, 180, 14], 10_000));
+    let serving_peer = PeerSocketAddr::from(([192, 168, 180, 15], 10_000));
+
+    // Block 2's header with block 1's body: the coinbase claims height 1, but we hold block 1 as
+    // the parent, so the body's real height is 2.
+    let block_1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block = block_2_header_with_body(&block_1);
+
+    // Derive the expected score, so the test tracks scoring policy changes.
+    let expected_score = HeightLimitError::BehindTip {
+        height: Height(1),
+        hash: block.hash(),
+    }
+    .misbehavior_score();
+    assert_ne!(
+        expected_score, 0,
+        "a parent-proven rewritten height must have a non-zero misbehaviour score",
+    );
+
+    let (state, _linked_chain_tip) = state_holding_genesis_and_block_1().await;
+    let (_chain_tip_sender, latest_chain_tip) = far_ahead_chain_tip();
+    let (block_verifier, mut verifier_called_rx) = recording_block_verifier();
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior_with_state(block_verifier, state, latest_chain_tip).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, advertiser, serving_peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report,
+        Some((serving_peer, expected_score)),
+        "the peer that served a parent-proven rewritten height must be reported for misbehaviour",
+    );
+    assert_eq!(
+        misbehavior_rx.try_recv().ok(),
+        None,
+        "no other peer may be reported for this download",
+    );
+    assert!(
+        verifier_called_rx.try_recv().is_err(),
+        "a block behind the finalized tip must be dropped before consensus validation",
+    );
+
+    Ok(())
+}
+
+/// The far-ahead sibling of the test above: a coinbase height rewritten past the lookahead limit is
+/// scored too, when the parent Zebra holds proves the rewrite.
+///
+/// Here the state's own chain tip is used, at height 1: a genuine block whose parent we hold is at
+/// most one above the tip, so a held parent is proof that a far-ahead height was rewritten.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_contradicted_far_ahead_height_scores_serving_peer() -> Result<(), BoxError>
+{
+    let _init_guard = zebra_test::init();
+
+    let advertiser = PeerSocketAddr::from(([192, 168, 180, 16], 10_000));
+    let serving_peer = PeerSocketAddr::from(([192, 168, 180, 17], 10_000));
+
+    // Block 2's header with a body from far above the lookahead limit.
+    let high_block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+    let claimed_height = high_block
+        .coinbase_height()
+        .expect("block vector has a height");
+    let block = block_2_header_with_body(&high_block);
+
+    let expected_score = HeightLimitError::AboveLookahead {
+        height: claimed_height,
+        hash: block.hash(),
+    }
+    .misbehavior_score();
+    assert_ne!(
+        expected_score, 0,
+        "a parent-proven rewritten height must have a non-zero misbehaviour score",
+    );
+
+    let (state, latest_chain_tip) = state_holding_genesis_and_block_1().await;
+    let (block_verifier, mut verifier_called_rx) = recording_block_verifier();
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior_with_state(block_verifier, state, latest_chain_tip).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, advertiser, serving_peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report,
+        Some((serving_peer, expected_score)),
+        "the peer that served a parent-proven rewritten height must be reported for misbehaviour",
+    );
+    assert!(
+        verifier_called_rx.try_recv().is_err(),
+        "a block above the lookahead limit must be dropped before consensus validation",
+    );
+
+    Ok(())
+}
+
+/// A peer that serves an authentic block from behind the finalized tip must not be scored.
+///
+/// The block is still dropped, but its height agrees with the parent we hold, so there is no proof of
+/// misbehaviour. Negative control for `GHSA-4f6v-mj46-gxg3`: guards against banning honest peers
+/// that serve genuinely old blocks.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossiped_block_genuinely_behind_tip_does_not_score_serving_peer() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let peer = PeerSocketAddr::from(([192, 168, 180, 18], 10_000));
+
+    // Block 2 as mined: its coinbase claims height 2, and we hold its parent, block 1.
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+
+    let (state, _linked_chain_tip) = state_holding_genesis_and_block_1().await;
+    let (_chain_tip_sender, latest_chain_tip) = far_ahead_chain_tip();
+    let (block_verifier, mut verifier_called_rx) = recording_block_verifier();
+
+    let (mut inbound, mut peer_set, mut misbehavior_rx) =
+        setup_gossiped_block_misbehavior_with_state(block_verifier, state, latest_chain_tip).await;
+
+    advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
+
+    let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
+
+    assert_eq!(
+        report, None,
+        "an authentic block behind the finalized tip must not be reported as peer misbehaviour",
+    );
+    assert!(
+        verifier_called_rx.try_recv().is_err(),
+        "a block behind the finalized tip must be dropped before consensus validation",
+    );
+
+    Ok(())
 }

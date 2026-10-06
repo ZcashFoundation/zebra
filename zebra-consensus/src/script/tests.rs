@@ -60,7 +60,7 @@ async fn verifier_returns_error_for_out_of_range_input_index() {
 
     let err = result.expect_err("out-of-range input_index must error, not panic");
     assert!(
-        err.to_string().contains("missing input"),
+        err.to_string().contains("input index out of bounds"),
         "unexpected error message: {err}",
     );
 }

@@ -24,7 +24,7 @@ use color_eyre::eyre::{eyre, Result};
 use zebra_chain::{
     block::Block,
     parameters::Network::*,
-    serialization::{BytesInDisplayOrder, ZcashSerialize},
+    serialization::ZcashSerialize,
     transaction::{self, Transaction},
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -302,7 +302,10 @@ async fn send_transactions_from_block(
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
-        let hash = transaction::Hash::from_bytes_in_display_order(&hash);
+        // Since lightwalletd v0.5.0, `GetMempoolTx` returns the txid in internal
+        // (little-endian) byte order, like the rest of its compact formats.
+        // Older versions returned the display order bytes of `getrawmempool`'s txid.
+        let hash = transaction::Hash::from(hash);
 
         assert!(
             transaction_hashes.contains(&hash),

@@ -47,10 +47,10 @@ fn h_sig_works() {
         let mut pubkey = hex::decode(t[3]).unwrap();
         pubkey.reverse();
         let mut r = h_sig(
-            &<[u8; 32]>::try_from(random_seed).unwrap().into(),
-            &<[u8; 32]>::try_from(nf1).unwrap().into(),
-            &<[u8; 32]>::try_from(nf2).unwrap().into(),
-            &<[u8; 32]>::try_from(pubkey).unwrap().into(),
+            &<[u8; 32]>::try_from(random_seed).unwrap(),
+            &<[u8; 32]>::try_from(nf1).unwrap(),
+            &<[u8; 32]>::try_from(nf2).unwrap(),
+            &<[u8; 32]>::try_from(pubkey).unwrap(),
         );
         r.reverse();
 

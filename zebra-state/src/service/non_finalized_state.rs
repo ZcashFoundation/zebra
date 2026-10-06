@@ -293,8 +293,8 @@ impl NonFinalizedState {
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
-        // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
-        // Neither of these fields has interior mutability.
+        // Chain::cmp uses the partial cumulative work, the tip's receipt time, and the
+        // hash of the tip block. None of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
         #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
@@ -599,21 +599,46 @@ impl NonFinalizedState {
             &prepared,
         );
 
-        // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-            prepared.clone(),
-            spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(prepared.height, &self.network),
+        let (height, block_hash) = (prepared.height, prepared.hash);
+        let transaction_count = prepared.block.transactions.len();
+        let spent_utxo_count = spent_utxos.len();
+        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
+            height,
+            &self.network,
+            new_chain.chain_value_pools,
+        )
+        .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
+            subsidy_error: subsidy_error.into(),
+            height,
+            block_hash,
+        })?;
+
+        let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            prepared,
+            spent_utxos,
+            deferred_pool_balance_change,
+            &self.network,
+            new_chain.chain_value_pools,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {
                 value_balance_error,
-                height: prepared.height,
-                block_hash: prepared.hash,
-                transaction_count: prepared.block.transactions.len(),
-                spent_utxo_count: spent_utxos.len(),
+                height,
+                block_hash,
+                transaction_count,
+                spent_utxo_count,
             }
         })?;
+
+        // The semantic verifier defers parent-dependent payouts to this exact-parent check.
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &self.network) {
+            check::nsm_subsidy_is_valid(
+                &contextual,
+                &self.network,
+                new_chain.chain_value_pools,
+                block_fees.expect("reissuance starts no earlier than NU7 fee accounting"),
+            )?;
+        }
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
@@ -707,7 +732,7 @@ impl NonFinalizedState {
     /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
-    /// (Using the tip block hash tie-breaker.)
+    /// (Using the first-received, then tip block hash tie-breakers.)
     pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,
@@ -924,6 +949,29 @@ impl NonFinalizedState {
         metrics::gauge!("state.memory.chain.count").set(self.chain_set.len() as f64);
         metrics::gauge!("state.memory.best.chain.length",)
             .set(self.best_chain_len().unwrap_or_default() as f64);
+
+        if let Some(best_chain) = self.best_chain() {
+            let value_pools = best_chain.chain_value_pools;
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "transparent")
+                .set(u64::from(value_pools.transparent_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "sprout")
+                .set(u64::from(value_pools.sprout_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "sapling")
+                .set(u64::from(value_pools.sapling_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "orchard")
+                .set(u64::from(value_pools.orchard_amount()) as f64);
+            metrics::gauge!("zcash.pool.value.zatoshis", "name" => "ironwood")
+                .set(u64::from(value_pools.ironwood_amount()) as f64);
+
+            metrics::gauge!("zcash.pool.notes.created", "name" => "sprout")
+                .set(best_chain.sprout_note_commitment_tree_for_tip().count() as f64);
+            metrics::gauge!("zcash.pool.notes.created", "name" => "sapling")
+                .set(best_chain.sapling_note_commitment_tree_for_tip().count() as f64);
+            metrics::gauge!("zcash.pool.notes.created", "name" => "orchard")
+                .set(best_chain.orchard_note_commitment_tree_for_tip().count() as f64);
+            metrics::gauge!("zcash.pool.notes.created", "name" => "ironwood")
+                .set(best_chain.ironwood_note_commitment_tree_for_tip().count() as f64);
+        }
     }
 
     /// Update the progress bars after any chain is modified.

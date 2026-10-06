@@ -6,7 +6,6 @@ use std::{mem, sync::Arc};
 
 use zebra_chain::{
     block::Block,
-    transaction::Transaction,
     transparent,
     work::difficulty::ExpandedDifficulty,
     work::difficulty::{Work, U256},
@@ -28,23 +27,18 @@ impl FakeChainHelper for Arc<Block> {
         let parent_hash = self.hash();
         let mut child = Block::clone(self);
         let mut transactions = mem::take(&mut child.transactions);
-        let mut tx = transactions.remove(0);
+        let tx = transactions.remove(0);
 
-        let input = match Arc::make_mut(&mut tx) {
-            Transaction::V1 { inputs, .. } => &mut inputs[0],
-            Transaction::V2 { inputs, .. } => &mut inputs[0],
-            Transaction::V3 { inputs, .. } => &mut inputs[0],
-            Transaction::V4 { inputs, .. } => &mut inputs[0],
-            Transaction::V5 { inputs, .. } => &mut inputs[0],
-            Transaction::V6 { inputs, .. } => &mut inputs[0],
-        };
-
-        match input {
+        // Get the first input (coinbase), increment its height, and rebuild the transaction.
+        let inner_tx = Arc::try_unwrap(tx).unwrap_or_else(|arc| (*arc).clone());
+        let mut inputs = inner_tx.inputs();
+        match &mut inputs[0] {
             transparent::Input::Coinbase { height, .. } => height.0 += 1,
             _ => panic!("block must have a coinbase height to create a child"),
         }
+        let new_tx = Arc::new(inner_tx.with_transparent_inputs(inputs));
 
-        child.transactions.insert(0, tx);
+        child.transactions.insert(0, new_tx);
         Arc::make_mut(&mut child.header).previous_block_hash = parent_hash;
 
         Arc::new(child)
@@ -90,4 +84,45 @@ fn round_trip_work_expanded() {
         let work_after = Work::try_from(expanded).unwrap();
         prop_assert_eq!(work_before, work_after);
     });
+}
+
+#[test]
+fn configured_network_state_paths_are_isolated() {
+    use zebra_chain::parameters::{testnet, Magic, Network};
+
+    let config = crate::Config {
+        cache_dir: "cache".into(),
+        should_backup_non_finalized_state: true,
+        ..Default::default()
+    };
+    let networks = [0, 1].map(|byte| {
+        testnet::Parameters::build()
+            .with_network_magic(Magic([byte; 4]))
+            .unwrap()
+            .to_network()
+            .unwrap()
+    });
+    assert_ne!(
+        config.db_path("state", 1, &networks[0]),
+        config.db_path("state", 1, &networks[1]),
+    );
+    assert_ne!(
+        config.non_finalized_state_backup_dir(&networks[0]),
+        config.non_finalized_state_backup_dir(&networks[1]),
+    );
+
+    for network in [
+        Network::Mainnet,
+        Network::new_default_testnet(),
+        Network::new_regtest(Default::default()),
+    ] {
+        assert_eq!(
+            config.db_path("state", 1, &network),
+            std::path::Path::new("cache/state/v1").join(network.lowercase_name()),
+        );
+        assert_eq!(
+            config.non_finalized_state_backup_dir(&network),
+            Some(std::path::Path::new("cache/non_finalized_state").join(network.lowercase_name())),
+        );
+    }
 }

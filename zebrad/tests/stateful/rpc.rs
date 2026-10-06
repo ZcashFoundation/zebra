@@ -13,24 +13,6 @@ use crate::common::{
     test_type::TestType,
 };
 
-/// Test successful getblocktemplate rpc call
-///
-/// See [`crate::common::get_block_template_rpcs::get_block_template`] for more information.
-#[tokio::test]
-#[ignore]
-async fn rpc_get_block_template() -> Result<()> {
-    crate::common::get_block_template_rpcs::get_block_template::run().await
-}
-
-/// Test successful submitblock rpc call
-///
-/// See [`crate::common::get_block_template_rpcs::submit_block`] for more information.
-#[tokio::test]
-#[ignore]
-async fn rpc_submit_block() -> Result<()> {
-    crate::common::get_block_template_rpcs::submit_block::run().await
-}
-
 /// Make a synced `getblock` RPC call against cached Zebra state.
 #[tokio::test]
 #[ignore]

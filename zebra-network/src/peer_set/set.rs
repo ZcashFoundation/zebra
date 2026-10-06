@@ -100,7 +100,6 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Instant,
 };
@@ -112,7 +111,6 @@ use futures::{
     stream::FuturesUnordered,
     task::noop_waker,
 };
-use indexmap::IndexMap;
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
@@ -138,10 +136,10 @@ use crate::{
         InventoryChange, InventoryRegistry,
     },
     protocol::{
-        external::InventoryHash,
+        external::{connection_limit_key, InventoryHash},
         internal::{Request, Response},
     },
-    BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
+    BanList, BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
 
 #[cfg(test)]
@@ -209,8 +207,8 @@ where
     /// A channel that asks the peer crawler task to connect to more peers.
     demand_signal: mpsc::Sender<MorePeers>,
 
-    /// A watch channel receiver with a copy of banned IP addresses.
-    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    /// A watch channel receiver with a snapshot of the banned peer groups.
+    bans_receiver: watch::Receiver<BanList>,
 
     /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
@@ -313,7 +311,7 @@ where
     last_peer_log: Option<Instant>,
 
     /// The configured maximum number of peers that can be in the
-    /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
+    /// peer set per connection limit key, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
 
     /// The network of this peer set.
@@ -358,7 +356,7 @@ where
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
     /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
     /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
-    ///   peer set per IP, defaults to the config value or to
+    ///   peer set per connection limit key, defaults to the config value or to
     ///   [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
@@ -367,7 +365,7 @@ where
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<InventoryChange>,
-        bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+        bans_receiver: watch::Receiver<BanList>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
@@ -588,7 +586,7 @@ where
                 Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
 
-                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                    if self.bans_receiver.borrow().is_banned(key.ip()) {
                         warn!(?key, "service is banned, dropping service");
                         std::mem::drop(svc);
                         let cancel = self.cancel_handles.remove(&key);
@@ -669,7 +667,7 @@ where
             match peer_readiness {
                 // Still ready, add it back to the list.
                 Ok(()) => {
-                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                    if self.bans_receiver.borrow().is_banned(key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
                         std::mem::drop(svc);
                         continue;
@@ -695,18 +693,22 @@ where
         }
     }
 
-    /// Returns the number of peer connections Zebra already has with
-    /// the provided IP address
+    /// Returns the number of peer connections Zebra already has with the
+    /// provided IPv4 address, or in the same IPv6 `/64` subnet.
+    ///
+    /// Peer set admission uses this count to enforce
+    /// [`Config::max_connections_per_ip`](crate::config::Config).
     ///
     /// # Performance
     ///
     /// This method is `O(connected peers)`, so it should not be called from a loop
     /// that is already iterating through the peer set.
     fn num_peers_with_ip(&self, ip: IpAddr) -> usize {
+        let limit_key = connection_limit_key(ip);
         self.ready_services
             .keys()
             .chain(self.cancel_handles.keys())
-            .filter(|addr| addr.ip() == ip)
+            .filter(|addr| connection_limit_key(addr.ip()) == limit_key)
             .count()
     }
 
@@ -773,8 +775,9 @@ where
                     // # Security
                     //
                     // drop the new peer if there are already `max_conns_per_ip` peers with
-                    // the same IP address in the peer set. Sidecars are exempt: they
-                    // are trusted, and the listener already caps their inbound slots.
+                    // the same IPv4 address, or in the same IPv6 `/64` subnet. Sidecars are
+                    // exempt: they are trusted, and the listener already caps their inbound
+                    // slots.
                     if !is_sidecar && self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
                         std::mem::drop(svc);
                         continue;
@@ -924,7 +927,7 @@ where
             len => {
                 // Choose 2 random peers, then return the least loaded of those 2 peers.
                 let (a, b) = {
-                    let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
+                    let idxs = rand::seq::index::sample(&mut rand::rng(), len, 2);
                     let a = idxs.index(0);
                     let b = idxs.index(1);
 
@@ -969,7 +972,7 @@ where
         self.ready_services
             .keys()
             .copied()
-            .choose_multiple(&mut rand::thread_rng(), max_peers)
+            .sample(&mut rand::rng(), max_peers)
     }
 
     /// Randomly chooses ready peers for a sidecar broadcast, always including
@@ -989,7 +992,7 @@ where
                 .keys()
                 .filter(|key| !self.zcashd_compat_peer_keys.contains(key))
                 .copied()
-                .choose_multiple(&mut rand::thread_rng(), max_peers),
+                .sample(&mut rand::rng(), max_peers),
         );
 
         selected_peers
@@ -1050,7 +1053,7 @@ where
                 !self
                     .minimum_peer_version
                     .chain_tip()
-                    .is_at_or_near_network_tip(&self.network)
+                    .is_at_or_near_network_tip(chrono::Utc::now())
             };
             // zcashd-compat sidecars are exempt: they sync *from* this node,
             // so they can legitimately trail it without being stalled peers.
@@ -1274,7 +1277,7 @@ where
         // Like `broadcast_all_queued`, don't deliver to peers that were banned
         // while the request was queued.
         let bans = self.bans_receiver.borrow().clone();
-        remaining_sidecars.retain(|key| !bans.contains_key(&key.ip()));
+        remaining_sidecars.retain(|key| !bans.is_banned(key.ip()));
 
         let ready_sidecars: Vec<D::Key> = remaining_sidecars
             .iter()
@@ -1356,7 +1359,7 @@ where
         };
 
         let bans = self.bans_receiver.borrow().clone();
-        remaining_peers.retain(|addr| !bans.contains_key(&addr.ip()));
+        remaining_peers.retain(|addr| !bans.is_banned(addr.ip()));
 
         let Ok(reserved_send_slot) = sender.try_reserve() else {
             self.queued_broadcast_all = Some((req, sender, remaining_peers));

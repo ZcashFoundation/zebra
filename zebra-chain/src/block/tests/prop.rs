@@ -100,7 +100,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         let has_coinbase_sapling_spends = block.transactions.iter().any(|tx| {
-            tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0
+            tx.is_coinbase() && tx.sapling_spends().count() > 0
         });
 
         let bytes = block.zcash_serialize_to_vec()?;

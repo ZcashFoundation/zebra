@@ -1,17 +1,72 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [18.0.0] - 2026-10-01
 
 ### Breaking Changes
 
-- The `Rpc` trait has a new required `get_deprecation_info` method. Downstream implementers of
-  the trait must add it; callers of `RpcImpl` are unaffected
-  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+- `getblocktemplate` removes `transactions` and `prevblock` from its advertised `mutable` list, retaining only `time`. Its required coinbase depends on the selected transactions and parent; miners must request a new template instead of changing those independently ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getblocktemplate` requires synchronization on all Proof-of-Work networks. Only Mainnet additionally checks tip timestamps against the 125-minute freshness allowance; synchronized public and custom Testnets can restart mining after a long stall. Networks with Proof-of-Work disabled bypass both checks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- `client::Input::NonCoinbase` gains a `prevout` field and `client::TransactionObject::new` takes it as an additional parameter, for `getblock` verbosity 3. Code constructing these types literally must add it. ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472))
+- Updated `zcash_primitives` to 0.31.0-pre.0, `zcash_protocol` to 0.11.0-pre.0, `zcash_address` to 0.14.0-pre.0 and `zcash_transparent` to 0.11.0-pre.0 for NU7, along with `orchard` 0.16, `sapling-crypto` 0.9 and `zcash_script` 0.6, and `zcash_keys` to 0.17.0-pre.0, whose `address::Address` is returned by `MinerParams::addr` ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
+### Added
+
+- `TransactionTemplate::new_coinbase_with_parent_pools`, which builds a coinbase whose block subsidy depends on the parent block's NSM value balance ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454)).
+- The `getblock` RPC now supports verbosity 3, which adds a `prevout` object (with `generated`, `height`, `value`, and `scriptPubKey`) to each transparent input and a `fee` field to each non-coinbase transaction, matching Bitcoin Core ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472)).
+
+### Changed
+
+- From NU7 activation, `getblocktemplate` coinbases claim only the miner share after withholding 60% of aggregate fees, rounded down. The coinbase `fee` metadata is the negative net miner share, excluding the NSM contribution. Non-coinbase transaction fees remain gross ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530), [#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- Mining templates and subsidy queries depend on the parent block's NSM value balance once NSM reissuance is active. Block proposals must build on the current tip at the next height ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Block-template transaction selection shares the NU7 budget of 330 across Orchard actions, Ironwood actions, Sapling inputs and outputs, and twice the JoinSplit count, with per-pool limits of 330 Orchard actions, 330 Ironwood actions, 300 Sapling inputs plus outputs, and zero Sprout JoinSplits. It reserves the coinbase shielded-action budget before selecting mempool transactions, including Sapling coinbases ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `getnetworksolps` selects the 17- or 102-block averaging window for nonpositive block counts using the effective height in the same state snapshot, including requests above the current tip ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `getnetworksolps` returns an RPC error instead of panicking when the estimated solution rate exceeds its supported integer range ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Block templates honor network-specific median-time rules and the local two-hour future limit. Cached and on-demand work reject timestamp ranges invalidated by clock rollback. Cached Testnet difficulty expires according to the candidate-height median-time rule. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- `getblocktemplate` transaction dependency lists contain unique, 1-based indexes into the final selected transaction order instead of always being empty ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Discard late coinbase precomputations from an older height or parent-reserve context instead of letting them evict the cached coinbases for the current tip ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getblocksubsidy` rejects heights above the consensus limit before reading state or computing subsidy. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))
+- Deserialize omitted funding-stream and lockbox-stream arrays as empty in `GetBlockSubsidyResponse`, matching the existing RPC wire format for Regtest and networks with no configured streams ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Malformed Orchard receivers in `z_list_unified_receivers` now return `InvalidParameter`, matching Sapling receiver validation ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getstandardfee` on Mainnet reports 5000 zatoshis per logical action until the next block is at height 3,590,000, and 1000 from then on, following the deployment schedule in [zcash/zips#1352](https://github.com/zcash/zips/pull/1352), so wallets switch to the lower fee together after nodes that drop it reach end of support. Test networks report 1000 at every height. The mempool still accepts 1000 zatoshis per logical action ([#11557](https://github.com/ZcashFoundation/zebra/pull/11557)).
+
+## [17.0.0] - 2026-09-23
+
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in this crate's public API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- `config::Config::max_response_body_size` now has type `u32` instead of `usize`. Convert existing `usize` values before assigning them ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).
+- `config::rpc::Config` gains a public `lightwalletd_listen_addr: Option<SocketAddr>` field. Code constructing the config literally must add it; the default `None` disables the lightwalletd gRPC server ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
+- `getaddressutxos` now accepts optional `startHeight` and `maxEntries` fields and bounds the state query by them. The JSON-RPC had no such fields before and silently dropped them, so a client that already sends them now receives fewer entries than before for the same request. The `GetAddressUtxos` gRPC method already accepted both, but applied them to the finished reply after the node had read every UTXO held by the named addresses; it now passes them through, so a request naming one address with a large UTXO set no longer costs the same whether it asks for one entry or all of them ([#11239](https://github.com/ZcashFoundation/zebra/issues/11239)).
+- Replaced `impl From<MetaAddr> for PeerInfo` with `PeerInfo::from_meta_addr(meta_addr, banscore)`. The `banscore` field of `getpeerinfo` now comes from the address book's per-peer-group ban state, so every address in an IPv6 `/64` reports the same score ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
+### Added
+
+- A new `lightwalletd` module with a tonic gRPC server that implements the lightwalletd `CompactTxStreamer` interface (`lightwalletd::server::init`), and a new `rpc.lightwalletd_listen_addr` config field to enable it ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
+- Method `methods::RpcImpl::spawn_block_template_updater()`, which spawns a task that keeps a template precomputed for the current chain tip, and returns `None` when mining isn't configured ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).
+
+### Changed
+
+- `getblocktemplate` builds the shielded coinbase with the Sapling prover shared with `zebra-consensus` instead of parsing the bundled Sapling parameters on every build, which removes a parameter parse from every coinbase construction, transparent miner addresses included ([#11337](https://github.com/ZcashFoundation/zebra/pull/11337)).
+- When available, the `getblocktemplate` RPC answers from the template precomputed by `methods::RpcImpl::spawn_block_template_updater()`. A cached call validates the chain tip against the state instead of reading the mempool, selecting transactions, and building a coinbase transaction; without usable cached work, it builds a template on demand. Long polling waits for a different long poll ID, a chain tip change, or for `max_time` to pass. Tip freshness is checked again after waiting, and cached Testnet work is refreshed when minimum-difficulty rules make easier work available. Background coinbase proofs remain bounded across tip changes. A precomputed template's transactions can be a few seconds behind the mempool ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).
+
+### Fixed
+
+- The `non_finalized_state_change` indexer subscription is no longer dropped when the listener buffer fills. A full buffer is ordinary backpressure during the initial send of the non-finalized state, so subscriptions were dropped on connect and clients reconnected in a loop, logging `slow consumer, dropping non_finalized_state_change stream after buffer filled`. `TrustedChainSync` also waits before re-subscribing after a stream ends or errors ([#11265](https://github.com/ZcashFoundation/zebra/issues/11265)).
+- Long polling `getblocktemplate` requests no longer build a coinbase transaction each, which ran a shielded proof per request for a miner address with a shielded component. The next tip's coinbase is built once and shared, and a request for a shielded miner address waits longer for the precomputed template rather than falling back to a build of its own ([#10747](https://github.com/ZcashFoundation/zebra/issues/10747)).
+- `z_gettreestate` no longer returns null commitments for a block it found when a concurrent reorg moves that block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).
+
+## [16.0.0] - 2026-08-10
+
+### Breaking Changes
+
+- Requires `zebra-chain` 12.0.0, whose `Height` type is used by this crate's public API,
+  including `RpcImpl::with_end_of_support_height`. The `Rpc` trait also has a new required
+  `get_deprecation_info` method ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
 
 ### Added
 

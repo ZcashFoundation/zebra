@@ -253,21 +253,24 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), ValidateContextError> {
+        let calculate_value_change_error =
+            |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height: finalized.height,
+                block_hash: finalized.hash,
+                transaction_count: finalized.transaction_hashes.len(),
+                spent_utxo_count: utxos_spent_by_block.len(),
+            };
+
         let block_value_pool_change = finalized
             .block
             .chain_value_pool_change(
                 &utxos_spent_by_block,
                 finalized.deferred_pool_balance_change,
+                &db.network(),
+                value_pool,
             )
-            .map_err(|value_balance_error| {
-                ValidateContextError::CalculateBlockChainValueChange {
-                    value_balance_error,
-                    height: finalized.height,
-                    block_hash: finalized.hash,
-                    transaction_count: finalized.transaction_hashes.len(),
-                    spent_utxo_count: utxos_spent_by_block.len(),
-                }
-            })?;
+            .map_err(calculate_value_change_error)?;
 
         let new_value_pool = value_pool
             .add_chain_value_pool_change(block_value_pool_change)

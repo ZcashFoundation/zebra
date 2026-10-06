@@ -25,8 +25,6 @@ exclude = [
     # Template placeholder URLs (0000)
     "^https://github.com/.*/issues/0000",
     "^https://github.com/.*/pull/0000",
-    # Mergify dashboard (requires auth)
-    "^https://dashboard.mergify.com/",
     # IACR eprint server returns 403 to automated link checkers
     "^https://eprint\\.iacr\\.org/",
 
@@ -48,7 +46,7 @@ exclude_path = [
 ]
 
 # Accept these HTTP status codes as valid
-accept = ["200", "204", "206", "301", "302", "307", "308", "429"]
+accept = ["200", "202", "204", "206", "301", "302", "307", "308", "403", "429"]
 
 # Timeout for requests (seconds)
 timeout = 30

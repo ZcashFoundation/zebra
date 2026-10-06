@@ -11,6 +11,7 @@ use zebra_chain::{
     block::Height,
     parameters::{
         testnet::{self, ConfiguredActivationHeights},
+        Magic,
         Network::*,
     },
 };
@@ -171,6 +172,8 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 
     let _init_guard = zebra_test::init();
     let network1 = testnet::Parameters::build()
+        .with_network_magic(Magic([0; 4]))
+        .expect("private test network magic must not be reserved")
         .with_activation_heights(ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),
@@ -261,6 +264,8 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
         .wrap_err("node 1 exited before opening its network listener")?;
 
     let network2 = testnet::Parameters::build()
+        .with_network_magic(Magic([0; 4]))
+        .expect("private test network magic must not be reserved")
         .with_activation_heights(ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),

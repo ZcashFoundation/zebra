@@ -7,9 +7,12 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get -qq update
         # libclang is needed at build time: librocksdb-sys always runs bindgen
         # (via clang-sys) to generate FFI bindings, even when linking the system
         # RocksDB via ROCKSDB_LIB_DIR.
-        sudo apt-get -qq install -y --no-install-recommends clang libclang-dev protobuf-compiler librocksdb-dev
+        #
+        # The install is wrapped so a stalling Ubuntu mirror fails fast instead
+        # of burning the whole job timeout. Composite action steps cannot set
+        # `timeout-minutes`, so the bound has to come from the script.
+        "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" clang libclang-dev protobuf-compiler librocksdb-dev
         echo "ROCKSDB_LIB_DIR=/usr/lib/" >> $GITHUB_ENV

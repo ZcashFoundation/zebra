@@ -45,8 +45,14 @@ pub struct PeerInfo {
 /// Response type for the `getpeerinfo` RPC method.
 pub type GetPeerInfoResponse = Vec<PeerInfo>;
 
-impl From<MetaAddr> for PeerInfo {
-    fn from(meta_addr: MetaAddr) -> Self {
+impl PeerInfo {
+    /// Builds a [`PeerInfo`] from an address book entry and the misbehavior
+    /// score of its peer group.
+    ///
+    /// `banscore` comes from the address book rather than the [`MetaAddr`],
+    /// because misbehavior is tracked per peer group — one IPv4 address, or one
+    /// IPv6 `/64` subnet — not per individual address.
+    pub fn from_meta_addr(meta_addr: MetaAddr, banscore: u32) -> Self {
         let services = meta_addr
             .services()
             .map(|s| format!("{:016x}", s.bits()))
@@ -65,7 +71,7 @@ impl From<MetaAddr> for PeerInfo {
             services,
             lastrecv,
             inbound: meta_addr.is_inbound(),
-            banscore: meta_addr.misbehavior(),
+            banscore,
             subver,
             version,
             connection_state,

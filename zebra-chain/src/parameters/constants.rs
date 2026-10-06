@@ -25,6 +25,9 @@ pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
 ///
 /// This is a local-only node policy; it is not part of consensus. The window is
 /// sized as a defence-in-depth measure against sustained consensus splits.
+///
+/// ZIP 218 keeps this block count unchanged, so it covers about 20.8 hours before NU7 and
+/// about 6.9 hours of 25-second blocks after it.
 //
 // TODO: change to HeightDiff
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = 1000;
@@ -69,6 +72,8 @@ pub mod activation_heights {
         pub const NU6_2: Height = Height(4_052_000);
         /// The block height at which `NU6.3` activates on Testnet.
         pub const NU6_3: Height = Height(4_134_000);
+        /// The block height at which `NU7` activates on Testnet, as specified in ZIP 259.
+        pub const NU7: Height = Height(4_465_026);
     }
 
     /// Network upgrade activation heights for Mainnet.

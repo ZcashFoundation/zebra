@@ -143,6 +143,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU6_1, Nu6_1),
         (NU6_2, Nu6_2),
         (NU6_3, Nu6_3),
+        (NU7, Nu7),
     ]
 };
 
@@ -239,12 +240,8 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu6_2, ConsensusBranchId(0x5437f330)),
     // The NU6.3 (Ironwood) consensus branch id, matching zcash_protocol's `BranchId::Nu6_3`.
     (Nu6_3, ConsensusBranchId(0x37a5165b)),
-    // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
-    #[cfg(any(test, feature = "zebra-test"))]
-    (Nu7, ConsensusBranchId(0xfffffffe)),
-    // Distinct test placeholder so it never collides with the `Nu7` placeholder above
-    // (which is gated on `test`/`zebra-test`, independent of `zfuture`); a collision would break
-    // the `branch_id_bijective` test under `--cfg zcash_unstable="zfuture"`.
+    // ZIP 259, matching zcash_protocol's `BranchId::Nu7`.
+    (Nu7, ConsensusBranchId(0x77190ad9)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xfffffffd)),
 ];
@@ -252,19 +249,59 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
 /// The target block spacing before Blossom.
 const PRE_BLOSSOM_POW_TARGET_SPACING: i64 = 150;
 
-/// The target block spacing after Blossom activation.
+/// The target block spacing after Blossom activation, and before NU7.
 pub const POST_BLOSSOM_POW_TARGET_SPACING: u32 = 75;
 
-/// The averaging window for difficulty threshold arithmetic mean calculations.
+/// The target block spacing after NU7 activation.
+///
+/// `PostNU7PoWTargetSpacing` in [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const POST_NU7_POW_TARGET_SPACING: u32 = 25;
+
+/// The ratio between the post-Blossom and post-NU7 target block spacings.
+///
+/// `NU7PoWTargetSpacingRatio` in [ZIP 218].
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const NU7_POW_TARGET_SPACING_RATIO: u32 =
+    POST_BLOSSOM_POW_TARGET_SPACING / POST_NU7_POW_TARGET_SPACING;
+
+/// The averaging window for difficulty threshold arithmetic mean calculations, before NU7.
 ///
 /// `PoWAveragingWindow` in the Zcash specification.
+///
+/// Use [`NetworkUpgrade::averaging_window`] instead of this constant for consensus checks: from
+/// NU7 onward the window is [`POST_NU7_POW_AVERAGING_WINDOW`] ([ZIP 218]).
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
 pub const POW_AVERAGING_WINDOW: usize = 17;
 
+/// The averaging window for difficulty threshold arithmetic mean calculations, from NU7 onward.
+///
+/// `PostNU7PoWAveragingWindow` in [ZIP 218]. It is six times the pre-NU7 window of 17, so with
+/// the target spacing cut to a third, the wall-clock smoothing window doubles from 1,275 to
+/// 2,550 seconds. ZIP 218 widens it deliberately: keeping the window at 17 blocks would have
+/// left a third of the wall-clock smoothing and tripled the difficulty noise.
+///
+/// [ZIP 218]: https://zips.z.cash/zip-0218
+pub const POST_NU7_POW_AVERAGING_WINDOW: usize = 102;
+
+/// The largest averaging window used by any network upgrade.
+///
+/// Used to size the buffers that hold difficulty adjustment context.
+pub const MAX_POW_AVERAGING_WINDOW: usize = POST_NU7_POW_AVERAGING_WINDOW;
+
 /// The multiplier used to derive the testnet minimum difficulty block time gap
-/// threshold.
+/// threshold before NU7.
 ///
 /// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
 const TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER: i32 = 6;
+
+/// The NU7 Testnet gap multiplier, preserving the 450-second threshold at 25-second spacing.
+///
+/// Specified by <https://github.com/zcash/zips/pull/1382>.
+const POST_NU7_TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER: i32 = 18;
 
 /// The start height for the testnet minimum difficulty consensus rule.
 ///
@@ -411,12 +448,14 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu6_2 | Nu6_3 | Nu7 => {
+            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu6_2 | Nu6_3 => {
                 POST_BLOSSOM_POW_TARGET_SPACING.into()
             }
+            // ZIP 218 drops the target spacing to 25 seconds from NU7 onward.
+            Nu7 => POST_NU7_POW_TARGET_SPACING.into(),
 
             #[cfg(zcash_unstable = "zfuture")]
-            ZFuture => POST_BLOSSOM_POW_TARGET_SPACING.into(),
+            ZFuture => POST_NU7_POW_TARGET_SPACING.into(),
         };
 
         Duration::seconds(spacing_seconds)
@@ -439,6 +478,7 @@ impl NetworkUpgrade {
                 NetworkUpgrade::Blossom,
                 POST_BLOSSOM_POW_TARGET_SPACING.into(),
             ),
+            (NetworkUpgrade::Nu7, POST_NU7_POW_TARGET_SPACING.into()),
         ]
         .into_iter()
         .filter_map(move |(upgrade, spacing_seconds)| {
@@ -448,10 +488,44 @@ impl NetworkUpgrade {
         })
     }
 
+    /// Returns the total target block spacing of the blocks after `from` up to and including
+    /// `to`, charging each block the spacing at its own height. Negative when `to` is below `from`.
+    pub fn duration_between_heights(
+        network: &Network,
+        from: block::Height,
+        to: block::Height,
+    ) -> Duration {
+        let low = i64::from(from.0.min(to.0));
+        let high = i64::from(from.0.max(to.0));
+
+        let target_spacings: Vec<_> = NetworkUpgrade::target_spacings(network).collect();
+        let seconds: i64 = target_spacings
+            .iter()
+            .enumerate()
+            .map(|(index, (start_height, target_spacing))| {
+                // The heights in `low + 1..=high` that use this target spacing.
+                let first = i64::from(start_height.0).max(low + 1);
+                let last = target_spacings
+                    .get(index + 1)
+                    .map_or(high, |(next_height, _)| {
+                        (i64::from(next_height.0) - 1).min(high)
+                    });
+
+                (last - first + 1).max(0) * target_spacing.num_seconds()
+            })
+            .sum();
+
+        Duration::seconds(if to < from { -seconds } else { seconds })
+    }
+
     /// Returns the minimum difficulty block spacing for `network` and `height`.
     /// Returns `None` if the testnet minimum difficulty consensus rule is not active.
     ///
+    /// Uses six target spacings before NU7 and eighteen from NU7 onward, preserving the
+    /// 450-second threshold after Blossom.
+    ///
     /// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
+    /// and the NU7 update in <https://github.com/zcash/zips/pull/1382>.
     pub fn minimum_difficulty_spacing_for_height(
         network: &Network,
         height: block::Height,
@@ -466,7 +540,12 @@ impl NetworkUpgrade {
             (Network::Mainnet, _) => None,
             (Network::Testnet(_params), _) => {
                 let network_upgrade = NetworkUpgrade::current(network, height);
-                Some(network_upgrade.target_spacing() * TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER)
+                let multiplier = if network_upgrade >= Nu7 {
+                    POST_NU7_TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER
+                } else {
+                    TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER
+                };
+                Some(network_upgrade.target_spacing() * multiplier)
             }
         }
     }
@@ -502,11 +581,31 @@ impl NetworkUpgrade {
         }
     }
 
+    /// Returns the difficulty averaging window for the network upgrade.
+    ///
+    /// `PoWAveragingWindow(height)` from the Zcash specification, as redefined by [ZIP 218].
+    ///
+    /// [ZIP 218]: https://zips.z.cash/zip-0218
+    pub fn averaging_window(&self) -> usize {
+        if self >= &NetworkUpgrade::Nu7 {
+            POST_NU7_POW_AVERAGING_WINDOW
+        } else {
+            POW_AVERAGING_WINDOW
+        }
+    }
+
+    /// Returns the difficulty averaging window for `network` and `height`.
+    ///
+    /// See [`NetworkUpgrade::averaging_window`] for details.
+    pub fn averaging_window_for_height(network: &Network, height: block::Height) -> usize {
+        NetworkUpgrade::current(network, height).averaging_window()
+    }
+
     /// Returns the averaging window timespan for the network upgrade.
     ///
     /// `AveragingWindowTimespan` from the Zcash specification.
     pub fn averaging_window_timespan(&self) -> Duration {
-        self.target_spacing() * POW_AVERAGING_WINDOW.try_into().expect("fits in i32")
+        self.target_spacing() * self.averaging_window().try_into().expect("fits in i32")
     }
 
     /// Returns the averaging window timespan for `network` and `height`.
@@ -538,7 +637,6 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_2 => Self::Nu6_2,
             zcash_protocol::consensus::NetworkUpgrade::Nu6_3 => Self::Nu6_3,
-            #[cfg(zcash_unstable = "nu7")]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zcash_protocol::consensus::NetworkUpgrade::ZFuture => Self::ZFuture,

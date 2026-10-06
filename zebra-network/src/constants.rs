@@ -129,7 +129,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 /// - the amount of time between connection events and address book updates,
 ///   even under heavy load (in tests, we have observed delays up to 500ms),
 /// - the delay between an outbound connection failing,
-///   and the [CandidateSet](crate::peer_set::CandidateSet) registering the failure, and
+///   and [candidate selection](crate::peer_set::candidate_set) registering the failure, and
 /// - the delay between the application closing a connection,
 ///   and any remaining positive changes from the peer.
 pub const CONCURRENT_ADDRESS_CHANGE_PERIOD: Duration = Duration::from_secs(5);
@@ -210,7 +210,7 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
 /// The minimum time between outbound peer connections, implemented by
-/// [`CandidateSet::next`][crate::peer_set::CandidateSet::next].
+/// [`next_reconnect_peer`][crate::peer_set::candidate_set::next_reconnect_peer].
 ///
 /// ## Security
 ///
@@ -253,7 +253,7 @@ pub const MIN_INBOUND_PEER_CONNECTION_INTERVAL: Duration = Duration::from_secs(1
 pub const MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL: Duration = Duration::from_millis(10);
 
 /// The minimum time between successive calls to
-/// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
+/// [`crawl_once`][crate::peer_set::candidate_set::crawl_once].
 ///
 /// Using a prime number makes sure that peer address crawls don't synchronise with other crawls.
 ///
@@ -264,7 +264,7 @@ pub const MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL: Duration = Duration::from
 pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(31);
 
 /// The combined timeout for all the requests in
-/// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
+/// [`crawl_once`][crate::peer_set::candidate_set::crawl_once].
 ///
 /// `zcashd` doesn't respond to most `getaddr` requests,
 /// so this timeout needs to be short.
@@ -347,14 +347,9 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
 ///
-/// This version of Zebra draws the current network protocol version from
-/// [ZIP-255](https://zips.z.cash/zip-0255).
-// TODO: The NU7 protocol version is provisional; update this constant and the mapping in
-// `Version::min_specified_for_upgrade` once NU7's deployment ZIP is published.
-// Next upgrade values, uncomment on activation:
-//   pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_170); // NU7 Testnet
-//   pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_180); // NU7 Mainnet
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU6.3 (Mainnet + Testnet)
+/// Advertise NU7 Testnet support; Mainnet's assigned version must wait for its activation schedule.
+/// See [ZIP 204](https://zips.z.cash/zip-0204#assigning-protocol-versions-to-network-upgrades).
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_180);
 
 /// The default RTT estimate for peer responses.
 ///
@@ -397,8 +392,7 @@ pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
-/// The maximum number of peer misbehavior incidents before a peer is
-/// disconnected and banned.
+/// The misbehavior score that bans a peer group.
 pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
 
 /// The interval between flushes of batched peer misbehaviour updates into the address book.
@@ -417,6 +411,21 @@ pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The maximum number of banned IP addresses to be stored in-memory at any time.
 pub const MAX_BANNED_IPS: usize = 20_000;
+
+/// How long a peer group stays banned after reaching
+/// [`MAX_PEER_MISBEHAVIOR_SCORE`].
+///
+/// This matches `zcashd`'s and Bitcoin Core's `DEFAULT_MISBEHAVING_BANTIME`.
+///
+/// # Security
+///
+/// Bans must expire. A ban applies to a whole peer group, and an IPv6 `/64` can
+/// be shared by unrelated nodes at providers that allocate narrower prefixes per
+/// customer, so a permanent ban risks permanently isolating an honest peer.
+/// Expiry also bounds the damage from a misattributed score, at the cost of
+/// letting a genuinely malicious peer retry once the ban lapses — it is banned
+/// again as soon as it misbehaves again.
+pub const BAN_DURATION: Duration = Duration::from_secs(60 * 60 * 24);
 
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,

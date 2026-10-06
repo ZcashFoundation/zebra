@@ -414,6 +414,7 @@ impl StartCmd {
             peer_set.clone(),
             block_verifier_router.clone(),
             state.clone(),
+            read_only_state_service.clone(),
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
         );
@@ -430,6 +431,10 @@ impl StartCmd {
             chain_tip_change.clone(),
             misbehavior_sender.clone(),
         );
+
+        // Subscribe as soon as possible to not miss any events
+        let mempool_change_receiver = mempool_transaction_subscriber.subscribe();
+
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
@@ -479,6 +484,30 @@ impl StartCmd {
         let rpc_impl = rpc_impl.with_end_of_support_height(
             sync::end_of_support::end_of_support_height(&config.network.network),
         );
+
+        // Keep a block template ready for the `getblocktemplate` RPC, if this node is configured
+        // for mining, and something can actually ask for a template. Without the RPC server and
+        // without the internal miner, nothing can call `getblocktemplate`, so precomputing
+        // templates would build coinbase transactions that no one reads.
+        #[cfg(feature = "internal-miner")]
+        let is_internal_miner_enabled = config.mining.is_internal_miner_enabled();
+        #[cfg(not(feature = "internal-miner"))]
+        let is_internal_miner_enabled = false;
+
+        let block_template_task_handle =
+            if config.rpc.listen_addr.is_some() || is_internal_miner_enabled {
+                rpc_impl
+                    .spawn_block_template_updater()
+                    .inspect(|_| info!("spawned block template updater task"))
+            } else {
+                None
+            };
+
+        // Supervise the updater like every other ongoing task: if it exits or panics, the RPC
+        // keeps serving the last template it published, and pays the new-tip timeout on every call
+        // after the next tip change, so a silent exit has to be visible.
+        let block_template_task_handle: tokio::task::JoinHandle<()> = block_template_task_handle
+            .unwrap_or_else(|| tokio::spawn(std::future::pending().in_current_span()));
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
             RpcServer::start(rpc_impl.clone(), config.rpc.clone())
@@ -544,6 +573,28 @@ impl StartCmd {
             }
         };
 
+        let lightwalletd_rpc_task_handle = {
+            if let Some(lightwalletd_listen_addr) = config.rpc.lightwalletd_listen_addr {
+                info!("spawning lightwalletd gRPC server");
+                let (lightwalletd_rpc_task_handle, _listen_addr) =
+                    zebra_rpc::lightwalletd::server::init(
+                        lightwalletd_listen_addr,
+                        rpc_impl.clone(),
+                        read_only_state_service.clone(),
+                        mempool.clone(),
+                        latest_chain_tip.clone(),
+                        mempool_transaction_subscriber.clone(),
+                        config.network.network.clone(),
+                    )
+                    .await
+                    .map_err(|err| eyre!(err))?;
+
+                lightwalletd_rpc_task_handle
+            } else {
+                tokio::spawn(std::future::pending().in_current_span())
+            }
+        };
+
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
         let block_gossip_task_handle = tokio::spawn(
@@ -576,11 +627,8 @@ impl StartCmd {
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(
-                mempool_transaction_subscriber.subscribe(),
-                peer_set.clone(),
-            )
-            .in_current_span(),
+            mempool::gossip_mempool_transaction_id(mempool_change_receiver, peer_set.clone())
+                .in_current_span(),
         );
 
         info!("spawning delete old databases task");
@@ -683,6 +731,7 @@ impl StartCmd {
         // ongoing tasks
         pin!(rpc_task_handle);
         pin!(indexer_rpc_task_handle);
+        pin!(lightwalletd_rpc_task_handle);
         pin!(syncer_task_handle);
         pin!(block_gossip_task_handle);
         pin!(block_notify_task_handle);
@@ -692,6 +741,7 @@ impl StartCmd {
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
         pin!(miner_task_handle);
+        pin!(block_template_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -733,6 +783,13 @@ impl StartCmd {
                     let indexer_rpc_server_result = indexer_rpc_join_result
                         .expect("unexpected panic in the indexer task");
                     info!(?indexer_rpc_server_result, "indexer rpc task exited");
+                    Ok(())
+                }
+
+                lightwalletd_rpc_join_result = &mut lightwalletd_rpc_task_handle => {
+                    let lightwalletd_rpc_server_result = lightwalletd_rpc_join_result
+                        .expect("unexpected panic in the lightwalletd gRPC task");
+                    info!(?lightwalletd_rpc_server_result, "lightwalletd gRPC task exited");
                     Ok(())
                 }
 
@@ -797,6 +854,14 @@ impl StartCmd {
                     Ok(())
                 }
 
+                block_template_result = &mut block_template_task_handle => {
+                    block_template_result
+                        .expect("unexpected panic in the block template updater task");
+                    info!("block template updater task exited");
+
+                    Ok(())
+                }
+
                 miner_result = &mut miner_task_handle => miner_result
                     .expect("unexpected panic in the miner task")
                     .map(|_| info!("miner task exited")),
@@ -825,6 +890,7 @@ impl StartCmd {
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
+        block_template_task_handle.abort();
         health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();

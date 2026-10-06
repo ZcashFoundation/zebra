@@ -16,6 +16,8 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
+        constants::magics,
+        subsidy::TESTNET_INITIAL_NSM_VALUE_BALANCE,
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
             ConfiguredLockboxDisbursement, RegtestParameters,
@@ -52,6 +54,20 @@ pub use cache_dir::CacheDir;
 /// If the number of retries is `0`, other peers are checked after every successful
 /// or failed DNS attempt.
 const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
+
+/// Public DNS seed endpoints, also used to isolate configured networks.
+const DEFAULT_MAINNET_PEERS: [&str; 5] = [
+    "dnsseed.str4d.xyz:8233",
+    "dnsseed.z.cash:8233",
+    "mainnet.seeder.shieldedinfra.net:8233",
+    "mainnet.seeder.zfnd.org:8233",
+    "seeder.zec.rocks:8233",
+];
+const DEFAULT_TESTNET_PEERS: [&str; 3] = [
+    "dnsseed.testnet.z.cash:18233",
+    "seeder.testnet.zec.rocks:18233",
+    "testnet.seeder.zfnd.org:18233",
+];
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -177,6 +193,10 @@ pub struct Config {
     /// The maximum number of peer connections Zebra will keep for a given IP address
     /// before it drops any additional peer connections with that IP.
     ///
+    /// IPv6 connections are grouped by `/64` prefix, so the limit applies per
+    /// `/64` subnet rather than per individual address. IPv4 connections are
+    /// limited per address.
+    ///
     /// The default and minimum value are 1.
     ///
     /// # Security
@@ -186,8 +206,8 @@ pub struct Config {
     /// If this config is greater than 1, Zebra can initiate multiple outbound handshakes to the same
     /// IP address.
     ///
-    /// This config does not currently limit the number of inbound connections that Zebra will accept
-    /// from the same IP address.
+    /// Inbound connection attempts sharing a connection limit key are also rate-limited
+    /// by this config within a short time window.
     ///
     /// If Zebra makes multiple inbound or outbound connections to the same IP, they will be dropped
     /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
@@ -244,6 +264,12 @@ impl Config {
     pub fn initial_peer_hostnames(&self) -> IndexSet<String> {
         match &self.network {
             Network::Mainnet => self.initial_mainnet_peers.clone(),
+            Network::Testnet(params) if params.is_regtest() => self
+                .initial_testnet_peers
+                .iter()
+                .filter(|peer| !is_default_initial_peer(peer))
+                .cloned()
+                .collect(),
             Network::Testnet(_params) => self.initial_testnet_peers.clone(),
         }
     }
@@ -545,25 +571,14 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Config {
-        let mainnet_peers = [
-            "dnsseed.str4d.xyz:8233",
-            "dnsseed.z.cash:8233",
-            "mainnet.seeder.shieldedinfra.net:8233",
-            "mainnet.seeder.zfnd.org:8233",
-            "seeder.zec.rocks:8233",
-        ]
-        .iter()
-        .map(|&s| String::from(s))
-        .collect();
-
-        let testnet_peers = [
-            "dnsseed.testnet.z.cash:18233",
-            "seeder.testnet.zec.rocks:18233",
-            "testnet.seeder.zfnd.org:18233",
-        ]
-        .iter()
-        .map(|&s| String::from(s))
-        .collect();
+        let mainnet_peers = DEFAULT_MAINNET_PEERS
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let testnet_peers = DEFAULT_TESTNET_PEERS
+            .into_iter()
+            .map(String::from)
+            .collect();
 
         Config {
             listen_addr: "[::]:8233"
@@ -599,9 +614,16 @@ struct DTestnetParameters {
     disable_pow: Option<bool>,
     genesis_hash: Option<String>,
     activation_heights: Option<ConfiguredActivationHeights>,
+    /// Override for the first NSM reissuance height; omission uses ZIP 237's crossover.
+    nsm_reissuance_height: Option<zebra_chain::block::Height>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    /// Omission retains the default streams; an explicitly empty list disables them.
+    /// An empty list cannot be combined with either legacy funding stream field.
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Must yield a supported first halving height and a schedule within the monetary cap.
+    /// Configured reissuance needs a positive coefficient; funding streams need a nonzero
+    /// address-change interval.
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     #[serde(default)]
@@ -616,6 +638,11 @@ struct DTestnetParameters {
     temporary_orchard_disabling_soft_fork_height: Option<u32>,
     /// Regtest only: whether to allow coinbase spends to have transparent outputs.
     should_allow_unshielded_coinbase_spends: Option<bool>,
+
+    /// Regtest and configured Testnets only: the NSM value balance seeded at NU7 activation
+    /// under the halving-preserving issuance ZIP.
+    initial_nsm_value_balance:
+        Option<zebra_chain::amount::Amount<zebra_chain::amount::NonNegative>>,
 }
 
 /// Network configuration used during deserialization.
@@ -686,8 +713,10 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
+            nsm_reissuance_height: params.configured_nsm_reissuance_height(),
             pre_nu6_funding_streams: None,
             post_nu6_funding_streams: None,
+            initial_nsm_value_balance: params.configured_initial_nsm_value_balance(),
             funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
                 params
@@ -790,9 +819,11 @@ impl<'de> Deserialize<'de> for Config {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
             }
-            (DNetwork::ConfiguredRegtest { params, .. }, _) => {
-                Network::new_regtest(build_regtest_params(*params))
-            }
+            (DNetwork::ConfiguredRegtest { params, .. }, _) => testnet::Parameters::new_regtest(
+                build_regtest_params(*params).map_err(de::Error::custom)?,
+            )
+            .map(Network::new_configured_testnet)
+            .map_err(de::Error::custom)?,
             (DNetwork::DefaultForKind(NetworkKind::Mainnet), _) => Network::Mainnet,
             (DNetwork::DefaultForKind(NetworkKind::Testnet), Some(params)) => {
                 build_configured_testnet::<D>(params, &initial_testnet_peers)?
@@ -801,7 +832,11 @@ impl<'de> Deserialize<'de> for Config {
                 Network::new_default_testnet()
             }
             (DNetwork::DefaultForKind(NetworkKind::Regtest), Some(params)) => {
-                Network::new_regtest(build_regtest_params(params))
+                testnet::Parameters::new_regtest(
+                    build_regtest_params(params).map_err(de::Error::custom)?,
+                )
+                .map(Network::new_configured_testnet)
+                .map_err(de::Error::custom)?
             }
             (DNetwork::DefaultForKind(NetworkKind::Regtest), None) => {
                 Network::new_regtest(Default::default())
@@ -863,21 +898,16 @@ impl<'de> Deserialize<'de> for Config {
     }
 }
 
-/// Accepts an [`IndexSet`] of initial peers,
-///
-/// Returns true if any of them are the default Testnet or Mainnet initial peers.
-fn contains_default_initial_peers(initial_peers: &IndexSet<String>) -> bool {
-    let Config {
-        initial_mainnet_peers: mut default_initial_peers,
-        initial_testnet_peers: default_initial_testnet_peers,
-        ..
-    } = Config::default();
-    default_initial_peers.extend(default_initial_testnet_peers);
-
-    initial_peers
-        .intersection(&default_initial_peers)
-        .next()
-        .is_some()
+/// Returns true for a public DNS seed hostname, regardless of case, trailing dot, or port.
+fn is_default_initial_peer(peer: &str) -> bool {
+    fn hostname(peer: &str) -> &str {
+        peer.rsplit_once(':').map_or(peer, |(host, _)| host)
+    }
+    let peer_host = hostname(peer).trim_end_matches('.');
+    DEFAULT_MAINNET_PEERS
+        .iter()
+        .chain(&DEFAULT_TESTNET_PEERS)
+        .any(|default| peer_host.eq_ignore_ascii_case(hostname(default)))
 }
 
 fn build_configured_testnet<'de, D>(
@@ -895,6 +925,7 @@ where
         disable_pow,
         genesis_hash,
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -904,6 +935,7 @@ where
         extend_funding_stream_addresses_as_required,
         temporary_orchard_disabling_soft_fork_height,
         should_allow_unshielded_coinbase_spends,
+        initial_nsm_value_balance,
     } = params;
 
     // This is a Regtest-only consensus knob, so reject it rather than silently ignoring it.
@@ -914,6 +946,14 @@ where
     }
 
     let mut params_builder = testnet::Parameters::build();
+
+    // A redundant public seed must not turn public Testnet into a configured network.
+    if let Some(initial_nsm_value_balance) = initial_nsm_value_balance.filter(|seed| {
+        network_magic.map(Magic).unwrap_or(magics::TESTNET) != magics::TESTNET
+            || u64::from(*seed) != TESTNET_INITIAL_NSM_VALUE_BALANCE
+    }) {
+        params_builder = params_builder.with_initial_nsm_value_balance(initial_nsm_value_balance);
+    }
 
     if let Some(network_name) = network_name.clone() {
         params_builder = params_builder
@@ -959,6 +999,10 @@ where
             .map_err(de::Error::custom)?
     }
 
+    if let Some(height) = nsm_reissuance_height {
+        params_builder = params_builder.with_nsm_reissuance_height(height);
+    }
+
     if let Some(halving_interval) = pre_blossom_halving_interval {
         params_builder = params_builder
             .with_halving_interval(halving_interval.into())
@@ -966,18 +1010,14 @@ where
     }
 
     // Set configured funding streams after setting any parameters that affect the funding stream address period.
-    let mut funding_streams_vec = funding_streams.unwrap_or_default();
-
-    if let Some(funding_streams) = post_nu6_funding_streams {
-        funding_streams_vec.insert(0, funding_streams);
-    }
-
-    if let Some(funding_streams) = pre_nu6_funding_streams {
-        funding_streams_vec.insert(0, funding_streams);
-    }
-
-    if !funding_streams_vec.is_empty() {
-        params_builder = params_builder.with_funding_streams(funding_streams_vec);
+    if let Some(funding_streams) = merge_funding_streams(
+        funding_streams,
+        pre_nu6_funding_streams,
+        post_nu6_funding_streams,
+    )
+    .map_err(de::Error::custom)?
+    {
+        params_builder = params_builder.with_funding_streams(funding_streams);
     }
 
     if let Some(lockbox_disbursements) = lockbox_disbursements {
@@ -989,7 +1029,9 @@ where
         .map_err(de::Error::custom)?;
 
     if let Some(true) = extend_funding_stream_addresses_as_required {
-        params_builder = params_builder.extend_funding_streams();
+        params_builder = params_builder
+            .extend_funding_streams()
+            .map_err(de::Error::custom)?;
     }
 
     // Retain the default soft-fork activation height unless one is configured.
@@ -999,27 +1041,46 @@ where
         );
     }
 
-    // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
-    // peers and the configured network parameters are incompatible with the default public Testnet.
-    if !params_builder.is_compatible_with_default_parameters()
-        && contains_default_initial_peers(initial_testnet_peers)
-    {
-        return Err(de::Error::custom(
-            "cannot use default initials peers with incompatible testnet",
-        ));
-    };
-
-    // Return the default Testnet if no network name was configured and all parameters match the default Testnet
+    // Preserve the canonical public Testnet representation when no parameters changed.
     if network_name.is_none() && params_builder == testnet::Parameters::build() {
-        Ok(Network::new_default_testnet())
-    } else {
-        Ok(params_builder.to_network().map_err(de::Error::custom)?)
+        return Ok(Network::new_default_testnet());
     }
+
+    if !params_builder.is_compatible_with_default_parameters() {
+        // Keep the diagnostic for explicitly configured public seeds, even with isolated magic.
+        if initial_testnet_peers
+            .iter()
+            .any(|peer| is_default_initial_peer(peer))
+        {
+            return Err(de::Error::custom(
+                "cannot use default initial peers with incompatible testnet; \
+                 for public Testnet, remove explicit consensus overrides from \
+                 [network.testnet_parameters] to use the updated public defaults, including NU7; \
+                 for a custom network, configure its own initial_testnet_peers and \
+                 network_magic distinct from public Testnet",
+            ));
+        }
+
+        // Peer names cannot enforce isolation: aliases, cached peers, and inbound connections
+        // can all reach public Testnet. Incompatible consensus rules require distinct wire magic.
+        if network_magic.map(Magic).unwrap_or(magics::TESTNET) == magics::TESTNET {
+            return Err(de::Error::custom(
+                "incompatible testnet parameters require network_magic distinct from public Testnet; \
+                 for public Testnet, remove explicit consensus overrides from \
+                 [network.testnet_parameters] (including activation_heights and funding_streams) \
+                 to use the updated public defaults, including NU7; for a custom network, configure its own \
+                 network_magic and initial_testnet_peers",
+            ));
+        }
+    }
+
+    params_builder.to_network().map_err(de::Error::custom)
 }
 
-fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
+fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters, &'static str> {
     let DTestnetParameters {
         activation_heights,
+        nsm_reissuance_height,
         pre_nu6_funding_streams,
         post_nu6_funding_streams,
         funding_streams,
@@ -1027,25 +1088,59 @@ fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
         checkpoints,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
+        initial_nsm_value_balance,
         ..
     } = params;
 
-    let mut funding_streams_vec = funding_streams.unwrap_or_default();
-
-    if let Some(funding_streams) = post_nu6_funding_streams {
-        funding_streams_vec.insert(0, funding_streams);
-    }
-
-    if let Some(funding_streams) = pre_nu6_funding_streams {
-        funding_streams_vec.insert(0, funding_streams);
-    }
-
-    RegtestParameters {
+    Ok(RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
-        funding_streams: Some(funding_streams_vec),
+        nsm_reissuance_height,
+        funding_streams: merge_funding_streams(
+            funding_streams,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
+        )?,
         lockbox_disbursements,
         checkpoints: Some(checkpoints),
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
+        initial_nsm_value_balance,
+    })
+}
+
+/// Merge legacy streams before the current list, preserving omission and explicit disable.
+fn merge_funding_streams(
+    funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+) -> Result<Option<Vec<ConfiguredFundingStreams>>, &'static str> {
+    let has_legacy_streams =
+        pre_nu6_funding_streams.is_some() || post_nu6_funding_streams.is_some();
+    if funding_streams.as_ref().is_some_and(Vec::is_empty) && has_legacy_streams {
+        return Err(
+            "funding_streams = [] cannot be combined with pre_nu6_funding_streams or post_nu6_funding_streams",
+        );
     }
+
+    let specified = funding_streams.is_some() || has_legacy_streams;
+    let mut funding_streams = funding_streams.unwrap_or_default();
+    if let Some(mut post_nu6) = post_nu6_funding_streams {
+        // Legacy names select their own defaults, not their position in the merged list.
+        if post_nu6.height_range.is_none() || post_nu6.recipients.is_none() {
+            let default_parameters = testnet::Parameters::default();
+            let defaults = &default_parameters.funding_streams()[1];
+            post_nu6
+                .height_range
+                .get_or_insert_with(|| defaults.height_range().clone());
+            if post_nu6.recipients.is_none() {
+                post_nu6.recipients = ConfiguredFundingStreams::from(defaults).recipients;
+            }
+        }
+        funding_streams.insert(0, post_nu6);
+    }
+    if let Some(pre_nu6) = pre_nu6_funding_streams {
+        funding_streams.insert(0, pre_nu6);
+    }
+
+    Ok(specified.then_some(funding_streams))
 }

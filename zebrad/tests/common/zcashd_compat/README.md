@@ -45,6 +45,9 @@ worker:
   state and verifies recovery after Zebra extends its branch.
 - `zcashd_compat_reorg_deep_depth33` verifies a 33-block replacement branch.
 - `zcashd_compat_reorg_deep_depth80` verifies an 80-block replacement branch.
+- `zcashd_compat_reorg_deep_depth150` verifies a 150-block replacement branch,
+  past the pre-`zebra-compat-v1.2.0` sidecar reorg limit of 99 blocks. Requires
+  the `zebra-compat-v1.2.0` sidecar or newer.
 - `zcashd_compat_reorg_deep_restart_recovers` verifies that a deep replacement
   branch remains healthy after a supervised zcashd restart.
 - `zcashd_compat_reorg_restart_after_reorg` is an opt-in slow probe for zcashd
@@ -167,6 +170,7 @@ error (misconfiguration, not a skip).
 | `zcashd_compat_reorg_equal_work_race` | reorg | Equal-work degraded state and recovery | **Skipped** |
 | `zcashd_compat_reorg_deep_depth33` | reorg | 33-block replacement branch convergence | **Skipped** |
 | `zcashd_compat_reorg_deep_depth80` | reorg | 80-block replacement branch convergence | **Skipped** |
+| `zcashd_compat_reorg_deep_depth150` | reorg | 150-block replacement branch convergence, past the old 99-block sidecar limit (needs `zebra-compat-v1.2.0`+) | **Skipped** |
 | `zcashd_compat_reorg_deep_restart_recovers` | reorg | Deep replacement branch remains healthy after restart | **Skipped** |
 | `zcashd_compat_reorg_restart_after_reorg` | reorg | **Opt-in:** slow supervised zcashd restart after several reorgs | **Skipped** |
 | `zcashd_compat_reorg_restart_cycles` | reorg | **Opt-in:** interleaved reorg-then-restart across three cycles | **Skipped** |
@@ -217,6 +221,7 @@ zebrad/tests/common/
     │                          historical_block_consistent
     └── reorg.rs               basic_depth1, equal_work_race,
                                deep_reorg_depth33, deep_reorg_depth80,
+                               deep_reorg_depth150,
                                deep_reorg_restart_recovers,
                                restart_after_reorg, restart_cycles,
                                restart_deep_chain, zebra_tip_behind_local,

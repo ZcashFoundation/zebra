@@ -51,12 +51,12 @@ Make sure you're using a release build on your native architecture.
 ### Syncer Lookahead Limit
 
 If your connection is slow, try
-[downloading fewer blocks at a time](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html#structfield.lookahead_limit):
+[downloading fewer blocks at a time](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html#structfield.checkpoint_verify_concurrency_limit):
 
 ```toml
 [sync]
-lookahead_limit = 1000
-max_concurrent_block_requests = 25
+checkpoint_verify_concurrency_limit = 1000
+download_concurrency_limit = 25
 ```
 
 ### Peer Set Size

@@ -21,7 +21,9 @@ without any issues.](https://x.com/Zerodartz/status/1811460885996798159)
 ## Disk Requirements
 
 Zebra uses around 300 GB for cached Mainnet data, and 10 GB for cached Testnet
-data. We expect disk usage to grow over time.
+data. We expect disk usage to grow over time. Syncing from a
+[state snapshot](./snapshots.md) temporarily needs about twice that while the
+archive is extracted.
 
 Zebra cleans up its database periodically, and also when you shut it down or
 restart it. Changes are committed using RocksDB database transactions. If you

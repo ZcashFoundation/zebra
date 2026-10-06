@@ -111,7 +111,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     for transaction in genesis_block.transactions.iter() {
         for sprout_note_commitment in transaction.sprout_note_commitments() {
             note_commitment_tree
-                .append(*sprout_note_commitment)
+                .append(sprout_note_commitment)
                 .expect("we should not be able to fill up the tree");
         }
     }
@@ -148,7 +148,7 @@ fn incremental_roots_with_blocks_for_network(network: Network) -> Result<()> {
     for transaction in next_block.transactions.iter() {
         for sprout_note_commitment in transaction.sprout_note_commitments() {
             note_commitment_tree
-                .append(*sprout_note_commitment)
+                .append(sprout_note_commitment)
                 .expect("test vector is correct");
             appended_count += 1;
         }

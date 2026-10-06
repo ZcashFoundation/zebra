@@ -2,14 +2,14 @@
 
 use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 
-use halo2::pasta::pallas;
+use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     ironwood, orchard,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy, Network, NetworkUpgrade},
     sapling,
     serialization::TrustedPreallocate,
     sprout,
@@ -81,9 +81,12 @@ impl Block {
     pub fn coinbase_height(&self) -> Option<Height> {
         self.transactions
             .first()
-            .and_then(|tx| tx.inputs().first())
+            .and_then(|tx| {
+                let inputs = tx.inputs();
+                inputs.into_iter().next()
+            })
             .and_then(|input| match input {
-                transparent::Input::Coinbase { ref height, .. } => Some(*height),
+                transparent::Input::Coinbase { height, .. } => Some(height),
                 _ => None,
             })
     }
@@ -140,63 +143,80 @@ impl Block {
         Ok(())
     }
 
-    /// Access the [`sprout::Nullifier`]s from all transactions in this block.
-    pub fn sprout_nullifiers(&self) -> impl Iterator<Item = &sprout::Nullifier> {
+    /// Access the sprout nullifiers from all transactions in this block.
+    pub fn sprout_nullifiers(&self) -> impl Iterator<Item = sprout::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sprout_nullifiers())
+            .flat_map(|transaction| transaction.sprout_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`sapling::Nullifier`]s from all transactions in this block.
-    pub fn sapling_nullifiers(&self) -> impl Iterator<Item = &sapling::Nullifier> {
+    /// Access the sapling nullifiers from all transactions in this block.
+    pub fn sapling_nullifiers(&self) -> impl Iterator<Item = sapling::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sapling_nullifiers())
+            .flat_map(|transaction| transaction.sapling_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`orchard::Nullifier`]s from all transactions in this block.
-    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+    /// Access the orchard nullifiers from all transactions in this block.
+    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = orchard::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.orchard_nullifiers())
+            .flat_map(|transaction| transaction.orchard_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`ironwood::Nullifier`]s from all transactions in this block.
+    /// Access the ironwood nullifiers from all transactions in this block.
     pub fn ironwood_nullifiers(&self) -> impl Iterator<Item = ironwood::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.ironwood_nullifiers())
+            .flat_map(|transaction| transaction.ironwood_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`sprout::NoteCommitment`]s from all transactions in this block.
-    pub fn sprout_note_commitments(&self) -> impl Iterator<Item = &sprout::NoteCommitment> {
+    /// Access the sprout note commitments from all transactions in this block.
+    pub fn sprout_note_commitments(
+        &self,
+    ) -> impl Iterator<Item = sprout::commitment::NoteCommitment> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sprout_note_commitments())
+            .flat_map(|transaction| transaction.sprout_note_commitments().collect::<Vec<_>>())
     }
 
-    /// Access the [sapling note commitments](`sapling_crypto::note::ExtractedNoteCommitment`)
-    /// from all transactions in this block.
+    /// Access the sapling note commitments from all transactions in this block.
     pub fn sapling_note_commitments(
         &self,
-    ) -> impl Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> {
+    ) -> impl Iterator<Item = sapling_crypto::note::ExtractedNoteCommitment> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sapling_note_commitments())
+            .flat_map(|transaction| transaction.sapling_note_commitments().collect::<Vec<_>>())
     }
 
-    /// Access the [orchard note commitments](pallas::Base) from all transactions in this block.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
-        self.transactions
-            .iter()
-            .flat_map(|transaction| transaction.orchard_note_commitments())
+    /// Access the orchard note commitments from all transactions in this block,
+    /// as `pallas::Base` values for the note commitment tree.
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
+        self.transactions.iter().flat_map(|transaction| {
+            transaction
+                .orchard_note_commitments()
+                .map(|cmx| {
+                    let bytes = cmx.to_bytes();
+                    pallas::Base::from_repr(bytes)
+                        .expect("orchard note commitment is a valid pallas::Base")
+                })
+                .collect::<Vec<_>>()
+        })
     }
 
-    /// Access the [ironwood note commitments](pallas::Base) from all transactions in this block.
-    pub fn ironwood_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
-        self.transactions
-            .iter()
-            .flat_map(|transaction| transaction.ironwood_note_commitments())
+    /// Access the ironwood note commitments from all transactions in this block,
+    /// as `pallas::Base` values for the note commitment tree.
+    pub fn ironwood_note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
+        self.transactions.iter().flat_map(|transaction| {
+            transaction
+                .ironwood_note_commitments()
+                .map(|cmx| {
+                    let bytes = cmx.to_bytes();
+                    pallas::Base::from_repr(bytes)
+                        .expect("ironwood note commitment is a valid pallas::Base")
+                })
+                .collect::<Vec<_>>()
+        })
     }
 
     /// Count how many Sapling transactions exist in a block,
@@ -237,8 +257,8 @@ impl Block {
     /// Returns the overall chain value pool change in this block---the negative sum of the
     /// transaction value balances in this block.
     ///
-    /// These are the changes in the transparent, Sprout, Sapling, Orchard, and
-    /// Deferred chain value pools, as a result of this block.
+    /// These are the changes in the transparent, Sprout, Sapling, Orchard, Ironwood and
+    /// Deferred chain value pools, and in the NSM reserve, as a result of this block.
     ///
     /// Positive values are added to the corresponding chain value pool and negative values are
     /// removed from the corresponding pool.
@@ -249,25 +269,135 @@ impl Block {
     /// including UTXOs created by earlier transactions in this block. It can also contain unrelated
     /// UTXOs, which are ignored.
     ///
+    /// `previous_value_pools` must be the exact parent's balances.
+    /// Genesis transparent outputs are permanently unspendable, so they do not enter the pool.
+    /// Custom networks with nonzero genesis outputs must rebuild state created before this rule;
+    /// public-network genesis outputs are zero, so their historical balances are unchanged.
+    ///
+    /// This calculation does not validate coinbase payouts or funding outputs. Callers must
+    /// validate them separately with [`subsidy::subsidy_is_valid`] and
+    /// [`subsidy::miner_fees_are_valid`], using the exact parent's reserve-funded subsidy.
+    /// `deferred_pool_balance_change` must also be calculated from that same parent.
+    ///
     /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        self.chain_value_pool_change_and_fees(
+            utxos,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+        .map(|(change, _)| change)
+    }
+
+    /// Returns the pool change and gross non-coinbase fees in a single transaction traversal.
+    ///
+    /// The arguments have the same requirements as [`Self::chain_value_pool_change`].
+    /// Fees are `None` before NU7, preserving pre-NU7 accounting without fee validation,
+    /// and `Some`, including zero, from NU7 onward. This does not validate coinbase payouts.
+    pub fn chain_value_pool_change_and_fees(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
+    {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
         // to propagate the first error instead.
-        let tx_pool_sum = self
-            .transactions
-            .iter()
-            .try_fold(ValueBalance::<NegativeAllowed>::zero(), |acc, tx| {
-                acc + tx.value_balance(utxos)?
-            })?;
+        //
+        // The transaction fees are accumulated in the same pass, because the NSM reserve
+        // contribution is calculated from them: `value_balance()` walks every input's UTXO, so a
+        // second pass would double the work on the state's block commit path.
+        //
+        // The fees are only accumulated once NU7 is active, so that this stays byte-for-byte the
+        // same calculation as before NU7 everywhere else. A transaction's fee is its remaining
+        // value, which is only guaranteed to be non-negative for semantically verified
+        // transactions, and this method is also called on blocks that have not been through the
+        // transaction verifier.
+        let height = self.coinbase_height();
+        let needs_fees =
+            height.is_some_and(|height| subsidy::nsm_value_balance_is_tracked(height, network));
 
-        Ok(*tx_pool_sum
-            .neg()
-            .set_deferred_amount(deferred_pool_balance_change.value()))
+        let (tx_pool_sum, transaction_fees) = self.transactions.iter().try_fold(
+            (
+                ValueBalance::<NegativeAllowed>::zero(),
+                Amount::<NonNegative>::zero(),
+            ),
+            |(pool_sum, fees), tx| {
+                let value_balance = tx.value_balance(utxos)?;
+
+                // The coinbase transaction consumes the fees rather than paying them, so it is
+                // excluded from the total, exactly as in the block verifier's miner fee sum.
+                let fees = if needs_fees && !tx.is_coinbase() {
+                    let fee = value_balance
+                        .remaining_transaction_value()
+                        .map_err(ValueBalanceError::Total)?;
+
+                    (fees + fee).map_err(ValueBalanceError::Total)?
+                } else {
+                    fees
+                };
+
+                Ok::<_, ValueBalanceError>(((pool_sum + value_balance)?, fees))
+            },
+        )?;
+
+        let mut chain_value_pool_change = tx_pool_sum.neg();
+        chain_value_pool_change.set_deferred_amount(deferred_pool_balance_change.value());
+        if height == Some(Height::MIN) {
+            chain_value_pool_change.set_transparent_value_balance(ValueBalance::zero());
+        }
+
+        if let Some(height) = height {
+            chain_value_pool_change.set_nsm_amount(
+                subsidy::nsm_value_balance_change(
+                    height,
+                    network,
+                    previous_value_pools,
+                    transaction_fees,
+                )
+                .map_err(ValueBalanceError::Nsm)?,
+            );
+        }
+
+        Ok((
+            chain_value_pool_change,
+            needs_fees.then_some(transaction_fees),
+        ))
+    }
+
+    /// Returns the total transaction fees paid by the non-coinbase transactions in this block,
+    /// `TransactionFees(height)` in the [NU7 deployment ZIP][nu7].
+    ///
+    /// From NU7 activation the miner only receives part of them, see
+    /// [`nsm_fee_contribution`](crate::parameters::subsidy::nsm_fee_contribution).
+    ///
+    /// [nu7]: https://github.com/zcash/zips/pull/1363
+    ///
+    /// `utxos` has the same requirements as in [`Block::chain_value_pool_change`].
+    pub fn transaction_fees(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<Amount<NonNegative>, ValueBalanceError> {
+        self.transactions
+            .iter()
+            .filter(|tx| !tx.is_coinbase())
+            .try_fold(Amount::zero(), |fees, tx| {
+                let fee = tx
+                    .value_balance(utxos)?
+                    .remaining_transaction_value()
+                    .map_err(ValueBalanceError::Total)?;
+
+                (fees + fee).map_err(ValueBalanceError::Total)
+            })
     }
 
     /// Compute the root of the authorizing data Merkle tree,

@@ -265,12 +265,15 @@ where
                     (Ok(Err(Box::new((hash, e)))), Some(hash))
                 }
                 Err((txid, elapsed)) => {
-                    // Remove the cancel handle so the spawned task's queued `Gossip`
-                    // doesn't stay resident in `cancel_handles` after a verification
-                    // timeout. Without this, a peer that gets each transaction to
-                    // hit `RATE_LIMIT_DELAY` can leak ~2 MB per tx until OOM.
-                    this.cancel_handles.remove(&txid);
-                    (Err((txid, elapsed)), None)
+                    // Treat a verification timeout as a terminal completion so the
+                    // shared cleanup below removes the `cancel_handles` entry — the
+                    // GHSA-65jj fix, which drops the resident `Gossip` (~2 MB per tx)
+                    // so it can't leak until OOM — and releases the per-peer queue
+                    // slot. A bare handle removal here left the slot pinned, so a
+                    // peer that timed out `MAX_INBOUND_CONCURRENCY_PER_PEER`
+                    // transactions could no longer queue any from that source.
+                    // See #10684.
+                    (Err((txid, elapsed)), Some(txid))
                 }
             };
 

@@ -1,24 +1,141 @@
-# CHANGELOG
+# Changelog
 
-All notable changes to Zebra are documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
+
+This release candidate supports the NU7 network upgrade on Testnet, which
+activates at height 4,465,026, expected around October 6th. Mainnet node
+operators are not required to upgrade. We encourage Testnet operators to run
+this release to test the network upgrade.
+
+This release bumps the major database format version from v28 to v29. Zebra
+moves the existing v28 state to v29 on first start without resyncing, but
+earlier Zebra releases cannot use the v29 database, so downgrading after the
+upgrade requires a full resync. We advise backing up the `state/v28` directory
+in `state.cache_dir` before upgrading.
 
 ### Breaking Changes
 
-- Updated zebrad's mempool transaction downloader for zebra-consensus's transaction-verifier API
-  split: the removed `transaction::Request::Mempool`/`transaction::Response::Mempool` enum
-  variants are replaced by dedicated `transaction::MempoolRequest`/`transaction::MempoolResponse`
-  types. Internal-only; no user-facing or operator-facing behavior change. See zebra-consensus's
-  changelog for the underlying API split
-  ([#11095](https://github.com/ZcashFoundation/zebra/pull/11095)).
-- New `getdeprecationinfo` RPC returning the block height and estimated time at which this
-  release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
-  object is only present on Mainnet, where end of support is enforced
-  ([#11097](https://github.com/ZcashFoundation/zebra/pull/11097)).
+- `getblocktemplate` removes `transactions` and `prevblock` from its advertised `mutable` list, retaining only `time`. Its required coinbase depends on the selected transactions and parent; miners must request a new template instead of changing those independently ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Changed database format to v29.0.0, which adds the NSM value-pool field. Older v28 state is moved into `state/v29`, without resyncing. Retain a v28 backup before upgrading for rollback ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Invalid custom subsidy schedules, funding address periods, and insufficient funding-recipient addresses are now rejected during configuration loading. Previously accepted configurations with early spacing upgrades, such as NU6 at height 1 with the default slow-start interval, can exceed the monetary cap; set `slow_start_interval = 0` for accelerated test networks. Supply enough addresses or explicitly enable funding-address extension when changing upgrade heights. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- Explicitly empty funding-stream lists disable defaults on configured Testnets and survive configuration round-trips, as they already did on Regtest. Testnet and Regtest reject combining an empty list with either legacy funding field; remove both legacy fields to disable streams, or omit the empty list to retain legacy payouts. Omitted settings retain network defaults, and legacy post-NU6 streams use post-NU6 defaults independently of the pre-NU6 field. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Incompatible configured Testnets reject public Testnet magic even when public seeds are omitted. Public seed matching now ignores hostname case, trailing dots, and ports. Configure distinct `network_magic` and non-public peers for incompatible consensus rules. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Custom Testnets isolate state, non-finalized backups, and peer caches by network name and wire magic. Existing unsuffixed custom-network caches are not reused: resynchronize after upgrading. Reserved names are case-insensitive; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Public and custom Testnet mining now requires synchronization. Unlike Mainnet, a synchronized Testnet can resume mining from a tip older than 125 minutes. Networks with Proof-of-Work disabled bypass synchronization and freshness checks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- Custom networks with nonzero genesis transparent outputs exclude those unspendable outputs from issued supply. Rebuild any existing state created with the old accounting; public-network genesis balances are unchanged ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Activate NU7 on public Testnet at height 4,465,026. The adjusted third halving is at 4,497,948, and NSM reissuance begins at 7,305,222. Explicit public-Testnet activation schedules without NU7 and the old funding-stream end height 4,476,000 are rejected; remove those consensus overrides from `[network.testnet_parameters]` to inherit the updated public defaults. Custom networks must use distinct `network_magic` and non-public peers. No Mainnet activation height is set yet ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- Reject Testnet and Regtest funding-stream configurations whose nonempty height ranges overlap after NU7 defaults are applied. Use disjoint ranges; adjacent and empty ranges are accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- Reject TEX funding-stream recipients on Testnet and Regtest before startup rather than failing when mining a coinbase. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+
+### Added
+
+- From NU7 activation, [ZIP 235](https://zips.z.cash/zip-0235) moves 60% of each block's transaction fees, rounded down, into the Network Sustainability Mechanism (NSM) reserve. Coinbase transactions can only claim the remaining fees, and `getblocktemplate` builds its coinbase accordingly; mining software that builds its own coinbase must apply the same split. The withheld fees are not part of `chainSupply` in `getblockchaininfo` and `getblock` ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487)).
+- [ZIP 237](https://zips.z.cash/zip-0237) halving-preserving NU7 issuance: from the configured NSM reissuance height, each block reissues a fraction of the parent NSM reserve, rounded up, in addition to its scheduled subsidy. Mainnet activation and reissuance heights remain unassigned ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `initial_nsm_value_balance` and `nsm_reissuance_height` are available under `[network.testnet_parameters]` for Regtest and configured Testnets. The configured initial balance, in zatoshis, is seeded at NU7 activation. Omitting the reissuance height uses ZIP 237's scheduled-issuance crossover; set an explicit height for accelerated testing ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getblock` accepts verbosity 3, which adds a `prevout` object (`generated`, `height`, `value` and `scriptPubKey`) to each transparent input and a `fee` field to each non-coinbase transaction, matching Bitcoin Core ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472)).
+
+### Changed
+
+- [ZIP 259](https://zips.z.cash/zip-0259) NU7 peer-version checks require 170180 on Testnet and Regtest and 170190 on Mainnet, so from NU7 activation on Testnet, Zebra disconnects peers that advertise an earlier version, including Zebra 6.x. Zebra now advertises 170180, up from 170160, until a Mainnet activation height is scheduled. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- [ZIP 218](https://zips.z.cash/zip-0218) NU7 difficulty adjustment averages the last 102 blocks instead of 17. On Testnet, the minimum-difficulty rule uses eighteen 25-second target spacings from NU7 instead of six 75-second spacings, so it still requires a gap of more than 450 seconds, under the approved amendment in [zips#1382](https://github.com/zcash/zips/pull/1382). ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- `getnetworksolps` selects the 17- or 102-block averaging window for nonpositive block counts using the effective height in the same state snapshot, including requests above the current tip ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `getblocktemplate` reports the negative collected miner fees in `coinbasetxn.fee`, excluding the NSM contribution from NU7 onward. Non-coinbase transaction fees remain gross ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- Configured networks calculate first-halving heights with the slow-start shift applied once, including halvings before Blossom ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Configured networks must include fixed lockbox disbursements even when the block subsidy is zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getnetworksolps` returns an RPC error instead of panicking when the estimated solution rate exceeds its supported integer range ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Chain-tip height estimates correctly cross block-spacing upgrades when estimating earlier or later timestamps, including fractional times before the known tip ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Block templates honor network-specific median-time rules and the local two-hour future limit, including cached and on-demand work after clock rollback. Cached Testnet difficulty respects the candidate-height rules, and empty timestamp ranges return an error. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- Custom-network configurations reject out-of-order explicit upgrade heights even when equal heights previously hid the mismatch. Configure upgrades in nondecreasing height order ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527)).
+- Regtest configurations preserve coincident upgrade activation heights when serialized and loaded again, rather than moving early upgrades to default heights ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527)).
+- `getblocktemplate.transactions[].depends` lists the 1-based positions of each transaction's parents in the returned template, instead of always being empty ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- NU7 uses ZIP 218's 25-second target block spacing and triples the remaining halving intervals, dividing scheduled block rewards by three to preserve issuance per unit of time. ZIP 207 likewise triples the remaining partial funding-address period, then uses 105,000-block periods on the public schedule. Canonical ZIP 214 revision-2 streams active at NU7 end at the adjusted third halving; expired streams remain expired and explicit custom ranges are preserved ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- NU7 enforces ZIP 218 limits of 330 actions per Orchard or Ironwood pool, 300 Sapling inputs plus outputs, and zero Sprout JoinSplits per block. Orchard actions + Ironwood actions + Sapling inputs and outputs + twice the JoinSplit count share a global budget of 330 ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Regtest skips public DNS seeders before resolving initial peers, while retaining explicitly configured local peers. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Coinbase transactions that finish building after the chain tip moves no longer evict the cached coinbases for the new tip, so miners with a shielded coinbase address avoid repeating coinbase proofs ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getblocksubsidy` rejects heights above the consensus limit before reading state or computing subsidy. ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530))
+- [ZIP 2008](https://zips.z.cash/zip-2008) rotates the Mainnet FPF recipient from `t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow` to the P2PKH address `t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG` at the first address period after the period containing the last pre-NU7 block. Funding-output validation accepts the assigned P2PKH recipient. Mainnet NU7 activation remains unassigned. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- From NU7, mempool admission rejects transactions that individually exceed a ZIP 218 shielded block budget before state lookup or proof verification, without penalizing the sending peer ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- NU7 seeds the public Mainnet and Testnet reserves with their historical pre-NU6 shortfalls: 36,858,445,520 and 55,768,414,957 zatoshis. Renaming Testnet or changing its checkpoints preserves the omitted seed with public Testnet magic. Explicitly matching that seed leaves network identity and state paths unchanged. Regtest and private networks with distinct magic default to zero; an isolated chain copied from public Testnet must configure its historical seed explicitly ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Return an invalid-parameter error for malformed Orchard receivers in `z_listunifiedreceivers` rather than returning an unusable address ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `getstandardfee` on Mainnet reports 5000 zatoshis per logical action until the next block is at height 3,590,000, and 1000 from then on, following the deployment schedule in [zcash/zips#1352](https://github.com/zcash/zips/pull/1352), so wallets switch to the lower fee together after nodes that drop it reach end of support. Test networks report 1000 at every height, as Zebra 6.4 did on every network. The mempool still accepts 1000 zatoshis per logical action ([#11557](https://github.com/ZcashFoundation/zebra/pull/11557)).
+
+### Fixed
+
+- Mempool peers are no longer penalized for relaying transactions with the previous or next network upgrade's consensus branch ID within about 50 minutes of any activation height, including NU7 on Testnet. Zebra 6.x applied this grace only around NU6.3 ([#11100](https://github.com/ZcashFoundation/zebra/issues/11100), [#11563](https://github.com/ZcashFoundation/zebra/pull/11563)).
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@conradoplg, @judah-caruso, @oxarbitrage, @robustfengbin, @upbqdn and @yagop
+
+## [Zebra 6.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.2) - 2026-09-25
+
+### Security
+
+- Fix a remotely triggerable denial of service when processing malformed V6 transactions ([GHSA-h5rr-8pqv-grp9](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h5rr-8pqv-grp9)). Originally reported by Google OSS-Fuzz; independently re-discovered by @v12security and @SphereDonout.
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@jvff
+
+## [Zebra 6.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.1) - 2026-09-23
+
+### Fixed
+
+- The syncer no longer stalls permanently after a sync restart near the chain tip. Zebra 6.4.0 started treating blocks queued for their parent as already downloaded, so once a restart cancelled the parent's download, every later attempt to obtain new tips failed with "queued download of hash behind our chain tip" until Zebra was restarted.
+
+## [Zebra 6.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.4.0) - 2026-09-23
+
+### Added
+
+- Add metrics `zcash.pool.value.zatoshis` (labeled by pool name) and `zcash.pool.notes.created` (labeled by pool name) reporting value pool balances in zatoshis and note commitment counts at the non-finalized chain tip ([#11391](https://github.com/ZcashFoundation/zebra/pull/11391))
+- Zebra can now serve Zcash light clients directly: a new experimental gRPC server implements the lightwalletd `CompactTxStreamer` interface, enabled by setting `rpc.lightwalletd_listen_addr` in the config ([#10953](https://github.com/ZcashFoundation/zebra/pull/10953)).
+
+### Changed
+
+- `rpc.max_response_body_size` is now limited to 4,294,967,295 bytes. Configurations with larger values must reduce the limit; they are rejected during configuration loading instead of causing an RPC server startup panic ([#11259](https://github.com/ZcashFoundation/zebra/pull/11259)).
+- Updated the `nix` dependency to 0.31 ([#11267](https://github.com/ZcashFoundation/zebra/pull/11267)).
+- Block template construction now caps the ZIP-317 fee weight ratio at 10 instead of 4, widening the priority lane for transactions that pay more than their conventional fee ([#11290](https://github.com/ZcashFoundation/zebra/pull/11290)).
+- Zebra no longer includes the unmaintained `ordered-map` crate or its legacy `quickcheck` 0.9 and `rand` 0.7 dependency subtree ([#10516](https://github.com/ZcashFoundation/zebra/issues/10516)).
+- Peer connection limiting is now applied per IPv6 `/64` subnet instead of per individual IPv6 address, so one machine can no longer bypass `network.max_connections_per_ip` by connecting from many addresses in the same `/64` allocation. IPv4 connections are unchanged, and are still limited per address ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+- The `getblocktemplate` RPC uses a precomputed block template for the current chain tip when one is available, rather than assembling one while the miner waits. Zebra precomputes templates when a miner address is configured and either the RPC server or the internal miner is enabled, refreshing them on chain tip changes and every few seconds, so a template can be a few seconds behind the mempool, but each template is checked against the committed tip. Cached work is also refreshed when Testnet difficulty becomes easier. Tip changes do not accumulate unfinished coinbase proofs ([#11370](https://github.com/ZcashFoundation/zebra/issues/11370)).
+- Peer bans now expire after 24 hours instead of lasting until Zebra restarts, so a peer banned by mistake — or one sharing an IPv6 `/64` with a misbehaving peer — is not shut out permanently ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+- When two competing chains have equal cumulative work, Zebra now prefers the chain whose tip block it received first, as specified by the Zcash protocol, instead of the chain with the greater tip block hash ([#11341](https://github.com/ZcashFoundation/zebra/pull/11341)).
+- The mempool now accepts transactions that pay at least 1000 zatoshis per ZIP-317 logical action instead of 5000 (2000 instead of 10000 for a minimal transaction), block template weights follow the new conventional fee, and `getstandardfee` reports 1000, per [zcash/zips#1352](https://github.com/zcash/zips/pull/1352) ([#11290](https://github.com/ZcashFoundation/zebra/pull/11290)).
+- The end-of-support halt time is now 12 weeks instead of 15 weeks, moving this release's halt to early November 2026 ([#11491](https://github.com/ZcashFoundation/zebra/pull/11491)).
+- Zebra caches Orchard, Ironwood, and Sapling bundle verification results, so a proof or signature verified when its transaction entered the mempool is not verified again when the block that mines it arrives. The cache is reported by the new `zebra.consensus.cache.*` metrics ([#11380](https://github.com/ZcashFoundation/zebra/pull/11380)).
+
+### Fixed
+
+- Zebra no longer runs a shielded coinbase proof for each outstanding `getblocktemplate` long poll when the configured miner address has a shielded component ([#10747](https://github.com/ZcashFoundation/zebra/issues/10747)).
+- The syncer no longer restarts when a block's transparent input lookup times out near the tip, or when the short post-checkpoint verify timeout fires. Both are transient UTXO races, and restarting cancelled the in-flight parent commit, causing a sync restart loop ([#11168](https://github.com/ZcashFoundation/zebra/issues/11168), [#11132](https://github.com/ZcashFoundation/zebra/issues/11132)).
+- The `zcashd_source = "embedded"` sidecar is now pinned to `zebra-compat-v1.2.0`, which raises the zcashd reorg limit from 99 to 1000 blocks to match Zebra's `MAX_BLOCK_REORG_HEIGHT`. The previous `zebra-compat-v1.1.0` sidecar shut itself down on any reorg deeper than 99 blocks while Zebra kept following the chain. Wallets holding shielded notes should expect the witness cache and `wallet.dat` to grow roughly 10x, reached gradually over about 900 blocks ([#11403](https://github.com/ZcashFoundation/zebra/issues/11403)).
+- The `docker-split-containers` mode of `scripts/install-zebra.sh` now prints a zcashd container command that can run. It defaulted to a zcashd Docker image that was never published; it now runs the hash-pinned sidecar `zcashd` from the Zebra image, downloading and verifying the binary on the host and bind-mounting it in. Pass `--zcashd-docker-image IMAGE` to use your own image instead ([#11413](https://github.com/ZcashFoundation/zebra/pull/11413)).
+- Build `librocksdb-sys` with bindgen's `runtime` feature, so libclang loads correctly when more than one bindgen version is resolved ([#11444](https://github.com/ZcashFoundation/zebra/pull/11444)).
+- `z_gettreestate` no longer returns null commitments for a block it found when a concurrent reorg moves that block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).
+- The mempool now frees a peer's download slot when a transaction from that peer times out during verification. Before, each timeout permanently used up one of the peer's slots, until the mempool rejected every further transaction from that peer as a full queue ([#11229](https://github.com/ZcashFoundation/zebra/pull/11229)).
+- The mempool no longer fails when nothing is subscribed to its change feed. Having no subscribers is normal, since the consumers of that feed are optional ([#11209](https://github.com/ZcashFoundation/zebra/pull/11209)).
+
+### Security
+
+- Score misbehavior for peers that advertise a block containing duplicate transactions, matching the treatment of the other definitive block-validity violations ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
+- Penalize coinbase scriptSig rewrite in inbound path ([GHSA-4f6v-mj46-gxg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4f6v-mj46-gxg3)). Thanks to @craftsoldier for reporting the issue.
+
+- Misbehaving peers can no longer avoid being banned by reconnecting from a different address in the same IPv6 `/64` allocation: bans now apply to the whole peer group ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+- The syncer no longer restarts its sync round when a peer serves a block body whose authorizing data does not match the header commitment. The failure was an ordinary `Invalid` verification error, so it cancelled the round and idled the syncer for `SYNC_RESTART_DELAY`, and the block hash was dropped instead of being re-requested. The hash is canonical and only the served body was forged, so the syncer now continues the round and re-requests the body from another peer, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Blocks the state rejects because they were queued behind a forged body are re-requested the same way, without scoring the peers that served them ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@Bortlesboat, @CodeMongerrr, @LarryRuane, @alchemydc, @andres-pcg, @aphelionz, @arya2, @conradoplg, @craftsoldier, @evan-forbes, @gustavovalverde, @jiehuo100net, @john-lawniczak, @mpguerra, @natalieesk, @oxarbitrage, @questfever, @robustfengbin, @str4d, @syszery and @upbqdn
+
+## [Zebra 6.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v6.3.0) - 2026-08-10
 
 ### Added
 
@@ -27,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Prometheus metrics now separate peer connection attempts and terminal outcomes by network,
   direction, address family, lifecycle stage, and bounded outcome. Version-message metrics also
   report the bounded self-reported implementation class without using peer IPs or raw user agents
-  as labels.
+  as labels ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 - New `getdeprecationinfo` RPC returning the block height and estimated time at which this
   release will halt for end of support, in zcashd's `end_of_service` format. The `end_of_service`
   object is only present on Mainnet, where end of support is enforced
@@ -39,7 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `FindBlocks` response, allowing nodes near the chain tip to continue advancing
   ([#11165](https://github.com/ZcashFoundation/zebra/pull/11165)).
 - Peer-set, crawler-handshake, and address-book gauges now include a `network` label, so Mainnet
-  and Testnet values no longer overwrite each other in processes that run both networks.
+  and Testnet values no longer overwrite each other in processes that run both networks
+  ([#11135](https://github.com/ZcashFoundation/zebra/pull/11135)).
 
 ### Fixed
 
@@ -50,14 +168,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - `getblocksubsidy` now returns NU6-era funding stream metadata (recipient names and
   specification URLs) for NU6.1 and later upgrades. Amounts and addresses were never
   affected ([#11172](https://github.com/ZcashFoundation/zebra/pull/11172)).
-
 - Reject blocks whose total chain value pool balance would exceed `MAX_MONEY`,
   enforcing the cap on the total monetary base
-  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817))
+  ([#10817](https://github.com/ZcashFoundation/zebra/pull/10817)).
 - Banning a misbehaving peer now removes every address book entry for that IP, and a banned IP is
   never selected as a reconnection candidate. Previously an entry on a different port could survive
   the ban and occupy the first candidate slot until the node restarted
-  ([#11134](https://github.com/ZcashFoundation/zebra/issues/11134)).
+  ([#11173](https://github.com/ZcashFoundation/zebra/pull/11173)).
 
 ### Security
 
@@ -66,7 +183,23 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   IPv4 address. Previously the mapped address became the peer set key, so a ban issued for that
   peer's IPv4 address did not disconnect it while it stayed connected, and the same peer counted
   twice towards the per-IP inbound connection limit
-  ([#10695](https://github.com/ZcashFoundation/zebra/issues/10695)).
+  ([#11129](https://github.com/ZcashFoundation/zebra/pull/11129)).
+- Prevent a peer from delaying tip discovery by answering a block download with a canonical header
+  and a rewritten coinbase height. Zebra now re-requests the hash immediately instead of waiting for
+  a later sync round to rediscover it, and scores the peer when a parent block Zebra already holds
+  proves the claimed height wrong
+  ([GHSA-g95h-hw6g-pvgv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g95h-hw6g-pvgv)).
+  Thanks to @zakura-security for reporting the issue.
+- Blocks above the sync lookahead height limit no longer score the peer that served
+  them, since that request is routed to an unrelated honest peer — scoring it let a
+  malicious `FindBlocks` responder get honest peers banned during initial block
+  download
+  ([GHSA-qhr3-cvch-5fh2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qhr3-cvch-5fh2)).
+- Peers that gossip consensus-invalid blocks are scored for misbehavior again. The inbound
+  download cleanup only recognized `VerifyBlockError`, but the gossiped block verifier is a
+  `BlockVerifierRouter`, which returns `RouterError`, so no score was ever applied and such
+  peers were never banned
+  ([GHSA-8hh2-hrf2-cqf4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8hh2-hrf2-cqf4)).
 
 ## [Zebra 6.2.3](https://github.com/ZcashFoundation/zebra/releases/tag/v6.2.3) - 2026-07-27
 

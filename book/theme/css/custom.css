@@ -21,3 +21,37 @@ h5,
 h6 {
   display: inline-block;
 }
+
+/* Opt-in button for the docs assistant, rendered by book/lens-init.js. It
+   stands in for the vendor's own launcher until a reader asks for it, so that
+   nothing is requested from the vendor on a plain page view. */
+#lens-opt-in {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 1000;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--sidebar-non-existant, #ccc);
+    border-radius: 999px;
+    background: var(--sidebar-bg, #fafafa);
+    color: var(--sidebar-fg, #333);
+    font-size: 0.85rem;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+#lens-opt-in:hover:not(:disabled) {
+    color: var(--sidebar-active, #1f75fe);
+}
+
+#lens-opt-in:disabled {
+    cursor: default;
+    opacity: 0.7;
+}
+
+@media (max-width: 1080px) {
+    #lens-opt-in {
+        right: 0.75rem;
+        bottom: 0.75rem;
+    }
+}

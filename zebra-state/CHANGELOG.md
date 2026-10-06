@@ -1,18 +1,72 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [15.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- The state uses database format v29.0.0. Its registered upgrade automatically moves compatible v28 state into `state/v29` when no v29 database exists, without a resync or record migration. Legacy 48-byte value-pool and 52-byte block-info records remain readable with a zero NSM balance; new writes use 56 and 60 bytes. New block-info records append NSM after the existing pool-and-size prefix. Direct database readers must use a v29-compatible `zebra-state` dependency and be upgraded with the writer; v28 readers cannot read the wider records. Retain a v28 backup before upgrading for rollback: disabling `state.delete_old_database` does not preserve the directory that the upgrade moves. Manual directory renames are not a substitute for the supported upgrade. The public `zebra_state::IntoDisk::Bytes` associated type changes from `Vec<u8>` to `[u8; 60]` for `zebra_chain::block_info::BlockInfo`, and from `[u8; 48]` to `[u8; 56]` for `zebra_chain::value_balance::ValueBalance<NonNegative>`. The NSM reserve is seeded once at NU7 activation, persisted with each block, and excluded from issued supply. `GetBlockTemplateChainInfo::chain_value_pools` is now unconditional; update struct literals. Contextual invalid-subsidy errors score the sending peer 100 ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `ContextuallyVerifiedBlock::with_block_and_spent_utxos` now also requires the network and parent chain value pools. It performs accounting, not coinbase payout validation; callers must separately apply the contextual subsidy checks. Deferred-pool calculation propagates subsidy errors through `ValidateContextError::InvalidSubsidy` rather than substituting zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `ReadRequest::SolutionRate::num_blocks` is now `Option<usize>`: use `Some` for an explicit window or `None` to select the consensus averaging window after the requested height is clamped to the snapshotted tip ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `Config::{db_path, non_finalized_state_backup_dir}` include configured Testnet wire magic in storage namespaces. Resynchronize existing custom Testnets; Mainnet, public Testnet, and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `ReadRequest` and `ReadResponse`, which are not `#[non_exhaustive]`, gain `SpentOutputs` variants that return the transparent outputs spent by a block's non-coinbase inputs. Consumers that match on them exhaustively must handle the new variants. ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472))
+- Updated `sapling-crypto` to 0.9, whose `Node` appears in `ReadResponse::SaplingSubtrees` ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
+### Changed
+
+- From NU7 activation, the state credits the NSM with 60% of aggregate transaction fees, rounded down. From the configured NSM reissuance height, contextual payout validation uses the exact parent reserve and rejects coinbases that claim the withheld fees ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- [ZIP 218](https://zips.z.cash/zip-0218) widens the difficulty averaging window from 17 to 102 blocks at NU7 ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `ReadRequest::ChainInfo` bounds timestamps by network-specific median-time rules and the local two-hour future limit, rejecting empty ranges. Testnet minimum-difficulty timestamps follow the candidate upgrade: six target spacings before NU7 and eighteen from NU7, requiring a gap strictly greater than 450 seconds under the approved amendment in [zips#1382](https://github.com/zcash/zips/pull/1382). Templates retain standard difficulty when the threshold exceeds the timestamp representation ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+
+## [14.0.0] - 2026-09-23
+
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in this crate's public API ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed the `UpdateWith` implementations for Sprout, Sapling, Orchard and Ironwood shielded data. Nullifier bookkeeping happens directly in `Chain::update_chain_tip_with_block_except_trees` and its revert path, so those implementations were an unused second copy ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- `ReadRequest::UtxosByAddresses` is now a struct variant, taking a `height_range` and an optional `max_entries` alongside the addresses. Both bound the index scan, so the work the query does is set by what the caller asks for rather than by the size of the addresses' UTXO sets ([#11239](https://github.com/ZcashFoundation/zebra/issues/11239)).
+- `ReadRequest`, which is not `#[non_exhaustive]`, gains the `AnyChainSaplingTree`, `AnyChainOrchardTree` and `AnyChainIronwoodTree` variants. Consumers that match on `ReadRequest` exhaustively must handle them ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).
+- `SemanticallyVerifiedBlock` gains a public `received_time: Option<Instant>` field, the local time the block verifier received the block. Code constructing it literally must set it; use `None` for blocks that did not pass through the block verifier ([#11341](https://github.com/ZcashFoundation/zebra/pull/11341)).
+
+### Added
+
+- `NonFinalizedState` now reports `zcash.pool.value.zatoshis` and `zcash.pool.notes.created` gauges, labeled by pool `name`, for the best chain tip rather than the finalized state ([#11391](https://github.com/ZcashFoundation/zebra/pull/11391)).
+- `ReadRequest::AnyChainSaplingTree`, `ReadRequest::AnyChainOrchardTree` and `ReadRequest::AnyChainIronwoodTree`, which look up a note commitment treestate by block hash in every non-finalized chain before falling back to the finalized state, like `ReadRequest::AnyChainBlock`. They stay correct when a reorg moves the block onto a side chain ([#10820](https://github.com/ZcashFoundation/zebra/pull/10820)).
+- `ValidateContextError::is_auth_commitment_mismatch()`, which reports whether a block was rejected because its authorizing data does not match its header commitment. It is a dedicated predicate rather than a `misbehavior_score()` test, so callers are not coupled to scoring policy. Also `ValidateContextError::AncestorRejected`, which the state now returns for a queued block whose ancestor failed contextual validation, instead of a copy of the ancestor's error, with `ValidateContextError::for_descendant()` to build it, and `is_descendant_of_auth_commitment_mismatch()` on `ValidateContextError` and `CommitBlockError`.
+- The concrete error type `AwaitUtxoError` for handling failed `AwaitUtxo` state requests ([#11205](https://github.com/ZcashFoundation/zebra/pull/11205)).
+- `AwaitUtxoRequest`, which implements `MappedRequest` for `Request::AwaitUtxo` ([#11205](https://github.com/ZcashFoundation/zebra/pull/11205)).
+
+### Changed
+
+- Best-chain selection among non-finalized chains with equal cumulative work now prefers the chain whose tip block was received first, per the Zcash protocol specification ("To break ties between leaf blocks, a node will prefer the block that it received first"), with the tip block hash as the final tie-breaker. The block verifier stamps each block's receipt time, and the non-finalized `Chain` tracks its tip's stamp for the comparison ([#11341](https://github.com/ZcashFoundation/zebra/pull/11341)).
+
+### Fixed
+
+- `NonFinalizedBlocksListener` no longer sends blocks that several non-finalized chains share once per chain. Forks share every block below their fork point, so an initial send could queue up to `MAX_NON_FINALIZED_CHAIN_FORKS` copies of a chain up to `MAX_BLOCK_REORG_HEIGHT` blocks long, overflowing the channel buffer ([#11265](https://github.com/ZcashFoundation/zebra/issues/11265)).
+- The non-finalized transparent `received` total (served by `getaddressbalance`) now saturates instead of overflowing. An address with enough non-finalized self-transfer churn could push its cumulative `received` counter past `u64::MAX`, panicking in debug builds and wrapping in release builds; it now matches the finalized path's saturating accounting ([#10556](https://github.com/ZcashFoundation/zebra/issues/10556)).
+
+### Security
+
+- A peer that serves a block whose authorizing data does not match its header commitment is now scored at the ban threshold. From NU5 onward the block hash and merkle root commit to transaction effects but not to authorizing data (ZIP-244), so a peer could reuse a canonical header with a forged body and keep the block hash unchanged. Such a body is only rejected by the contextual `hashBlockCommitments` check, whose suggested misbehaviour score was hard-coded to 0, so the peer was never scored and could repeat the forgery for free. `InvalidChainHistoryBlockTxAuthCommitment` now scores 100; every other contextual error keeps a score of 0, because it does not prove the serving peer misbehaved. Blocks queued behind a forged body are rejected with a distinct `AncestorRejected` error that scores 0, so the honest peers that served them are not banned along with the forger ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
+
+## [13.0.0] - 2026-08-10
+
+### Breaking Changes
+
+- Requires `zebra-chain` 12.0.0 and `zebra-node-services` 10.0.0, whose types and service traits
+  appear in this crate's public API.
 
 ### Fixed
 
 - `init_read_only()` now returns `StateInitError::ReadOnlyEphemeralConflict` for a config with
   `ephemeral = true`, even when the configured `cache_dir` is missing or unreadable. Previously the
   cache directory was checked first, so this configuration error surfaced as
-  `StateInitError::ReadOnlyCacheDirUnreadable`.
+  `StateInitError::ReadOnlyCacheDirUnreadable`
+  ([#11146](https://github.com/ZcashFoundation/zebra/pull/11146)).
 
 ## [12.0.1] - 2026-07-27
 

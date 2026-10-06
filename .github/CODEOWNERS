@@ -35,7 +35,6 @@
 
 # Devops Code
 # /.github/workflows/                     @ZcashFoundation/devops-reviewers
-# /.github/mergify.yml                    @ZcashFoundation/devops-reviewers
 # /docker/                                @ZcashFoundation/devops-reviewers
 # cloudbuild.yaml                         @ZcashFoundation/devops-reviewers
 # codecov.yml                             @ZcashFoundation/devops-reviewers

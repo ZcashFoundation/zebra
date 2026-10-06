@@ -155,6 +155,7 @@ pub mod constants;
 
 mod address_book;
 mod address_book_updater;
+mod ban_list;
 mod connection_metrics;
 mod isolated;
 mod meta_addr;
@@ -162,7 +163,12 @@ mod peer;
 mod peer_cache_updater;
 mod peer_set;
 mod policies;
+// Fuzzing switch: expose `protocol::external` (Codec/Message) to the p2p fuzz
+// harnesses. Private in normal builds; public only under `fuzzing`.
+#[cfg(not(feature = "fuzzing"))]
 mod protocol;
+#[cfg(feature = "fuzzing")]
+pub mod protocol;
 
 #[allow(unused)]
 pub(crate) use peer_set::PeerSet;
@@ -184,6 +190,7 @@ pub use crate::{
 pub use crate::{
     address_book::AddressBook,
     address_book_peers::AddressBookPeers,
+    ban_list::BanList,
     config::{CacheDir, Config},
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
