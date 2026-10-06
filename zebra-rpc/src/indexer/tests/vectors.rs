@@ -1,6 +1,6 @@
 //! Fixed test vectors for indexer RPCs
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -12,13 +12,15 @@ use zebra_chain::{
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
-use zebra_state::{HashOrHeight, ReadRequest, ReadResponse};
+use zebra_state::{HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
 };
 
-use crate::indexer::{self, indexer_client::IndexerClient, BlockRequest, Empty};
+use crate::indexer::{
+    self, indexer_client::IndexerClient, BlockRequest, Empty, NonFinalizedStateChangeRequest,
+};
 
 #[tokio::test]
 async fn rpc_server_spawn() -> Result<()> {
@@ -34,7 +36,84 @@ async fn rpc_server_spawn() -> Result<()> {
 
     test_chain_tip_change(client.clone(), mock_chain_tip_sender).await?;
     test_mempool_change(client.clone(), mempool_transaction_sender).await?;
-    test_get_block(client.clone(), mock_read_service).await?;
+    test_get_block(client.clone(), mock_read_service.clone()).await?;
+    test_non_finalized_state_change(client.clone(), mock_read_service).await?;
+
+    Ok(())
+}
+
+/// Tests that `NonFinalizedStateChange` streams every buffered block when the listener channel is
+/// already full as the subscription starts.
+///
+/// A full listener buffer is ordinary backpressure: the state side fills it while sending the
+/// initial dump of the non-finalized state, faster than the consumer can serialize blocks onto the
+/// wire. Treating it as a dead consumer drops the subscription on connect, and the client then
+/// re-subscribes into the same condition.
+async fn test_non_finalized_state_change(
+    client: IndexerClient<tonic::transport::Channel>,
+    mut mock_read_service: MockService<ReadRequest, ReadResponse, PanicAssertion, BoxError>,
+) -> Result<()> {
+    let blocks: Vec<Arc<Block>> = [
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_3_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_4_BYTES[..],
+    ]
+    .into_iter()
+    .map(|bytes| bytes.zcash_deserialize_into())
+    .collect::<std::result::Result<_, _>>()?;
+
+    // Fill the listener channel to capacity, like the state side does when the non-finalized state
+    // has more blocks than the buffer has slots.
+    let (sender, receiver) = tokio::sync::mpsc::channel(blocks.len());
+    for block in &blocks {
+        sender
+            .try_send((block.hash(), block.clone()))
+            .expect("channel has one slot per block");
+    }
+    assert_eq!(
+        receiver.capacity(),
+        0,
+        "the listener buffer should be full before the subscription starts"
+    );
+
+    let mut request_client = client.clone();
+    let request_task = tokio::spawn(async move {
+        request_client
+            .non_finalized_state_change(tonic::Request::new(NonFinalizedStateChangeRequest {
+                chain_tip_hashes: Vec::new(),
+            }))
+            .await
+    });
+
+    mock_read_service
+        .expect_request(ReadRequest::NonFinalizedBlocksListener {
+            known_chain_tips: HashSet::new(),
+        })
+        .await
+        .respond(ReadResponse::NonFinalizedBlocksListener(
+            NonFinalizedBlocksListener(Arc::new(receiver)),
+        ));
+
+    let mut response = request_task
+        .await?
+        .expect("non_finalized_state_change should succeed")
+        .into_inner();
+
+    for block in &blocks {
+        let message = tokio::time::timeout(Duration::from_secs(3), response.next())
+            .await
+            .expect("should receive a non-finalized block before timeout")
+            .expect("response stream should not end while blocks are buffered")
+            .expect("non-finalized state change response should not be an error message");
+
+        let (_decoded_block, decoded_hash) = message.decode().expect("response should decode");
+        assert_eq!(decoded_hash, block.hash());
+    }
+
+    // Keep the state side of the channel open until every block has been received, so the stream
+    // can only end early because the subscription was dropped.
+    drop(sender);
 
     Ok(())
 }

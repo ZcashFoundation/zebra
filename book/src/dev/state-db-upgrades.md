@@ -144,9 +144,31 @@ state against those checkpoints. This checks that the two codepaths produce the 
 
 [upgrades]: #upgrades
 
-For most state upgrades, we want to modify the database format of the existing database. If we
-change the major database version, every user needs to re-download and re-verify all the blocks,
-which can take days.
+For most state upgrades, we want to modify the database format of the existing database.
+Major version changes create a new cache and require a full resync unless a registered
+upgrade supports reusing the previous major version.
+
+The NU7/NSM format is v29. Its registered upgrade automatically reuses compatible v28
+state without resyncing or rewriting existing records. When no v29 database exists,
+the writer moves the v28 network directory into `state/v29`, provided the old state
+is inside `state.cache_dir`. Legacy 48-byte `ValueBalance` and 52-byte `BlockInfo`
+records remain readable with a zero NSM balance; new writes use 56 and 60 bytes.
+The NSM balance follows the existing 52-byte `BlockInfo` prefix, leaving the
+block-size offset unchanged.
+
+Before upgrading, stop Zebra and direct database readers and retain a v28 backup
+outside the active cache for rollback. A v28 reader cannot read the wider records
+written by v29. Setting `state.delete_old_database = false` only disables cleanup;
+it does not preserve the directory that the upgrade moves.
+
+Direct database readers must be upgraded with the writer: Zallet's Zebra backend,
+Zaino's Zebra read-state backend, and other consumers opening Zebra's cache need a
+v29-compatible `zebra-state` dependency. Start the writer before compatible readers;
+read-only instances do not perform the upgrade. Manually renaming or symlinking
+versioned directories is not a substitute for the supported upgrade.
+Integration builds and their binary caches must identify the Zebra revision used
+by each direct reader as well as the writer, rather than matching only the
+downstream application's revision.
 
 ### Writing Blocks to the State
 
@@ -167,7 +189,7 @@ their first experience of Zebra.)
 When Zebra starts up and shuts down (and periodically in CI tests), we run checks on the state
 format. This makes sure that the two codepaths produce the same state on disk.
 
-To reduce code and testing complexity:
+Within a major format version, to reduce code and testing complexity:
 
 - when a previous Zebra version opens a newer state, the entire state is considered to have that lower version, and
 - when a newer Zebra version opens an older state, each required upgrade is run on the entire state.
@@ -180,17 +202,17 @@ Here are the goals of in-place upgrades:
 
 - avoid a full download and rebuild of the state
 - Zebra must be able to upgrade the format from previous minor or patch versions of its disk format
-  (Major disk format versions are breaking changes. They create a new empty state and re-sync the whole chain.)
+  (Major versions are breaking changes, but registered reusable major upgrades avoid a full resync.)
   - this is checked the first time CI runs on a PR with a new state version.
     After the first CI run, the cached state is marked as upgraded, so the upgrade doesn't run
     again. If CI fails on the first run, any cached states with that version should be deleted.
 - the upgrade and full sync formats must be identical
   - this is partially checked by the state validity checks for each upgrade (see above)
-- previous zebra versions should be able to load the new format
+- previous Zebra versions using the same major format should be able to load the new format
   - this is checked by other PRs running using the upgraded cached state, but only if a Rust PR
     runs after the new PR's CI finishes, but before it merges
 - best-effort loading of older supported states by newer Zebra versions
-- best-effort compatibility between newer states and older supported Zebra versions
+- best-effort compatibility between newer states and older supported Zebra versions using the same major format
 
 ### Design Constraints
 
@@ -332,6 +354,7 @@ We use the following rocksdb column families:
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
+| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
 | _Sprout_                           |                        |                               |         |
 | `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
@@ -346,23 +369,31 @@ We use the following rocksdb column families:
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
+| _Ironwood_                         |                        |                               |         |
+| `ironwood_nullifiers`              | `ironwood::Nullifier`  | `()`                          | Create  |
+| `ironwood_anchors`                 | `orchard::tree::Root`  | `()`                          | Create  |
+| `ironwood_note_commitment_tree`    | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
+| `ironwood_note_commitment_subtree` | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | _Chain_                            |                        |                               |         |
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 | `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
 
-With the following additional modifications when compiled with the `indexer` feature:
+With the following additional modifications when compiled with the `indexer` feature
+(the column families themselves are always registered — see `STATE_COLUMN_FAMILIES_IN_CODE`
+in `zebra-state/src/service/finalized_state.rs` — but the nullifier column families store
+these richer values instead of `()`):
 
 | Column Family             | Keys                 | Values                | Changes |
 | ------------------------- | -------------------- | --------------------- | ------- |
-| _Transparent_             |                      |                       |         |
-| `tx_loc_by_spent_out_loc` | `OutputLocation`     | `TransactionLocation` | Create  |
 | _Sprout_                  |                      |                       |         |
 | `sprout_nullifiers`       | `sprout::Nullifier`  | `TransactionLocation` | Create  |
 | _Sapling_                 |                      |                       |         |
 | `sapling_nullifiers`      | `sapling::Nullifier` | `TransactionLocation` | Create  |
 | _Orchard_                 |                      |                       |         |
 | `orchard_nullifiers`      | `orchard::Nullifier` | `TransactionLocation` | Create  |
+| _Ironwood_                |                      |                       |         |
+| `ironwood_nullifiers`     | `ironwood::Nullifier` | `TransactionLocation` | Create |
 
 ### Data Formats
 
@@ -493,7 +524,8 @@ So ReadStateService queries that only access a single key or value will always s
 a consistent view of the database.
 
 If a ReadStateService query only uses column families that have keys and values appended
-(`Never` in the Updates table above), it should ignore extra appended values.
+(`Create` in the Changes column of the tables above — entries are never updated or deleted),
+it should ignore extra appended values.
 Most queries do this by default.
 
 For more complex queries, there are several options:

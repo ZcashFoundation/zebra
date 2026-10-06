@@ -503,10 +503,6 @@ criteria = "safe-to-deploy"
 version = "0.3.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.env_logger]]
-version = "0.7.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.equihash]]
 version = "0.3.0"
 criteria = "safe-to-deploy"
@@ -607,10 +603,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.generic-array]]
 version = "0.14.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.getrandom]]
-version = "0.1.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.getrandom]]
@@ -1083,10 +1075,6 @@ criteria = "safe-to-deploy"
 version = "0.15.0-pre.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.ordered-map]]
-version = "0.4.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.ordered-multimap]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -1263,14 +1251,6 @@ criteria = "safe-to-deploy"
 version = "0.39.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.quickcheck]]
-version = "0.9.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.quickcheck_macros]]
-version = "0.9.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.quinn]]
 version = "0.11.9"
 criteria = "safe-to-deploy"
@@ -1289,22 +1269,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.radium]]
 version = "0.7.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand]]
-version = "0.7.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_chacha]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
-version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_hc]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_xoshiro]]
@@ -1912,10 +1876,6 @@ version = "2.5.0"
 criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
-
-[[exemptions.wasi]]
-version = "0.9.0+wasi-snapshot-preview1"
-criteria = "safe-to-deploy"
 
 [[exemptions.wasi]]
 version = "0.11.0+wasi-snapshot-preview1"

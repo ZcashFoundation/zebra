@@ -54,7 +54,7 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
         let block: Block = bytes.zcash_deserialize_into().expect("valid block");
 
         for tx in &block.transactions {
-            if tx.orchard_shielded_data().is_none() {
+            if !tx.has_orchard_shielded_data() {
                 continue;
             }
 

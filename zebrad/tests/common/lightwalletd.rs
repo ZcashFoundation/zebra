@@ -30,7 +30,7 @@ use super::{
         DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
     config::testdir,
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt},
+    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, LIGHTWALLETD_STARTUP_DELAY},
     sync::SYNC_FINISHED_REGEX,
     test_type::TestType,
 };
@@ -122,14 +122,28 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
         test_type.lightwalletd_failure_messages();
 
+    // Bound the launch check below, so a `lightwalletd` log format change fails quickly instead
+    // of blocking for the full test timeout. Never extend a test's own timeout to do it.
+    let startup_timeout = LIGHTWALLETD_STARTUP_DELAY.min(test_type.lightwalletd_timeout());
+
     let mut lightwalletd = lightwalletd_dir
         .spawn_lightwalletd_child(lightwalletd_state_path, test_type, arguments)?
-        .with_timeout(test_type.lightwalletd_timeout())
+        .with_timeout(startup_timeout)
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
     // Wait until `lightwalletd` has launched.
     // This log happens very quickly, so it is ok to block for a short while here.
-    lightwalletd.expect_stdout_line_matches(regex::escape("Starting gRPC server"))?;
+    //
+    // This must match the first line `lightwalletd` logs: `expect_stdout_line_matches` consumes
+    // every line up to and including the match, so waiting for a later line here silently
+    // swallows the startup logs that callers check for. (lightwalletd v0.4 logged
+    // "Starting gRPC server" before the `getblockchaininfo` response, but v0.5 logs it after,
+    // which made those checks unreachable until they hit the test timeout.)
+    lightwalletd
+        .expect_stdout_line_matches(regex::escape("Starting lightwalletd process version"))?;
+
+    // Now that lightwalletd has launched, restore the full timeout for the rest of the test.
+    let lightwalletd = lightwalletd.with_timeout(test_type.lightwalletd_timeout());
 
     Ok(Some((lightwalletd, lightwalletd_rpc_port)))
 }
@@ -445,7 +459,7 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
         );
 
         // Launch lightwalletd
-        let (mut lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_for_rpc(
+        let (lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_for_rpc(
             network,
             test_name,
             test_type,
@@ -461,6 +475,12 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
         // Check that `lightwalletd` is calling the expected Zebra RPCs
 
         // getblockchaininfo
+        //
+        // This is a startup log, so bound it the same way `spawn_lightwalletd_for_rpc` bounds
+        // the launch log, instead of leaving it on the full test timeout.
+        let mut lightwalletd = lightwalletd
+            .with_timeout(LIGHTWALLETD_STARTUP_DELAY.min(test_type.lightwalletd_timeout()));
+
         if test_type.needs_zebra_cached_state() {
             lightwalletd.expect_stdout_line_matches(
                 "Got sapling height 419200 block height [0-9]{7} chain main branchID [0-9a-f]{8}",
@@ -471,6 +491,10 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
                 "Got sapling height 419200 block height [0-9]{1,6} chain main branchID 00000000",
             ))?;
         }
+
+        // Restore the full timeout: reading a cached lightwalletd state from disk, and waiting
+        // for Zebra to supply the next block, can both take much longer than the launch logs.
+        let mut lightwalletd = lightwalletd.with_timeout(test_type.lightwalletd_timeout());
 
         if test_type.needs_lightwalletd_cached_state() {
             lightwalletd

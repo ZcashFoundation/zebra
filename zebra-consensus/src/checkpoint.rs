@@ -1035,6 +1035,24 @@ impl VerifyCheckpointError {
         }
     }
 
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// See [`zs::ValidateContextError::is_auth_commitment_mismatch()`].
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            VerifyCheckpointError::VerifyBlock(block_error) => {
+                block_error.is_auth_commitment_mismatch()
+            }
+            // Like `is_duplicate_request()`, the boxed `zs::CommitCheckpointVerifiedError`
+            // newtype must be unwrapped to reach the state's classification.
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .is_some_and(|commit_err| commit_err.inner().is_auth_commitment_mismatch()),
+            _ => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).
@@ -1046,6 +1064,14 @@ impl VerifyCheckpointError {
             | VerifyCheckpointError::CoinbaseHeight { .. }
             | VerifyCheckpointError::DuplicateTransaction
             | VerifyCheckpointError::AmountError(_) => 100,
+            // Checkpoint verification only checks the block hash, which doesn't
+            // commit to the authorizing data, so a forged body reaches contextual
+            // validation in the finalized state. Like `is_duplicate_request()`, the
+            // boxed `zs::CommitCheckpointVerifiedError` newtype must be unwrapped
+            // for the state's suggested score to reach the peer that served it.
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .map_or(0, |commit_err| commit_err.inner().misbehavior_score()),
             _other => 0,
         }
     }
@@ -1154,10 +1180,27 @@ where
             } else {
                 result.expect("commit_checkpoint_verified should not panic")
             };
-            if result.is_err() {
-                // If there was an error committing the block, then this verifier
-                // will be out of sync with the state. In that case, reset
-                // its progress back to the state tip.
+            // Only reset the verifier's progress when a block that the verifier
+            // accepted failed to commit to the state. Then the verifier's
+            // progress can be ahead of the state's committed blocks, so it must
+            // be re-aligned to the state tip.
+            //
+            // Other errors are rejections of this specific block (side-chain
+            // fork candidates, duplicates, or invalid block data). They don't
+            // change the committed chain, so the verifier's progress stays in
+            // sync with the state, and resetting would be harmful:
+            //
+            // # Correctness
+            //
+            // Verified checkpoint ranges commit to the state in height order,
+            // so the state tip can temporarily lag the verifier's progress
+            // while a range is still committing. Resetting to that lagging tip
+            // on unrelated errors rewinds the verifier below the last verified
+            // checkpoint. The blocks in between have already been consumed
+            // from the verifier's queue, so verification would stall until
+            // they are submitted again. The syncer re-downloads them, but
+            // other submitters (like the zcashd state migration) don't.
+            if let Err(VerifyCheckpointError::CommitCheckpointVerified(_)) = result {
                 let tip = match state_service
                     .oneshot(zs::Request::Tip)
                     .await

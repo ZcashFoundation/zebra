@@ -181,6 +181,7 @@ impl VerifiedSet {
             self.created_outputs.insert(outpoint, output.clone());
             pending_outputs.respond(&outpoint, output)
         }
+
         self.spent_outpoints.extend(tx.spent_outpoints());
         self.sprout_nullifiers.extend(tx.sprout_nullifiers());
         self.sapling_nullifiers.extend(tx.sapling_nullifiers());
@@ -222,8 +223,7 @@ impl VerifiedSet {
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     #[allow(clippy::unwrap_in_result)]
     pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
-        use rand::distributions::{Distribution, WeightedIndex};
-        use rand::prelude::thread_rng;
+        use rand::distr::{weighted::WeightedIndex, Distribution};
 
         let (keys, weights): (Vec<transaction::Hash>, Vec<u64>) = self
             .transactions
@@ -236,7 +236,7 @@ impl VerifiedSet {
         );
 
         let key_to_remove = keys
-            .get(dist.sample(&mut thread_rng()))
+            .get(dist.sample(&mut rand::rng()))
             .expect("should have a key at every index in the distribution");
 
         // Removes the randomly selected transaction and all of its dependents from the set,
@@ -324,10 +324,9 @@ impl VerifiedSet {
         let tx = &unmined_tx.transaction;
 
         Self::has_conflicts(&self.spent_outpoints, tx.spent_outpoints())
-            || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers().copied())
-            || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers().copied())
-            || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers().copied())
-            // `ironwood_nullifiers()` already yields owned `ironwood::Nullifier`s.
+            || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers())
+            || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers())
+            || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers())
             || Self::has_conflicts(&self.ironwood_nullifiers, tx.ironwood_nullifiers())
     }
 
@@ -344,17 +343,31 @@ impl VerifiedSet {
         }
 
         let spent_outpoints = tx.spent_outpoints().map(Cow::Owned);
-        let sprout_nullifiers = tx.sprout_nullifiers().map(Cow::Borrowed);
-        let sapling_nullifiers = tx.sapling_nullifiers().map(Cow::Borrowed);
-        let orchard_nullifiers = tx.orchard_nullifiers().map(Cow::Borrowed);
-        // `ironwood_nullifiers()` yields owned `ironwood::Nullifier`s, so wrap them as `Cow::Owned`.
-        let ironwood_nullifiers = tx.ironwood_nullifiers().map(Cow::Owned);
+
+        // All the nullifier accessors yield owned nullifiers, so they are wrapped as `Cow::Owned`.
+        // They are collected first so `tx` is no longer borrowed while `self` is mutated.
+        let sprout_nfs: Vec<_> = tx.sprout_nullifiers().collect();
+        let sapling_nfs: Vec<_> = tx.sapling_nullifiers().collect();
+        let orchard_nfs: Vec<_> = tx.orchard_nullifiers().collect();
+        let ironwood_nfs: Vec<_> = tx.ironwood_nullifiers().collect();
 
         Self::remove_from_set(&mut self.spent_outpoints, spent_outpoints);
-        Self::remove_from_set(&mut self.sprout_nullifiers, sprout_nullifiers);
-        Self::remove_from_set(&mut self.sapling_nullifiers, sapling_nullifiers);
-        Self::remove_from_set(&mut self.orchard_nullifiers, orchard_nullifiers);
-        Self::remove_from_set(&mut self.ironwood_nullifiers, ironwood_nullifiers);
+        Self::remove_from_set(
+            &mut self.sprout_nullifiers,
+            sprout_nfs.into_iter().map(Cow::Owned),
+        );
+        Self::remove_from_set(
+            &mut self.sapling_nullifiers,
+            sapling_nfs.into_iter().map(Cow::Owned),
+        );
+        Self::remove_from_set(
+            &mut self.orchard_nullifiers,
+            orchard_nfs.into_iter().map(Cow::Owned),
+        );
+        Self::remove_from_set(
+            &mut self.ironwood_nullifiers,
+            ironwood_nfs.into_iter().map(Cow::Owned),
+        );
     }
 
     /// Returns `true` if the two sets have common items.

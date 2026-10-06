@@ -103,8 +103,8 @@ impl DiskFormatUpgrade for Upgrade {
                                 let (tx, h, _) = db
                                     .transaction(outpoint.hash)
                                     .expect("transaction should be in the database");
-                                let output = tx
-                                    .outputs()
+                                let outputs = tx.outputs();
+                                let output = outputs
                                     .get(outpoint.index as usize)
                                     .expect("output should exist");
 
@@ -163,8 +163,7 @@ impl DiskFormatUpgrade for Upgrade {
             // Get the data loaded from the parallel iterator
             let (block, size, utxos, address_balance_changes) = match load_result {
                 LoadResult::HasInfo(prev_value_pool) => {
-                    // BlockInfo already stored; we just need the its value pool
-                    // then skip the block
+                    // BlockInfo already stored; reuse its value pool and skip the block.
                     value_pool = prev_value_pool;
                     continue;
                 }
@@ -176,16 +175,17 @@ impl DiskFormatUpgrade for Upgrade {
                 } => (block, size, utxos, address_balance_changes),
             };
 
+            let deferred_pool_balance_change =
+                calculate_deferred_pool_balance_change(height, &network, value_pool)
+                    .expect("the finalized block has a valid subsidy and lockbox disbursement");
+
+            let block_value_pool_change = block
+                .chain_value_pool_change(&utxos, deferred_pool_balance_change, &network, value_pool)
+                .expect("the finalized block has valid transaction and NSM balance changes");
+
             // Add this block's value pool changes to the total value pool.
             value_pool = value_pool
-                .add_chain_value_pool_change(
-                    block
-                        .chain_value_pool_change(
-                            &utxos,
-                            calculate_deferred_pool_balance_change(height, &network),
-                        )
-                        .unwrap_or_default(),
-                )
+                .add_chain_value_pool_change(block_value_pool_change)
                 .expect("value pool change should not overflow");
 
             let mut batch = DiskWriteBatch::new();

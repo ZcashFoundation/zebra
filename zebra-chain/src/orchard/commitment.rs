@@ -4,15 +4,14 @@ use std::{fmt, io};
 
 use group::{
     ff::{FromUniformBytes, PrimeField},
-    prime::PrimeCurveAffine,
-    GroupEncoding,
+    CurveAffine as _, GroupEncoding,
 };
 use halo2::{
     arithmetic::{Coordinates, CurveAffine},
     pasta::pallas,
 };
 use lazy_static::lazy_static;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use crate::{
     amount::Amount,
@@ -29,7 +28,7 @@ use super::sinsemilla::*;
 /// <https://zips.z.cash/protocol/nu5.pdf#pallasandvesta>
 pub fn generate_trapdoor<T>(csprng: &mut T) -> Result<pallas::Scalar, RandError>
 where
-    T: RngCore + CryptoRng,
+    T: Rng + CryptoRng,
 {
     let mut bytes = [0u8; 64];
     csprng
@@ -232,7 +231,7 @@ impl ValueCommitment {
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
     pub fn randomized<T>(csprng: &mut T, value: Amount) -> Result<Self, RandError>
     where
-        T: RngCore + CryptoRng,
+        T: Rng + CryptoRng,
     {
         let rcv = generate_trapdoor(csprng)?;
 

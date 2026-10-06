@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use derive_new::new;
 use thiserror::Error;
 
+use tokio::sync::broadcast::error::RecvError;
 use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
@@ -125,9 +126,42 @@ impl CommitBlockError {
         matches!(self, CommitBlockError::Duplicate { .. })
     }
 
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// See [`ValidateContextError::is_auth_commitment_mismatch()`] for why this is
+    /// tracked separately from the misbehaviour score: the served body is invalid, but
+    /// the block hash is still valid and still wanted, so the syncer re-requests it
+    /// instead of restarting the sync round.
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
+            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+        }
+    }
+
+    /// Returns `true` if the block was rejected only because an ancestor's authorizing
+    /// data didn't match the commitment in its header.
+    ///
+    /// See [`ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
+    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
+        match self {
+            CommitBlockError::ValidateContextError(err) => {
+                err.is_descendant_of_auth_commitment_mismatch()
+            }
+            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
+    ///
+    /// Consensus-invalid subsidies and authorizing-data commitments score 100.
+    /// Duplicate requests, shutdowns, and rejected-ancestor descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
-        0
+        match self {
+            CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
+            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => 0,
+        }
     }
 }
 
@@ -237,6 +271,33 @@ pub enum ReconsiderError {
     /// validation.
     #[error("replaying a previously invalidated block failed contextual validation: {0}")]
     ReplayFailed(#[source] ValidateContextError),
+}
+
+/// An error describing why an `AwaitUtxo` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum AwaitUtxoError {
+    /// The state stopped responding, for example because it was dropped
+    /// during shutdown, before the UTXO could be found.
+    #[error("the state stopped responding before the UTXO arrived")]
+    Cancelled,
+
+    /// An internal channel error occurred while waiting for the UTXO.
+    #[error("internal channel error while waiting for the UTXO: receiver lagged by {0}")]
+    Lagged(u64),
+
+    /// The `ReadStateService` returned an error while looking up the UTXO.
+    #[error("the read state service returned an error: {0}")]
+    ReadStateFailed(#[source] BoxError),
+}
+
+impl From<RecvError> for AwaitUtxoError {
+    fn from(err: RecvError) -> Self {
+        match err {
+            RecvError::Closed => AwaitUtxoError::Cancelled,
+            RecvError::Lagged(skipped) => AwaitUtxoError::Lagged(skipped),
+        }
+    }
 }
 
 /// An error describing why a block failed contextual validation.
@@ -424,6 +485,17 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
+    #[error(
+        "invalid block subsidy, funding stream, or miner fee payment in block {block_hash:?} at \
+         {height:?}: {subsidy_error}"
+    )]
+    #[non_exhaustive]
+    InvalidSubsidy {
+        subsidy_error: zebra_chain::parameters::subsidy::CoinbaseTransactionError,
+        height: block::Height,
+        block_hash: block::Hash,
+    },
+
     #[error("error updating a note commitment tree: {0}")]
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
@@ -481,6 +553,81 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    /// The block was not validated because an ancestor in the same queued chain
+    /// failed contextual validation.
+    ///
+    /// This is a distinct variant, rather than a copy of the ancestor's error, so the
+    /// peer that served this block isn't scored or classified for the ancestor's
+    /// failure.
+    #[error("ancestor block {ancestor_hash} failed contextual validation")]
+    #[non_exhaustive]
+    AncestorRejected {
+        ancestor_hash: block::Hash,
+        source: Box<ValidateContextError>,
+    },
+}
+
+impl ValidateContextError {
+    /// Returns `true` if the block's authorizing data doesn't match the commitment in
+    /// its header.
+    ///
+    /// From NU5 onward, the block header hash and merkle root don't commit to the
+    /// authorizing data, so a peer can serve a forged body for a canonical header
+    /// without changing the block hash. A mismatched authorizing data commitment proves
+    /// the served body doesn't belong to its header, and an honest peer never serves
+    /// such a body, so the serving peer is misbehaving and the hash is still wanted.
+    pub fn is_auth_commitment_mismatch(&self) -> bool {
+        matches!(
+            self,
+            ValidateContextError::InvalidBlockCommitment(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
+            )
+        )
+    }
+
+    /// Returns `true` if the block was rejected only because an ancestor's authorizing
+    /// data didn't match the commitment in its header.
+    ///
+    /// The ancestor's served body was forged, but its hash is still wanted, so this
+    /// block's hash is still wanted too. The peer that served this block isn't the one
+    /// that forged the ancestor, so it must not be scored.
+    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
+        matches!(
+            self,
+            ValidateContextError::AncestorRejected { source, .. }
+                if source.is_auth_commitment_mismatch()
+        )
+    }
+
+    /// Wraps `self`, the error of a rejected ancestor block, into the error for one of
+    /// its descendants, so the descendant carries neither the ancestor's misbehaviour
+    /// score nor its classification.
+    pub fn for_descendant(&self, ancestor_hash: block::Hash) -> Self {
+        match self {
+            // Keep the original failing ancestor, so deep descendants don't nest errors.
+            ValidateContextError::AncestorRejected { .. } => self.clone(),
+            _ => ValidateContextError::AncestorRejected {
+                ancestor_hash,
+                source: Box::new(self.clone()),
+            },
+        }
+    }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        match self {
+            // A forged body proves the serving peer misbehaved, see
+            // `is_auth_commitment_mismatch()`.
+            ValidateContextError::InvalidBlockCommitment(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. },
+            ) => 100,
+            // A wrong block subsidy, funding stream, or miner fee payment is invalid given only
+            // the block and its parent, so the peer that sent it is misbehaving.
+            ValidateContextError::InvalidSubsidy { .. } => 100,
+            _other => 0,
+        }
+    }
 }
 
 impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {
@@ -551,5 +698,70 @@ mod tests {
             location: KnownBlock::BestChain,
         };
         assert_eq!(dup_err.misbehavior_score(), 0);
+
+        // A mismatched authorizing data commitment means the served body doesn't
+        // belong to its header, so the serving peer must be scored.
+        let auth_commitment_err = CommitBlockError::ValidateContextError(Box::new(
+            ValidateContextError::InvalidBlockCommitment(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                    expected: [1; 32],
+                    actual: [2; 32],
+                },
+            ),
+        ));
+        assert_eq!(auth_commitment_err.misbehavior_score(), 100);
+    }
+
+    /// The state rejects queued descendants along with a failed block, but the peers that
+    /// served them didn't serve the failed block, so they must not inherit its score or
+    /// classification.
+    #[test]
+    fn descendant_errors_are_not_scored() {
+        let auth_commitment_err = ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        );
+        let forged_hash = block::Hash([1; 32]);
+
+        let child_err = auth_commitment_err.for_descendant(forged_hash);
+        assert_eq!(child_err.misbehavior_score(), 0);
+        assert!(!child_err.is_auth_commitment_mismatch());
+        assert!(child_err.is_descendant_of_auth_commitment_mismatch());
+
+        // Deeper descendants keep pointing at the block that actually failed.
+        let grandchild_err = child_err.for_descendant(block::Hash([2; 32]));
+        assert_eq!(grandchild_err, child_err);
+
+        let commit_err = CommitBlockError::ValidateContextError(Box::new(child_err));
+        assert_eq!(commit_err.misbehavior_score(), 0);
+        assert!(!commit_err.is_auth_commitment_mismatch());
+        assert!(commit_err.is_descendant_of_auth_commitment_mismatch());
+
+        // Descendants of other contextual failures aren't re-requested.
+        let other_child_err = ValidateContextError::NonSequentialBlock {
+            candidate_height: Height(5),
+            parent_height: Height(3),
+        }
+        .for_descendant(forged_hash);
+        assert_eq!(other_child_err.misbehavior_score(), 0);
+        assert!(!other_child_err.is_descendant_of_auth_commitment_mismatch());
+    }
+
+    #[test]
+    fn invalid_subsidy_commit_error_misbehavior_score() {
+        use zebra_chain::parameters::subsidy::{CoinbaseTransactionError, SubsidyError};
+
+        let invalid_subsidy = ValidateContextError::InvalidSubsidy {
+            subsidy_error: CoinbaseTransactionError::Subsidy(SubsidyError::InvalidMinerFees),
+            height: Height(5),
+            block_hash: zebra_chain::block::Hash([0; 32]),
+        };
+        let descendant = invalid_subsidy.for_descendant(block::Hash([1; 32]));
+        assert_eq!(descendant.misbehavior_score(), 0);
+        assert!(!descendant.is_descendant_of_auth_commitment_mismatch());
+        let subsidy_err = CommitBlockError::ValidateContextError(Box::new(invalid_subsidy));
+        assert_eq!(subsidy_err.misbehavior_score(), 100);
     }
 }

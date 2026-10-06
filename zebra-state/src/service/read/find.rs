@@ -28,7 +28,7 @@ use zebra_chain::{
 use crate::{
     constants,
     service::{
-        block_iter::any_ancestor_blocks,
+        block_iter::any_chain_ancestor_iter,
         check::{difficulty::POW_MEDIAN_BLOCK_SPAN, AdjustedDifficulty},
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
@@ -668,7 +668,7 @@ pub fn next_median_time_past(
 
 /// Do a consistency check by checking the finalized tip before and after all other database queries.
 ///
-/// Returns recent blocks in reverse height order from the tip.
+/// Returns recent header times in reverse height order from the tip.
 /// Returns an error if the tip obtained before and after is not the same.
 ///
 /// # Panics
@@ -677,17 +677,19 @@ pub fn next_median_time_past(
 fn best_relevant_chain(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-) -> Result<Vec<Arc<Block>>, BoxError> {
+) -> Result<Vec<DateTime<Utc>>, BoxError> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
-    let best_relevant_chain =
-        any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
-    let best_relevant_chain: Vec<_> = best_relevant_chain
-        .into_iter()
-        .take(POW_MEDIAN_BLOCK_SPAN)
-        .collect();
+    let best_relevant_chain = any_chain_ancestor_iter::<block::Header>(
+        non_finalized_state,
+        db,
+        state_tip_before_queries.1,
+    )
+    .take(POW_MEDIAN_BLOCK_SPAN)
+    .map(|header| header.time)
+    .collect::<Vec<_>>();
 
     if best_relevant_chain.is_empty() {
         return Err("missing genesis block, wait until it is committed".into());
@@ -705,22 +707,17 @@ fn best_relevant_chain(
     Ok(best_relevant_chain)
 }
 
-/// Returns the median-time-past for the provided `relevant_chain`.
+/// Returns the median-time-past for the provided header times.
 ///
-/// The `relevant_chain` has blocks in reverse height order.
+/// The `relevant_times` has header times in reverse height order.
 ///
 /// See [`next_median_time_past()`] for details.
-pub(crate) fn calculate_median_time_past(relevant_chain: Vec<Arc<Block>>) -> DateTime32 {
-    let relevant_data: Vec<DateTime<Utc>> = relevant_chain
-        .iter()
-        .map(|block| block.header.time)
-        .collect();
-
+pub(crate) fn calculate_median_time_past(relevant_times: Vec<DateTime<Utc>>) -> DateTime32 {
     // > Define the median-time-past of a block to be the median of the nTime fields of the
     // > preceding PoWMedianBlockSpan blocks (or all preceding blocks if there are fewer than
     // > PoWMedianBlockSpan). The median-time-past of a genesis block is not defined.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    let median_time_past = AdjustedDifficulty::median_time(relevant_data);
+    let median_time_past = AdjustedDifficulty::median_time(relevant_times);
 
     DateTime32::try_from(median_time_past).expect("valid blocks have in-range times")
 }

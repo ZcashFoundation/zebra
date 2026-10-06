@@ -2,7 +2,8 @@
 name: '🚦 DevOps Report'
 description: Issues related to the Zebra build, test, or release process.
 title: 'devops: '
-labels: [A-devops, C-bug, S-needs-triage]
+labels: [devops]
+type: Bug
 body:
   - type: markdown
     attributes:

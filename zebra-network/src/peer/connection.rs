@@ -10,7 +10,7 @@
 use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
 
 use futures::{future::Either, prelude::*};
-use rand::{seq::SliceRandom, thread_rng, Rng};
+use rand::{seq::SliceRandom, RngExt};
 use tokio::time::{sleep, Sleep};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
@@ -462,7 +462,7 @@ impl Handler {
         std::mem::swap(cached_addrs, &mut temp_cache);
 
         // The response is fully shuffled, remaining is partially shuffled.
-        let (response, remaining) = temp_cache.partial_shuffle(&mut thread_rng(), response_size);
+        let (response, remaining) = temp_cache.partial_shuffle(&mut rand::rng(), response_size);
 
         // # Security
         //
@@ -1606,7 +1606,7 @@ where
         let prev = self.last_overload_time.replace(now);
         let drop_connection_probability = overload_drop_connection_probability(now, prev);
 
-        if thread_rng().gen::<f32>() < drop_connection_probability {
+        if rand::rng().random::<f32>() < drop_connection_probability {
             if matches!(error, PeerError::Overloaded) {
                 metrics::counter!("pool.closed.loadshed").increment(1);
             } else {

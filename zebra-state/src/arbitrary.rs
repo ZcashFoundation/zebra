@@ -78,7 +78,7 @@ impl ContextuallyVerifiedBlock {
             .iter()
             .map(AsRef::as_ref)
             .flat_map(Transaction::inputs)
-            .flat_map(transparent::Input::outpoint)
+            .flat_map(|input| input.outpoint())
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
@@ -86,6 +86,8 @@ impl ContextuallyVerifiedBlock {
             block,
             zero_spent_utxos,
             DeferredPoolBalanceChange::zero(),
+            &zebra_chain::parameters::Network::Mainnet,
+            ValueBalance::zero(),
         )
         .expect("all UTXOs are provided with zero values")
     }
@@ -101,6 +103,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            received_time,
         } = block.into();
 
         Self {
@@ -114,6 +117,7 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
+            received_time,
         }
     }
 }

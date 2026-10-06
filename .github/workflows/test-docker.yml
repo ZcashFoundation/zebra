@@ -6,12 +6,13 @@ on:
   push:
     branches: [main]
   merge_group:
+    types: [checks_requested]
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
 # to run, cancelling any workflows in between
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,26 +28,18 @@ env:
 
 jobs:
   changes:
-    # Docker validation runs on source PRs, not temporary Mergify queue candidates.
-    if: >-
-      ${{
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.user.login != 'mergify[bot]' ||
-        github.event.pull_request.head.repo.full_name != github.repository ||
-        !startsWith(github.event.pull_request.head.ref, 'mergify/merge-queue/')
-      }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       test_docker: ${{ steps.filter.outputs.test_docker || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           filters: .github/path-filters.yml
 
@@ -56,7 +49,6 @@ jobs:
     if: needs.changes.outputs.test_docker == 'true'
     permissions:
       contents: read
-      id-token: write
       statuses: write
     runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
     timeout-minutes: 60

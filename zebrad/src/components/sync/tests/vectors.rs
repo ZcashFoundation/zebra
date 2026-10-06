@@ -13,7 +13,9 @@ use zebra_chain::{
     parameters::subsidy::SubsidyError,
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
+use zebra_consensus::{
+    error::TransactionError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+};
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -376,6 +378,129 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .expect_request(zebra_consensus::Request::Commit(block1))
         .await
         .respond(block1_hash);
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
+/// Test that obtain_tips downloads blocks that are queued in the state, waiting for their parent.
+///
+/// A sync restart cancels in-flight downloads, but blocks that were already queued in the state
+/// stay there, so a peer response can contain a missing parent followed by its queued children.
+/// If queued blocks were treated as present, obtain_tips would reject every such download set with
+/// "queued download of hash behind our chain tip", and the sync would stall forever.
+#[tokio::test]
+async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxError> {
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let block2_hash = block2.hash();
+
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    // ChainSync::request_genesis
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    // ChainSync::obtain_tips
+
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![block1_hash, block2_hash]));
+
+    // Block 1 is missing, because its download was cancelled by a sync restart.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    for _ in 1..sync::FANOUT {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block0_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test obtain tips error")));
+    }
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    // Recheck every hash in the merged download set: block 2 is queued, waiting for block 1.
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    state_service
+        .expect_request(zs::Request::KnownBlock(block2_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::Queue)));
+
+    // Both blocks are downloaded, so the missing parent reaches the state.
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
+
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
+        [(block1_hash, block1), (block2_hash, block2)]
+            .iter()
+            .cloned()
+            .collect();
+
+    for _ in 1..=2 {
+        block_verifier_router
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
+            .await
+            .respond_with(|req| req.block().hash());
+    }
+    assert_eq!(
+        remaining_blocks,
+        HashMap::new(),
+        "expected the missing parent and its queued child to be verified by obtain tips"
+    );
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
@@ -1399,6 +1524,142 @@ async fn invalid_height_does_not_restart_sync() {
     );
 }
 
+/// A concrete `ChainSync` type for calling associated functions in tests.
+type TestChainSync = ChainSync<
+    MockService<zn::Request, zn::Response, PanicAssertion>,
+    MockService<zs::Request, zs::Response, PanicAssertion>,
+    MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+    MockChainTip,
+>;
+
+/// Verifies fix for #11168 and #11132: a `TransparentInputNotFound` from an `AwaitUtxo`
+/// timeout does not trigger a sync restart, but other transaction errors still do.
+#[tokio::test]
+async fn transparent_input_not_found_does_not_restart_sync() {
+    let make_invalid = |tx_error| BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Transaction(tx_error)),
+        },
+        height: block::Height(3_427_629),
+        hash: block::Hash::from([0xCC; 32]),
+        advertiser_addr: None,
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&make_invalid(
+            TransactionError::TransparentInputNotFound
+        )),
+        "a transparent input UTXO lookup timeout should NOT trigger sync restart (#11168)"
+    );
+
+    assert!(
+        TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
+        "other transaction errors should still trigger sync restart"
+    );
+}
+
+/// A poisoned `FindBlocks` batch can make every block in a lookahead wave time out on its
+/// UTXO lookup with nothing committing in between. The #11168 exemption is bounded so that
+/// case still restarts the sync, while a single near-tip race followed by a commit does not.
+#[tokio::test]
+async fn utxo_lookup_timeouts_without_a_commit_restart_sync() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let limit = chain_sync
+        .full_verify_concurrency_limit
+        .max(sync::MIN_UTXO_RACE_DROPS_BEFORE_RESTART);
+
+    let utxo_timeout = |i: u8| {
+        Err(BlockDownloadVerifyError::Invalid {
+            error: RouterError::Block {
+                source: Box::new(VerifyBlockError::Transaction(
+                    TransactionError::TransparentInputNotFound,
+                )),
+            },
+            height: block::Height(3_427_629 + u32::from(i)),
+            hash: block::Hash::from([i; 32]),
+            advertiser_addr: None,
+        })
+    };
+
+    for i in 0..(limit - 1) {
+        assert!(
+            chain_sync
+                .handle_block_response(utxo_timeout(i as u8))
+                .is_ok(),
+            "UTXO lookup timeouts below the lookahead limit should not restart sync (#11168)"
+        );
+        assert!(
+            chain_sync
+                .reobtain_hashes
+                .contains(&block::Hash::from([i as u8; 32])),
+            "a dropped UTXO-race block must be re-requested, not left for a tip walk"
+        );
+    }
+
+    // A verified block means the race resolved, so the count starts over.
+    assert!(chain_sync
+        .handle_block_response(Ok((
+            block::Height(3_427_628),
+            block::Hash::from([0xAA; 32])
+        )))
+        .is_ok());
+    assert!(chain_sync.handle_block_response(utxo_timeout(0)).is_ok());
+
+    for i in 1..(limit - 1) {
+        assert!(chain_sync
+            .handle_block_response(utxo_timeout(i as u8))
+            .is_ok());
+    }
+    assert!(
+        chain_sync
+            .handle_block_response(utxo_timeout(0xFF))
+            .is_err(),
+        "a full lookahead wave of UTXO lookup timeouts with no verified block should restart sync"
+    );
+}
+
+/// Verifies fix for #11168: the short post-final-checkpoint verify timeout (#5125) does
+/// not trigger a sync restart, but the tower-level `BLOCK_VERIFY_TIMEOUT` still does (#5709).
+#[tokio::test]
+async fn verify_timeout_elapsed_does_not_restart_sync() {
+    let tokio_elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("timeout on a pending future always elapses");
+
+    let make_error = |error: crate::BoxError| BlockDownloadVerifyError::ValidationRequestError {
+        error,
+        height: block::Height(3_428_007),
+        hash: block::Hash::from([0xCD; 32]),
+    };
+
+    assert!(
+        !TestChainSync::should_restart_sync(&make_error(tokio_elapsed.into())),
+        "the post-final-checkpoint verify timeout should NOT trigger sync restart (#11168)"
+    );
+
+    assert!(
+        TestChainSync::should_restart_sync(&make_error(
+            tower::timeout::error::Elapsed::new().into()
+        )),
+        "the tower block verify timeout should still trigger sync restart (#5709)"
+    );
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let tokio_elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+        .await
+        .expect_err("timeout on a pending future always elapses");
+    assert!(chain_sync
+        .handle_block_response(Err(make_error(tokio_elapsed.into())))
+        .is_ok());
+    assert!(
+        chain_sync
+            .reobtain_hashes
+            .contains(&block::Hash::from([0xCD; 32])),
+        "a block dropped on the post-checkpoint verify timeout must be re-requested"
+    );
+}
+
 /// Regression test for GHSA-g95h-hw6g-pvgv: a behind-tip drop scores the supplying peer and
 /// re-queues the hash the syncer still needs.
 ///
@@ -1499,6 +1760,276 @@ async fn behind_tip_height_limit_requeue_is_bounded() {
         // Stand in for `reobtain_missing_blocks()`, which drains the set each sync round.
         chain_sync.reobtain_hashes.clear();
     }
+}
+
+/// Builds the error the syncer sees when a peer serves a body that doesn't match the
+/// authorizing data commitment in the header it was served under.
+///
+/// The error is wrapped exactly as the production stack wraps it: the state's contextual
+/// validation failure, unwrapped by `map_commit_error` into `VerifyBlockError::Commit`,
+/// boxed by the router into `RouterError::Block`, and reported by the downloader as
+/// `BlockDownloadVerifyError::Invalid`.
+fn auth_commitment_mismatch_error(
+    hash: block::Hash,
+    advertiser_addr: Option<PeerSocketAddr>,
+) -> BlockDownloadVerifyError {
+    let commit_error = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        ),
+    ));
+
+    BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Commit(commit_error)),
+        },
+        height: block::Height(42),
+        hash,
+        advertiser_addr,
+    }
+}
+
+/// A body that fails the authorizing data commitment check must score the serving peer and
+/// re-request the hash, without cancelling the sync round.
+///
+/// The hash is still canonical and still needed — only the served body was forged — so
+/// restarting the round would let one forgery idle the syncer for `SYNC_RESTART_DELAY`,
+/// and dropping the hash would leave it to a later round to rediscover.
+#[tokio::test]
+async fn auth_commitment_mismatch_scores_peer_and_requeues_hash_without_restart() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x1A; 32]);
+
+    chain_sync
+        .handle_block_response(Err(auth_commitment_mismatch_error(hash, Some(advertiser))))
+        .expect("a forged body is non-fatal and must not restart the syncer");
+
+    assert_eq!(
+        misbehavior_rx.try_recv().ok(),
+        Some((advertiser, 100)),
+        "the peer that served the forged body must be scored at the ban threshold"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "the hash is still canonical and still needed, so it must be re-requested"
+    );
+}
+
+/// The state rejects an honest block queued behind a forged parent along with it. The peer
+/// that served the child didn't forge anything, so it must not be scored, but the child's
+/// hash is still wanted, so it is re-requested without cancelling the sync round.
+///
+/// Otherwise one forged body would get every peer that served one of its queued
+/// descendants banned too.
+#[tokio::test]
+async fn descendant_of_auth_commitment_mismatch_is_requeued_without_scoring() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x6F; 32]);
+
+    let commit_error = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        )
+        .for_descendant(block::Hash::from([0x1A; 32])),
+    ));
+    let error = BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Commit(commit_error)),
+        },
+        height: block::Height(43),
+        hash,
+        advertiser_addr: Some(advertiser),
+    };
+
+    chain_sync
+        .handle_block_response(Err(error))
+        .expect("a child of a forged body is non-fatal and must not restart the syncer");
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "the peer that served an honest child of a forged body must not be scored"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "the child's hash is still wanted, so it must be re-requested"
+    );
+}
+
+/// The forged-body re-request is bounded, so a peer cannot turn it into an unbounded
+/// download loop.
+///
+/// Misbehaviour reports only reach the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so
+/// the first re-request can briefly land on the same peer again. This bound is what makes
+/// that acceptable.
+#[tokio::test]
+async fn auth_commitment_mismatch_requeue_is_bounded() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x2B; 32]);
+
+    for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+        chain_sync
+            .handle_block_response(Err(auth_commitment_mismatch_error(hash, Some(advertiser))))
+            .expect("a forged body is non-fatal and must not restart the syncer");
+
+        if attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES {
+            assert!(
+                chain_sync.reobtain_hashes.contains(&hash),
+                "attempt {attempt} of {} must re-queue the hash",
+                sync::MAX_BLOCK_REOBTAIN_RETRIES
+            );
+        } else {
+            assert!(
+                chain_sync.reobtain_hashes.is_empty(),
+                "the hash must not be re-queued after {} retries",
+                sync::MAX_BLOCK_REOBTAIN_RETRIES
+            );
+        }
+
+        // Stand in for `reobtain_missing_blocks()`, which drains the set each sync round.
+        chain_sync.reobtain_hashes.clear();
+    }
+}
+
+/// A forged body served over an isolated connection has no address to score, but the hash
+/// is still missing, so it is still re-requested.
+#[tokio::test]
+async fn auth_commitment_mismatch_without_advertiser_is_still_requeued() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0x3C; 32]);
+
+    chain_sync
+        .handle_block_response(Err(auth_commitment_mismatch_error(hash, None)))
+        .expect("a forged body is non-fatal and must not restart the syncer");
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "an unattributed forged body must not score any peer"
+    );
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "an unattributed forged body must still re-queue the hash"
+    );
+}
+
+/// The new handling is scoped to the commitment mismatch: every other consensus failure
+/// still restarts the sync round and is not re-requested.
+///
+/// A genuinely invalid block was rejected by the network, so re-downloading it is
+/// pointless. Only the commitment mismatch proves the *body* was forged while the hash
+/// stayed valid.
+#[tokio::test]
+async fn other_invalid_errors_still_restart_sync_and_are_not_requeued() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x4D; 32]);
+
+    let err = BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::Subsidy(SubsidyError::NoCoinbase)),
+        },
+        height: block::Height(42),
+        hash,
+        advertiser_addr: Some(advertiser),
+    };
+
+    assert!(
+        chain_sync.handle_block_response(Err(err)).is_err(),
+        "an ordinary consensus failure must still restart the syncer"
+    );
+    assert!(
+        !chain_sync.reobtain_hashes.contains(&hash),
+        "a block the network rejected must not be re-requested"
+    );
+}
+
+/// An honest body whose authorizing data matches its header must not be classified as a
+/// forgery, whatever else went wrong with it.
+///
+/// This is the guard against over-banning and over-re-requesting: the errors a
+/// behind-tip or far-ahead honest body produces, and the other contextual validation
+/// failures, must all stay outside the new arm.
+#[tokio::test]
+async fn honest_bodies_are_not_classified_as_forgeries() {
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    // A duplicate commit is the benign case the syncer already tolerated.
+    let duplicate = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zs::KnownBlock::BestChain,
+    };
+    assert!(
+        !duplicate.is_auth_commitment_mismatch(),
+        "a duplicate block is not a forged body"
+    );
+
+    // A sibling commitment failure, which doesn't prove the *serving* peer forged
+    // anything: the chain history root is the node's own view of the chain, so a
+    // mismatch there can be a local disagreement rather than a forged body.
+    let other_context = zs::CommitBlockError::ValidateContextError(Box::new(
+        zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryRoot {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        ),
+    ));
+    assert!(
+        !other_context.is_auth_commitment_mismatch(),
+        "an unrelated commitment failure is not a forged body"
+    );
+    assert_eq!(
+        other_context.misbehavior_score(),
+        0,
+        "an unrelated contextual failure must not score the serving peer"
+    );
+
+    // The height-limit errors an honest behind-tip or far-ahead body produces are not
+    // `Invalid`, so they never reach the new arm.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let above_hash = block::Hash::from([0x5E; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
+            height: block::Height(60_000),
+            hash: above_hash,
+        }))
+        .expect("a far-ahead block is non-fatal and must not restart the syncer");
+    assert!(
+        chain_sync.reobtain_hashes.is_empty(),
+        "a far-ahead honest body must not be re-requested as a forgery"
+    );
+
+    let behind_hash = block::Hash::from([0x6F; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::BehindTipHeightLimit {
+            height: block::Height(1),
+            hash: behind_hash,
+            advertiser_addr: Some(advertiser),
+        }))
+        .expect("a behind-tip block is non-fatal and must not restart the syncer");
+    assert!(
+        chain_sync.reobtain_hashes.contains(&behind_hash),
+        "the behind-tip re-request is unchanged by the forged-body arm"
+    );
 }
 
 /// The pre-existing `NotFound` re-request (#5709) still works, and only fires for `NotFound`.

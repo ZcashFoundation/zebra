@@ -246,14 +246,12 @@ fn build_and_verify_v5_p2pkh(
     sig_hash_type_byte: u8,
 ) -> std::result::Result<(), crate::Error> {
     use ripemd::{Digest as _, Ripemd160};
-    use secp256k1::{Message, Secp256k1, SecretKey};
+    use secp256k1::{Message, SecretKey};
     use sha2::Sha256;
 
-    let secp = Secp256k1::new();
-
     // Deterministic keypair (32 bytes, nonzero)
-    let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
-    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let secret_key = SecretKey::from_secret_bytes([0xcd; 32]).expect("valid secret key");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secret_key);
     let pubkey_bytes = public_key.serialize(); // 33 bytes, compressed
 
     // Derive P2PKH lock script: OP_DUP OP_HASH160 <20-byte-hash> OP_EQUALVERIFY OP_CHECKSIG
@@ -277,11 +275,9 @@ fn build_and_verify_v5_p2pkh(
     // Build a V5 transaction with a placeholder unlock script.
     // For v5/ZIP-244, the sighash does NOT depend on the unlock script contents,
     // so we can compute the sighash with a placeholder, sign, then rebuild.
-    let placeholder_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        inputs: vec![transparent::Input::PrevOut {
+    let placeholder_tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -289,13 +285,13 @@ fn build_and_verify_v5_p2pkh(
             unlock_script: transparent::Script::new(&[]),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]), // OP_FALSE (burn)
         }],
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     // Compute the sighash for the canonical hash type
     let all_previous_outputs = Arc::new(vec![previous_output.clone()]);
@@ -305,7 +301,7 @@ fn build_and_verify_v5_p2pkh(
 
     // Sign the sighash with the private key
     let msg = Message::from_digest(*sighash.as_ref());
-    let signature = secp.sign_ecdsa(&msg, &secret_key);
+    let signature = secp256k1::ecdsa::sign(msg, &secret_key);
     let der_sig = signature.serialize_der();
 
     // Build the unlock script: <sig_len> <DER_sig || hash_type_byte> <pubkey_len> <pubkey>
@@ -320,11 +316,9 @@ fn build_and_verify_v5_p2pkh(
     unlock_script_bytes.extend_from_slice(&pubkey_bytes);
 
     // Rebuild the V5 transaction with the real unlock script
-    let final_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        inputs: vec![transparent::Input::PrevOut {
+    let final_tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -332,13 +326,13 @@ fn build_and_verify_v5_p2pkh(
             unlock_script: transparent::Script::new(&unlock_script_bytes),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]),
         }],
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     let verifier = super::CachedFfiTransaction::new(
         Arc::new(final_tx),
@@ -451,14 +445,13 @@ fn build_and_verify_v5_p2pkh_single_with_missing_output(
     anyone_can_pay: bool,
 ) -> std::result::Result<(), crate::Error> {
     use ripemd::{Digest as _, Ripemd160};
-    use secp256k1::{Message, Secp256k1, SecretKey};
+    use secp256k1::{Message, SecretKey};
     use sha2::Sha256;
 
     assert!(signed_input_index < 2, "test fixture only has two inputs");
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
-    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let secret_key = SecretKey::from_secret_bytes([0xcd; 32]).expect("valid secret key");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secret_key);
     let pubkey_bytes = public_key.serialize();
 
     // Standard P2PKH lock script reused for every prevout.
@@ -478,34 +471,34 @@ fn build_and_verify_v5_p2pkh_single_with_missing_output(
 
     // Two inputs, one output: any input at index >= 1 has no corresponding
     // output for SIGHASH_SINGLE.
-    let make_tx = |unlock_scripts: [Vec<u8>; 2]| Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        inputs: vec![
-            transparent::Input::PrevOut {
-                outpoint: transparent::OutPoint {
-                    hash: transaction::Hash([0u8; 32]),
-                    index: 0,
+    let make_tx = |unlock_scripts: [Vec<u8>; 2]| {
+        Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![
+                transparent::Input::PrevOut {
+                    outpoint: transparent::OutPoint {
+                        hash: transaction::Hash([0u8; 32]),
+                        index: 0,
+                    },
+                    unlock_script: transparent::Script::new(&unlock_scripts[0]),
+                    sequence: u32::MAX,
                 },
-                unlock_script: transparent::Script::new(&unlock_scripts[0]),
-                sequence: u32::MAX,
-            },
-            transparent::Input::PrevOut {
-                outpoint: transparent::OutPoint {
-                    hash: transaction::Hash([1u8; 32]),
-                    index: 0,
+                transparent::Input::PrevOut {
+                    outpoint: transparent::OutPoint {
+                        hash: transaction::Hash([1u8; 32]),
+                        index: 0,
+                    },
+                    unlock_script: transparent::Script::new(&unlock_scripts[1]),
+                    sequence: u32::MAX,
                 },
-                unlock_script: transparent::Script::new(&unlock_scripts[1]),
-                sequence: u32::MAX,
-            },
-        ],
-        outputs: vec![transparent::Output {
-            value: 1_5000_0000u64.try_into().expect("valid amount"),
-            lock_script: transparent::Script::new(&[0x00]),
-        }],
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
+            ],
+            vec![transparent::Output {
+                value: 1_5000_0000u64.try_into().expect("valid amount"),
+                lock_script: transparent::Script::new(&[0x00]),
+            }],
+            LockTime::unlocked(),
+            block::Height(0),
+        )
     };
 
     let placeholder_tx = make_tx([Vec::new(), Vec::new()]);
@@ -529,7 +522,7 @@ fn build_and_verify_v5_p2pkh_single_with_missing_output(
     );
 
     let msg = Message::from_digest(*sighash.as_ref());
-    let signature = secp.sign_ecdsa(&msg, &secret_key);
+    let signature = secp256k1::ecdsa::sign(msg, &secret_key);
     let der_sig = signature.serialize_der();
 
     let mut signed_unlock = Vec::new();
@@ -611,12 +604,11 @@ fn sighash_divergence_v5_sighash_single_with_corresponding_output_accepted() {
 /// and Zebra accepts.
 fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), crate::Error> {
     use ripemd::{Digest as _, Ripemd160};
-    use secp256k1::{Message, Secp256k1, SecretKey};
+    use secp256k1::{Message, SecretKey};
     use sha2::Sha256;
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
-    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let secret_key = SecretKey::from_secret_bytes([0xcd; 32]).expect("valid secret key");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secret_key);
     let pubkey_bytes = public_key.serialize();
 
     let sha_hash = Sha256::digest(pubkey_bytes);
@@ -632,8 +624,8 @@ fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), 
         lock_script: lock_script.clone(),
     };
 
-    let placeholder_tx = Transaction::V4 {
-        inputs: vec![transparent::Input::PrevOut {
+    let placeholder_tx = Transaction::test_v4(
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -641,15 +633,13 @@ fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), 
             unlock_script: transparent::Script::new(&[]),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]),
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     let all_previous_outputs = Arc::new(vec![previous_output.clone()]);
     let sighasher = SigHasher::new(
@@ -664,7 +654,7 @@ fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), 
         sighasher.sighash_v4_raw(sig_hash_type_byte, Some((0, lock_script_bytes.clone())));
 
     let msg = Message::from_digest(*sighash.as_ref());
-    let signature = secp.sign_ecdsa(&msg, &secret_key);
+    let signature = secp256k1::ecdsa::sign(msg, &secret_key);
     let der_sig = signature.serialize_der();
 
     let mut unlock_script_bytes = Vec::new();
@@ -675,8 +665,8 @@ fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), 
     unlock_script_bytes.push(pubkey_bytes.len() as u8);
     unlock_script_bytes.extend_from_slice(&pubkey_bytes);
 
-    let final_tx = Transaction::V4 {
-        inputs: vec![transparent::Input::PrevOut {
+    let final_tx = Transaction::test_v4(
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -684,15 +674,13 @@ fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), 
             unlock_script: transparent::Script::new(&unlock_script_bytes),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]),
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     let verifier = super::CachedFfiTransaction::new(
         Arc::new(final_tx),
@@ -736,8 +724,8 @@ fn sighash_divergence_v4_raw_canonical_matches_typed() {
         lock_script: lock_script.clone(),
     };
 
-    let tx = Transaction::V4 {
-        inputs: vec![transparent::Input::PrevOut {
+    let tx = Transaction::test_v4(
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -745,15 +733,13 @@ fn sighash_divergence_v4_raw_canonical_matches_typed() {
             unlock_script: transparent::Script::new(&[]),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]),
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     let sighasher = SigHasher::new(&tx, NetworkUpgrade::Canopy, Arc::new(vec![previous_output]))
         .expect("sighasher creation should succeed");
@@ -884,22 +870,20 @@ fn count_coinbase_legacy_sigops_includes_coinbase_script() -> Result<()> {
         .activation_height(&network)
         .expect("NU5 has a Mainnet activation height");
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![transparent::Input::Coinbase {
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::Coinbase {
             height,
             data: miner_data,
             sequence: 0xffff_ffff,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: output_amount,
             lock_script: dummy_output_script,
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        Height(0),
+    );
     let _ = network;
 
     // Before the fix, Zebra's `Sigops` impl skipped the coinbase input and returned 0 for a
@@ -970,15 +954,13 @@ fn p2sh_sigop_count_counts_redeem_script() -> Result<()> {
         lock_script,
     };
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![input],
-        outputs: vec![spent_output.clone()],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![input],
+        vec![spent_output.clone()],
+        LockTime::unlocked(),
+        Height(0),
+    );
 
     assert_eq!(
         p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output)),
@@ -1051,15 +1033,13 @@ fn p2sh_sigop_count_matches_zcashd_when_redeem_script_contains_disabled_opcode()
         lock_script,
     };
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![input],
-        outputs: vec![spent_output.clone()],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![input],
+        vec![spent_output.clone()],
+        LockTime::unlocked(),
+        Height(0),
+    );
 
     // zcashd's GetP2SHSigOpCount() returns 1000 here; Zebra's pure-Rust counter
     // short-circuits at the leading 0xab and returns 0. Failing this assertion is the
@@ -1107,22 +1087,20 @@ fn p2sh_sigop_count_is_zero_for_non_p2sh_and_coinbase() -> Result<()> {
         .expect("NU5 has a Mainnet activation height");
     let dummy_output_script = transparent::Script::new(&[0x51]);
     let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
-    let coinbase_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![transparent::Input::Coinbase {
+    let coinbase_tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::Coinbase {
             height: nu5_height,
             data: vec![OP_CHECKSIG; 80],
             sequence: 0xffff_ffff,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: output_amount,
             lock_script: dummy_output_script.clone(),
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        Height(0),
+    );
     let _ = &network;
 
     // Coinbase inputs have no spent output; zcashd passes an empty vector.
@@ -1147,15 +1125,13 @@ fn p2sh_sigop_count_is_zero_for_non_p2sh_and_coinbase() -> Result<()> {
         value: zebra_chain::amount::Amount::try_from(1_000_000)?,
         lock_script: p2pkh_lock,
     };
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![input],
-        outputs: vec![],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![input],
+        vec![],
+        LockTime::unlocked(),
+        Height(0),
+    );
     assert_eq!(p2sh_sigop_count(&tx, &[spent_output]), 0);
 
     Ok(())
@@ -1197,22 +1173,20 @@ fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
         .expect("NU5 has a Mainnet activation height");
     let dummy_output_script = transparent::Script::new(&[0x51]); // OP_TRUE
     let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
-    let coinbase_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![transparent::Input::Coinbase {
+    let coinbase_tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::Coinbase {
             height: nu5_height,
             data: vec![OP_CHECKSIG; 80],
             sequence: 0xffff_ffff,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: output_amount,
             lock_script: dummy_output_script,
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        Height(0),
+    );
     let _ = &network;
 
     // Surface B: each non-coinbase transaction has one P2SH input whose
@@ -1242,15 +1216,13 @@ fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
         value: zebra_chain::amount::Amount::try_from(1_000_000)?,
         lock_script,
     };
-    let p2sh_tx_template = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![p2sh_input],
-        outputs: vec![],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    let p2sh_tx_template = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![p2sh_input],
+        vec![],
+        LockTime::unlocked(),
+        Height(0),
+    );
 
     // 1334 P2SH spends * 15 sigops = 20010 P2SH sigops.
     // Plus 80 coinbase legacy sigops = 20090 total, > MAX_BLOCK_SIGOPS.
@@ -1384,13 +1356,12 @@ fn is_valid_rejects_out_of_range_input_index() {
 /// dev and release builds.
 #[test]
 fn stale_sighash_buffer_v5_two_checksig_rejected() {
-    use secp256k1::{Message, Secp256k1, SecretKey};
+    use secp256k1::{Message, SecretKey};
 
     let _init_guard = zebra_test::init();
 
-    let secp = Secp256k1::new();
-    let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
-    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let secret_key = SecretKey::from_secret_bytes([0xcd; 32]).expect("valid secret key");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secret_key);
     let pubkey_bytes = public_key.serialize();
 
     // scriptPubKey: <0x21> <pubkey 33 bytes> OP_CHECKSIGVERIFY
@@ -1413,11 +1384,9 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
     // Placeholder V5 tx used to compute the sighash; the V5 (ZIP 244) sighash
     // does not depend on the unlock script contents, so we can sign, then
     // rebuild the transaction with the real unlock script.
-    let placeholder_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        inputs: vec![transparent::Input::PrevOut {
+    let placeholder_tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -1425,13 +1394,13 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
             unlock_script: transparent::Script::new(&[]),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]),
         }],
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     let all_previous_outputs = Arc::new(vec![previous_output.clone()]);
     let sighasher = SigHasher::new(&placeholder_tx, NetworkUpgrade::Nu5, all_previous_outputs)
@@ -1441,7 +1410,7 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
     // the stale C++ buffer to still hold when the second CHECKSIG runs.
     let sighash = sighasher.sighash(HashType::ALL, Some((0, lock_script_bytes.clone())));
     let msg = Message::from_digest(*sighash.as_ref());
-    let signature = secp.sign_ecdsa(&msg, &secret_key);
+    let signature = secp256k1::ecdsa::sign(msg, &secret_key);
     let der_sig = signature.serialize_der();
 
     // scriptSig pushes:
@@ -1458,11 +1427,9 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
     unlock_script_bytes.extend_from_slice(&der_sig);
     unlock_script_bytes.push(0x01);
 
-    let final_tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::unlocked(),
-        expiry_height: block::Height(0),
-        inputs: vec![transparent::Input::PrevOut {
+    let final_tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -1470,13 +1437,13 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
             unlock_script: transparent::Script::new(&unlock_script_bytes),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: 9000_0000u64.try_into().expect("valid amount"),
             lock_script: transparent::Script::new(&[0x00]),
         }],
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        block::Height(0),
+    );
 
     let verifier = super::CachedFfiTransaction::new(
         Arc::new(final_tx),
@@ -1513,9 +1480,9 @@ fn p2sh_sigop_count_uses_accurate_multisig_mode() -> Result<()> {
     lock.extend_from_slice(&[0u8; 20]);
     lock.push(0x87u8);
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![transparent::Input::PrevOut {
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::PrevOut {
             outpoint: transparent::OutPoint {
                 hash: transaction::Hash([0u8; 32]),
                 index: 0,
@@ -1523,15 +1490,13 @@ fn p2sh_sigop_count_uses_accurate_multisig_mode() -> Result<()> {
             unlock_script: transparent::Script::new(&unlock),
             sequence: u32::MAX,
         }],
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: zebra_chain::amount::Amount::try_from(1_000_000)?,
             lock_script: transparent::Script::new(&[0x51]),
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        Height(0),
+    );
     let spent = transparent::Output {
         value: zebra_chain::amount::Amount::try_from(1_000_000)?,
         lock_script: transparent::Script::new(&lock),
@@ -1606,18 +1571,16 @@ fn poc_p2sh_accurate_multisig_should_count_one_not_twenty() -> Result<()> {
         lock_script,
     };
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        inputs: vec![input],
-        outputs: vec![transparent::Output {
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![input],
+        vec![transparent::Output {
             value: zebra_chain::amount::Amount::try_from(1_000_000)?,
             lock_script: transparent::Script::new(&[0x51]), // OP_TRUE dummy output
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        Height(0),
+    );
 
     let zebra_count = p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output));
 
@@ -1660,18 +1623,16 @@ fn poc_p2sh_1001_accurate_multisigs_should_stay_below_block_sigop_limit() -> Res
 
     let spent_outputs = vec![spent_output; SPENDS];
 
-    let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
+    let tx = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
         inputs,
-        outputs: vec![transparent::Output {
+        vec![transparent::Output {
             value: zebra_chain::amount::Amount::try_from(1_000_000)?,
             lock_script: transparent::Script::new(&[0x51]), // OP_TRUE dummy output
         }],
-        lock_time: LockTime::unlocked(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+        LockTime::unlocked(),
+        Height(0),
+    );
 
     let zebra_count = p2sh_sigop_count(&tx, &spent_outputs);
     let zcashd_accurate_count = SPENDS as u32;

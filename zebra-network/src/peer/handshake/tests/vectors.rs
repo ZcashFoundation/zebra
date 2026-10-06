@@ -2,7 +2,7 @@
 
 use tower::{service_fn, ServiceExt};
 
-use crate::peer_set::ActiveConnectionCounter;
+use crate::{address_book_updater, peer_set::ActiveConnectionCounter};
 
 use super::super::*;
 
@@ -115,7 +115,7 @@ fn chain_tip_at_network_tip() -> (
 ) {
     let (chain_tip, sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
     sender.send_best_tip_height(block::Height(3_000_000));
-    sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    sender.send_best_tip_block_time(chrono::Utc::now());
     (chain_tip, sender)
 }
 
@@ -230,7 +230,7 @@ async fn rejected_non_serving_peer_is_not_recorded_with_services() {
         ..Config::default()
     };
 
-    let (address_book_tx, mut address_book_rx) = tokio::sync::mpsc::channel(10);
+    let (address_book_tx, mut address_book_rx) = address_book_updater::change_channel(10);
 
     let handshake = Handshake::builder()
         .with_config(config)

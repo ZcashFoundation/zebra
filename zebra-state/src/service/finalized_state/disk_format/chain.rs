@@ -11,19 +11,19 @@ use bincode::Options;
 use serde_big_array::BigArray;
 
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{Amount, NonNegative},
     block::Height,
     block_info::BlockInfo,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
     parameters::{Network, NetworkKind},
     primitives::zcash_history,
-    value_balance::ValueBalance,
+    value_balance::{ValueBalance, SERIALIZED_SIZE},
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 48];
+    type Bytes = [u8; SERIALIZED_SIZE];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.to_bytes()
@@ -162,41 +162,48 @@ impl FromDisk for HistoryTreeParts {
 }
 
 impl IntoDisk for BlockInfo {
-    type Bytes = Vec<u8>;
+    type Bytes = [u8; SERIALIZED_SIZE + 4];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.value_pools()
-            .as_bytes()
-            .iter()
-            .copied()
-            .chain(self.size().to_le_bytes().iter().copied())
-            .collect()
+        let mut bytes = [0; SERIALIZED_SIZE + 4];
+        let value_pools = self.value_pools().to_bytes();
+        bytes[..48].copy_from_slice(&value_pools[..48]);
+        bytes[48..52].copy_from_slice(&self.size().to_le_bytes());
+        bytes[52..].copy_from_slice(&value_pools[48..]);
+        bytes
     }
 }
 
 impl FromDisk for BlockInfo {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        // Records are exactly 52 bytes from NU6.3 onward (48-byte value pool incl. the ironwood
-        // pool, plus the 4-byte block size) and exactly 44 bytes for records written by earlier
-        // Zebra versions (40-byte value pool plus 4-byte size). We discriminate the two layouts by
-        // length, and stay forward-compatible by reading the known prefix
-        // and ignoring any unexpected trailing bytes.
-        match bytes.as_ref().len() {
-            // NU6.3 onward (and any forward-compatible larger record): 48-byte pool + 4-byte size.
-            52.. => {
-                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..48])
+        let bytes = bytes.as_ref();
+
+        // Preserve the v28 pool-and-size prefix; append NSM after the block size.
+        // Legacy layouts leave newer pools zero; ignore forward-compatible trailing bytes.
+        match bytes.len() {
+            60.. => {
+                let mut value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes[..48])
                     .expect("must work for 48 bytes");
-                let size =
-                    u32::from_le_bytes(bytes.as_ref()[48..52].try_into().expect("must be 4 bytes"));
+                let size = u32::from_le_bytes(bytes[48..52].try_into().expect("must be 4 bytes"));
+                let nsm = Amount::from_bytes(bytes[52..60].try_into().expect("must be 8 bytes"))
+                    .expect("stored NSM balance must be a valid nonnegative amount");
+                value_pools.set_nsm_amount(nsm);
                 BlockInfo::new(value_pools, size)
             }
-            // Pre-NU6.3 records (exactly 44 bytes; the open range stays forward-compatible, and the
-            // 52.. arm above already took every NU6.3 record).
+            // v28.0 records (exactly 52 bytes; the `60..` arm above already took every wide
+            // record): 48-byte pool + 4-byte size.
+            52.. => {
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes[0..48])
+                    .expect("must work for 48 bytes");
+                let size = u32::from_le_bytes(bytes[48..52].try_into().expect("must be 4 bytes"));
+                BlockInfo::new(value_pools, size)
+            }
+            // Pre-NU6.3 records (exactly 44 bytes; the arms above already took every NU6.3 and
+            // NU7 record).
             44.. => {
-                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes.as_ref()[0..40])
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(&bytes[0..40])
                     .expect("must work for 40 bytes");
-                let size =
-                    u32::from_le_bytes(bytes.as_ref()[40..44].try_into().expect("must be 4 bytes"));
+                let size = u32::from_le_bytes(bytes[40..44].try_into().expect("must be 4 bytes"));
                 BlockInfo::new(value_pools, size)
             }
             _ => panic!("invalid format"),

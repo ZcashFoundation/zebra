@@ -1,13 +1,13 @@
 //! Transaction-related types.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::methods::arrayhex;
 use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
-use rand::rngs::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use zcash_script::script::Asm;
 
 use zcash_keys::address::Address;
@@ -15,25 +15,25 @@ use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder},
     fees::fixed::FeeRule,
 };
-use zcash_proofs::prover::LocalTxProver;
-use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::Zatoshis};
+use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::ZatBalance, value::Zatoshis};
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
-    orchard,
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
+        subsidy::{
+            block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
+            nsm_fee_contribution,
+        },
         Network, NetworkUpgrade,
     },
     primitives::ed25519,
     sapling::ValueCommitment,
     serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
-    transparent::Script,
+    transparent::{OutPoint, Script, Utxo},
 };
-use zebra_consensus::{error::TransactionError, funding_stream_address};
+use zebra_consensus::error::TransactionError;
 use zebra_script::Sigops;
-use zebra_state::IntoDisk;
 
 use super::zec::Zec;
 use super::{super::opthex, get_block_template::MinerParams};
@@ -63,7 +63,7 @@ where
     /// The transactions in this block template that this transaction depends upon.
     /// These are 1-based indexes in the `transactions` list.
     ///
-    /// Zebra's mempool does not support transaction dependencies, so this list is always empty.
+    /// Populated when the selected transactions are assembled into a block template.
     ///
     /// We use `u16` because 2 MB blocks are limited to around 39,000 transactions.
     pub(crate) depends: Vec<u16>,
@@ -71,8 +71,8 @@ where
     /// The fee for this transaction.
     ///
     /// Non-coinbase transactions must be `NonNegative`.
-    /// The Coinbase transaction `fee` is the negative sum of the fees of the transactions in
-    /// the block, so their fee must be `NegativeOrZero`.
+    /// The coinbase transaction `fee` is the negative total collected miner fees, excluding
+    /// the NSM contribution, so its fee must be `NegativeOrZero`.
     #[getter(copy)]
     pub(crate) fee: Amount<FeeConstraint>,
 
@@ -102,7 +102,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
                 .auth_digest()
                 .unwrap_or(AUTH_DIGEST_PLACEHOLDER),
 
-            // Always empty, not supported by Zebra's mempool.
+            // Indexes require the final selected transaction order.
             depends: Vec::new(),
 
             fee: tx.miner_fee,
@@ -124,15 +124,45 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
-    /// Constructs a transaction template for a coinbase transaction.
+    /// Constructs a transaction template for a coinbase without parent-dependent reissuance.
+    ///
+    /// `txs_fee` is the gross transaction fee total. The payout and the template's negative
+    /// `fee` include only the miner's share after the NSM contribution.
     pub fn new_coinbase(
         net: &Network,
         height: Height,
         miner_params: &MinerParams,
         txs_fee: Amount<NonNegative>,
     ) -> Result<Self, TransactionError> {
-        let block_subsidy = block_subsidy(height, net)?;
-        let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
+        Self::new_coinbase_with_parent_pools(net, height, miner_params, txs_fee, None)
+    }
+
+    /// Constructs a transaction template for a coinbase transaction in a block whose parent leaves
+    /// `parent_nsm_value_balance` in the NSM value balance.
+    ///
+    /// The parent's NSM value balance is required from the NSM reissuance height, because it
+    /// determines the block subsidy.
+    /// The payout and negative `fee` include only net miner fees after the NSM contribution.
+    pub fn new_coinbase_with_parent_pools(
+        net: &Network,
+        height: Height,
+        miner_params: &MinerParams,
+        txs_fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> Result<Self, TransactionError> {
+        let block_subsidy = match parent_nsm_value_balance {
+            Some(parent_nsm_value_balance) => {
+                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                    height,
+                    net,
+                    parent_nsm_value_balance,
+                )?
+            }
+            None => block_subsidy(height, net)?,
+        };
+        // From NU7 activation, the coinbase can't claim the fees ZIP 235 removes from circulation.
+        let miner_fees = (txs_fee - nsm_fee_contribution(height, net, txs_fee))?;
+        let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fees;
         let miner_reward = Zatoshis::try_from(miner_reward?)?;
 
         let mut builder = Builder::new(
@@ -146,9 +176,9 @@ impl TransactionTemplate<NegativeOrZero> {
         let default_memo = MemoBytes::empty();
         let memo = miner_params.memo().unwrap_or(&default_memo);
 
-        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. If the
-        // Network Sustainability Mechanism re-introduces a burn, it will be plumbed back through
-        // explicitly at that point.
+        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. The
+        // fees ZIP 235 removes from circulation are left out of the miner reward above, and need
+        // no transaction field.
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {
@@ -240,14 +270,14 @@ impl TransactionTemplate<NegativeOrZero> {
             builder.add_transparent_output(&fs_addr, fs_amount)?;
         }
 
-        let sapling_prover = LocalTxProver::bundled();
+        let sapling_prover = zebra_consensus::sapling_prover();
         let build_result = builder.build(
             &Default::default(),
             Default::default(),
             Default::default(),
-            OsRng,
-            &sapling_prover,
-            &sapling_prover,
+            UnwrapErr(SysRng),
+            sapling_prover,
+            sapling_prover,
             &FeeRule::non_standard(Zatoshis::ZERO),
         )?;
 
@@ -260,7 +290,7 @@ impl TransactionTemplate<NegativeOrZero> {
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),
-            fee: (-txs_fee).constrain()?,
+            fee: (-miner_fees).constrain()?,
             sigops: tx.sigops()?,
             required: true,
         })
@@ -291,6 +321,13 @@ pub struct TransactionObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) confirmations: Option<i64>,
+
+    /// The transaction fee in ZEC, only present at `getblock` verbosity 3.
+    ///
+    /// Omitted for the coinbase transaction and when a spent output cannot be found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    pub(crate) fee: Option<f64>,
 
     /// Transparent inputs of the transaction.
     #[serde(rename = "vin")]
@@ -462,7 +499,32 @@ pub enum Input {
         /// The address of the output being spent.
         #[serde(skip_serializing_if = "Option::is_none")]
         address: Option<String>,
+        /// The output being spent, only present at `getblock` verbosity 3.
+        ///
+        /// Boxed to keep the common (verbosity 1/2) input small.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prevout: Option<Box<Prevout>>,
     },
+}
+
+/// The previous output spent by a transparent input.
+///
+/// Only present at `getblock` verbosity 3. The fields match Bitcoin Core's `getblock`
+/// verbosity 3 `prevout` object.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct Prevout {
+    /// Whether the output being spent was created by a coinbase transaction.
+    #[getter(copy)]
+    generated: bool,
+    /// The height of the block that created the output being spent.
+    #[getter(copy)]
+    height: u32,
+    /// The value of the output being spent in ZEC.
+    #[getter(copy)]
+    value: f64,
+    /// The scriptPubKey of the output being spent.
+    #[serde(rename = "scriptPubKey")]
+    script_pub_key: ScriptPubKey,
 }
 
 /// The transparent output of a transaction.
@@ -501,36 +563,11 @@ impl OutputObject {
         coinbase: bool,
         network: &Network,
     ) -> Self {
-        let lock_script = &output.lock_script;
-        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
-        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
-
-        let script_pub_key = ScriptPubKey::new(
-            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
-            lock_script.clone(),
-            req_sigs,
-            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
-                .to_component()
-                .ok()
-                .and_then(|c| c.refine().ok())
-                .and_then(|component| zcash_script::solver::standard(&component))
-                .map(|kind| match kind {
-                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
-                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
-                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
-                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
-                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
-                })
-                .unwrap_or("nonstandard")
-                .to_string(),
-            addresses,
-        );
-
         Self {
             best_block,
             confirmations,
             value: crate::methods::types::zec::Zec::from(output.value()).lossy_zec(),
-            script_pub_key,
+            script_pub_key: ScriptPubKey::from_output(output, network),
             version,
             coinbase,
         }
@@ -557,6 +594,38 @@ pub struct ScriptPubKey {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     addresses: Option<Vec<String>>,
+}
+
+impl ScriptPubKey {
+    /// Builds the `scriptPubKey` object for a transparent output's lock script.
+    pub fn from_output(output: &zebra_chain::transparent::Output, network: &Network) -> Self {
+        let lock_script = &output.lock_script;
+        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
+        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
+
+        Self {
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
+            asm: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
+            hex: lock_script.clone(),
+            req_sigs,
+            r#type: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+                .to_component()
+                .ok()
+                .and_then(|c| c.refine().ok())
+                .and_then(|component| zcash_script::solver::standard(&component))
+                .map(|kind| match kind {
+                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                })
+                .unwrap_or("nonstandard")
+                .to_string(),
+            addresses,
+        }
+    }
 }
 
 /// The scriptSig of a transaction input.
@@ -763,25 +832,27 @@ pub struct OrchardAction {
 ///
 /// The Ironwood pool reuses the Orchard bundle shape, so both pools serialize through the same
 /// [`Orchard`] object; the caller selects which pool's shielded data and value balance to pass.
+/// Builds the RPC object for an Orchard-shaped bundle.
+///
+/// Both the Orchard and Ironwood pools use the same bundle type and the same wire shape, so this
+/// serves both. The caller supplies the pool's own value balance, since that is read from a
+/// separate field per pool.
 fn orchard_shaped_object(
-    shielded_data: Option<&orchard::ShieldedData>,
+    bundle: Option<&::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
     value_balance: Amount<NegativeAllowed>,
 ) -> Orchard {
-    let actions = shielded_data
+    let actions = bundle
         .into_iter()
-        .flat_map(|data| data.actions.iter())
-        .map(|authorized_action| {
-            let action = &authorized_action.action;
-            OrchardAction {
-                cv: action.cv.into(),
-                nullifier: action.nullifier.into(),
-                rk: action.rk.into(),
-                cm_x: action.cm_x.into(),
-                ephemeral_key: action.ephemeral_key.into(),
-                enc_ciphertext: action.enc_ciphertext.into(),
-                spend_auth_sig: authorized_action.spend_auth_sig.into(),
-                out_ciphertext: action.out_ciphertext.into(),
-            }
+        .flat_map(|bundle| bundle.actions().iter())
+        .map(|action| OrchardAction {
+            cv: action.cv_net().to_bytes(),
+            nullifier: action.nullifier().to_bytes(),
+            rk: action.rk().into(),
+            cm_x: action.cmx().to_bytes(),
+            ephemeral_key: action.encrypted_note().epk_bytes,
+            enc_ciphertext: action.encrypted_note().enc_ciphertext.0,
+            spend_auth_sig: action.authorization().into(),
+            out_ciphertext: action.encrypted_note().out_ciphertext,
         })
         .collect();
 
@@ -789,15 +860,19 @@ fn orchard_shaped_object(
         actions,
         value_balance: Zec::from(value_balance).lossy_zec(),
         value_balance_zat: value_balance.zatoshis(),
-        flags: shielded_data.map(|data| {
-            OrchardFlags::new(
-                data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
-                data.flags.contains(orchard::Flags::ENABLE_SPENDS),
-            )
+        flags: bundle.map(|bundle| {
+            let flags = bundle.flags();
+            OrchardFlags::new(flags.outputs_enabled(), flags.spends_enabled())
         }),
-        anchor: shielded_data.map(|data| data.shared_anchor.bytes_in_display_order()),
-        proof: shielded_data.map(|data| data.proof.bytes_in_display_order()),
-        binding_sig: shielded_data.map(|data| data.binding_sig.into()),
+        anchor: bundle.map(|bundle| {
+            let mut anchor = bundle.anchor().to_bytes();
+            // Display order is reversed in the RPC output.
+            anchor.reverse();
+            anchor
+        }),
+        proof: bundle.map(|bundle| bundle.authorization().proof().as_ref().to_vec()),
+        binding_sig: bundle
+            .map(|bundle| <[u8; 64]>::from(bundle.authorization().binding_signature())),
     }
 }
 
@@ -809,6 +884,7 @@ impl Default for TransactionObject {
             ),
             height: Option::default(),
             confirmations: Option::default(),
+            fee: None,
             inputs: Vec::new(),
             outputs: Vec::new(),
             shielded_spends: Vec::new(),
@@ -872,6 +948,8 @@ impl TransactionObject {
                 // Mempool
                 None
             },
+            // Only populated at `getblock` verbosity 3.
+            fee: None,
             inputs: tx
                 .inputs()
                 .iter()
@@ -899,6 +977,7 @@ impl TransactionObject {
                         value: None,
                         value_zat: None,
                         address: None,
+                        prevout: None,
                     },
                 })
                 .collect(),
@@ -906,68 +985,33 @@ impl TransactionObject {
                 .outputs()
                 .iter()
                 .enumerate()
-                .map(|output| {
-                    // Parse the scriptPubKey to find destination addresses.
-                    let (addresses, req_sigs) = output
-                        .1
-                        .address(network)
-                        .map(|address| (vec![address.to_string()], 1))
-                        .unzip();
-
-                    Output {
-                        value: Zec::from(output.1.value).lossy_zec(),
-                        value_zat: output.1.value.zatoshis(),
-                        n: output.0 as u32,
-                        script_pub_key: ScriptPubKey {
-                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
-                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
-                            asm: zcash_script::script::Code(
-                                output.1.lock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_asm(false),
-                            hex: output.1.lock_script.clone(),
-                            req_sigs,
-                            r#type: zcash_script::script::Code(
-                                output.1.lock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_component()
-                            .ok()
-                            .and_then(|c| c.refine().ok())
-                            .and_then(|component| zcash_script::solver::standard(&component))
-                            .map(|kind| match kind {
-                                zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
-                                zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
-                                zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
-                                zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
-                                zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
-                            })
-                            .unwrap_or("nonstandard")
-                            .to_string(),
-                            addresses,
-                        },
-                    }
+                .map(|(n, output)| Output {
+                    value: Zec::from(output.value).lossy_zec(),
+                    value_zat: output.value.zatoshis(),
+                    n: n as u32,
+                    script_pub_key: ScriptPubKey::from_output(output, network),
                 })
                 .collect(),
             shielded_spends: tx
-                .sapling_spends_per_anchor()
+                .sapling_spends()
                 .map(|spend| {
-                    let mut anchor = spend.per_spend_anchor.as_bytes();
+                    let mut anchor = spend.anchor().to_bytes();
                     anchor.reverse();
 
-                    let mut nullifier = spend.nullifier.as_bytes();
+                    let mut nullifier = spend.nullifier().0;
                     nullifier.reverse();
 
-                    let mut rk: [u8; 32] = spend.clone().rk.into();
+                    let mut rk: [u8; 32] = (*spend.rk()).into();
                     rk.reverse();
 
-                    let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
+                    let spend_auth_sig: [u8; 64] = (*spend.spend_auth_sig()).into();
 
                     ShieldedSpend {
-                        cv: spend.cv.clone(),
+                        cv: ValueCommitment(spend.cv().clone()),
                         anchor,
                         nullifier,
                         rk,
-                        proof: spend.zkproof.0,
+                        proof: *spend.zkproof(),
                         spend_auth_sig,
                     }
                 })
@@ -975,79 +1019,81 @@ impl TransactionObject {
             shielded_outputs: tx
                 .sapling_outputs()
                 .map(|output| {
-                    let mut cm_u: [u8; 32] = output.cm_u.to_bytes();
+                    let mut cm_u: [u8; 32] = output.cmu().to_bytes();
                     cm_u.reverse();
-                    let mut ephemeral_key: [u8; 32] = output.ephemeral_key.into();
+                    let mut ephemeral_key: [u8; 32] = output.ephemeral_key().0;
                     ephemeral_key.reverse();
-                    let enc_ciphertext: [u8; 580] = output.enc_ciphertext.into();
-                    let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
+                    let enc_ciphertext: [u8; 580] = *output.enc_ciphertext();
+                    let out_ciphertext: [u8; 80] = *output.out_ciphertext();
 
                     ShieldedOutput {
-                        cv: output.cv.clone(),
+                        cv: ValueCommitment(output.cv().clone()),
                         cm_u,
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
-                        proof: output.zkproof.0,
+                        proof: *output.zkproof(),
                     }
                 })
                 .collect(),
             joinsplits: tx
-                .sprout_joinsplits()
+                .sprout_joinsplit_descriptions()
                 .map(|joinsplit| {
-                    let mut ephemeral_key_bytes: [u8; 32] = joinsplit.ephemeral_key.to_bytes();
-                    ephemeral_key_bytes.reverse();
+                    // `JsDescription` stores every field in wire order; the RPC renders the
+                    // 32-byte fields in display (reversed) order, matching zcashd.
+                    let display_order = |bytes: &[u8; 32]| {
+                        let mut bytes = *bytes;
+                        bytes.reverse();
+                        bytes
+                    };
+
+                    let (ephemeral_key, proof, ciphertexts) =
+                        transaction::sprout_joinsplit_key_proof_and_ciphertexts(joinsplit);
+
+                    let vpub_old = i64::from(joinsplit.vpub_old());
+                    let vpub_new = i64::from(joinsplit.vpub_new());
+                    let vpub_old_amount = Amount::<NonNegative>::try_from(vpub_old)
+                        .expect("vpub_old is a valid non-negative amount");
+                    let vpub_new_amount = Amount::<NonNegative>::try_from(vpub_new)
+                        .expect("vpub_new is a valid non-negative amount");
 
                     JoinSplit {
-                        old_public_value: Zec::from(joinsplit.vpub_old).lossy_zec(),
-                        old_public_value_zat: joinsplit.vpub_old.zatoshis(),
-                        new_public_value: Zec::from(joinsplit.vpub_new).lossy_zec(),
-                        new_public_value_zat: joinsplit.vpub_new.zatoshis(),
-                        anchor: joinsplit.anchor.bytes_in_display_order(),
-                        nullifiers: joinsplit
-                            .nullifiers
-                            .iter()
-                            .map(|n| n.bytes_in_display_order())
-                            .collect(),
-                        commitments: joinsplit
-                            .commitments
-                            .iter()
-                            .map(|c| c.bytes_in_display_order())
-                            .collect(),
-                        one_time_pubkey: ephemeral_key_bytes,
-                        random_seed: joinsplit.random_seed.bytes_in_display_order(),
-                        macs: joinsplit
-                            .vmacs
-                            .iter()
-                            .map(|m| m.bytes_in_display_order())
-                            .collect(),
-                        proof: joinsplit.zkproof.unwrap_or_default(),
-                        ciphertexts: joinsplit
-                            .enc_ciphertexts
-                            .iter()
-                            .map(|c| c.zcash_serialize_to_vec().unwrap_or_default())
-                            .collect(),
+                        old_public_value: Zec::from(vpub_old_amount).lossy_zec(),
+                        old_public_value_zat: vpub_old,
+                        new_public_value: Zec::from(vpub_new_amount).lossy_zec(),
+                        new_public_value_zat: vpub_new,
+                        anchor: display_order(joinsplit.anchor()),
+                        nullifiers: joinsplit.nullifiers().iter().map(display_order).collect(),
+                        commitments: joinsplit.commitments().iter().map(display_order).collect(),
+                        one_time_pubkey: display_order(&ephemeral_key),
+                        random_seed: display_order(joinsplit.random_seed()),
+                        macs: joinsplit.macs().iter().map(display_order).collect(),
+                        proof,
+                        ciphertexts: ciphertexts.iter().map(|c| c.to_vec()).collect(),
                     }
                 })
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
             orchard: Some(orchard_shaped_object(
-                tx.orchard_shielded_data(),
+                tx.orchard_bundle(),
                 tx.orchard_value_balance().orchard_amount(),
             )),
-            ironwood: tx.ironwood_shielded_data().map(|data| {
-                orchard_shaped_object(Some(data), tx.ironwood_value_balance().ironwood_amount())
+            ironwood: tx.ironwood_bundle().map(|bundle| {
+                orchard_shaped_object(Some(bundle), tx.ironwood_value_balance().ironwood_amount())
             }),
-            binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
-            joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
+            binding_sig: tx.sapling_bundle().map(|b| {
+                let sig: [u8; 64] = b.authorization().binding_sig.into();
+                sig
+            }),
+            joinsplit_pub_key: tx.sprout_joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.
                 let mut key: [u8; 32] = raw_key.into();
                 key.reverse();
                 key
             }),
-            joinsplit_sig: tx.joinsplit_sig().map(|raw_sig| raw_sig.into()),
-            size: tx.as_bytes().len().try_into().ok(),
+            joinsplit_sig: tx.sprout_bundle().map(|b| b.joinsplit_sig),
+            size: tx.zcash_serialized_size().try_into().ok(),
             time: block_time,
             txid,
             in_active_chain,
@@ -1066,5 +1112,394 @@ impl TransactionObject {
             block_hash,
             block_time,
         }
+    }
+
+    /// Fills in each transparent input's `prevout` and the transaction `fee` from the outputs
+    /// `tx` spends, for `getblock` verbosity 3.
+    ///
+    /// `spent_utxos` maps each spent outpoint to the output it spends. Coinbase transactions
+    /// spend no outputs and have no fee, so they are left unchanged. A `prevout` object is set
+    /// for every input whose spent output is present in `spent_utxos`; the `fee` is only set when
+    /// every spent output is present, because the value balance is otherwise incomplete.
+    pub fn add_prevouts(
+        &mut self,
+        tx: &Transaction,
+        spent_utxos: &HashMap<OutPoint, Utxo>,
+        network: &Network,
+    ) {
+        if tx.is_coinbase() {
+            return;
+        }
+
+        // `self.inputs` is built one-to-one from `tx.inputs()`, so pair each rendered input with
+        // its own source input and use that input's outpoint. This keeps the alignment correct
+        // even if an input carries no outpoint, rather than relying on the filtered
+        // `spent_outpoints()` iterator staying in step.
+        for (input, source_input) in self.inputs.iter_mut().zip(tx.inputs()) {
+            let Input::NonCoinbase { prevout, .. } = input else {
+                continue;
+            };
+            let Some(utxo) = source_input.outpoint().and_then(|o| spent_utxos.get(&o)) else {
+                continue;
+            };
+            *prevout = Some(Box::new(Prevout::new(
+                utxo.from_coinbase,
+                utxo.height.0,
+                Zec::from(utxo.output.value).lossy_zec(),
+                ScriptPubKey::from_output(&utxo.output, network),
+            )));
+        }
+
+        // The fee needs every spent output to complete the value balance.
+        if tx
+            .spent_outpoints()
+            .all(|outpoint| spent_utxos.contains_key(&outpoint))
+        {
+            if let Ok(value_balance) = tx.value_balance(spent_utxos) {
+                if let Ok(fee) = value_balance.remaining_transaction_value() {
+                    self.fee = Some(Zec::from(fee).lossy_zec());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto, transparent::Output};
+
+    /// Returns the first non-coinbase, transparent-only transaction in the mainnet block vectors.
+    ///
+    /// "Transparent-only" means it has transparent inputs and no shielded data, so its fee is just
+    /// the difference between the transparent input and output totals.
+    fn first_transparent_only_tx() -> Arc<Transaction> {
+        zebra_test::vectors::MAINNET_BLOCKS
+            .values()
+            .flat_map(|bytes| {
+                let block: Block = bytes
+                    .zcash_deserialize_into()
+                    .expect("hard-coded test vector must deserialize");
+                block.transactions.clone()
+            })
+            .find(|tx| {
+                !tx.is_coinbase()
+                    && !tx.inputs().is_empty()
+                    && tx.sapling_spends_count() == 0
+                    && tx.sapling_outputs().count() == 0
+                    && tx.orchard_actions().count() == 0
+                    && tx.ironwood_actions().count() == 0
+                    && tx.sprout_joinsplit_descriptions().next().is_none()
+            })
+            .expect("the mainnet block vectors contain a transparent-only transaction")
+    }
+
+    /// `add_prevouts` fills every input's `prevout` and computes the `fee` when all spent outputs
+    /// are present.
+    #[test]
+    fn add_prevouts_fills_prevouts_and_fee() {
+        let network = Network::Mainnet;
+        let tx = first_transparent_only_tx();
+
+        let output_total = tx
+            .outputs()
+            .iter()
+            .try_fold(Amount::<NonNegative>::zero(), |acc, output| {
+                acc + output.value
+            })
+            .expect("transparent outputs sum within range");
+
+        // Put the whole input value on the first input, so the fee is exactly `FEE`.
+        const FEE: i64 = 10_000;
+        let first_input_value = (output_total + Amount::<NonNegative>::try_from(FEE).unwrap())
+            .expect("input total within range");
+        let lock_script = Script::new(&[0x76, 0xa9]);
+
+        let mut spent_utxos = HashMap::new();
+        for (i, outpoint) in tx.spent_outpoints().enumerate() {
+            let value = if i == 0 {
+                first_input_value
+            } else {
+                Amount::zero()
+            };
+            spent_utxos.insert(
+                outpoint,
+                Utxo::new(Output::new(value, lock_script.clone()), Height(123), i == 0),
+            );
+        }
+
+        let mut object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &network,
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+        object.add_prevouts(&tx, &spent_utxos, &network);
+
+        // Every transparent input has a prevout.
+        for input in &object.inputs {
+            let Input::NonCoinbase { prevout, .. } = input else {
+                panic!("a transparent-only transaction has only non-coinbase inputs");
+            };
+            assert!(prevout.is_some(), "each input must carry a prevout");
+        }
+
+        // The first input's prevout carries the fabricated fields.
+        let Input::NonCoinbase { prevout, .. } = &object.inputs[0] else {
+            unreachable!("checked above");
+        };
+        let prevout = prevout.as_ref().expect("prevout is set");
+        assert!(prevout.generated());
+        assert_eq!(prevout.height(), 123);
+        assert_eq!(prevout.value(), Zec::from(first_input_value).lossy_zec());
+
+        // For a transparent-only transaction the fee is inputs minus outputs.
+        let expected_fee = Zec::from(Amount::<NonNegative>::try_from(FEE).unwrap()).lossy_zec();
+        assert_eq!(object.fee(), Some(expected_fee));
+    }
+
+    /// `add_prevouts` leaves a coinbase transaction unchanged: no `fee`, no `prevout`.
+    #[test]
+    fn add_prevouts_is_noop_for_coinbase() {
+        let network = Network::Mainnet;
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+        let coinbase = block.transactions[0].clone();
+        assert!(coinbase.is_coinbase());
+
+        let mut object = TransactionObject::from_transaction(
+            coinbase.clone(),
+            None,
+            None,
+            &network,
+            None,
+            None,
+            None,
+            coinbase.hash(),
+        );
+        object.add_prevouts(&coinbase, &HashMap::new(), &network);
+
+        assert_eq!(object.fee(), None);
+        assert!(matches!(object.inputs[0], Input::Coinbase { .. }));
+    }
+
+    /// When a spent output is missing, `add_prevouts` sets no `prevout` for it and omits the `fee`,
+    /// because the value balance would be incomplete.
+    #[test]
+    fn add_prevouts_omits_fee_when_a_spent_output_is_missing() {
+        let network = Network::Mainnet;
+        let tx = first_transparent_only_tx();
+
+        let mut object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &network,
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+        // No spent outputs supplied.
+        object.add_prevouts(&tx, &HashMap::new(), &network);
+
+        assert_eq!(object.fee(), None);
+        for input in &object.inputs {
+            let Input::NonCoinbase { prevout, .. } = input else {
+                panic!("a transparent-only transaction has only non-coinbase inputs");
+            };
+            assert!(
+                prevout.is_none(),
+                "a missing spent output must leave no prevout"
+            );
+        }
+    }
+
+    /// `vjoinsplit` must be populated for transactions with Sprout JoinSplits.
+    ///
+    /// The existing `getrawtransaction` snapshots all use blocks that predate Sprout, so an empty
+    /// `vjoinsplit` is byte-identical to a correct one there and cannot catch a regression. This
+    /// uses mainnet block 419,201, which contains real JoinSplits.
+    #[test]
+    fn vjoinsplit_is_populated_for_sprout_transactions() {
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+
+        let tx = block
+            .transactions
+            .iter()
+            .find(|tx| tx.sprout_joinsplit_descriptions().next().is_some())
+            .expect("block 419,201 contains a transaction with JoinSplits")
+            .clone();
+
+        let expected_count = tx.sprout_joinsplit_descriptions().count();
+        assert!(expected_count > 0);
+
+        let object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &Network::Mainnet,
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+
+        assert_eq!(
+            object.joinsplits.len(),
+            expected_count,
+            "every JoinSplit must appear in vjoinsplit",
+        );
+
+        // Field-level check against the parsed transaction, in the RPC's display byte order.
+        let joinsplit = tx
+            .sprout_joinsplit_descriptions()
+            .next()
+            .expect("the transaction has JoinSplits");
+        let rendered = &object.joinsplits[0];
+
+        let reversed = |bytes: &[u8; 32]| {
+            let mut bytes = *bytes;
+            bytes.reverse();
+            bytes
+        };
+
+        assert_eq!(rendered.anchor, reversed(joinsplit.anchor()));
+        assert_eq!(rendered.nullifiers[0], reversed(&joinsplit.nullifiers()[0]));
+        assert_eq!(
+            rendered.commitments[0],
+            reversed(&joinsplit.commitments()[0])
+        );
+        assert_eq!(rendered.random_seed, reversed(joinsplit.random_seed()));
+        assert_eq!(rendered.macs[0], reversed(&joinsplit.macs()[0]));
+        assert_eq!(
+            rendered.old_public_value_zat,
+            i64::from(joinsplit.vpub_old())
+        );
+        assert_eq!(
+            rendered.new_public_value_zat,
+            i64::from(joinsplit.vpub_new())
+        );
+
+        // These two fields have no upstream accessor and are read back out of the wire encoding.
+        assert_eq!(rendered.ciphertexts.len(), 2);
+        assert!(rendered.ciphertexts.iter().all(|c| c.len() == 601));
+        assert_ne!(
+            rendered.one_time_pubkey, [0u8; 32],
+            "the ephemeral key must be read from the JoinSplit, not left zeroed",
+        );
+
+        // V4 JoinSplits carry Groth16 proofs.
+        assert_eq!(rendered.proof.len(), 192);
+    }
+
+    /// The `proof` field must carry the 296-byte PHGR13 proof for V2/V3 transactions.
+    ///
+    /// The sibling test above only covers V4 (Groth16) JoinSplits. PHGR13 proofs have no
+    /// upstream accessor, so a Groth16-only extraction silently renders them as empty; this
+    /// uses testnet block 141,042, whose non-coinbase transactions are V2 with one JoinSplit
+    /// each.
+    #[test]
+    fn vjoinsplit_proof_is_populated_for_phgr13_transactions() {
+        const PHGR_PROOF_SIZE: usize = 296;
+
+        let block: Block = zebra_test::vectors::BLOCK_TESTNET_141042_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+
+        let tx = block
+            .transactions
+            .iter()
+            .find(|tx| tx.sprout_joinsplit_descriptions().next().is_some())
+            .expect("block 141,042 contains transactions with JoinSplits")
+            .clone();
+
+        let joinsplit = tx
+            .sprout_joinsplit_descriptions()
+            .next()
+            .expect("the transaction has JoinSplits");
+
+        // The proof variant is what selects the extraction path, so assert on it directly rather
+        // than on the transaction version that implies it.
+        assert!(
+            joinsplit.groth_proof_bytes().is_none(),
+            "the fixture must exercise a PHGR13 proof, not a Groth16 one",
+        );
+
+        let object = TransactionObject::from_transaction(
+            tx.clone(),
+            None,
+            None,
+            &Network::new_default_testnet(),
+            None,
+            None,
+            None,
+            tx.hash(),
+        );
+
+        assert_eq!(object.joinsplits.len(), 1);
+        let rendered = &object.joinsplits[0];
+
+        assert_eq!(
+            rendered.proof.len(),
+            PHGR_PROOF_SIZE,
+            "the PHGR13 proof must be rendered, not replaced with an empty vector",
+        );
+
+        // The length alone would hold even if the proof were read from the wrong offset, because
+        // the extracted slice is always `PHGR_PROOF_SIZE` bytes wide. Pin the bytes instead: the
+        // proof must appear verbatim in the transaction's wire encoding, immediately after
+        // `vmacs[1]` and immediately before the first ciphertext.
+        let raw = tx
+            .zcash_serialize_to_vec()
+            .expect("a parsed transaction re-serializes");
+        let proof_offset = raw
+            .windows(PHGR_PROOF_SIZE)
+            .position(|window| window == rendered.proof.as_slice())
+            .expect("the rendered proof must appear verbatim in the wire encoding");
+
+        assert_eq!(
+            &raw[proof_offset - 32..proof_offset],
+            &joinsplit.macs()[1][..],
+            "the proof must be read from immediately after `vmacs[1]`",
+        );
+        assert_eq!(
+            &raw[proof_offset + PHGR_PROOF_SIZE..proof_offset + PHGR_PROOF_SIZE + 601],
+            rendered.ciphertexts[0].as_slice(),
+            "the proof must be read from immediately before the first ciphertext",
+        );
+    }
+
+    /// The `Default` impl and coinbase path legitimately have no JoinSplits.
+    #[test]
+    fn vjoinsplit_is_empty_for_coinbase() {
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_419201_BYTES
+            .zcash_deserialize_into()
+            .expect("hard-coded test vector must deserialize");
+
+        let coinbase = block.transactions[0].clone();
+        assert!(coinbase.is_coinbase());
+
+        let object = TransactionObject::from_transaction(
+            coinbase.clone(),
+            None,
+            None,
+            &Network::Mainnet,
+            None,
+            None,
+            None,
+            coinbase.hash(),
+        );
+
+        assert!(object.joinsplits.is_empty());
+        assert!(TransactionObject::default().joinsplits.is_empty());
     }
 }

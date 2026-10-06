@@ -56,8 +56,9 @@ use crate::{
         read::find,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
-    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, StateInitError,
+    AwaitUtxoError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
+    KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    StateInitError,
 };
 
 pub mod block_iter;
@@ -1163,14 +1164,19 @@ impl Service<Request> for StateService {
 
             // Uses pending_utxos and non_finalized_state_queued_blocks in the StateService.
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
+            //
+            // The expected error type for this request is `AwaitUtxoError`.
             Request::AwaitUtxo(outpoint) => {
                 let timer = CodeTimer::start();
-                // Prepare the AwaitUtxo future from PendingUxtos.
+                // Prepare the AwaitUtxo future from PendingUtxos.
                 let response_fut = self.pending_utxos.queue(outpoint);
                 // Only instrument `response_fut`, the ReadStateService already
                 // instruments its requests with the same span.
 
-                let response_fut = response_fut.instrument(span).boxed();
+                let response_fut = response_fut
+                    .map(|result| result.map_err(BoxError::from))
+                    .instrument(span)
+                    .boxed();
 
                 // Check the non-finalized block queue outside the returned future,
                 // so we can access mutable state fields.
@@ -1209,7 +1215,10 @@ impl Service<Request> for StateService {
                 async move {
                     let req = ReadRequest::AnyChainUtxo(outpoint);
 
-                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = read_service
+                        .oneshot(req)
+                        .await
+                        .map_err(AwaitUtxoError::ReadStateFailed)?;
 
                     // Optional TODO:
                     //  - make pending_utxos.respond() async using a channel,
@@ -1245,12 +1254,16 @@ impl Service<Request> for StateService {
 
                 self.drain_non_finalized_rejected_hashes();
 
-                let sent_hash_response = self.known_sent_hash(&hash);
+                let known_sent_hash = self.known_sent_hash(&hash);
+                let known_queued = self
+                    .non_finalized_state_queued_blocks
+                    .has(hash)
+                    .then_some(KnownBlock::Queue);
                 let read_service = self.read_service.clone();
 
                 async move {
-                    if sent_hash_response.is_some() {
-                        return Ok(Response::KnownBlock(sent_hash_response));
+                    if let Some(loc) = known_sent_hash.or(known_queued) {
+                        return Ok(Response::KnownBlock(Some(loc)));
                     };
 
                     let response = read::non_finalized_state_contains_block_hash(
@@ -1462,6 +1475,11 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            // Used by the get_block (verbosity 3) RPC.
+            ReadRequest::SpentOutputs(hash_or_height) => Ok(ReadResponse::SpentOutputs(
+                read::spent_outputs_for_block(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
+
             // Used by the get_block (verbose) RPC and the StateService.
             ReadRequest::BlockHeader(hash_or_height) => {
                 let best_chain = state.latest_best_chain();
@@ -1601,9 +1619,33 @@ impl Service<ReadRequest> for ReadStateService {
                 read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            ReadRequest::AnyChainSaplingTree(hash) => {
+                Ok(ReadResponse::SaplingTree(read::any_sapling_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }
+
+            ReadRequest::AnyChainOrchardTree(hash) => {
+                Ok(ReadResponse::OrchardTree(read::any_orchard_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }
+
             ReadRequest::IronwoodTree(hash_or_height) => Ok(ReadResponse::IronwoodTree(
                 read::ironwood_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
+
+            ReadRequest::AnyChainIronwoodTree(hash) => {
+                Ok(ReadResponse::IronwoodTree(read::any_ironwood_tree(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }
 
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
@@ -1682,11 +1724,17 @@ impl Service<ReadRequest> for ReadStateService {
             .map(ReadResponse::AddressesTransactionIds),
 
             // For the get_address_utxos RPC.
-            ReadRequest::UtxosByAddresses(addresses) => read::address_utxos(
+            ReadRequest::UtxosByAddresses {
+                addresses,
+                height_range,
+                max_entries,
+            } => read::address_utxos(
                 &state.network,
                 state.latest_best_chain(),
                 &state.db,
                 addresses,
+                height_range,
+                max_entries,
             )
             .map(ReadResponse::AddressUtxos),
 
@@ -1750,15 +1798,19 @@ impl Service<ReadRequest> for ReadStateService {
                         None => return Ok(ReadResponse::SolutionRate(None)),
                     };
 
-                let start_hash = match height {
-                    Some(height) if height < tip_height => read::hash_by_height(
+                let start_height = height.map_or(tip_height, |height| height.min(tip_height));
+                let start_hash = if start_height < tip_height {
+                    read::hash_by_height(
                         latest_non_finalized_state.best_chain(),
                         &state.db,
-                        height,
-                    ),
-                    // use the chain tip hash if height is above it or not provided.
-                    _ => Some(tip_hash),
+                        start_height,
+                    )
+                } else {
+                    Some(tip_hash)
                 };
+                let num_blocks = num_blocks.unwrap_or_else(|| {
+                    NetworkUpgrade::averaging_window_for_height(&state.network, start_height)
+                });
 
                 let solution_rate = start_hash.and_then(|start_hash| {
                     read::difficulty::solution_rate(

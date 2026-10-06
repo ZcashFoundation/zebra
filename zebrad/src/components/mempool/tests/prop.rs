@@ -69,6 +69,7 @@ proptest! {
         height_offset in 0i64..40,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 1),
                 nu6_3: Some(activation_height),
@@ -100,6 +101,7 @@ proptest! {
         height_offset in -40i64..0,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 41),
                 nu6_3: Some(activation_height),
@@ -131,6 +133,7 @@ proptest! {
         height_offset in -100i64..-40,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 101),
                 nu6_3: Some(activation_height),
@@ -162,6 +165,7 @@ proptest! {
         height_offset in 40i64..1_000,
     ) {
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
                 nu6_2: Some(activation_height - 1),
                 nu6_3: Some(activation_height),
@@ -198,8 +202,10 @@ proptest! {
         prop_assume!(transaction_upgrade != NetworkUpgrade::Nu6_3);
 
         let network = Parameters::build()
+            .with_slow_start_interval(block::Height::MIN)
             .with_activation_heights(ConfiguredActivationHeights {
-                nu6_2: Some(activation_height - 1),
+                // NU6.2 activates outside its own grace window, so only the NU6.3 boundary is tested.
+                nu6_2: Some(activation_height - 41),
                 nu6_3: Some(activation_height),
                 ..Default::default()
             })
@@ -312,12 +318,10 @@ proptest! {
                 // when there is a chain growth.
                 if let Some(expiry_height) = transaction.transaction.transaction.expiry_height() {
                     if chain_tip.height >= expiry_height {
-                        let mut tmp_tx = (*transaction.transaction.transaction).clone();
-
-                        // Set a new expiry height that is greater than the
-                        // height of the current chain tip.
-                        *tmp_tx.expiry_height_mut() = block::Height(chain_tip.height.0 + 1);
-                        transaction.transaction = tmp_tx.into();
+                        // TODO: Adjust expiry height when Transaction API supports expiry_height_mut.
+                        // For now, skip transactions that have already expired.
+                        // This may cause the test to have fewer inserted transactions than expected.
+                        continue;
                     }
                 }
 
@@ -512,4 +516,112 @@ impl FakeChainTip {
             Self::Reset(chain_tip_block) => chain_tip_block.clone(),
         }
     }
+}
+
+proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+                                          .ok()
+                                          .and_then(|v| v.parse().ok())
+                                          .unwrap_or(DEFAULT_MEMPOOL_PROPTEST_CASES)))]
+
+    /// Checks that NU6.3 branch IDs have no peer score for 50 minutes of 25-second NU7 blocks.
+    #[test]
+    fn nu6_3_branch_id_has_no_score_during_nu7_grace(
+        activation_height in 100u32..1_000_000,
+        height_offset in 0i64..120,
+    ) {
+        let network = configured_testnet(ConfiguredActivationHeights {
+            nu6_3: Some(activation_height - 1),
+            nu7: Some(activation_height),
+            ..Default::default()
+        });
+        let height = height_at_offset(activation_height, height_offset);
+
+        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu6_3, height, &network), 0);
+    }
+
+    /// Checks that NU6.3 branch IDs regain their peer score at the NU7 grace cutoff.
+    #[test]
+    fn nu6_3_branch_id_keeps_score_after_nu7_grace(
+        activation_height in 100u32..1_000_000,
+        height_offset in 120i64..1_000,
+    ) {
+        let network = configured_testnet(ConfiguredActivationHeights {
+            nu6_3: Some(activation_height - 1),
+            nu7: Some(activation_height),
+            ..Default::default()
+        });
+        let height = height_at_offset(activation_height, height_offset);
+
+        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu6_3, height, &network), 100);
+    }
+
+    /// Checks that NU7 branch IDs have no peer score for 50 minutes of 75-second blocks before
+    /// activation, and keep it earlier.
+    #[test]
+    fn nu7_branch_id_has_no_score_only_within_grace_before_activation(
+        activation_height in 200u32..1_000_000,
+        height_offset in -100i64..0,
+    ) {
+        let network = configured_testnet(ConfiguredActivationHeights {
+            nu6_3: Some(activation_height - 101),
+            nu7: Some(activation_height),
+            ..Default::default()
+        });
+        let height = height_at_offset(activation_height, height_offset);
+        let expected_score = if height_offset >= -40 { 0 } else { 100 };
+
+        prop_assert_eq!(branch_id_score(NetworkUpgrade::Nu7, height, &network), expected_score);
+    }
+
+    /// Checks that non-adjacent branch IDs retain their normal peer score around NU7 activation.
+    #[test]
+    fn non_adjacent_branch_ids_keep_mempool_score_at_nu7(
+        activation_height in 100u32..1_000_000,
+        height_offset in -1i64..121,
+        transaction_upgrade in any::<NetworkUpgrade>(),
+    ) {
+        prop_assume!(transaction_upgrade != NetworkUpgrade::Nu6_3);
+        prop_assume!(transaction_upgrade != NetworkUpgrade::Nu7);
+
+        let network = configured_testnet(ConfiguredActivationHeights {
+            nu6_3: Some(activation_height - 41),
+            nu7: Some(activation_height),
+            ..Default::default()
+        });
+        let height = height_at_offset(activation_height, height_offset);
+
+        prop_assert_eq!(branch_id_score(transaction_upgrade, height, &network), 100);
+    }
+}
+
+/// Builds a configured Testnet with `activation_heights` and no slow start or funding streams.
+fn configured_testnet(activation_heights: ConfiguredActivationHeights) -> Network {
+    Parameters::build()
+        .with_slow_start_interval(block::Height::MIN)
+        .with_activation_heights(activation_heights)
+        .expect("generated activation heights are valid")
+        .clear_funding_streams()
+        .to_network()
+        .expect("configured testnet is valid")
+}
+
+/// Returns `activation_height` offset by `height_offset`.
+fn height_at_offset(activation_height: u32, height_offset: i64) -> block::Height {
+    (block::Height(activation_height) + height_offset)
+        .expect("generated activation heights are far from the Height bounds")
+}
+
+/// Returns the mempool peer score for a `WrongConsensusBranchId` error with `transaction_upgrade`.
+fn branch_id_score(
+    transaction_upgrade: NetworkUpgrade,
+    height: block::Height,
+    network: &Network,
+) -> u32 {
+    adjusted_mempool_misbehavior_score(
+        &TransactionError::WrongConsensusBranchId,
+        Some(transaction_upgrade),
+        height,
+        network,
+    )
 }

@@ -1,11 +1,56 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [14.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- Explicitly empty funding-stream lists disable defaults on configured Testnets and survive configuration round-trips, as they already did on Regtest. Testnet and Regtest reject combining an empty list with either legacy funding field; remove both legacy fields to disable streams, or omit the empty list to retain legacy payouts. Omitted settings retain network defaults, and legacy post-NU6 streams use post-NU6 defaults independently of the pre-NU6 field. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Incompatible configured Testnets reject public Testnet magic even when public seeds are omitted. Public seed matching now ignores hostname case, trailing dots, and ports. Configure distinct `network_magic` and non-public peers for incompatible consensus rules. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `config::CacheDir::peer_cache_file_path` includes configured Testnet wire magic in peer cache names. Existing unsuffixed custom-network caches are not reused; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Configured Testnets using public Testnet magic inherit the historical public NSM seed when omitted. Explicitly matching that seed leaves network identity and state paths unchanged. A different seed requires distinct `network_magic` and non-public peers; Regtest and distinct-magic networks default to zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `Config` deserialization rejects custom Testnet subsidy schedules that exceed the monetary cap, including early spacing upgrades with the default slow-start interval. Set `slow_start_interval = 0` for accelerated test networks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- `Config` deserialization rejects overlapping nonempty funding-stream height ranges on Testnet and Regtest, including overlaps introduced by inherited NU7 defaults. Use disjoint ranges; adjacent and empty ranges are accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- `Config` deserialization rejects TEX funding-stream recipients on Testnet and Regtest before node startup. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+
+### Added
+
+- `initial_nsm_value_balance` and `nsm_reissuance_height` under `[network.testnet_parameters]` are available for Regtest and configured Testnets. Serialization preserves omitted settings. The effective reissuance height follows ZIP 237's scheduled-issuance crossover, with explicit overrides for accelerated testing ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+
+### Changed
+
+- [ZIP 259](https://zips.z.cash/zip-0259) NU7 peer-version checks require 170180 on Testnet and Regtest and 170190 on Mainnet. `CURRENT_NETWORK_PROTOCOL_VERSION` is now 170180, up from 170160, until a Mainnet activation height is scheduled. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `Config` rejects explicitly out-of-order upgrade heights even when coincident activations previously hid the invalid ordering ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527)).
+- Serializing and deserializing a Regtest `Config` preserves the effective activation heights of coincident upgrades instead of applying earlier defaults ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527)).
+- Peer-service requirements and stall detection use the local tip timestamp for freshness, preserving the elapsed-time allowance when NU7 shortens block spacing ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Regtest skips public DNS seeders before resolving initial peers, while retaining explicitly configured local peers. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+
+## [13.0.0] - 2026-09-23
+
+### Breaking Changes
+
+- `zebra-chain`'s `Transaction` type is now a newtype over `zcash_primitives::transaction::Transaction`, and appears in public protocol messages ([#10461](https://github.com/ZcashFoundation/zebra/pull/10461)).
+- Removed the `misbehavior_score` field and `MetaAddr::misbehavior` method. Misbehavior is now tracked per peer group by the `AddressBook`, and read with the new `AddressBook::misbehavior_score` method, also available on the `AddressBookPeers` trait: currently it returns `MAX_PEER_MISBEHAVIOR_SCORE` for a banned group and `0` otherwise, because scores are not currently accumulated since those are the only two scores being used. `AddressBook::bans` now returns the new `BanList` type instead of an `Arc<IndexMap<IpAddr, Instant>>`; query it with `BanList::is_banned`, which applies both the peer group mapping and ban expiry ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
+### Added
+
+- A `fuzzing` feature, off by default, which makes the `protocol` module public for the coverage-guided fuzz harnesses in `zebra-fuzz/`. It activates no dependencies and leaves default and release builds unchanged ([#11221](https://github.com/ZcashFoundation/zebra/pull/11221)).
+
+### Changed
+
+- Concurrent reconnection-candidate selection can no longer hand the same peer to two connection attempts: a candidate is now chosen and marked `AttemptPending` in a single atomic step. `init()`, the public API, and network-visible behavior are unchanged ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+- Outbound connection pacing is now applied only when an address-book candidate is returned. An empty candidate-selection attempt no longer delays the next available connection attempt. Crawls are still skipped while rate-limited, and the intervals are unchanged ([#1976](https://github.com/ZcashFoundation/zebra/issues/1976)).
+- `zebra-network` no longer pulls the unmaintained `ordered-map` crate or its legacy `quickcheck` 0.9 and `rand` 0.7 dependency subtree into downstream builds ([#10516](https://github.com/ZcashFoundation/zebra/issues/10516)).
+- `network.max_connections_per_ip` now limits IPv6 peer connections per `/64` subnet, rather than per individual address. A single machine with a standard IPv6 `/64` allocation has 2^64 distinct addresses, so per-address limiting did not bound the number of connections one machine could open. IPv4 connections are still limited per address ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+- Peer bans now expire after 24 hours, matching `zcashd`'s `DEFAULT_MISBEHAVING_BANTIME`. Bans were previously kept until restart. A peer whose ban has lapsed is banned again as soon as it misbehaves again. Lapsed bans are pruned when a new ban is applied ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
+
+### Security
+
+- Peer misbehavior bans now apply to the whole peer group — one IPv4 address, or one IPv6 `/64` subnet — instead of a single address. Bans were previously keyed by the full address, so a peer could avoid its ban by reconnecting from another of the 2^64 addresses in its `/64` ([#11255](https://github.com/ZcashFoundation/zebra/issues/11255)).
 
 ## [12.0.0] - 2026-08-10
 
