@@ -195,7 +195,7 @@ The reasoning behind this process is recorded in [ADR 0009](https://github.com/Z
 
 ### Which line receives patches
 
-Patches go to the current stable release line, the line of the latest published stable release. It does not matter which version an unmerged Release PR on `main` proposes. If 6.3.1 is the latest published stable release, the patch target is `release/6.3`.
+Patches go to the current stable release line, the line of the latest published stable release. It does not matter which version an unmerged Release PR on `main` proposes. If 6.4.2 is the latest published stable release, the patch target is `release/6.4`.
 
 Supporting an older line is a separate decision that maintainers make explicitly. Do not assume it.
 
@@ -203,12 +203,12 @@ Everything else still goes to `main` and ships in the next feature release.
 
 ### Create the release branch
 
-`release/X.Y` is an ordinary public branch. A maintainer creates it when the line first needs a patch, starting from the latest published stable release on that line. For `release/6.3`, that is `v6.3.1` when `v6.3.1` is the newest 6.3 tag, and `v6.3.0` otherwise:
+`release/X.Y` is an ordinary public branch. A maintainer creates it when the line first needs a patch, starting from the latest published stable release on that line. For `release/6.4`, that is `v6.4.2` when `v6.4.2` is the newest 6.4 tag, and `v6.4.0` otherwise:
 
 ```sh
 git fetch origin --tags
-git switch -c release/6.3 v6.3.1
-git push origin release/6.3
+git switch -c release/6.4 v6.4.2
+git push origin release/6.4
 ```
 
 The `Release branches` ruleset covers `refs/heads/release/**`. It applies the same requirements as `PR Requirements` on `main`, and also blocks deletion and force-pushes. It does not include a merge queue: GitHub rejects merge queues on wildcard refs. A per-line merge-queue ruleset is an optional later admin step once a concrete `release/X.Y` exists.
@@ -235,8 +235,8 @@ Open the fix pull request against `release/X.Y` directly. It is reviewed and tes
 If the same fix already exists on `main`, reuse it instead of rewriting it:
 
 ```sh
-git switch release/6.3
-git switch -c fix-peer-timeout-6.3
+git switch release/6.4
+git switch -c fix-peer-timeout-6.4
 git cherry-pick -x -m 1 <merge commit of the main PR>
 ```
 
@@ -256,7 +256,7 @@ Versions and changelog entries come from the Release PR, generated the same way 
 
 Publication works exactly as it does on `main`. release-plz opens `chore: release vX.Y.Z` against the release branch, a maintainer reviews and merges it, and the rest is automated. Review it with the [Release PR checklist](#review-the-release-pr) and read [What Happens After Merge](#what-happens-after-merge).
 
-Release PR head branches are namespaced by base branch, so `main` gets `release-plz-main-*` and `release/6.3` gets `release-plz-6.3-*`. The workflow sets this from the branch it runs on. Without the namespacing, one branch's Release PR would suppress the other's, because release-plz deduplicates open Release PRs by head-branch prefix across every base branch.
+Release PR head branches are namespaced by base branch, so `main` gets `release-plz-main-*` and `release/6.4` gets `release-plz-6.4-*`. The workflow sets this from the branch it runs on. Without the namespacing, one branch's Release PR would suppress the other's, because release-plz deduplicates open Release PRs by head-branch prefix across every base branch.
 
 Recovery uses the same dispatch as `main`, pointed at the branch:
 
@@ -276,7 +276,7 @@ gh workflow run release.yml --ref release/X.Y \
 
 `ZcashFoundation/cargo-release` decides whether a release is marked Latest on GitHub. The binaries and deploy workflows always publish the immutable `X.Y.Z` artifacts, then recheck GitHub's latest-release marker immediately before mutating Docker Hub `latest` or deploying production.
 
-A patch that is not marked Latest still publishes crates, tags, the GitHub Release, signed binaries, and the Docker Hub `X.Y.Z` tag. Operators who pin `zfnd/zebra:6.3.1` get the patch.
+A patch that is not marked Latest still publishes crates, tags, the GitHub Release, signed binaries, and the Docker Hub `X.Y.Z` tag. Operators who pin `zfnd/zebra:6.4.3` get the patch.
 
 ### Carry the fix into `main`
 
