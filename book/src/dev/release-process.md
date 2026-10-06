@@ -215,7 +215,7 @@ In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback t
    docker buildx imagetools create -t zfnd/zebra:latest zfnd/zebra:<good>
    ```
 
-   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. Delete the `<bad>` and `sha-<7 chars>` tags of the withdrawn image in the Docker Hub repository, so nobody can fetch it by tag. A pull by digest can still succeed.
+   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. In the Docker Hub repository, delete the `<bad>` tag and the `sha-<7 chars>` tag with the same digest (the short SHA of the Release PR's merge commit), so nobody can fetch the withdrawn image by tag. A pull by digest can still succeed.
 
 3. Roll production back to `<good>`. `zfnd-deploy-nodes-gcp.yml` builds and deploys the commit of the ref it runs from, so dispatch it from the good release tag, once per network and zone. Leave out a network whose active upgrades `<good>` does not support. The production state disks already exist, so skip the cached-disk lookup:
 
@@ -229,7 +229,7 @@ In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback t
    done
    ```
 
-   A dispatch waits for the new template to roll out, not for node health, so check each MIG with the commands in [GCP Deployment Operations](gcp-deployment-operations.md#diagnose-a-stuck-mig), using `P=zfnd-prod-zebra` and the production names `zebrad-<network>-<zone letter>`. If the withdrawn release changed the major `DATABASE_FORMAT_VERSION` in `zebra-state/src/constants.rs`, `<good>` cannot use the upgraded disks. The [rollback for that case](gcp-deployment-operations.md#db-format-version-break-release) deletes each disk and recreates it from its `-pre-major-<timestamp>` snapshot, so confirm the snapshots exist first; they exist only if that section's snapshot loop ran before the release.
+   A dispatch waits for the new template to roll out, not for node health, so check each MIG with the commands in [GCP Deployment Operations](gcp-deployment-operations.md#diagnose-a-stuck-mig), using `P=zfnd-prod-zebra` and the production MIG names, which use the lowercase network, such as `MIG=zebrad-mainnet-b`. If the withdrawn release changed the major `DATABASE_FORMAT_VERSION` in `zebra-state/src/constants.rs`, `<good>` cannot use the upgraded disks. The [rollback for that case](gcp-deployment-operations.md#db-format-version-break-release) deletes each disk and recreates it from its `-pre-major-<timestamp>` snapshot, so confirm the snapshots exist first; they exist only if that section's snapshot loop ran before the release.
 
 4. Tell operators. The warning on the GitHub Release is the primary notice. If the defect is a vulnerability, publish a GitHub Security Advisory that names the affected and fixed versions, as described in [SECURITY.md](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md#advisories-cves-and-credit).
 
