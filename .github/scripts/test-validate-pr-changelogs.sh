@@ -91,6 +91,9 @@ projects:
       key: zebra-example
       changelog: zebra-example/CHANGELOG.md
 kinds:
+    - key: network-upgrade
+      label: Network Upgrade
+      auto: major
     - key: breaking
       label: Breaking Changes
       auto: major
@@ -140,6 +143,22 @@ fragment zebra-example-breaking-2.yaml zebra-example breaking
 commit_fixture breaking-undeclared
 expect_failure "breaking fragment without a breaking title" true feat false
 expect_failure "breaking fragment on a chore title" true chore false
+
+# A zebrad network upgrade is a declared break, and no other package may use it.
+remove_file .changes/unreleased/zebra-example-breaking-2.yaml
+write_file zebrad/src/main.rs 'fn main() { /* network upgrade */ }'
+fragment zebrad-network-upgrade.yaml zebrad network-upgrade
+commit_fixture network-upgrade
+expect_success "zebrad network upgrade with a breaking title" true feat true
+expect_failure "zebrad network upgrade without a breaking title" true feat false
+
+remove_file .changes/unreleased/zebrad-network-upgrade.yaml
+write_file zebra-example/src/lib.rs '// Network upgrade in a library.'
+fragment zebra-example-network-upgrade.yaml zebra-example network-upgrade
+commit_fixture network-upgrade-outside-zebrad
+expect_failure "network upgrade outside zebrad" true feat true
+
+remove_file .changes/unreleased/zebra-example-network-upgrade.yaml
 
 # Malformed fragments are rejected before they can reach a release.
 write_file zebra-example/src/lib.rs '// Malformed fragment.'
