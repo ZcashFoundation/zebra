@@ -278,6 +278,10 @@ jobs:
             -print0 | xargs -0 -r shellcheck --color=always
       - name: Test release changelog validator
         run: .github/scripts/test-validate-release-changelogs.sh
+      - name: Test release version planner
+        run: .github/scripts/test-plan-release-versions.sh
+      - name: Test release readiness check
+        run: .github/scripts/test-check-release-readiness.sh
       # Builds a throwaway cargo workspace, so it needs the runner image's cargo.
       - name: Test PR changelog validator
         run: .github/scripts/test-validate-pr-changelogs.sh
