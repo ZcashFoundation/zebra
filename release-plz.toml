@@ -12,8 +12,9 @@ release_always = false
 # `zebrad` GitHub Release in .github/workflows/release.yml.
 git_release_enable = false
 
-# Changie owns every changelog. The release workflow batches source-authored
-# fragments after release-plz has selected the versions.
+# Changie owns every changelog. The release workflow replaces the versions
+# release-plz selects with the plan the change fragments give, then batches the
+# fragments into those versions.
 changelog_update = false
 
 # Breaking-change detection runs per PR via ziff, not in the release-pr job.

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # Turns the change fragments on a Release PR branch into versioned changelog
-# entries, for the packages release-plz is releasing.
+# entries, for the packages in a release plan.
 #
 # Run with the Release PR branch checked out. For each released package this
 # batches its pending fragments into `.changes/<project>/v<version>.md`, then
-# regenerates every changelog with `changie merge`. A package that release-plz
-# is releasing only because a local dependency moved has no fragments of its
+# regenerates every changelog with `changie merge`. A package that the plan
+# releases only because a local dependency moved has no fragments of its
 # own, so one is written for it, the way release-plz used to add a mechanical
 # dependency entry under `[Unreleased]`.
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
   echo "usage: $0 <base-revision> <releases-tsv>" >&2
-  echo "  <releases-tsv>: tab separated '<package> <version>' lines, from release-plz's prs output" >&2
+  echo "  <releases-tsv>: tab separated '<package> <version>' lines, from plan-release-versions.sh" >&2
   exit 2
 fi
 
@@ -69,7 +69,7 @@ package_directory() {
   return 1
 }
 
-# The local path dependencies whose version requirement release-plz bumped, in
+# The local path dependencies whose version requirement moved, in
 # the order they appear in the manifest, as a comma separated list.
 updated_local_packages() {
   local directory="$1"

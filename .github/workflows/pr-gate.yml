@@ -104,7 +104,7 @@ jobs:
   semver-checks:
     needs: changes
     # Real work runs only on contributor pull requests that change Rust and do not already declare
-    # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
+    # a break with `!`. A declared break is allowed through; its `breaking` change fragment majors the version at release.
     if: >-
       github.event_name == 'pull_request' &&
       needs.changes.outputs.semver == 'true' &&
