@@ -37,6 +37,13 @@ filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integra
 slow-timeout = { period = "5m", terminate-after = 2 }
 retries = 2
 
+# The live handshake smoke test depends on public peers. Retry it, so it only fails
+# when every attempt finds no responsive peer, and nextest still reports a retry as
+# FLAKY.
+[[profile.ci.overrides]]
+filter = 'test(=integration::network::live_mainnet_peer_handshake)'
+retries = 2
+
 [[profile.ci.overrides]]
 filter = "test(=peer_set::set::tests::vectors::peer_set_ready_multiple_connections) or test(=peer_set::set::tests::vectors::peer_set_ready_single_connection) or test(=peer_set::set::tests::vectors::peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set::set::tests::vectors::peer_set_route_inv_advertised_registry)"
 retries = 2
@@ -107,7 +114,8 @@ filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
 
 # The other tests that dial live Mainnet peers: zebra-network's Mainnet peer-limit
-# tests, and `config_tests`, which starts zebrad with the generated default config.
+# tests, `config_tests`, which starts zebrad with the generated default config, and
+# the `live_mainnet_peer_handshake` smoke test.
 # Remote Zebra peers accept then drop any second connection from the same IP within
 # ~2 minutes (max_connections_per_ip is 1 by default), so concurrent live tests on
 # one runner reject each other's handshakes. Other zebrad tests only dial live peers
@@ -115,11 +123,11 @@ test-group = 'serial-zcashd-compat'
 # overrides set only the test-group; retries and timeouts fall through to earlier
 # overrides or profile defaults.
 [[profile.default.overrides]]
-filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests)'
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
 
 [[profile.ci.overrides]]
-filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests)'
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
 
 # Stateful tests share on-disk state, so run them serially. This override sets
