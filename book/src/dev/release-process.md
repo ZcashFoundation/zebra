@@ -123,7 +123,7 @@ The normal release path requires 2 maintainer actions:
 1. Review the latest Release PR after every required check passes.
 2. Approve and merge the latest commit.
 
-Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `release` label, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
+Everything else is automatic. release-plz creates and updates a PR whose branch starts with `release-plz-` and carries the `release` label, the Release workflow sets its versions and changelogs from the unreleased change fragments, `PR Gate / Release readiness` validates it, and `ZcashFoundation/cargo-release` publishes from that PR's source range after merge.
 
 ### Review the Release PR
 
@@ -136,7 +136,7 @@ To check the bumps, read the "Public API diff since zebrad vX" comment on the Re
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, then runs these checks independently, so the summary reports every outcome even when one fails:
 
 - **Changelogs:** each released package has a non-empty versioned changelog.
-- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted.
+- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted. The workflow always applies the release version, so a prerelease is a maintainer edit to the Release PR after the workflow's latest update, and a later release-plz update replaces it.
 - **Manifests:** a package whose `Cargo.toml` changes is released.
 - **Cargo release:** Cargo 1.91's multi-package dry-run. It also observes crates.io, tags, and the GitHub Release without changing them.
 
@@ -167,7 +167,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | --- | --- |
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing fragment on `main` with `changie new -j <project>`, then let release-plz refresh the PR. A dependency-only failure indicates a changelog batching regression; do not edit the generated branch. |
-| A version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let release-plz refresh the PR. Otherwise release-plz picked the wrong versions: freeze `main` in Merge Freeze, then correct the Release PR branch by hand (see [Review the Release PR](#review-the-release-pr)). Save the plan with `.github/scripts/plan-release-versions.sh <base> > releases.tsv` and restore release-plz's edits with `git checkout <base> -- Cargo.lock '*Cargo.toml'`. Then set each planned package's `version`, and its requirement in the other planned packages, to the planned version. Finish with `cargo update --workspace` and `.github/scripts/batch-release-changelogs.sh <base> releases.tsv`. `release-plz set-version` can't do this: it fails on the `zebrad` changelog heading and rewrites unreleased dependents. |
+| A version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let the Release workflow refresh the PR. Otherwise the workflow's apply step failed, and its log names the problem. After fixing it, freeze `main` in Merge Freeze, run `.github/scripts/plan-release-versions.sh <base> > releases.tsv` and `.github/scripts/apply-release-plan.sh <base> releases.tsv` on the Release PR branch, then commit and push the result (see [Review the Release PR](#review-the-release-pr)). |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 
