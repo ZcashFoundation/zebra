@@ -420,7 +420,7 @@ impl ValueBalance<NonNegative> {
     /// remain parsable by [`Self::from_bytes`].
     pub fn to_bytes(self) -> [u8; SERIALIZED_SIZE] {
         let mut bytes = [0; SERIALIZED_SIZE];
-        for (destination, amount) in bytes.chunks_exact_mut(8).zip([
+        for (destination, amount) in bytes.as_chunks_mut::<8>().0.iter_mut().zip([
             self.transparent,
             self.sprout,
             self.sapling,
@@ -429,7 +429,7 @@ impl ValueBalance<NonNegative> {
             self.ironwood,
             self.nsm,
         ]) {
-            destination.copy_from_slice(&amount.to_bytes());
+            *destination = amount.to_bytes();
         }
         bytes
     }
