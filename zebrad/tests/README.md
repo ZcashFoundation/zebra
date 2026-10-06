@@ -32,3 +32,20 @@ zebrad/tests/
 | `ci-stateful` | stateful (via --filter-expr) | GCP CI |
 | `ci-e2e` | E2E (via --filter-expr) | GCP CI |
 | `check-no-git-dependencies` | Single release check | Release PRs |
+
+## Keeping the gate bounded
+
+- `default` and `ci` retain the unit/integration scope and terminate a test attempt
+  after three minutes. Use dedicated profiles for long stateful and E2E checks.
+  The CI command still includes `--run-ignored=all`.
+- Local startup, configuration, conflict, and RPC checks disable public seeders
+  and peer-cache loading. Wait for the resource or response being tested, not a
+  fixed startup sleep. Only tests that actually contact public peers belong in
+  the serialized live-network groups.
+- Use paused Tokio time for in-memory timer tests. Do not auto-advance time past
+  real socket or database work; synchronize those tests on observable progress.
+- `TestChild::with_timeout` bounds quiet or partial-line reads and natural
+  process exit. Reset it when moving from a short startup phase to a longer
+  observation phase, and before explicit cleanup after separately bounded HTTP
+  or RPC operations. The `wait_with_output` method drains both remaining streams,
+  including after earlier log matches; already-consumed lines are not returned.
