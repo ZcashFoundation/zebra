@@ -1,14 +1,15 @@
 //! Converting bytes into Zcash consensus-critical data structures.
 
-use std::{io, net::Ipv6Addr, sync::Arc};
+use std::{io, io::Read, net::Ipv6Addr, sync::Arc};
 
 use super::{AtLeastOne, CompactSizeMessage, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
 
-/// Initial-allocation cap for `zcash_deserialize_external_count`.
+/// Initial-allocation cap for `zcash_deserialize_external_count` and the bytes
+/// path, `zcash_deserialize_bytes_external_count`.
 ///
 /// 1024 is large enough that honest messages amortize their growth to a few
 /// reallocations.
-const MAX_INITIAL_ALLOCATION: usize = 1024;
+pub(crate) const MAX_INITIAL_ALLOCATION: usize = 1024;
 
 /// Consensus-critical deserialization for Zcash.
 ///
@@ -112,38 +113,34 @@ pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + Trust
 
 /// `zcash_deserialize_external_count`, specialised for raw bytes.
 ///
-/// This lets us read the bytes in bulk with `read_exact()`, instead of
-/// deserializing one element at a time, while bounding the upfront allocation.
+/// Reads the bytes in bulk instead of one element at a time, while bounding the
+/// upfront allocation against the peer-supplied `external_count`.
 ///
 /// This function has a `zcash_` prefix to alert the reader that the
 /// serialization in use is consensus-critical serialization, rather than
 /// some other kind of serialization.
 pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
     external_count: usize,
-    mut reader: R,
+    reader: R,
 ) -> Result<Vec<u8>, SerializationError> {
     if external_count > MAX_U8_ALLOCATION {
         return Err(SerializationError::Parse(
             "Byte vector longer than MAX_U8_ALLOCATION",
         ));
     }
-    // Bound the upfront allocation. `external_count` is peer-supplied, so rather
-    // than reserving all of it before reading a single byte (`vec![0u8; external_count]`),
-    // cap the initial reservation and grow the buffer in `MAX_INITIAL_ALLOCATION`-sized
-    // steps as real bytes arrive. `read_exact` keeps the original `UnexpectedEof`
-    // semantics when the reader ends early, so a lying `external_count` can never force
-    // more than the delivered bytes (plus one step) to be allocated. This is the
-    // bytes-path counterpart of the cap added to `zcash_deserialize_external_count`
-    // in PR #10563, and also bounds `zcash_deserialize_string_external_count`, which
-    // delegates here.
+    // `external_count` is peer-supplied, so grow the buffer as real bytes arrive
+    // rather than reserving all of it first: `read_to_end` over a `take`-limited
+    // reader can't allocate more than the bytes actually delivered.
     let mut vec = Vec::with_capacity(external_count.min(MAX_INITIAL_ALLOCATION));
-    let mut remaining = external_count;
-    while remaining > 0 {
-        let step = remaining.min(MAX_INITIAL_ALLOCATION);
-        let filled = vec.len();
-        vec.resize(filled + step, 0);
-        reader.read_exact(&mut vec[filled..])?;
-        remaining -= step;
+    let count = reader.take(external_count as u64).read_to_end(&mut vec)?;
+    if count != external_count {
+        // The reader ended before delivering the claimed count: fail closed, as
+        // the previous `read_exact` over a pre-allocated buffer did.
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "reader ended before external_count bytes were read",
+        )
+        .into());
     }
     Ok(vec)
 }
