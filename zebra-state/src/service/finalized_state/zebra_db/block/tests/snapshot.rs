@@ -333,8 +333,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             // Check block transaction hashes and transactions.
             //
             // TODO: split out transaction snapshots into their own function (#3151)
-            for tx_index in 0..stored_block.transactions.len() {
-                let block_transaction = &stored_block.transactions[tx_index];
+            for (tx_index, block_transaction) in stored_block.transactions.iter().enumerate() {
                 let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
 
                 let transaction_hash = block_transaction.hash();
@@ -375,8 +374,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 stored_transaction_hashes.push(stored_transaction_hash);
                 stored_transactions.push(transaction_data);
 
-                for output_index in 0..stored_block.transactions[tx_index].outputs().len() {
-                    let output = &stored_block.transactions[tx_index].outputs()[output_index];
+                for (output_index, output) in block_transaction.outputs().iter().enumerate() {
                     let outpoint =
                         transparent::OutPoint::from_usize(transaction_hash, output_index);
                     let output_location =
