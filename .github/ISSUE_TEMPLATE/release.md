@@ -53,6 +53,8 @@ If it is a testnet or mainnet network upgrade support release, check:
 - [ ] Check if none of the current reported security advisories would block the
   release (e.g. critical issues). If any would block, ensure they will be
   incorporated into the release.
+- [ ] No open Bug issue labelled `security` or `urgent` affects this release, or
+  a maintainer has accepted it in the Release PR.
 
 # Security Release
 
@@ -99,6 +101,9 @@ privileges is around.
 Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for detailed instructions and recovery guidance.
 
 - [ ] Wait for `PR Gate / Release readiness` and every other required check to pass on the latest Release PR commit.
+- [ ] If the release includes `zebrad`, `Zebra tip update / Run sync-update-mainnet test`
+  passed on the latest Release PR commit, after the `run-stateful-tests` label was
+  added with `main` frozen, or on the `main` commit the Release PR is based on.
 - [ ] Double-check the correctness of the version bumps and changelogs. Common pitfalls:
     - A major bump in e.g. `zebra-chain` requires a major bump in most of its
       users (because they re-export types from it)
