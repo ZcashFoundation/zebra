@@ -13,6 +13,7 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
+use indexmap::IndexSet;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
@@ -26,10 +27,13 @@ use zebrad::{
 use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
 
 /// Returns a config with:
-/// - a Zcash listener on an unused port on IPv4 localhost, and
+/// - a Zcash listener on an unused port on IPv4 localhost,
+/// - no initial peers,
 /// - an ephemeral state,
 /// - the minimum syncer lookahead limit, and
 /// - shorter task intervals, to improve test coverage.
+///
+/// Tests that need live network peers must opt in with [`use_live_peers`].
 pub fn default_test_config(net: &Network) -> ZebradConfig {
     const TEST_DURATION: Duration = Duration::from_secs(30);
 
@@ -37,6 +41,8 @@ pub fn default_test_config(net: &Network) -> ZebradConfig {
         network: net.clone(),
         // The OS automatically chooses an unused port.
         listen_addr: "127.0.0.1:0".parse().unwrap(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
         crawl_new_peer_interval: TEST_DURATION,
         ..zebra_network::Config::default()
     };
@@ -72,6 +78,17 @@ pub fn default_test_config(net: &Network) -> ZebradConfig {
         ..ZebradConfig::default()
     }
     .with(MinerAddressType::Transparent)
+}
+
+/// Configures `config` to connect to the default DNS seeders for its network.
+///
+/// Only use this in tests that sync from or connect to live network peers. Concurrent live tests
+/// compete for the same peers from one IP address, so they run in the `serial-live-mainnet`
+/// nextest group.
+pub fn use_live_peers(config: &mut ZebradConfig) {
+    let defaults = zebra_network::Config::default();
+    config.network.initial_mainnet_peers = defaults.initial_mainnet_peers;
+    config.network.initial_testnet_peers = defaults.initial_testnet_peers;
 }
 
 pub fn persistent_test_config(network: &Network) -> Result<ZebradConfig> {

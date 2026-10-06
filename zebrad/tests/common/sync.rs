@@ -15,7 +15,7 @@ use zebrad::{components::sync, config::ZebradConfig};
 use zebra_test::{args, prelude::*};
 
 use super::{
-    config::{persistent_test_config, testdir},
+    config::{persistent_test_config, testdir, use_live_peers},
     launch::ZebradTestDirExt,
 };
 
@@ -201,6 +201,7 @@ pub fn sync_until(
 
     // Use a persistent state, so we can handle large syncs
     let mut config = persistent_test_config(network)?;
+    use_live_peers(&mut config);
     config.state.debug_stop_at_height = Some(height.0);
     config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
     config.consensus.checkpoint_sync = checkpoint_sync;
@@ -342,6 +343,7 @@ fn get_zebra_cached_state_dir() -> PathBuf {
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.
 pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<ZebradConfig> {
     let mut config = persistent_test_config(network)?;
+    use_live_peers(&mut config);
     config.state.cache_dir = get_zebra_cached_state_dir();
 
     // To get to the mandatory checkpoint, we need to sync lots of blocks.

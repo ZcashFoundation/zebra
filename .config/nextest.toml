@@ -106,41 +106,20 @@ test-group = 'serial-zcashd-compat'
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
 
-# All other tests that dial live Mainnet peers: zebra-network's crawler and
-# peer-cache tests, and every zebrad test that starts a node without clearing
-# the default DNS seeders. Remote Zebra peers accept then drop any second
-# connection from the same IP within ~2 minutes (max_connections_per_ip is 1 by
-# default), so concurrent live tests on one runner reject each other's
-# handshakes. These overrides set only the test-group; retries and timeouts fall
-# through to earlier overrides or profile defaults.
+# The other tests that dial live Mainnet peers: zebra-network's Mainnet peer-limit
+# tests, and `config_tests`, which starts zebrad with the generated default config.
+# Remote Zebra peers accept then drop any second connection from the same IP within
+# ~2 minutes (max_connections_per_ip is 1 by default), so concurrent live tests on
+# one runner reject each other's handshakes. Other zebrad tests only dial live peers
+# if they call `use_live_peers()`, and those tests must join this group too. These
+# overrides set only the test-group; retries and timeouts fall through to earlier
+# overrides or profile defaults.
 [[profile.default.overrides]]
-filter = '''
-test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
-or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
-or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
-or test(=unit::config::config_tests)
-or test(=unit::config::non_blocking_logger)
-or test(=unit::end_of_support::end_of_support_is_checked_at_start)
-or test(/^integration::network::zebra_(zcash_listener|metrics|tracing|rpc)_conflict$/)
-or test(/^integration::rpc::(metrics_endpoint|tracing_endpoint|rpc_endpoint_single_thread|rpc_endpoint_parallel_threads|rpc_endpoint_client_content_type)$/)
-or test(/^integration::database::(zebra_state_conflict|delete_old_databases)$/)
-'''
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests)'
 test-group = 'serial-live-mainnet'
 
 [[profile.ci.overrides]]
-filter = '''
-test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
-or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
-or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
-or test(=unit::config::config_tests)
-or test(=unit::config::non_blocking_logger)
-or test(=unit::end_of_support::end_of_support_is_checked_at_start)
-or test(/^integration::network::zebra_(zcash_listener|metrics|tracing|rpc)_conflict$/)
-or test(/^integration::rpc::(metrics_endpoint|tracing_endpoint|rpc_endpoint_single_thread|rpc_endpoint_parallel_threads|rpc_endpoint_client_content_type)$/)
-or test(/^integration::database::(zebra_state_conflict|delete_old_databases)$/)
-'''
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests)'
 test-group = 'serial-live-mainnet'
 
 # Stateful tests share on-disk state, so run them serially. This override sets
