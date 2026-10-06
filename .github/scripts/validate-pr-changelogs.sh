@@ -112,7 +112,7 @@ for path in ${fragment_paths[@]+"${fragment_paths[@]}"}; do
 done
 
 # A break has to be declared in both places, so the version bump changie derives
-# from the fragment and the `semver-checks` skip derived from the title agree.
+# from the fragment and the `api-diff` policy derived from the title agree.
 if [[ "$breaking" != "true" && ${#breaking_fragment_projects[@]} -gt 0 ]]; then
   echo "Breaking fragment without a breaking PR title." >&2
   echo "::error title=Undeclared breaking change::This PR adds a '${breaking_kind}' fragment, so its title needs a conventional commit break marker, for example 'feat!: ...'." >&2
