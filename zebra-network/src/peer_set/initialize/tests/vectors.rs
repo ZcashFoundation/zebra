@@ -60,6 +60,12 @@ use Network::*;
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 
+/// The crawl timer interval for crawler tests.
+///
+/// Much shorter than [`CRAWLER_TEST_DURATION`], so the timer refills freed outbound slots many
+/// times during each test, rather than only on its first tick.
+const CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_millis(100);
+
 /// The amount of time to run the listener, before testing what it has done.
 ///
 /// Using a very short time can make the listener not run at all.
@@ -2240,7 +2246,10 @@ where
     C::Future: Send + 'static,
 {
     // Create a test config.
-    let mut config = Config::default();
+    let mut config = Config {
+        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        ..Config::default()
+    };
     if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
         config.peerset_initial_target_size = peerset_initial_target_size;
     }
