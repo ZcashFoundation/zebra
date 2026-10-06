@@ -9,7 +9,7 @@ use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::client::PeerInfo;
 
 use crate::common::{
-    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc, LAUNCH_DELAY},
     test_type::TestType,
 };
 
@@ -39,6 +39,7 @@ pub(crate) async fn run() -> Result<()> {
     zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {rpc_address}"))?;
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
+    zebrad = zebrad.with_timeout(Duration::from_secs(2 * 60));
 
     let peer_info = tokio::time::timeout(Duration::from_secs(2 * 60), async {
         loop {
@@ -60,6 +61,7 @@ pub(crate) async fn run() -> Result<()> {
     .wrap_err("timed out waiting for getpeerinfo to return at least 1 peer")??;
 
     tracing::info!(?peer_info, "getpeerinfo returned peer info");
+    zebrad = zebrad.with_timeout(LAUNCH_DELAY);
 
     zebrad.kill(false)?;
 
