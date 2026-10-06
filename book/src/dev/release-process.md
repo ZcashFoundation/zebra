@@ -129,7 +129,7 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 Track each release in an issue created from the [release issue template](https://github.com/ZcashFoundation/zebra/issues/new?template=release.md), and follow its checklist. It covers the preparation steps and the review of the Release PR's version bumps and changelogs.
 
-To correct a Release PR by hand, freeze `main` in Merge Freeze first, push the corrections to the Release PR branch, merge it with **Unblock 1 pull request**, then unfreeze.
+To correct a Release PR by hand, freeze `main` in Merge Freeze first, then remove any other pull requests from the merge queue: a freeze does not stop a queued pull request that has already passed `mergefreeze`, and anything that lands on `main` makes release-plz regenerate the Release PR (see [Holding a Pull Request Back](continuous-integration.md#holding-a-pull-request-back)). Push the corrections to the Release PR branch, merge it with **Unblock 1 pull request**, then unfreeze and add any pull requests you removed back to the queue.
 
 ### What Release Readiness Reports
 
