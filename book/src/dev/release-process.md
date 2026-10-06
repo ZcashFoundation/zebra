@@ -127,7 +127,7 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 ### Review the Release PR
 
-Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`, then the Release workflow batches them into versioned entries for the versions release-plz picked and regenerates every changelog, writing a mechanical dependency entry for a package that is being released only because a local dependency moved. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
+Wait until release-plz finishes updating the PR and every required check passes, then review the latest commit and complete every checkbox in its generated checklist. Each checked box records that a maintainer performed that validation; for a conditional item, check it after validating the condition or confirming that it does not apply. Checklist edits use the standard PR Gate workflow, so wait for the latest run before approval. Source PRs commit curated change fragments under `.changes/unreleased/`. release-plz decides when a Release PR opens, and then the Release workflow makes the PR release exactly the versions those fragments plan: it sets the planned versions and dependency requirements, restores the manifest of every package outside the plan, batches the fragments into versioned entries, regenerates every changelog, and rewrites the PR title and release summary. A package released only because a local dependency moved gets a mechanical dependency entry. Before approval, any required checkpoint, end-of-support height, README, or operational release-note changes must land on `main`.
 
 A new Release PR commit replaces the generated body and resets every checkbox. Treat only the latest checklist and required-check results as authoritative.
 
@@ -138,7 +138,7 @@ Approve and merge only after every required check passes and every checkbox is c
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, then runs these checks independently, so the summary reports every outcome even when one fails:
 
 - **Changelogs:** each released package has a non-empty versioned changelog.
-- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted.
+- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted. The workflow always applies the release version, so a prerelease is a maintainer edit to the Release PR after the workflow's latest update, and a later release-plz update replaces it.
 - **Manifests:** a package whose `Cargo.toml` changes is released.
 - **Cargo release:** Cargo 1.91's multi-package dry-run. It also observes crates.io, tags, and the GitHub Release without changing them.
 
@@ -169,7 +169,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | --- | --- |
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing fragment on `main` with `changie new -j <project>`, then let release-plz refresh the PR. A dependency-only failure indicates a changelog batching regression; do not edit the generated branch. |
-| A version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let release-plz refresh the PR. Otherwise release-plz picked the wrong version: correct the Release PR by hand. Set each crate's `version` in its `Cargo.toml` to the planned one and update its requirement in each released dependent, run `git checkout <base> -- <crate>/Cargo.toml` for each crate that isn't released, then `cargo update --workspace` and `.github/scripts/batch-release-changelogs.sh <base> releases.tsv`, where `releases.tsv` is the planner's output. `release-plz set-version` can't do this: it fails on the `zebrad` changelog heading and rewrites unreleased dependents. |
+| A version differs from the fragment plan, or a manifest changes without a release | The Release workflow applies the fragment plan each time it updates the PR, so hand correction is only needed when a fragment is wrong. If a fragment's kind or project is wrong, fix it on `main` and let the workflow refresh the PR. If the workflow's apply step failed, its log names the problem; after fixing it, `.github/scripts/plan-release-versions.sh <base> > releases.tsv` and `.github/scripts/apply-release-plan.sh <base> releases.tsv` apply the plan on the Release PR branch. |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 

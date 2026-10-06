@@ -292,6 +292,9 @@ jobs:
           version: v1.25.2
       - name: Test release changelog batching
         run: .github/scripts/test-batch-release-changelogs.sh
+      # Builds a throwaway cargo workspace, so it also needs the runner image's cargo.
+      - name: Test release plan application
+        run: .github/scripts/test-apply-release-plan.sh
 
   lint:
     runs-on: ubuntu-latest
