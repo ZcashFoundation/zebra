@@ -30,7 +30,7 @@ use super::{
         DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
     config::testdir,
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, LIGHTWALLETD_STARTUP_DELAY},
+    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, LAUNCH_DELAY, LIGHTWALLETD_STARTUP_DELAY},
     sync::SYNC_FINISHED_REGEX,
     test_type::TestType,
 };
@@ -620,14 +620,20 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
     if let Some(mut lightwalletd) = lightwalletd {
         lightwalletd.kill(false)?;
 
-        let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
+        let lightwalletd_output = lightwalletd
+            .with_timeout(LAUNCH_DELAY)
+            .wait_with_output()?
+            .assert_failure()?;
 
         lightwalletd_output
             .assert_was_killed()
             .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
     }
 
-    let zebrad_output = zebrad.wait_with_output()?.assert_failure()?;
+    let zebrad_output = zebrad
+        .with_timeout(LAUNCH_DELAY)
+        .wait_with_output()?
+        .assert_failure()?;
 
     zebrad_output
         .assert_was_killed()

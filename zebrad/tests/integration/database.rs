@@ -20,7 +20,7 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{default_test_config, persistent_test_config, testdir},
-    launch::{spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
+    launch::{spawn_zebrad_without_rpc, ZebradTestDirExt, LAUNCH_DELAY},
     test_type::TestType::*,
 };
 
@@ -70,6 +70,7 @@ fn zebra_state_conflict() -> Result<()> {
     // A persistent config has a fixed temp state directory, but asks the OS to
     // automatically choose an unused port
     let mut config = persistent_test_config(&Mainnet)?;
+    config.network.cache_dir = false.into();
     let dir_conflict = testdir()?.with_config(&mut config)?;
 
     // Windows problems with this match will be worked on at #1654
@@ -101,10 +102,9 @@ fn zebra_state_conflict() -> Result<()> {
     Ok(())
 }
 
-/// Launch a node in `first_dir`, wait a few seconds, then launch a node in
-/// `second_dir`. Check that the first node's stdout contains
-/// `first_stdout_regex`, and the second node's stderr contains
-/// `second_stderr_regex`.
+/// Launch a node in `first_dir`, wait until it acquires the resource, then launch a node
+/// in `second_dir`. Require the second node to exit with `second_stderr_regex` while
+/// the first node still holds the resource.
 #[tracing::instrument]
 pub fn check_config_conflict<T, U>(
     first_dir: T,
@@ -117,43 +117,27 @@ where
     U: ZebradTestDirExt + std::fmt::Debug,
 {
     // Start the first node
-    let mut node1 = first_dir.spawn_child(args!["start"])?;
+    let mut node1 = first_dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY);
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
-
-    // Wait a bit before launching the second node.
-    std::thread::sleep(BETWEEN_NODES_DELAY);
 
     // Spawn the second node
     let node2 = second_dir.spawn_child(args!["start"]);
     let (node2, mut node1) = node1.kill_on_error(node2)?;
 
-    // Wait a few seconds and kill first node.
-    // Second node is terminated by panic, no need to kill.
-    std::thread::sleep(LAUNCH_DELAY);
-    let node1_kill_res = node1.kill(false);
-    let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
-
-    // node2 should have panicked due to a conflict. Kill it here anyway, so it
-    // doesn't outlive the test on error.
-    //
-    // This code doesn't work on Windows or macOS. It's cleanup code that only
-    // runs when node2 doesn't panic as expected. So it's ok to skip it.
-    // See #1781.
-    #[cfg(target_os = "linux")]
-    if node2.is_running() {
-        return node2
-            .kill_on_error::<(), _>(Err(eyre!(
-                "conflicted node2 was still running, but the test expected a panic"
-            )))
-            .context_from(&mut node1)
-            .map(|_| ());
-    }
-
-    // Now we're sure both nodes are dead, and we have both their outputs
-    let output1 = node1.wait_with_output().context_from(&mut node2)?;
-    let output2 = node2.wait_with_output().context_from(&output1)?;
+    // Keep the conflicting resource held until node2 exits by itself.
+    let output2 = node2
+        .with_timeout(LAUNCH_DELAY)
+        .wait_with_output()
+        .context_from(&mut node1)?;
+    node1.kill(false).context_from(&output2)?;
+    let output1 = node1
+        .with_timeout(LAUNCH_DELAY)
+        .wait_with_output()
+        .context_from(&output2)?;
 
     // Make sure the first node was killed, rather than exiting with an error.
     output1
@@ -166,6 +150,7 @@ where
         .stderr_line_matches(second_stderr_regex)
         .context_from(&output1)?;
     output2
+        .assert_failure()?
         .assert_was_not_killed()
         .warning("Possible port conflict. Are there other zebrad tests running?")
         .context_from(&output1)?;
@@ -179,16 +164,8 @@ fn delete_old_databases() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    // Skip this test because it can be very slow without a network.
-    //
-    // The delete databases task is launched last during startup, after network setup.
-    // If there is no network, network setup can take a long time to timeout,
-    // so the task takes a long time to launch, slowing down this test.
-    if zebra_test::net::zebra_skip_network_tests() {
-        return Ok(());
-    }
-
     let mut config = default_test_config(&Mainnet);
+    config.network.cache_dir = false.into();
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");
 
@@ -214,7 +191,8 @@ fn delete_old_databases() -> Result<()> {
     // run zebra with our config
     let mut child = run_dir
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY);
 
     // delete checker running
     child.expect_stdout_line_matches("checking for old database versions".to_string())?;

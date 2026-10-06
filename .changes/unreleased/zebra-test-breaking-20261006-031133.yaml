@@ -1,0 +1,11 @@
+project: zebra-test
+kind: breaking
+body: >-
+  Enforced `command::TestChild::with_timeout` for quiet and partial-line reads and
+  `TestChild::wait_with_output`, which drains both remaining streams and returns timeout or
+  failure-log errors. Reset timeouts between startup and longer observation phases. Changed
+  `TestChild::{stdout, stderr}` to `Option<command::ChildOutput>` and removed `command::IteratorDebug`;
+  use the `TestChild` output methods instead of custom iterators. Bounded post-kill draining in
+  `TestChild::{kill_and_return_output, kill_and_consume_output}` to one second; returned output
+  retains line endings. ([#11598](https://github.com/ZcashFoundation/zebra/pull/11598))
+time: 2026-10-06T03:11:33+02:00
