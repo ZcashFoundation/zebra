@@ -74,9 +74,14 @@ jobs:
             fi
 
             if [[ "${head_ref}" == release-plz-* && ",${labels}," == *,release,* ]]; then
-              behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${head_sha}" --jq .behind_by)"
+              # Fail closed: a Release PR that cannot be compared with the queue base is held.
+              if ! behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${head_sha}" --jq .behind_by)"; then
+                echo "::error title=Cannot compare Release PR #${number}::Comparing ${head_sha} with the queue base ${BASE_SHA} failed, so this check cannot tell whether the Release PR is behind."
+                exit 1
+              fi
+
               if [[ "${behind}" != "0" ]]; then
-                echo "::error title=Release PR is behind the queue::Release PR #${number} does not include every commit ahead of it in the queue, so its release plan does not cover everything being merged. Wait for release-plz to update it."
+                echo "::error title=Release PR is behind the queue::Release PR #${number} (${head_sha}) is ${behind} commit(s) behind the queue base ${BASE_SHA}, so its release plan does not cover everything being merged. Wait for release-plz to update it."
                 held=1
               fi
             fi
