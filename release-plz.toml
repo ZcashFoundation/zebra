@@ -46,9 +46,11 @@ Checking a box records a maintainer's validation. For a conditional item, check 
 ### Release prerequisites
 
 - [ ] No unintended prerelease dependency versions remain.
+- [ ] No open Bug issue labelled `security` or `urgent` affects this release, or a maintainer has accepted it in this PR.
 
 For releases that include `zebrad`:
 
+- [ ] `Zebra tip update / Run sync-update-mainnet test` passed on this PR's latest commit, after the `run-stateful-tests` label was added with `main` frozen, or on the `main` commit this PR is based on.
 - [ ] A full sync completed after the latest state change, or no new full sync is required.
 - [ ] Mainnet and Testnet checkpoints are current for this release.
 
