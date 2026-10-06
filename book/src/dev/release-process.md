@@ -129,7 +129,6 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 Track each release in an issue created from the [release issue template](https://github.com/ZcashFoundation/zebra/issues/new?template=release.md), and follow its checklist. It covers the preparation steps and the review of the Release PR's version bumps and changelogs.
 
-
 ### What Release Readiness Reports
 
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.
