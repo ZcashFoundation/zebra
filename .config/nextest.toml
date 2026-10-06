@@ -106,8 +106,8 @@ test-group = 'serial-zcashd-compat'
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
 
-# All other tests that dial live Mainnet peers: zebra-network's crawler and
-# peer-cache tests, and every zebrad test that starts a node without clearing
+# All other tests that dial live Mainnet peers: zebra-network's live crawler
+# tests, and every zebrad test that starts a node without clearing
 # the default DNS seeders. Remote Zebra peers accept then drop any second
 # connection from the same IP within ~2 minutes (max_connections_per_ip is 1 by
 # default), so concurrent live tests on one runner reject each other's
@@ -116,7 +116,6 @@ test-group = 'serial-zcashd-compat'
 [[profile.default.overrides]]
 filter = '''
 test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
 or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
 or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
 or test(=unit::config::config_tests)
@@ -131,7 +130,6 @@ test-group = 'serial-live-mainnet'
 [[profile.ci.overrides]]
 filter = '''
 test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
 or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
 or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
 or test(=unit::config::config_tests)
