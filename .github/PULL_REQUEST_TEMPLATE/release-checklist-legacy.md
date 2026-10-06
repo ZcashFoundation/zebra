@@ -129,19 +129,16 @@ cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 
 ### Verify the API bump (backstop)
 
-The per-PR cargo-semver-checks CI gate already enforces that breaking API changes
-carry a conventional-commit `!`. Run the manual checks below as a backstop, or
-when the gate could not run (for example, the previous release was yanked, which
-`semver-checks` cannot diff against):
+The per-PR `api-diff` CI gate already runs [`zc`](https://github.com/ZcashFoundation/zc)
+to enforce that breaking public API changes carry a conventional-commit `!`. Run
+the manual check below as a backstop, or when the gate could not run:
 
-- [ ] Update (or install) `semver-checks`: `cargo +stable install cargo-semver-checks --locked`
-- [ ] Update (or install) `public-api`: `cargo +stable install cargo-public-api --locked`
-- [ ] For each crate, confirm the chosen release level matches the API surface:
-      `cargo semver-checks -p <crate> --default-features`. List the full API diff
-      with `cargo public-api diff latest -p <crate> -sss`, or run
-      [`ziff`](https://github.com/ZcashFoundation/ziff) `<previous_tag>` once to
-      get the per-crate diff plus dependency and (with `--with-values`)
-      const/static value and doc changes in one pass.
+- [ ] Install `zc` and its prerequisites as described in the
+      [zc README](https://github.com/ZcashFoundation/zc#install).
+- [ ] Run `zc <previous_tag>` once to get the per-crate public API diff plus
+      dependency and (with `--with-values`) const/static value and doc changes
+      in one pass. For each crate, confirm the chosen release level matches
+      that diff.
 
 ## Update Initial Minimum Network Protocol Version
 
