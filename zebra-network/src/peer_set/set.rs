@@ -131,7 +131,7 @@ use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
     constants::MIN_PEER_SET_LOG_INTERVAL,
-    peer::{LoadTrackedClient, MinimumPeerVersion},
+    peer::{MinimumPeerVersion, TrackedClient},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
@@ -196,7 +196,7 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
 pub struct PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -322,7 +322,7 @@ where
 
 impl<D, C> Drop for PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -337,7 +337,7 @@ where
 
 impl<D, C> PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -1517,7 +1517,7 @@ where
 
 impl<D, C> Service<Request> for PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
