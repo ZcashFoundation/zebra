@@ -142,6 +142,8 @@ pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
         )
         .into());
     }
+    // `read_to_end` grows by doubling, so drop the excess capacity on large fields.
+    vec.shrink_to_fit();
     Ok(vec)
 }
 
