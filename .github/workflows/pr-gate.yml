@@ -161,8 +161,8 @@ jobs:
           bash .github/scripts/validate-pr-changelogs.sh \
             "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
 
-  # Reads every pending fragment with changie, so the set that separate PRs combine on the
-  # merge queue ref and on `main` is checked too.
+  # Dry-runs the release batching over every pending fragment, so the set that separate PRs
+  # combine on the merge queue ref and on `main` is checked too.
   changelog-fragments:
     needs: changes
     runs-on: ubuntu-latest
@@ -175,7 +175,7 @@ jobs:
       - uses: miniscruff/changie-action@3223cb29b92a0972dedc864ace3da01e04780ae4 # v3.0.1
         with:
           version: v1.25.2
-      - name: Read change fragments
+      - name: Check change fragments
         run: .github/scripts/validate-changelog-fragments.sh
 
   # No ruleset context pins this worker's display name; the ruleset requires `pr-gate-result`.
