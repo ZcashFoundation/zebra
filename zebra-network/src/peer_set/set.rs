@@ -135,7 +135,7 @@ use crate::{
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
-        InventoryChange, InventoryRegistry,
+        InventoryChange, InventoryRegistry, PeerStallEvent, StallOutcome,
     },
     protocol::{
         external::{connection_limit_key, InventoryHash},
@@ -163,15 +163,6 @@ pub struct MorePeers;
 pub struct CancelClientWork;
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
-
-/// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
-/// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
-/// the stall tracker can be updated and the peer disconnected if needed.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum StallOutcome {
-    Stall,
-    Clear,
-}
 
 fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
     match result {
@@ -220,10 +211,10 @@ where
     /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
-    stall_event_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, StallOutcome)>,
+    stall_event_rx: tokio_mpsc::UnboundedReceiver<PeerStallEvent>,
 
     /// Producer clones handed to each tracked request's response wrapper.
-    stall_event_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
+    stall_event_tx: tokio_mpsc::UnboundedSender<PeerStallEvent>,
 
     // Peer Tracking: Ready Peers
     //
@@ -825,7 +816,11 @@ where
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((addr, outcome))) = self.stall_event_rx.poll_recv(cx) {
+        while let Poll::Ready(Some(PeerStallEvent::Response {
+            peer: addr,
+            outcome,
+        })) = self.stall_event_rx.poll_recv(cx)
+        {
             match outcome {
                 StallOutcome::Stall => {
                     if self.find_response_stalls.record_stall(addr) {
@@ -1070,7 +1065,10 @@ where
                 return async move {
                     let result = fut.await;
                     if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
+                        let _ = stall_tx.send(PeerStallEvent::Response {
+                            peer: p2c_key,
+                            outcome,
+                        });
                     }
                     result.map_err(Into::into)
                 }

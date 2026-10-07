@@ -3,6 +3,7 @@ mod initialize;
 mod inventory_registry;
 mod limit;
 mod set;
+mod stall_event;
 mod stall_tracker;
 mod unready_service;
 
@@ -15,6 +16,7 @@ pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker};
 
 use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
+pub(crate) use stall_event::{PeerStallEvent, StallOutcome};
 pub use stall_tracker::FindResponseFeedback;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use stall_tracker::FindResponseFeedbackObserver;
