@@ -1,12 +1,17 @@
 //! Connection-lifecycle tests and their shared peer-set scenario.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use futures::{channel::mpsc, FutureExt as _};
+use indexmap::IndexMap;
 use proptest::prop_assert;
 use proptest::test_runner::TestCaseError;
 use proptest_derive::Arbitrary;
-use tokio::time::timeout;
+use tokio::{sync::watch, time::timeout};
 use tower::{discover::Change, BoxError, Service as _, ServiceExt as _};
 
 use zebra_chain::{
@@ -38,6 +43,7 @@ struct TestScenario {
     request_kind: FindRequestKind,
     peer_set: TestPeerSet,
     discovery_sender: mpsc::UnboundedSender<DiscoveryEvent>,
+    bans_sender: watch::Sender<Arc<IndexMap<IpAddr, Instant>>>,
     address: PeerSocketAddr,
     _chain_tip: MockChainTipSender,
     _peer_set_guard: PeerSetGuard,
@@ -48,17 +54,20 @@ impl TestScenario {
     fn new(request_kind: FindRequestKind) -> Self {
         let address = SocketAddr::from(([127, 0, 0, 1], 8233)).into();
         let (discovery_sender, discovery) = mpsc::unbounded();
+        let (bans_sender, bans_receiver) = watch::channel(Arc::new(IndexMap::new()));
         let (minimum_peer_version, chain_tip) =
             MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
         let (peer_set, peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovery)
             .with_minimum_peer_version(minimum_peer_version)
+            .with_bans_receiver(bans_receiver)
             .build();
 
         Self {
             request_kind,
             peer_set,
             discovery_sender,
+            bans_sender,
             address,
             _chain_tip: chain_tip,
             _peer_set_guard: peer_set_guard,
@@ -76,6 +85,13 @@ impl TestScenario {
             .expect("the scenario retains the discovery receiver");
 
         handle
+    }
+
+    /// Bans the test address without polling connection maintenance.
+    fn ban(&mut self) {
+        self.bans_sender.send_modify(|bans| {
+            Arc::make_mut(bans).insert(self.address.ip(), Instant::now());
+        });
     }
 
     /// Waits for a ready connection, bounding unexpected mock setup failures.
