@@ -59,3 +59,6 @@ pub(crate) enum StallOutcome {
     Stall,
     Clear,
 }
+
+#[cfg(test)]
+mod tests;
