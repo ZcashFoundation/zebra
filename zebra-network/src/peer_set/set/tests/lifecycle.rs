@@ -11,6 +11,7 @@ use tokio::{sync::watch, time::timeout};
 use tower::{discover::Change, Service, ServiceExt};
 
 use zebra_chain::{
+    block::Hash,
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     parameters::{Network, NetworkUpgrade},
 };
@@ -436,6 +437,47 @@ async fn connection_closure_releases_pending_outcomes() {
             FindResponseOutcome::Stalled,
         )),
         "the unresolved old request must not block subsequent ordered outcomes"
+    );
+}
+
+/// A useful response from an old connection cannot clear the replacement's stalls.
+#[tokio::test]
+async fn delayed_old_useful_response_preserves_replacement_stalls() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    let old_response = harness.request().await;
+    original
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap()
+        .tx
+        .send(Ok(Response::BlockHashes {
+            hashes: vec![Hash([1; 32])],
+            feedback: None,
+        }))
+        .unwrap();
+    harness.ready().await;
+
+    original.set_error(PeerError::ConnectionClosed);
+    harness.poll();
+    assert!(!original.wants_connection_heartbeats());
+    let mut replacement = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut replacement).await;
+    }
+    harness.ready().await;
+
+    timeout(Duration::from_secs(5), old_response)
+        .await
+        .unwrap()
+        .unwrap();
+    harness.poll();
+    harness.stall(&mut replacement).await;
+    harness.poll();
+    assert!(
+        !replacement.wants_connection_heartbeats(),
+        "an old useful response must not erase the replacement's accumulated stalls"
     );
 }
 
