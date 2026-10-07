@@ -346,4 +346,50 @@ proptest! {
             Ok(())
         })?;
     }
+
+    /// A banned unready service releases tracking when it becomes ready and is rejected.
+    ///
+    /// Every nonzero pre-threshold history must reset to a full fresh stall allowance.
+    #[test]
+    fn unready_ban_clears_tracking(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let mut original = test.connect();
+            test.stall_without_disconnecting(&mut original, initial_stalls).await?;
+
+            // Leave classification unpolled even after the mock sends its response.
+            let _response = test.request()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            original
+                .try_to_receive_outbound_client_request()
+                .request()
+                .ok_or_else(|| TestCaseError::fail("expected an outbound find request"))?
+                .tx
+                .send(Ok(request_kind.empty_response()))
+                .map_err(|_| TestCaseError::fail("the find response receiver was dropped"))?;
+
+            test.ban();
+            // Drop the newly ready banned service, queuing its connection-closure event.
+            test.poll();
+            // Process the closure event to clear the connection's identity and stalls.
+            test.poll();
+
+            prop_assert!(!original.wants_connection_heartbeats());
+            prop_assert!(!test
+                .peer_set
+                .tracked_connections
+                .contains_key(&test.address));
+
+            test.assert_fresh_stall_allowance()?;
+
+            Ok(())
+        })?;
+    }
 }
