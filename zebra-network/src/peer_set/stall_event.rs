@@ -11,6 +11,17 @@ pub(crate) enum PeerStallEvent {
     },
 }
 
+/// Identifies one admitted connection within a peer set, independently of its address.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub(crate) struct ConnectionId(u64);
+
+impl From<u64> for ConnectionId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
 /// The existing empty/non-empty classification of a find response.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StallOutcome {
