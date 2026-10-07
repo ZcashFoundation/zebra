@@ -117,6 +117,37 @@ async fn delayed_old_closure_preserves_replacement_stalls() {
     );
 }
 
+/// Rejecting a duplicate connection preserves the admitted connection's stall count.
+#[tokio::test]
+async fn rejected_duplicate_preserves_current_stalls() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    harness.ready().await;
+
+    let mut duplicate = harness.connect();
+    harness.poll();
+    harness.poll();
+    assert!(
+        !duplicate.wants_connection_heartbeats(),
+        "the duplicate was rejected"
+    );
+    assert!(
+        original.wants_connection_heartbeats(),
+        "the admitted connection remains"
+    );
+
+    harness.stall(&mut original).await;
+    harness.poll();
+    assert!(
+        !original.wants_connection_heartbeats(),
+        "duplicate rejection must not reset the admitted connection's stalls"
+    );
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
