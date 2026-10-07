@@ -40,33 +40,24 @@ proptest = "1.6"
 # crate pins an older minor, two zcash_address versions coexist in the
 # dependency graph and the TryFromAddress / From<transparent::Address> impls
 # (defined by zebra-chain against its own pin) stop resolving.
-zcash_address = "0.13.0"
+zcash_address = "0.14.0-pre.0"
 # note_commitment_tree_fuzz tree types
-halo2 = { package = "halo2_proofs", version = "0.3.2" }
-sapling-crypto = "0.7"
+halo2 = { package = "halo2_proofs", version = "0.4" }
+sapling-crypto = "0.9"
 # rpc_handler_fuzz / jsonrpsee_envelope_fuzz timestamp handling
 chrono = { version = "0.4.40", default-features = false }
 # equihash_fuzz multi-param oracle
 equihash = "0.3"
 # script_flag_matrix_fuzz: below-zebra-script FFI flag matrix
-libzcash_script = "0.1"
-zcash_script = { version = "0.4.5", features = ["signature-validation"] }
+libzcash_script = "0.2"
+zcash_script = { version = "0.6", features = ["signature-validation"] }
 hex = "0.4.3"
 # p2p_*/addr_message_fuzz: wire Codec Decoder/Encoder traits + BytesMut buffer
 bytes = "1.10"
 tokio-util = { version = "0.7.14", features = ["codec"] }
 # generate_v6_seeds bundle types
-orchard = "0.15.0"
-zcash_protocol = "0.10.0"
-
-# This standalone workspace must use the same NU7 implementation as the root workspace.
-[patch.crates-io]
-zcash_primitives = { git = "https://github.com/zcash/librustzcash", rev = "cd5eae71a000d426a63906be740952b5f232a558" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash", rev = "cd5eae71a000d426a63906be740952b5f232a558" }
-
-[patch."https://github.com/zcash/librustzcash"]
-equihash = { version = "=0.3.0" }
-zcash_transparent = { version = "=0.10.0" }
+orchard = "0.16.0"
+zcash_protocol = "=0.11.0-pre.0"
 
 [[bin]]
 name = "rpc_handler_fuzz"
