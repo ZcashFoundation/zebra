@@ -135,7 +135,8 @@ use crate::{
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
-        InventoryChange, InventoryRegistry, PeerStallEvent, StallOutcome,
+        ConnectionGuard, ConnectionId, InventoryChange, InventoryRegistry, PeerStallEvent,
+        StallOutcome,
     },
     protocol::{
         external::{connection_limit_key, InventoryHash},
@@ -215,6 +216,12 @@ where
 
     /// Producer clones handed to each tracked request's response wrapper.
     stall_event_tx: tokio_mpsc::UnboundedSender<PeerStallEvent>,
+
+    /// Identifies the admitted connection whose events may update each address's tracker.
+    tracked_connections: HashMap<PeerSocketAddr, ConnectionId>,
+
+    /// Allocates connection identities that are never reused within this peer set.
+    next_connection_id: u64,
 
     // Peer Tracking: Ready Peers
     //
@@ -375,6 +382,8 @@ where
             find_response_stalls: FindResponseStallTracker::new(),
             stall_event_rx,
             stall_event_tx,
+            tracked_connections: HashMap::new(),
+            next_connection_id: 0,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -743,7 +752,7 @@ where
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
                 }
-                Change::Insert(key, svc) => {
+                Change::Insert(key, mut svc) => {
                     // We add peers as unready, so that we:
                     // - always do the same checks on every ready peer, and
                     // - check for any errors that happened right after the handshake
@@ -780,6 +789,20 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
+                    let connection_id = ConnectionId::from(self.next_connection_id);
+                    self.next_connection_id = self
+                        .next_connection_id
+                        .checked_add(1)
+                        .expect("a peer set cannot admit u64::MAX connections");
+
+                    // A replacement must start fresh even if the old guard's event is queued.
+                    self.find_response_stalls.clear(key);
+                    self.tracked_connections.insert(key, connection_id);
+                    svc.track_connection(ConnectionGuard::new(
+                        key,
+                        connection_id,
+                        self.stall_event_tx.clone(),
+                    ));
                     self.push_unready(key, svc);
                 }
             }
@@ -817,12 +840,28 @@ where
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
         while let Poll::Ready(Some(event)) = self.stall_event_rx.poll_recv(cx) {
-            let PeerStallEvent::Response {
-                peer: addr,
-                outcome,
-            } = event
-            else {
+            let (addr, connection_id) = match &event {
+                PeerStallEvent::Response {
+                    peer,
+                    connection_id,
+                    ..
+                }
+                | PeerStallEvent::ConnectionClosed {
+                    peer,
+                    connection_id,
+                } => (*peer, *connection_id),
+            };
+            if self.tracked_connections.get(&addr) != Some(&connection_id) {
                 continue;
+            }
+
+            let outcome = match event {
+                PeerStallEvent::ConnectionClosed { .. } => {
+                    self.tracked_connections.remove(&addr);
+                    self.find_response_stalls.clear(addr);
+                    continue;
+                }
+                PeerStallEvent::Response { outcome, .. } => outcome,
             };
             match outcome {
                 StallOutcome::Stall => {
@@ -844,6 +883,7 @@ where
     /// Drops the service, cancelling any pending request or response to that peer.
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
+        self.tracked_connections.remove(key);
         self.find_response_stalls.clear(*key);
         self.zcashd_compat_peer_keys.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
@@ -1065,11 +1105,16 @@ where
 
             if track_stalls {
                 let stall_tx = self.stall_event_tx.clone();
+                let connection_id = *self
+                    .tracked_connections
+                    .get(&p2c_key)
+                    .expect("routed peers have been admitted with a connection identity");
                 return async move {
                     let result = fut.await;
                     if let Some(outcome) = classify_find_response(&result) {
                         let _ = stall_tx.send(PeerStallEvent::Response {
                             peer: p2c_key,
+                            connection_id,
                             outcome,
                         });
                     }

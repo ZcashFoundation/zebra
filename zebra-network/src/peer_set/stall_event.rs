@@ -4,11 +4,12 @@ use tokio::sync::mpsc;
 
 use crate::PeerSocketAddr;
 
-/// An immediate response classification delivered to the peer set.
+/// A response classification or connection closure delivered to the peer set.
 #[derive(Debug)]
 pub(crate) enum PeerStallEvent {
     Response {
         peer: PeerSocketAddr,
+        connection_id: ConnectionId,
         outcome: StallOutcome,
     },
     ConnectionClosed {
@@ -29,14 +30,12 @@ impl From<u64> for ConnectionId {
 
 /// Reports closure when the owning peer service is dropped, independently of responses.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct ConnectionGuard {
     peer: PeerSocketAddr,
     connection_id: ConnectionId,
     sender: mpsc::UnboundedSender<PeerStallEvent>,
 }
 
-#[allow(dead_code)]
 impl ConnectionGuard {
     /// Creates a guard that reports closure for `peer` and `connection_id` on drop.
     pub(crate) fn new(
