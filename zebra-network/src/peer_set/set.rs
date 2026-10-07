@@ -208,13 +208,13 @@ where
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
 
-    /// Receives stall/clear events from tracked routing futures in
-    /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
+    /// Receives response outcomes from [`Self::route_p2c`] and connection closures
+    /// from service-owned guards. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
     stall_event_rx: tokio_mpsc::UnboundedReceiver<PeerStallEvent>,
 
-    /// Producer clones handed to each tracked request's response wrapper.
+    /// Producer clones handed to connection guards and tracked response futures.
     stall_event_tx: tokio_mpsc::UnboundedSender<PeerStallEvent>,
 
     /// Identifies the admitted connection whose events may update each address's tracker.
@@ -834,8 +834,10 @@ where
         }
     }
 
-    /// Drains pending stall/clear events from tracked routing futures and
-    /// disconnects peers that have exceeded the stall threshold. The peer's
+    /// Applies events only to the currently tracked connection at each address.
+    ///
+    /// Closure clears both stall counts and pending ordered responses. Response
+    /// outcomes disconnect peers that have exceeded the stall threshold. The peer's
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {

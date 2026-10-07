@@ -1,4 +1,9 @@
 //! Events from peer services that update find-response stall tracking.
+//!
+//! Response futures retain only sender clones and connection identities, not
+//! [`ConnectionGuard`]s. Their lifetime therefore cannot delay closure reporting.
+//! These events retain the immediate response policy; deferred consumer feedback
+//! is represented separately by the stall tracker's existing feedback API.
 
 use tokio::sync::mpsc;
 

@@ -1,5 +1,4 @@
-//! A peer connection service wrapper to handle load tracking and provide access to the
-//! reported protocol version.
+//! A peer service wrapper for load measurements, protocol metadata, and connection cleanup.
 
 use std::{
     net::{IpAddr, SocketAddr},
