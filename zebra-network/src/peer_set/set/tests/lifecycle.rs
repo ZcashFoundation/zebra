@@ -48,6 +48,46 @@ async fn reconnect_after_ready_error_starts_without_stalls() {
     );
 }
 
+/// A response future from a removed connection cannot stall its replacement.
+#[tokio::test]
+async fn delayed_old_response_cannot_stall_replacement() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    let old_response = harness.request().await;
+    original
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap()
+        .tx
+        .send(Ok(Response::BlockHashes {
+            hashes: vec![],
+            feedback: None,
+        }))
+        .unwrap();
+
+    harness.ready().await;
+    original.set_error(PeerError::ConnectionClosed);
+    harness.poll();
+    assert!(!original.wants_connection_heartbeats());
+
+    let mut replacement = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut replacement).await;
+    }
+    harness.ready().await;
+
+    timeout(Duration::from_secs(5), old_response)
+        .await
+        .unwrap()
+        .unwrap();
+    harness.poll();
+    assert!(
+        replacement.wants_connection_heartbeats(),
+        "a delayed old response must not count as a replacement stall"
+    );
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
