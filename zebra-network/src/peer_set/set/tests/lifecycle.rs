@@ -24,6 +24,7 @@ use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientTestHarness, MinimumPeerVersion, TrackedClient},
     peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerSet},
+    protocol::external::types::Version,
     PeerSocketAddr, Request, Response,
 };
 
@@ -45,7 +46,7 @@ struct TestScenario {
     discovery_sender: mpsc::UnboundedSender<DiscoveryEvent>,
     bans_sender: watch::Sender<Arc<IndexMap<IpAddr, Instant>>>,
     address: PeerSocketAddr,
-    _chain_tip: MockChainTipSender,
+    chain_tip: MockChainTipSender,
     _peer_set_guard: PeerSetGuard,
 }
 
@@ -69,16 +70,19 @@ impl TestScenario {
             discovery_sender,
             bans_sender,
             address,
-            _chain_tip: chain_tip,
+            chain_tip,
             _peer_set_guard: peer_set_guard,
         }
     }
 
     /// Announces a new connection at the test address without polling admission.
     fn connect(&mut self) -> ClientTestHarness {
-        let (client, handle) = ClientTestHarness::build()
-            .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
-            .finish();
+        self.connect_with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+    }
+
+    /// Announces a connection with the supplied protocol version without polling admission.
+    fn connect_with_version(&mut self, version: Version) -> ClientTestHarness {
+        let (client, handle) = ClientTestHarness::build().with_version(version).finish();
 
         self.discovery_sender
             .unbounded_send(Ok(Change::Insert(self.address, client.into())))

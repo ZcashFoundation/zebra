@@ -5,9 +5,12 @@ use std::time::Duration;
 use proptest::prelude::*;
 use tokio::time::timeout;
 
+use zebra_chain::parameters::{Network, NetworkUpgrade};
+
 use crate::{
     peer::PeerError,
     peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerStallEvent},
+    protocol::external::types::Version,
 };
 
 use super::{FindRequestKind, TestScenario};
@@ -377,6 +380,49 @@ proptest! {
 
             test.ban();
             // Drop the newly ready banned service, queuing its connection-closure event.
+            test.poll();
+            // Process the closure event to clear the connection's identity and stalls.
+            test.poll();
+
+            prop_assert!(!original.wants_connection_heartbeats());
+            prop_assert!(!test
+                .peer_set
+                .tracked_connections
+                .contains_key(&test.address));
+
+            test.assert_fresh_stall_allowance()?;
+
+            Ok(())
+        })?;
+    }
+
+    /// Version pruning clears the tracking of a ready connection without explicit removal.
+    ///
+    /// Every nonzero pre-threshold history must reset to a full fresh stall allowance.
+    #[test]
+    fn version_pruning_clears_tracking(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let version =
+                Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+            test.chain_tip
+                .send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&Network::Mainnet));
+
+            let mut original = test.connect_with_version(version);
+            test.stall_without_disconnecting(&mut original, initial_stalls).await?;
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+
+            test.chain_tip
+                .send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+            // Prune the outdated ready service, queuing its connection-closure event.
             test.poll();
             // Process the closure event to clear the connection's identity and stalls.
             test.poll();
