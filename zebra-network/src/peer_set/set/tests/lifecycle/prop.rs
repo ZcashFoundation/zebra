@@ -224,4 +224,52 @@ proptest! {
             Ok(())
         })?;
     }
+
+    /// Rejecting a duplicate connection preserves the admitted connection's stall count.
+    ///
+    /// The intervening event must preserve every nonzero pre-threshold stall count.
+    #[test]
+    fn rejected_duplicate_preserves_current_stalls(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let mut original = test.connect();
+            test.stall_without_disconnecting(&mut original, initial_stalls).await?;
+
+            let mut duplicate = test.connect();
+            // Reject the duplicate before attaching a connection guard.
+            test.poll();
+            // Allow any erroneous closure event from rejecting the duplicate to be processed.
+            test.poll();
+            prop_assert!(
+                !duplicate.wants_connection_heartbeats(),
+                "the duplicate was rejected"
+            );
+            prop_assert!(
+                original.wants_connection_heartbeats(),
+                "the admitted connection remains"
+            );
+
+            test.stall_without_disconnecting(
+                &mut original,
+                FIND_RESPONSE_STALL_THRESHOLD - initial_stalls - 1,
+            ).await?;
+
+            test.stall(&mut original)
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            test.poll();
+            prop_assert!(
+                !original.wants_connection_heartbeats(),
+                "the connection must disconnect at the stall threshold",
+            );
+
+            Ok(())
+        })?;
+    }
 }
