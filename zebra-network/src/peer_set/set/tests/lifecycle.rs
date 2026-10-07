@@ -15,8 +15,10 @@ use tokio::{sync::watch, time::timeout};
 use tower::{discover::Change, BoxError, Service as _, ServiceExt as _};
 
 use zebra_chain::{
+    block,
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     parameters::Network,
+    serialization::ZcashDeserializeInto as _,
 };
 use zebra_test::prelude::eyre::{self, eyre};
 
@@ -193,6 +195,21 @@ enum FindRequestKind {
 }
 
 impl FindRequestKind {
+    /// Creates a nonempty response classified as useful by the peer set.
+    fn useful_response(self) -> eyre::Result<Response> {
+        let header: block::Header = zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+
+        Ok(match self {
+            Self::Blocks => Response::BlockHashes {
+                hashes: vec![header.hash()],
+                feedback: None,
+            },
+            Self::Headers => Response::BlockHeaders(vec![block::CountedHeader {
+                header: header.into(),
+            }]),
+        })
+    }
+
     /// Creates a request with an empty locator and no stop hash.
     fn request(self) -> Request {
         match self {

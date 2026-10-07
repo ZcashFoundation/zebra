@@ -280,6 +280,67 @@ proptest! {
         })?;
     }
 
+    /// A useful response from an old connection cannot clear the replacement's stalls.
+    ///
+    /// The intervening event must preserve every nonzero pre-threshold stall count.
+    #[test]
+    fn delayed_old_useful_response_preserves_replacement_stalls(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let mut original = test.connect();
+
+            let old_response = test.request()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            original
+                .try_to_receive_outbound_client_request()
+                .request()
+                .ok_or_else(|| TestCaseError::fail("expected an outbound find request"))?
+                .tx
+                .send(Ok(request_kind.useful_response()
+                    .map_err(|error| TestCaseError::fail(format!("{error:?}")))?))
+                .map_err(|_| TestCaseError::fail("the find response receiver was dropped"))?;
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+
+            original.set_error(PeerError::ConnectionClosed);
+            test.poll();
+            prop_assert!(!original.wants_connection_heartbeats());
+
+            let mut replacement = test.connect();
+            test.stall_without_disconnecting(&mut replacement, initial_stalls).await?;
+
+            timeout(Duration::from_secs(5), old_response)
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            test.poll();
+
+            test.stall_without_disconnecting(
+                &mut replacement,
+                FIND_RESPONSE_STALL_THRESHOLD - initial_stalls - 1,
+            ).await?;
+
+            test.stall(&mut replacement)
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            test.poll();
+            prop_assert!(
+                !replacement.wants_connection_heartbeats(),
+                "the connection must disconnect at the stall threshold",
+            );
+
+            Ok(())
+        })?;
+    }
+
     /// An errored unready service clears tracking when its readiness future drops it.
     ///
     /// Every nonzero pre-threshold history must reset to a full fresh stall allowance.
