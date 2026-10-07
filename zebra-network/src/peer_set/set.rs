@@ -816,11 +816,14 @@ where
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some(PeerStallEvent::Response {
-            peer: addr,
-            outcome,
-        })) = self.stall_event_rx.poll_recv(cx)
-        {
+        while let Poll::Ready(Some(event)) = self.stall_event_rx.poll_recv(cx) {
+            let PeerStallEvent::Response {
+                peer: addr,
+                outcome,
+            } = event
+            else {
+                continue;
+            };
             match outcome {
                 StallOutcome::Stall => {
                     if self.find_response_stalls.record_stall(addr) {
