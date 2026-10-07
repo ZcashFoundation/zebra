@@ -315,6 +315,52 @@ async fn version_pruning_clears_tracking() {
     );
 }
 
+/// Rejecting a newly ready service after an upgrade clears its old tracking.
+#[tokio::test]
+async fn outdated_unready_service_clears_tracking() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    harness
+        .chain_tip
+        .send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&Network::Mainnet));
+    let version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let mut original = harness.connect_with_version(version);
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    let response = harness.request().await;
+    original
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap()
+        .tx
+        .send(Ok(Response::BlockHashes {
+            hashes: vec![],
+            feedback: None,
+        }))
+        .unwrap();
+
+    harness
+        .chain_tip
+        .send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "rejecting an outdated newly ready connection must clear its stalls"
+    );
+    drop(response);
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
