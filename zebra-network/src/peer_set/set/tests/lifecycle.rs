@@ -177,6 +177,36 @@ async fn ready_error_clears_tracking_without_reconnection() {
     );
 }
 
+/// An errored unready service clears tracking when its readiness future drops it.
+#[tokio::test]
+async fn unready_error_clears_tracking() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    let response = harness.request().await;
+
+    original.set_error(PeerError::ConnectionClosed);
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "unready failure must clear the previous stall count"
+    );
+    drop(response);
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
