@@ -10,7 +10,10 @@ use zebra_chain::parameters::{Network, NetworkUpgrade};
 
 use crate::{
     peer::PeerError,
-    peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerStallEvent},
+    peer_set::stall_tracker::{
+        FindRequestId, FindResponseEvent, FindResponseOutcome, FIND_RESPONSE_STALL_THRESHOLD,
+    },
+    peer_set::PeerStallEvent,
     protocol::external::types::Version,
 };
 
@@ -533,6 +536,55 @@ proptest! {
                 .contains_key(&test.address));
 
             test.assert_fresh_stall_allowance()?;
+
+            Ok(())
+        })?;
+    }
+
+    /// Connection closure discards pending ordered outcomes, not just the stall count.
+    ///
+    /// Any retained old request would block the new completed response.
+    #[test]
+    fn connection_closure_releases_pending_outcomes(
+        request_kind in any::<FindRequestKind>(),
+        pending_count in 1u64..=10,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let original = test.connect();
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            for request_id in 0..pending_count {
+                test.peer_set
+                    .find_response_stalls
+                    .begin_request(test.address, FindRequestId::from(request_id));
+            }
+
+            original.set_error(PeerError::ConnectionClosed);
+            // Drop the errored service, queuing its connection-closure event.
+            test.poll();
+            // Process the closure event to clear the connection's identity and stalls.
+            test.poll();
+
+            // Inspect ordered tracking without reconnecting, which would also reset it.
+            let tracker = &mut test.peer_set.find_response_stalls;
+            for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+                prop_assert!(!tracker.record_stall(test.address));
+            }
+
+            tracker.begin_request(test.address, FindRequestId::from(pending_count));
+            prop_assert!(
+                tracker.record_response(FindResponseEvent::new(
+                    test.address,
+                    FindRequestId::from(pending_count),
+                    FindResponseOutcome::Stalled,
+                )),
+                "unresolved old requests must not block subsequent ordered outcomes"
+            );
 
             Ok(())
         })?;
