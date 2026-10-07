@@ -12,14 +12,14 @@ use tower::{discover::Change, Service, ServiceExt};
 
 use zebra_chain::{
     chain_tip::mock::{MockChainTip, MockChainTipSender},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
 };
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientTestHarness, MinimumPeerVersion, PeerError, TrackedClient},
     peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerSet},
-    BoxError, PeerSocketAddr, Request, Response,
+    BoxError, PeerSocketAddr, Request, Response, Version,
 };
 
 use super::{super::ResponseFuture, PeerSetBuilder, PeerSetGuard};
@@ -280,6 +280,41 @@ async fn unready_ban_clears_tracking() {
     drop(response);
 }
 
+/// Version pruning clears the tracking of a ready connection without explicit removal.
+#[tokio::test]
+async fn version_pruning_clears_tracking() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    harness
+        .chain_tip
+        .send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&Network::Mainnet));
+    let version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let mut original = harness.connect_with_version(version);
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    harness.ready().await;
+
+    harness
+        .chain_tip
+        .send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "version pruning must clear the old connection's stalls"
+    );
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
@@ -291,7 +326,7 @@ struct Harness {
     peer_set: TestPeerSet,
     discovery_sender: mpsc::UnboundedSender<DiscoveryEvent>,
     address: PeerSocketAddr,
-    _chain_tip: MockChainTipSender,
+    chain_tip: MockChainTipSender,
     _peer_set_guard: PeerSetGuard,
 }
 
@@ -311,16 +346,19 @@ impl Harness {
             peer_set,
             discovery_sender,
             address,
-            _chain_tip: chain_tip,
+            chain_tip,
             _peer_set_guard: peer_set_guard,
         }
     }
 
     /// Announces a new connection at the test address without polling admission.
     fn connect(&mut self) -> ClientTestHarness {
-        let (client, handle) = ClientTestHarness::build()
-            .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
-            .finish();
+        self.connect_with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+    }
+
+    /// Announces a connection with the supplied protocol version without polling admission.
+    fn connect_with_version(&mut self, version: Version) -> ClientTestHarness {
+        let (client, handle) = ClientTestHarness::build().with_version(version).finish();
         self.discovery_sender
             .unbounded_send(Ok(Change::Insert(self.address, client.into())))
             .unwrap();
