@@ -40,7 +40,7 @@ proptest = "1.6"
 # crate pins an older minor, two zcash_address versions coexist in the
 # dependency graph and the TryFromAddress / From<transparent::Address> impls
 # (defined by zebra-chain against its own pin) stop resolving.
-zcash_address = "0.14.0-pre.0"
+zcash_address = "0.14.0-pre.1"
 # note_commitment_tree_fuzz tree types
 halo2 = { package = "halo2_proofs", version = "0.4" }
 sapling-crypto = "0.9"

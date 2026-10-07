@@ -1614,9 +1614,9 @@ dependencies = [
 
 [[package]]
 name = "f4jumble"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d42773cb15447644d170be20231a3268600e0c4cea8987d013b93ac973d3cf7"
+checksum = "2cae5503f6dc8629246d7e9b3450d3712e5be20f2ed7f9fb6b67212a4f315adc"
 dependencies = [
  "blake2b_simd",
 ]
@@ -7132,9 +7132,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.14.0-pre.0"
+version = "0.14.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43e96e21e873c5a12fcd2ee6b04315e23e8ca4488cf4929c0774483dad24a995"
+checksum = "db56348a60fb82895c37475a4a3a39e9eaf47bc4267c05cad42f83b0771b18c8"
 dependencies = [
  "bech32",
  "bs58",
@@ -7168,9 +7168,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.17.0-pre.0"
+version = "0.17.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fc5f0dfdaf6eb7f6252522f7c8f013754dd1ef22aec81c5c065f8704a2af278"
+checksum = "96e6eaf9ae82ea0e40aadd35df0778f37125fb3405a25e2b1f0d6b45a9884e14"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -7209,9 +7209,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.31.0-pre.0"
+version = "0.31.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e2f5bf9a1e5a16612cbbab5a112bcec36a3623d8585da0187dcb58a247bc078"
+checksum = "0329bee4107df1aaaaaab365bdf94fcc0d9a185165c4675dff2397c5af7d13f4"
 dependencies = [
  "blake2b_simd",
  "corez",
@@ -7238,9 +7238,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.31.0-pre.0"
+version = "0.31.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9bc8791093fe97f895ff7779645aa0bf71fde708640fe51e7fc05b6d9e68bb4"
+checksum = "1cc30f2c394b8558269a13f5c9b4188eae7b9b5b659afdc60d1c6fcd861d2311"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7301,9 +7301,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.11.0-pre.0"
+version = "0.11.0-pre.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeb255bbf28f7a6ad34e2e94871569ed1f5604d2d3ccac2ef63e0e7ce1a8ed4b"
+checksum = "d3b7dfde65266233ad2babba2f115d41a786e0270cac1a4644e26b9992dcf375"
 dependencies = [
  "bip32",
  "bs58",
