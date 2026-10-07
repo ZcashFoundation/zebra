@@ -361,6 +361,47 @@ async fn outdated_unready_service_clears_tracking() {
     drop(response);
 }
 
+/// Cancelling a request routed after a version change clears the connection's tracking.
+#[tokio::test]
+async fn outdated_request_cancellation_clears_tracking() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    harness
+        .chain_tip
+        .send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&Network::Mainnet));
+    let version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let mut original = harness.connect_with_version(version);
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    harness.ready().await;
+
+    // Change the minimum after readiness, so rejection happens in push_unready.
+    harness
+        .chain_tip
+        .send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+    let response = harness.peer_set.call(Request::FindBlocks {
+        known_blocks: vec![],
+        stop: None,
+    });
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "cancelling an outdated routed connection must clear its stalls"
+    );
+    drop(response);
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
