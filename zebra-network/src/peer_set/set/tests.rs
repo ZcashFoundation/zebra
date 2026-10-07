@@ -36,6 +36,9 @@ use crate::{
 };
 
 #[cfg(test)]
+mod lifecycle;
+
+#[cfg(test)]
 mod prop;
 
 #[cfg(test)]
