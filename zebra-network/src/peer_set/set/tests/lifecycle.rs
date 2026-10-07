@@ -88,6 +88,35 @@ async fn delayed_old_response_cannot_stall_replacement() {
     );
 }
 
+/// A late guard drop does not erase stalls accumulated by a replacement connection.
+#[tokio::test]
+async fn delayed_old_closure_preserves_replacement_stalls() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let _original = harness.connect();
+    harness.ready().await;
+
+    // Hold the old service outside the ready map to delay its guard's drop.
+    let old_service = harness
+        .peer_set
+        .take_ready_service(&harness.address)
+        .unwrap();
+    let mut replacement = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut replacement).await;
+    }
+    harness.ready().await;
+
+    drop(old_service);
+    harness.poll();
+    harness.stall(&mut replacement).await;
+    harness.poll();
+    assert!(
+        !replacement.wants_connection_heartbeats(),
+        "old cleanup must not erase the replacement's accumulated stalls"
+    );
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
