@@ -128,14 +128,10 @@ pub fn zcash_deserialize_bytes_external_count<R: io::Read>(
             "Byte vector longer than MAX_U8_ALLOCATION",
         ));
     }
-    // `external_count` is peer-supplied, so grow the buffer as real bytes arrive
-    // rather than reserving all of it first: `read_to_end` over a `take`-limited
-    // reader can't allocate more than the bytes actually delivered.
+    // `external_count` is peer-supplied, so grow the buffer as bytes arrive instead of reserving it all.
     let mut vec = Vec::with_capacity(external_count.min(MAX_INITIAL_ALLOCATION));
     let count = reader.take(external_count as u64).read_to_end(&mut vec)?;
     if count != external_count {
-        // The reader ended before delivering the claimed count: fail closed, as
-        // the previous `read_exact` over a pre-allocated buffer did.
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
             "reader ended before external_count bytes were read",
