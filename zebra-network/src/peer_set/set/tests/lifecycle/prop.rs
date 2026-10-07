@@ -139,4 +139,41 @@ proptest! {
             Ok(())
         })?;
     }
+
+    /// An errored ready service releases its identity and stalls without waiting for reconnect.
+    ///
+    /// Every nonzero pre-threshold history must reset to a full fresh stall allowance.
+    #[test]
+    fn ready_error_clears_tracking_without_reconnection(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let mut original = test.connect();
+            test.stall_without_disconnecting(&mut original, initial_stalls).await?;
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+
+            original.set_error(PeerError::ConnectionClosed);
+            // Drop the errored ready service, queuing its connection-closure event.
+            test.poll();
+            // Process the closure event to clear the connection's identity and stalls.
+            test.poll();
+
+            prop_assert!(!original.wants_connection_heartbeats());
+            prop_assert!(!test
+                .peer_set
+                .tracked_connections
+                .contains_key(&test.address));
+
+            test.assert_fresh_stall_allowance()?;
+
+            Ok(())
+        })?;
+    }
 }
