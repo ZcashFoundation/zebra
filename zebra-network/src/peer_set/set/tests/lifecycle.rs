@@ -148,6 +148,35 @@ async fn rejected_duplicate_preserves_current_stalls() {
     );
 }
 
+/// An errored ready service releases its identity and stalls without waiting for reconnect.
+#[tokio::test]
+async fn ready_error_clears_tracking_without_reconnection() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    harness.ready().await;
+
+    original.set_error(PeerError::ConnectionClosed);
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "connection closure must clear the previous stall count"
+    );
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
