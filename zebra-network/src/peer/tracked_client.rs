@@ -1,4 +1,4 @@
-//! A peer connection service wrapper type to handle load tracking and provide access to the
+//! A peer connection service wrapper to handle load tracking and provide access to the
 //! reported protocol version.
 
 use std::{
@@ -22,7 +22,7 @@ use crate::{
 ///
 /// It also keeps track of the peer's reported protocol version.
 #[derive(Debug)]
-pub struct LoadTrackedClient {
+pub struct TrackedClient {
     /// A service representing a connected peer, wrapped in a load tracker.
     service: PeakEwma<Client>,
 
@@ -30,8 +30,8 @@ pub struct LoadTrackedClient {
     connection_info: Arc<ConnectionInfo>,
 }
 
-/// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
-impl From<Client> for LoadTrackedClient {
+/// Create a new [`TrackedClient`] wrapping the provided `client` service.
+impl From<Client> for TrackedClient {
     fn from(client: Client) -> Self {
         let connection_info = client.connection_info.clone();
 
@@ -42,14 +42,14 @@ impl From<Client> for LoadTrackedClient {
             tower::load::CompleteOnResponse::default(),
         );
 
-        LoadTrackedClient {
+        TrackedClient {
             service,
             connection_info,
         }
     }
 }
 
-impl LoadTrackedClient {
+impl TrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
@@ -67,7 +67,7 @@ impl LoadTrackedClient {
     }
 }
 
-impl<Request> Service<Request> for LoadTrackedClient
+impl<Request> Service<Request> for TrackedClient
 where
     Client: Service<Request>,
 {
@@ -84,7 +84,7 @@ where
     }
 }
 
-impl Load for LoadTrackedClient {
+impl Load for TrackedClient {
     type Metric = <PeakEwma<Client> as Load>::Metric;
 
     fn load(&self) -> Self::Metric {
