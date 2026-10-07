@@ -5,7 +5,11 @@ use proptest::{collection::size_range, prelude::*};
 use std::matches;
 
 use crate::serialization::{
-    arbitrary::max_allocation_is_big_enough, zcash_deserialize::MAX_U8_ALLOCATION,
+    arbitrary::max_allocation_is_big_enough,
+    zcash_deserialize::{
+        zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
+        MAX_INITIAL_ALLOCATION, MAX_U8_ALLOCATION,
+    },
     SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     MAX_PROTOCOL_MESSAGE_LEN,
 };
@@ -93,4 +97,49 @@ fn u8_max_allocation_is_correct() {
     assert_eq!(largest_allowed_vec_len, MAX_U8_ALLOCATION);
     // Check that our largest_allowed_vec is the size of a maximal protocol message
     assert_eq!(largest_allowed_serialized_len, MAX_PROTOCOL_MESSAGE_LEN);
+}
+
+#[test]
+/// A peer-supplied byte count at the `MAX_U8_ALLOCATION` ceiling, paired with a
+/// near-empty reader, must fail closed with `UnexpectedEof` rather than
+/// pre-allocating the full claimed count.
+fn bytes_external_count_rejects_short_reader() {
+    let data = [0u8; 4];
+    let result =
+        zcash_deserialize_bytes_external_count(MAX_U8_ALLOCATION, std::io::Cursor::new(&data[..]));
+
+    match result {
+        Err(SerializationError::Io(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof)
+        }
+        other => panic!("expected an UnexpectedEof io error, got {other:?}"),
+    }
+}
+
+#[test]
+/// Round-trip a byte vector several times larger than `MAX_INITIAL_ALLOCATION`,
+/// so the buffer grows past the initial reservation while all bytes are present.
+fn bytes_external_count_roundtrips_past_initial_allocation() {
+    let len = MAX_INITIAL_ALLOCATION * 2 + 7;
+    let input: Vec<u8> = (0..len).map(|i| i as u8).collect();
+    let deserialized = zcash_deserialize_bytes_external_count(len, std::io::Cursor::new(&input))
+        .expect("deserialization must succeed when all bytes are present");
+
+    assert_eq!(deserialized, input);
+}
+
+#[test]
+/// Confirm the `String` specialisation inherits the same bound and fail-closed
+/// behaviour, since it delegates to `zcash_deserialize_bytes_external_count`.
+fn string_external_count_rejects_short_reader() {
+    let data = [0u8; 4];
+    let result =
+        zcash_deserialize_string_external_count(MAX_U8_ALLOCATION, std::io::Cursor::new(&data[..]));
+
+    match result {
+        Err(SerializationError::Io(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof)
+        }
+        other => panic!("expected an UnexpectedEof io error, got {other:?}"),
+    }
 }
