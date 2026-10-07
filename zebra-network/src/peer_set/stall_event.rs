@@ -2,10 +2,13 @@
 
 use tokio::sync::mpsc;
 
+#[cfg(test)]
+use proptest_derive::Arbitrary;
+
 use crate::PeerSocketAddr;
 
 /// A response classification or connection closure delivered to the peer set.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) enum PeerStallEvent {
     Response {
         peer: PeerSocketAddr,
@@ -21,6 +24,7 @@ pub(crate) enum PeerStallEvent {
 
 /// Identifies one admitted connection within a peer set, independently of its address.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub(crate) struct ConnectionId(u64);
 
 impl From<u64> for ConnectionId {
@@ -60,3 +64,6 @@ pub(crate) enum StallOutcome {
     Stall,
     Clear,
 }
+
+#[cfg(test)]
+mod tests;
