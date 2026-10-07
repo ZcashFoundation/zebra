@@ -240,6 +240,46 @@ async fn ready_ban_clears_tracking() {
     );
 }
 
+/// A banned unready service releases tracking when it becomes ready and is rejected.
+#[tokio::test]
+async fn unready_ban_clears_tracking() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    let response = harness.request().await;
+    original
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap()
+        .tx
+        .send(Ok(Response::BlockHashes {
+            hashes: vec![],
+            feedback: None,
+        }))
+        .unwrap();
+
+    harness.ban();
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "banning an unready connection must clear its stalls"
+    );
+    drop(response);
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
