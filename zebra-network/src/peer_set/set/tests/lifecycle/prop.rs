@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use proptest::prelude::*;
 use tokio::time::timeout;
+use tower::Service as _;
 
 use zebra_chain::parameters::{Network, NetworkUpgrade};
 
@@ -475,6 +476,52 @@ proptest! {
             test.chain_tip
                 .send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
             // Reject the newly ready outdated service, queuing its connection-closure event.
+            test.poll();
+            // Process the closure event to clear the connection's identity and stalls.
+            test.poll();
+
+            prop_assert!(!original.wants_connection_heartbeats());
+            prop_assert!(!test
+                .peer_set
+                .tracked_connections
+                .contains_key(&test.address));
+
+            test.assert_fresh_stall_allowance()?;
+
+            Ok(())
+        })?;
+    }
+
+    /// Cancelling a request routed after a version change clears the connection's tracking.
+    ///
+    /// Every nonzero pre-threshold history must reset to a full fresh stall allowance.
+    #[test]
+    fn outdated_request_cancellation_clears_tracking(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let version =
+                Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+            test.chain_tip
+                .send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&Network::Mainnet));
+
+            let mut original = test.connect_with_version(version);
+            test.stall_without_disconnecting(&mut original, initial_stalls).await?;
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+
+            // Change the minimum after readiness, so rejection happens in push_unready.
+            test.chain_tip
+                .send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+            // Routing queues cancellation because the connection is now outdated.
+            let _response = test.peer_set.call(request_kind.request());
+            // Process the queued cancellation and drop the outdated service.
             test.poll();
             // Process the closure event to clear the connection's identity and stalls.
             test.poll();
