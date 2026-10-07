@@ -176,4 +176,52 @@ proptest! {
             Ok(())
         })?;
     }
+
+    /// A late guard drop does not erase stalls accumulated by a replacement connection.
+    ///
+    /// The intervening event must preserve every nonzero pre-threshold stall count.
+    #[test]
+    fn delayed_old_closure_preserves_replacement_stalls(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let _original = test.connect();
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+
+            // Hold the old service outside the ready map to delay its guard's drop.
+            let old_service = test
+                .peer_set
+                .take_ready_service(&test.address)
+                .ok_or_else(|| TestCaseError::fail("expected the original ready connection"))?;
+
+            let mut replacement = test.connect();
+            test.stall_without_disconnecting(&mut replacement, initial_stalls).await?;
+
+            drop(old_service);
+            test.poll();
+
+            test.stall_without_disconnecting(
+                &mut replacement,
+                FIND_RESPONSE_STALL_THRESHOLD - initial_stalls - 1,
+            ).await?;
+
+            test.stall(&mut replacement)
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            test.poll();
+            prop_assert!(
+                !replacement.wants_connection_heartbeats(),
+                "the connection must disconnect at the stall threshold",
+            );
+
+            Ok(())
+        })?;
+    }
 }
