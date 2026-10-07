@@ -15,7 +15,6 @@ pub(crate) enum PeerStallEvent {
         connection_id: ConnectionId,
         outcome: StallOutcome,
     },
-    #[allow(dead_code)]
     ConnectionClosed {
         peer: PeerSocketAddr,
         connection_id: ConnectionId,
@@ -33,7 +32,7 @@ impl From<u64> for ConnectionId {
     }
 }
 
-/// Retains a connection's cleanup identity; drop notification is not implemented yet.
+/// Reports closure when the owning peer service is dropped, independently of responses.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct ConnectionGuard {
@@ -44,7 +43,7 @@ pub(crate) struct ConnectionGuard {
 
 #[allow(dead_code)]
 impl ConnectionGuard {
-    /// Creates a guard without reporting closure until drop notification is implemented.
+    /// Creates a guard that reports closure for `peer` and `connection_id` on drop.
     pub(crate) fn new(
         peer: PeerSocketAddr,
         connection_id: ConnectionId,
@@ -55,6 +54,15 @@ impl ConnectionGuard {
             connection_id,
             sender,
         }
+    }
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        let _ = self.sender.send(PeerStallEvent::ConnectionClosed {
+            peer: self.peer,
+            connection_id: self.connection_id,
+        });
     }
 }
 
