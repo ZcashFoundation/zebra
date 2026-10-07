@@ -1,9 +1,13 @@
 //! Connection-lifetime regressions for find-response stall tracking.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use futures::{channel::mpsc, FutureExt};
-use tokio::time::timeout;
+use tokio::{sync::watch, time::timeout};
 use tower::{discover::Change, Service, ServiceExt};
 
 use zebra_chain::{
@@ -207,6 +211,35 @@ async fn unready_error_clears_tracking() {
     drop(response);
 }
 
+/// A banned ready service releases its connection tracking through the drop guard.
+#[tokio::test]
+async fn ready_ban_clears_tracking() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let mut original = harness.connect();
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        harness.stall(&mut original).await;
+    }
+    harness.ready().await;
+
+    harness.ban();
+    harness.poll();
+    harness.poll();
+
+    assert!(!original.wants_connection_heartbeats());
+    assert!(!harness
+        .peer_set
+        .tracked_connections
+        .contains_key(&harness.address));
+    assert!(
+        !harness
+            .peer_set
+            .find_response_stalls
+            .record_stall(harness.address),
+        "banning a ready connection must clear its stalls"
+    );
+}
+
 /// A discovery notification for an individually controlled mock connection.
 type DiscoveryEvent = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>;
 
@@ -253,6 +286,14 @@ impl Harness {
             .unwrap();
 
         handle
+    }
+
+    /// Bans the test address without polling connection maintenance.
+    fn ban(&mut self) {
+        let mut bans = self.peer_set.bans_receiver.borrow().clone();
+        Arc::make_mut(&mut bans).insert(self.address.ip(), Instant::now());
+        let (_sender, receiver) = watch::channel(bans);
+        self.peer_set.bans_receiver = receiver;
     }
 
     /// Waits for a ready connection, bounding unexpected mock setup failures.
