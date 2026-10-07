@@ -18,7 +18,12 @@ use zebra_chain::{
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientTestHarness, MinimumPeerVersion, PeerError, TrackedClient},
-    peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerSet},
+    peer_set::{
+        stall_tracker::{
+            FindRequestId, FindResponseEvent, FindResponseOutcome, FIND_RESPONSE_STALL_THRESHOLD,
+        },
+        PeerSet,
+    },
     BoxError, PeerSocketAddr, Request, Response, Version,
 };
 
@@ -400,6 +405,38 @@ async fn outdated_request_cancellation_clears_tracking() {
         "cancelling an outdated routed connection must clear its stalls"
     );
     drop(response);
+}
+
+/// Connection closure discards pending ordered outcomes, not just the stall count.
+#[tokio::test]
+async fn connection_closure_releases_pending_outcomes() {
+    let _test_guard = zebra_test::init();
+    let mut harness = Harness::new();
+    let original = harness.connect();
+    harness.ready().await;
+    harness
+        .peer_set
+        .find_response_stalls
+        .begin_request(harness.address, FindRequestId::from(1));
+
+    original.set_error(PeerError::ConnectionClosed);
+    harness.poll();
+    harness.poll();
+
+    // Inspect ordered tracking without reconnecting, which would also reset it.
+    let tracker = &mut harness.peer_set.find_response_stalls;
+    for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+        assert!(!tracker.record_stall(harness.address));
+    }
+    tracker.begin_request(harness.address, FindRequestId::from(2));
+    assert!(
+        tracker.record_response(FindResponseEvent::new(
+            harness.address,
+            FindRequestId::from(2),
+            FindResponseOutcome::Stalled,
+        )),
+        "the unresolved old request must not block subsequent ordered outcomes"
+    );
 }
 
 /// A discovery notification for an individually controlled mock connection.
