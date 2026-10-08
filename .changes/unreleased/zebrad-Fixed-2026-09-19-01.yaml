@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: "The block gossip task no longer stalls when there are no ready peers, which could fill the mined block channel and make `submitblock` return errors for blocks that were committed ([#11475](https://github.com/ZcashFoundation/zebra/issues/11475))."
+time: 2026-09-19T12:00:00.000000000+00:00
