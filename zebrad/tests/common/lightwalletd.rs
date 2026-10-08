@@ -166,11 +166,7 @@ pub fn can_spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     }
 
     let lightwalletd_state_path = test_type.lightwalletd_state_path(test_name);
-    if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
-        return false;
-    }
-
-    true
+    !test_type.needs_lightwalletd_cached_state() || lightwalletd_state_path.is_some()
 }
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test

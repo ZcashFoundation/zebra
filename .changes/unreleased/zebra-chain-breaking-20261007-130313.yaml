@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: 'Updated `zcash_primitives` to 0.31.0-pre.1, `zcash_address` to 0.14.0-pre.1 and `zcash_transparent` to 0.11.0-pre.1. Their types appear in the public API. `zcash_protocol` remains at 0.11.0-pre.0. ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614))'
+time: 2026-10-07T13:03:13.000000000-06:00

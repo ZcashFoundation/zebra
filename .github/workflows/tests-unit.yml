@@ -59,6 +59,12 @@ jobs:
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      # Thin LTO roughly doubles the time to link the release test binaries and
+      # makes no difference to what the tests check, so it stays on only for the
+      # binaries Zebra ships. This is job-level so the Rust cache key includes
+      # it, and dependencies built with and without LTO are never mixed.
+      CARGO_PROFILE_RELEASE_LTO: "false"
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2

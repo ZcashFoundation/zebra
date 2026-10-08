@@ -7,12 +7,15 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        # libclang is needed at build time: librocksdb-sys always runs bindgen
-        # (via clang-sys) to generate FFI bindings, even when linking the system
-        # RocksDB via ROCKSDB_LIB_DIR.
+        # libclang is needed at build time: librocksdb-sys and libzcash_script run
+        # bindgen, which loads the shared libclang at runtime, even when linking the
+        # system RocksDB via ROCKSDB_LIB_DIR. `clang` pulls in that library and the
+        # builtin headers, and is already on the runner image. `libclang-dev` would
+        # add only the C headers and static libraries, a 28.8 MB download that
+        # bindgen does not use.
         #
         # The install is wrapped so a stalling Ubuntu mirror fails fast instead
         # of burning the whole job timeout. Composite action steps cannot set
         # `timeout-minutes`, so the bound has to come from the script.
-        "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" clang libclang-dev protobuf-compiler librocksdb-dev
+        "$GITHUB_ACTION_PATH/../../scripts/apt-install.sh" clang protobuf-compiler librocksdb-dev
         echo "ROCKSDB_LIB_DIR=/usr/lib/" >> $GITHUB_ENV
