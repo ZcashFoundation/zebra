@@ -1,33 +1,21 @@
 name: Trigger Integration Tests
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - .cargo/config.toml
-      - .github/workflows/trigger-integration-tests.yml
-
-  push:
-    branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - .cargo/config.toml
-      - .github/workflows/trigger-integration-tests.yml
+  # Runs weekly against `main` instead of on every PR (#11616): the suite is slow,
+  # its checks are not required, and failures are often caused by Zaino/Zallet
+  # changes unrelated to the PR. Dispatch it manually to test a specific PR.
+  schedule:
+    - cron: "0 6 * * 1"
 
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number to run integration tests against (use for fork PRs)"
-        required: true
+        description: "PR number to run integration tests against (leave empty to test the selected branch)"
+        required: false
         type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || inputs.pr_number || github.run_id }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.ref_name }}
   cancel-in-progress: true
 
 permissions: {}
@@ -35,23 +23,16 @@ permissions: {}
 jobs:
   trigger-integration:
     name: Trigger integration tests
-    # Fork PRs do not receive repository secrets on pull_request events.
-    # Skip the job on fork PRs; maintainers can still run it manually via
-    # workflow_dispatch with the PR number as input.
-    if: >-
-      ${{
-        (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
-        (github.event_name == 'push' && github.ref_name == 'main') ||
-        github.event_name == 'workflow_dispatch'
-      }}
+    # Scheduled runs need the app secrets, so skip them on forks and mirrors.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository == 'ZcashFoundation/zebra' }}
     runs-on: ubuntu-latest
     permissions:
       # Needed to post a sticky comment on the PR when triggered manually.
       pull-requests: write
     steps:
-      - name: Resolve target PR details (manual dispatch only)
+      - name: Resolve target PR details (manual PR dispatch only)
         id: pr
-        if: github.event_name == 'workflow_dispatch'
+        if: inputs.pr_number
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr_number }}
@@ -77,25 +58,15 @@ jobs:
           owner: zcash
           repositories: integration-tests
 
-      - name: Get requested test branch, if any
-        if: github.event_name == 'pull_request'
-        id: test-branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          TEST_SHA=$(gh pr -R ZcashFoundation/zebra list --search "${HEAD_SHA}" --json body | jq '.[0].body' | sed '/[^ ]ZIT-Revision/!d' | sed -E 's/.*ZIT-Revision: ([^\\]*)\\.*/\1/')
-          echo "test_sha=${TEST_SHA}" >> $GITHUB_OUTPUT
-
       - name: Trigger integration tests
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          SHA: ${{ steps.pr.outputs.sha || github.event.pull_request.head.sha || github.sha }}
-          TEST_SHA: ${{ steps.pr.outputs.test_sha || steps.test-branch.outputs.test_sha }}
+          SHA: ${{ steps.pr.outputs.sha || github.sha }}
+          TEST_SHA: ${{ steps.pr.outputs.test_sha }}
           # Stable per-source key so the integration repo can cancel a superseded
-          # run: the PR number for pull requests and manual dispatches, otherwise
-          # the branch name (e.g. `main`).
-          SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && format('pr-{0}', inputs.pr_number) || (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name) }}
+          # run: the PR number for manual PR dispatches, otherwise the branch
+          # name (e.g. `main`).
+          SOURCE_REF: ${{ inputs.pr_number && format('pr-{0}', inputs.pr_number) || github.ref_name }}
         run: >
           gh api repos/zcash/integration-tests/dispatches
           --field event_type="zebra-interop-request"
@@ -103,8 +74,8 @@ jobs:
           --field client_payload[test_sha]="${TEST_SHA}"
           --field client_payload[source_ref]="${SOURCE_REF}"
 
-      - name: Post sticky comment on PR (manual dispatch only)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Post sticky comment on PR (manual PR dispatch only)
+        if: inputs.pr_number
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 #v3.0.4
         with:
           number: ${{ inputs.pr_number }}

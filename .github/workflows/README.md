@@ -404,6 +404,7 @@ docker run --rm zebra-tests
   `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
   `mergefreeze` status on the merge group
 
-It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
-`pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
-manually with the PR number.
+It does **not** cover the [zcash/integration-tests](https://github.com/zcash/integration-tests)
+interop suite (Zaino/Zallet RPC tests): `trigger-integration-tests.yml` runs weekly against
+`main` only, so to test a PR (same-repo or fork) a maintainer dispatches it manually with
+the PR number.
