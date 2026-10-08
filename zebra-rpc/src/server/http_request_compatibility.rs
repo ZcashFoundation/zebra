@@ -150,7 +150,8 @@ impl<S> HttpRequestMiddleware<S> {
             };
         Ok((
             version,
-            HttpRequest::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec())),
+            // `Vec::from` reuses the buffer without copying when it is uniquely owned.
+            HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
         ))
     }
     /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
