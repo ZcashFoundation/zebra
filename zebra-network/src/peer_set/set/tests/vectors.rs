@@ -1413,8 +1413,8 @@ fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
     });
 }
 
-/// Check that a queued block request is routed to the busy serving peer as soon as it becomes
-/// ready, even if the peer set gets no other requests.
+/// Check that consecutive queued block requests reach the busy serving peer when it becomes
+/// ready, without unrelated requests waking the peer set.
 ///
 /// In zebrad, the peer set is behind a `Buffer`, which only polls it when it has a request. So the
 /// task spawned by [`PeerSet::into_buffer`] has to poll it when the busy peer becomes ready.
@@ -1432,17 +1432,17 @@ fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
 
         let (mut peer_set, _poll_task) = peer_set.into_buffer(10);
 
-        // Make the serving peer busy, then queue a block request for it. The mock peer channel
-        // holds 2 requests.
+        // Fill the serving peer's 2-slot channel, then queue two more block requests.
         let mut futs = Vec::new();
-        for byte in [1, 9, 2] {
+        for byte in [1, 9, 2, 3] {
             let peer_ready = peer_set
                 .ready()
                 .await
                 .expect("peer set service is always ready");
             futs.push(peer_ready.call(block_request(byte)));
         }
-        let queued_fut = futs.pop().expect("just pushed the queued request");
+        let second_queued_fut = futs.pop().expect("just pushed the second queued request");
+        let first_queued_fut = futs.pop().expect("just pushed the first queued request");
 
         // Let the buffer route the requests.
         tokio::time::sleep(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 4).await;
@@ -1458,21 +1458,23 @@ fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
         // requests to the peer set, so only the poll task can route the queued request.
         tokio::time::sleep(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 4).await;
 
-        let ClientRequest { request, tx, .. } = handles[0]
-            .try_to_receive_outbound_client_request()
-            .request()
-            .expect("the queued block request should be routed to the now-ready serving peer");
-        assert_eq!(request, block_request(2));
-        assert_eq!(received_request(&mut handles[1]), None);
+        for (byte, queued_fut) in [(2, first_queued_fut), (3, second_queued_fut)] {
+            let ClientRequest { request, tx, .. } = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .expect("each queued request should reach the now-ready serving peer");
+            assert_eq!(request, block_request(byte));
+            assert_eq!(received_request(&mut handles[1]), None);
 
-        let _ = tx.send(Ok(Response::Nil));
-        let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
-            .await
-            .expect("the queued request should resolve to the serving peer's response");
-        assert!(
-            matches!(response, Ok(Response::Nil)),
-            "unexpected response: {response:?}"
-        );
+            let _ = tx.send(Ok(Response::Nil));
+            let response = timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                .await
+                .expect("the queued request should resolve to the serving peer's response");
+            assert!(
+                matches!(response, Ok(Response::Nil)),
+                "unexpected response: {response:?}"
+            );
+        }
     });
 }
 

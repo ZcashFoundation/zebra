@@ -1498,6 +1498,7 @@ where
         }
 
         let mut queued_requests = std::mem::take(&mut self.queued_inv_requests);
+        let mut routed_any = false;
         while let Some(queued) = queued_requests.pop_front() {
             // The remaining requests can't be routed until another peer becomes ready.
             if self.ready_services.is_empty() {
@@ -1509,6 +1510,7 @@ where
             match self.select_inv_route(queued.hash) {
                 InvRoute::Peer(peer) => {
                     let response_fut = self.call_ready_peer(peer, queued.request);
+                    routed_any = true;
                     // If the receiver was dropped since the check above, dropping the response
                     // future cancels the peer's request.
                     let _ = queued.response_sender.send(response_fut);
@@ -1517,6 +1519,11 @@ where
                 // Dropping the sender refuses the request.
                 InvRoute::Refuse => {}
             }
+        }
+
+        // Poll the newly busy peer's readiness future even if another peer stays ready.
+        if routed_any && !self.queued_inv_requests.is_empty() {
+            self.queued_request_waker.notify.notify_one();
         }
     }
 

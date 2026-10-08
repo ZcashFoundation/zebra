@@ -59,10 +59,11 @@ pub enum Request {
     /// didn't start with a `Vec` but with, e.g., an iterator, they can collect
     /// directly into a `HashSet` and save work.
     ///
-    /// If this requests a recently-advertised block, the peer set will make a
-    /// best-effort attempt to route the request to a peer that advertised the
-    /// block. This routing is only used for request sets of size 1.
-    /// Otherwise, it is routed using the normal load-balancing strategy.
+    /// Single-block requests prefer a connected peer that advertised the block. For blocks
+    /// nobody advertised, they prefer peers that serve historic blocks. If no ready peer can
+    /// serve the block but a busy peer might have it, the request waits for up to
+    /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`](crate::constants::INVENTORY_BUSY_PEER_WAIT_TIMEOUT).
+    /// Larger request sets use normal load balancing.
     ///
     /// The list contains zero or more block hashes.
     ///
