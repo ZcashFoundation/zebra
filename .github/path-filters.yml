@@ -30,7 +30,7 @@ shellcheck:
   - ".github/workflows/lint.yml"
   - ".github/path-filters.yml"
 
-semver:
+api_diff:
   - "**/*.rs"
   - "**/Cargo.toml"
   - "**/Cargo.lock"
