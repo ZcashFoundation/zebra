@@ -41,20 +41,20 @@ expect_success() {
   fi
 }
 
-# Every path after the description must be named in an error annotation.
-expect_failure_naming() {
+# Every string after the description must appear in the output.
+expect_failure_reporting() {
   local description="$1"
   shift
-  local path
+  local expected
 
   if output="$(run_validator)"; then
     echo "expected validation to fail: $description" >&2
     exit 1
   fi
 
-  for path in "$@"; do
-    if ! grep -qF -- "::error file=.changes/unreleased/${path}," <<< "$output"; then
-      echo "expected an error annotation naming ${path}: $description" >&2
+  for expected in "$@"; do
+    if ! grep -qF -- "$expected" <<< "$output"; then
+      echo "expected the output to contain '${expected}': $description" >&2
       echo "$output" >&2
       exit 1
     fi
@@ -70,36 +70,27 @@ body: 'Returns the ancestor''s error, which contains: a colon.'
 time: 2026-09-17T20:22:41.000000000Z"
 expect_success "single quoted body with a doubled apostrophe"
 
-# An apostrophe inside a single quoted body ends the scalar early.
+# An apostrophe inside a single quoted body ends the scalar early. Changie fails
+# to read it for every project, but it is annotated once.
 write_fragment zebra-state-Added-20260917-202241.yaml "project: zebra-state
 kind: Added
 body: '\`ValidateContextError::AncestorRejected\`, which the state now returns instead of a copy of the ancestor's error.'
 time: 2026-09-17T20:22:41.000000000Z"
-expect_failure_naming "apostrophe inside a single quoted body" zebra-state-Added-20260917-202241.yaml
+expect_failure_reporting "apostrophe inside a single quoted body" \
+  "::error title=Invalid change fragment::unmarshaling change file '.changes/unreleased/zebra-state-Added-20260917-202241.yaml'"
+if [[ "$(grep -c '^::error' <<< "$output")" -ne 1 ]]; then
+  echo "expected one annotation for a fragment changie cannot read" >&2
+  echo "$output" >&2
+  exit 1
+fi
 
-# Fragments that parse as YAML but that changie cannot use.
+# Changie checks the kind only when it batches the fragment's project.
 remove_fragments
 write_fragment zebrad-Added-typo.yaml 'project: zebrad
 kind: Fix
 body: A mistyped kind.'
-expect_failure_naming "unknown kind" zebrad-Added-typo.yaml
-
-# Every malformed fragment is named.
-remove_fragments
-write_fragment zebrad-Added-plain.yaml 'project: zebrad
-kind: Added
-body: A plain entry.'
-write_fragment zebra-network-Added-first.yaml "project: zebra-network
-kind: Added
-body: 'the peer's address'"
-write_fragment zebra-rpc-Added-second.yaml "project: zebra-rpc
-kind: Added
-body: 'the node's height'"
-expect_failure_naming "several malformed fragments" zebra-network-Added-first.yaml zebra-rpc-Added-second.yaml
-if grep -qF -- zebrad-Added-plain.yaml <<< "$output"; then
-  echo "expected a valid fragment beside malformed ones not to be reported" >&2
-  echo "$output" >&2
-  exit 1
-fi
+expect_failure_reporting "unknown kind" \
+  "changie cannot batch zebrad" \
+  "::error title=Invalid change fragment::kind not found but configuration expects one: 'Fix'"
 
 echo "All change fragment validator tests passed."

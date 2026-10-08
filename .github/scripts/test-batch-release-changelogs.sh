@@ -179,19 +179,4 @@ if (cd "$fixture" && "$batcher" HEAD "$releases" >/dev/null 2>&1); then
   exit 1
 fi
 
-# A fragment changie cannot read fails the run before anything is batched.
-write_file .changes/unreleased/zebrad-Fix-typo.yaml 'project: zebrad
-kind: Fix
-body: A mistyped kind.'
-commit_fixture 'add a malformed fragment'
-printf 'zebra-example\t4.0.0\n' > "$releases"
-if (cd "$fixture" && "$batcher" HEAD "$releases" >/dev/null 2>&1); then
-  echo "expected a malformed fragment to fail the batching" >&2
-  exit 1
-fi
-if [[ -e "${fixture}/.changes/zebra-example/v4.0.0.md" ]]; then
-  echo "expected nothing to be batched after a malformed fragment" >&2
-  exit 1
-fi
-
 echo "All release changelog batching tests passed."

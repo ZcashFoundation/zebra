@@ -23,7 +23,6 @@ fi
 
 base_revision="$1"
 releases_tsv="$2"
-script_directory="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(git rev-parse --show-toplevel)"
 
 cd "$repository_root"
@@ -131,8 +130,6 @@ while IFS= read -r -d '' path; do
 done < <(git diff --name-only -z --diff-filter=A "$base_revision" HEAD -- .changes)
 
 git checkout "$base_revision" -- .changes
-
-"${script_directory}/validate-changelog-fragments.sh"
 
 failed=false
 

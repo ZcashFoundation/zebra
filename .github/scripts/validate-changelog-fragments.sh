@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-# Reads every pending change fragment the way changie does when it batches them
-# into a release, and reports each fragment changie rejects by path.
+# Dry-runs the release changelog batching for every changie project, so a
+# pending change fragment that would break the Release PR job fails here first.
 #
-# Run from a checkout that has the fragments to check. Every fragment under
-# `.changes/unreleased/` is checked, not only the ones a pull request touches,
-# because fragments from separate pull requests are combined on `main`.
+# Every fragment under `.changes/unreleased/` is checked, not only the ones a pull
+# request touches, because fragments from separate pull requests are combined on
+# `main`.
 
 set -euo pipefail
 
@@ -14,34 +14,28 @@ if ! command -v changie >/dev/null 2>&1; then
   exit 1
 fi
 
-repository_root="$(git rev-parse --show-toplevel)"
+cd "$(git rev-parse --show-toplevel)"
 
-cd "$repository_root"
-
-unreleased_directory=".changes/unreleased"
-scratch="$(mktemp -d)"
-
-trap 'rm -rf "$scratch"' EXIT
-
-# Changie loads only the requested project's fragments, and rejects an unknown
-# kind only in those. Without a project list it loads every fragment.
-awk '/^projects:/ { skip = 1; next } /^[^[:space:]#]/ { skip = 0 } !skip' .changie.yaml > "${scratch}/.changie.yaml"
-mkdir -p "${scratch}/${unreleased_directory}"
-
+projects="$(awk '/^projects:/ { p = 1; next } /^[^[:space:]#]/ { p = 0 } p && $1 == "key:" { print $2 }' .changie.yaml)"
 failed=false
+reported=""
 
-while IFS= read -r -d '' fragment; do
-  cp "$fragment" "${scratch}/${fragment}"
-
-  if ! output="$(cd "$scratch" && changie batch major --dry-run 2>&1 >/dev/null)"; then
-    message="${output#Error: }"
-    echo "::error file=${fragment},title=Invalid change fragment::${message//$'\n'/%0A}" >&2
-    failed=true
+while IFS= read -r project; do
+  if output="$(changie batch major --dry-run --allow-no-changes --project "$project" 2>&1 >/dev/null </dev/null)"; then
+    continue
   fi
 
-  rm "${scratch}/${fragment}"
-done < <(find "$unreleased_directory" -maxdepth 1 -name '*.yaml' -print0 | sort -z)
+  failed=true
+  message="${output#Error: }"
+  message="${message//$'\n'/%0A}"
+  printf 'changie cannot batch %s: %s\n' "$project" "$message" >&2
 
-if [[ "$failed" == "true" ]]; then
-  exit 1
-fi
+  # Changie reads every fragment for each project, so a fragment it cannot parse
+  # fails every project with the same message. Annotate it once.
+  if ! grep -qxF -- "$message" <<< "$reported"; then
+    reported+="${message}"$'\n'
+    echo "::error title=Invalid change fragment::${message}" >&2
+  fi
+done <<< "$projects"
+
+[[ "$failed" == "false" ]]
