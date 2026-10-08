@@ -1,5 +1,4 @@
-//! A peer connection service wrapper type to handle load tracking and provide access to the
-//! reported protocol version.
+//! A peer service wrapper for load measurements, protocol metadata, and connection cleanup.
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -15,23 +14,28 @@ use tower::{
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
     peer::{Client, ConnectedAddr, ConnectionInfo},
+    peer_set::ConnectionGuard,
     protocol::external::{canonical_socket_addr, types::Version},
 };
 
 /// A client service wrapper that keeps track of its load.
 ///
-/// It also keeps track of the peer's reported protocol version.
+/// It also tracks the peer's reported protocol version and, once admitted to a
+/// peer set, reports connection closure when the service is dropped.
 #[derive(Debug)]
-pub struct LoadTrackedClient {
+pub struct TrackedClient {
     /// A service representing a connected peer, wrapped in a load tracker.
     service: PeakEwma<Client>,
 
     /// The metadata for the connected peer `service`.
     connection_info: Arc<ConnectionInfo>,
+
+    /// Owned only by this service, never by its response futures or shared metadata.
+    connection_guard: Option<ConnectionGuard>,
 }
 
-/// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
-impl From<Client> for LoadTrackedClient {
+/// Create a new [`TrackedClient`] wrapping the provided `client` service.
+impl From<Client> for TrackedClient {
     fn from(client: Client) -> Self {
         let connection_info = client.connection_info.clone();
 
@@ -42,14 +46,24 @@ impl From<Client> for LoadTrackedClient {
             tower::load::CompleteOnResponse::default(),
         );
 
-        LoadTrackedClient {
+        TrackedClient {
             service,
             connection_info,
+            connection_guard: None,
         }
     }
 }
 
-impl LoadTrackedClient {
+impl TrackedClient {
+    /// Attaches the cleanup guard when this connection is admitted to a peer set.
+    pub(crate) fn track_connection(&mut self, guard: ConnectionGuard) {
+        assert!(
+            self.connection_guard.is_none(),
+            "a connection is admitted only once"
+        );
+        self.connection_guard = Some(guard);
+    }
+
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
@@ -67,7 +81,7 @@ impl LoadTrackedClient {
     }
 }
 
-impl<Request> Service<Request> for LoadTrackedClient
+impl<Request> Service<Request> for TrackedClient
 where
     Client: Service<Request>,
 {
@@ -84,7 +98,7 @@ where
     }
 }
 
-impl Load for LoadTrackedClient {
+impl Load for TrackedClient {
     type Metric = <PeakEwma<Client> as Load>::Metric;
 
     fn load(&self) -> Self::Metric {

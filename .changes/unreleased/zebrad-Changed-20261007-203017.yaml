@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reconnecting peers now start with fresh stall tracking, preventing premature disconnections caused by earlier connections at the same address while catching up with the chain.
+time: 2026-10-07T20:30:17.528361582Z

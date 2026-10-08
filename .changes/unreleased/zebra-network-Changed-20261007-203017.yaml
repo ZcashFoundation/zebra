@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Peer-set find-response stall tracking is scoped to admitted connection lifetimes. Dropping a peer service clears its stall counts and pending outcomes; delayed response or closure events from older connections cannot modify a replacement at the same address.
+time: 2026-10-07T20:30:17.540692959Z

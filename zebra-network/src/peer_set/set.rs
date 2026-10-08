@@ -131,11 +131,12 @@ use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
     constants::MIN_PEER_SET_LOG_INTERVAL,
-    peer::{LoadTrackedClient, MinimumPeerVersion},
+    peer::{MinimumPeerVersion, TrackedClient},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
-        InventoryChange, InventoryRegistry,
+        ConnectionGuard, ConnectionId, InventoryChange, InventoryRegistry, PeerStallEvent,
+        StallOutcome,
     },
     protocol::{
         external::{connection_limit_key, InventoryHash},
@@ -164,15 +165,6 @@ pub struct CancelClientWork;
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
 
-/// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
-/// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
-/// the stall tracker can be updated and the peer disconnected if needed.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum StallOutcome {
-    Stall,
-    Clear,
-}
-
 fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
     match result {
         Ok(Response::BlockHashes { hashes, .. }) if hashes.is_empty() => Some(StallOutcome::Stall),
@@ -196,7 +188,7 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
 /// Otherwise, malicious peers could interfere with other peers' `PeerSet` state.
 pub struct PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -216,14 +208,20 @@ where
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
 
-    /// Receives stall/clear events from tracked routing futures in
-    /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
+    /// Receives response outcomes from [`Self::route_p2c`] and connection closures
+    /// from service-owned guards. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
-    stall_event_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, StallOutcome)>,
+    stall_event_rx: tokio_mpsc::UnboundedReceiver<PeerStallEvent>,
 
-    /// Producer clones handed to each tracked request's response wrapper.
-    stall_event_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
+    /// Producer clones handed to connection guards and tracked response futures.
+    stall_event_tx: tokio_mpsc::UnboundedSender<PeerStallEvent>,
+
+    /// Identifies the admitted connection whose events may update each address's tracker.
+    tracked_connections: HashMap<PeerSocketAddr, ConnectionId>,
+
+    /// Allocates connection identities that are never reused within this peer set.
+    next_connection_id: u64,
 
     // Peer Tracking: Ready Peers
     //
@@ -322,7 +320,7 @@ where
 
 impl<D, C> Drop for PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -337,7 +335,7 @@ where
 
 impl<D, C> PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -384,6 +382,8 @@ where
             find_response_stalls: FindResponseStallTracker::new(),
             stall_event_rx,
             stall_event_tx,
+            tracked_connections: HashMap::new(),
+            next_connection_id: 0,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -752,7 +752,7 @@ where
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
                 }
-                Change::Insert(key, svc) => {
+                Change::Insert(key, mut svc) => {
                     // We add peers as unready, so that we:
                     // - always do the same checks on every ready peer, and
                     // - check for any errors that happened right after the handshake
@@ -789,6 +789,20 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
+                    let connection_id = ConnectionId::from(self.next_connection_id);
+                    self.next_connection_id = self
+                        .next_connection_id
+                        .checked_add(1)
+                        .expect("a peer set cannot admit u64::MAX connections");
+
+                    // A replacement must start fresh even if the old guard's event is queued.
+                    self.find_response_stalls.clear(key);
+                    self.tracked_connections.insert(key, connection_id);
+                    svc.track_connection(ConnectionGuard::new(
+                        key,
+                        connection_id,
+                        self.stall_event_tx.clone(),
+                    ));
                     self.push_unready(key, svc);
                 }
             }
@@ -820,12 +834,37 @@ where
         }
     }
 
-    /// Drains pending stall/clear events from tracked routing futures and
-    /// disconnects peers that have exceeded the stall threshold. The peer's
+    /// Applies events only to the currently tracked connection at each address.
+    ///
+    /// Closure clears both stall counts and pending ordered responses. Response
+    /// outcomes disconnect peers that have exceeded the stall threshold. The peer's
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((addr, outcome))) = self.stall_event_rx.poll_recv(cx) {
+        while let Poll::Ready(Some(event)) = self.stall_event_rx.poll_recv(cx) {
+            let (addr, connection_id) = match &event {
+                PeerStallEvent::Response {
+                    peer,
+                    connection_id,
+                    ..
+                }
+                | PeerStallEvent::ConnectionClosed {
+                    peer,
+                    connection_id,
+                } => (*peer, *connection_id),
+            };
+            if self.tracked_connections.get(&addr) != Some(&connection_id) {
+                continue;
+            }
+
+            let outcome = match event {
+                PeerStallEvent::ConnectionClosed { .. } => {
+                    self.tracked_connections.remove(&addr);
+                    self.find_response_stalls.clear(addr);
+                    continue;
+                }
+                PeerStallEvent::Response { outcome, .. } => outcome,
+            };
             match outcome {
                 StallOutcome::Stall => {
                     if self.find_response_stalls.record_stall(addr) {
@@ -846,6 +885,7 @@ where
     /// Drops the service, cancelling any pending request or response to that peer.
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
+        self.tracked_connections.remove(key);
         self.find_response_stalls.clear(*key);
         self.zcashd_compat_peer_keys.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
@@ -1067,10 +1107,18 @@ where
 
             if track_stalls {
                 let stall_tx = self.stall_event_tx.clone();
+                let connection_id = *self
+                    .tracked_connections
+                    .get(&p2c_key)
+                    .expect("routed peers have been admitted with a connection identity");
                 return async move {
                     let result = fut.await;
                     if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
+                        let _ = stall_tx.send(PeerStallEvent::Response {
+                            peer: p2c_key,
+                            connection_id,
+                            outcome,
+                        });
                     }
                     result.map_err(Into::into)
                 }
@@ -1517,7 +1565,7 @@ where
 
 impl<D, C> Service<Request> for PeerSet<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {

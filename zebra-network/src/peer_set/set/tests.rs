@@ -29,7 +29,7 @@ use zebra_chain::{
 use crate::{
     address_book::AddressMetrics,
     constants::DEFAULT_MAX_CONNS_PER_IP,
-    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
+    peer::{ClientTestHarness, MinimumPeerVersion, TrackedClient},
     peer_set::{set::MorePeers, InventoryChange, PeerSet},
     protocol::external::types::Version,
     AddressBook, Config, PeerSocketAddr,
@@ -40,6 +40,9 @@ mod prop;
 
 #[cfg(test)]
 mod vectors;
+
+#[cfg(test)]
+mod lifecycle;
 
 /// The maximum number of arbitrary peers to generate in [`PeerVersions`].
 ///
@@ -57,12 +60,12 @@ impl PeerVersions {
     /// Convert the arbitrary peer versions into mock peer services.
     ///
     /// Each peer versions results in a mock peer service, which is returned as a tuple. The first
-    /// element is the [`LeadTrackedClient`], which is the actual service for the peer connection.
+    /// element is the [`TrackedClient`], which is the actual service for the peer connection.
     /// The second element is a [`ClientTestHarness`], which contains the open endpoints of the
     /// mock channels used by the peer service.
     ///
     /// The clients and the harnesses are collected into separate [`Vec`] lists and returned.
-    pub fn mock_peers(&self) -> (Vec<LoadTrackedClient>, Vec<ClientTestHarness>) {
+    pub fn mock_peers(&self) -> (Vec<TrackedClient>, Vec<ClientTestHarness>) {
         let mut clients = Vec::with_capacity(self.peer_versions.len());
         let mut harnesses = Vec::with_capacity(self.peer_versions.len());
 
@@ -92,7 +95,7 @@ impl PeerVersions {
     pub fn mock_peer_discovery(
         &self,
     ) -> (
-        impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>,
+        impl Stream<Item = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>>,
         Vec<ClientTestHarness>,
     ) {
         let (clients, harnesses) = self.mock_peers();
@@ -210,7 +213,7 @@ impl<D, C> PeerSetBuilder<D, C> {
 
 impl<D, C> PeerSetBuilder<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
