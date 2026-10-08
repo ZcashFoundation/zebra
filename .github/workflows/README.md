@@ -403,8 +403,3 @@ docker run --rm zebra-tests
 - This covers the repository-owned checks (`lint`, `unit-tests`, `test-crates`,
   `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
   `mergefreeze` status on the merge group
-
-It does **not** cover the [zcash/integration-tests](https://github.com/zcash/integration-tests)
-interop suite (Zaino/Zallet RPC tests): `trigger-integration-tests.yml` runs weekly against
-`main` only, so to test a PR (same-repo or fork) a maintainer dispatches it manually with
-the PR number.
