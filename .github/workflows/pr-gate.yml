@@ -176,7 +176,11 @@ jobs:
         with:
           version: v1.25.2
       - name: Check change fragments
-        run: .github/scripts/validate-changelog-fragments.sh
+        run: |
+          projects="$(awk '/^projects:/ { p = 1; next } /^[^[:space:]#]/ { p = 0 } p && $1 == "key:" { print $2 }' .changie.yaml)"
+          for project in $projects; do
+            changie batch major --dry-run --project "$project" > /dev/null
+          done
 
   # No ruleset context pins this worker's display name; the ruleset requires `pr-gate-result`.
   release-readiness:
