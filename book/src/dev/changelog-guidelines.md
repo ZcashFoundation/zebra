@@ -32,6 +32,12 @@ is `zebrad` or a crate directory name. Running `changie new` with no flags
 prompts for all of them. Fragments land in `.changes/unreleased/` and are
 committed with the PR.
 
+The PR Gate dry-runs the release batching over every pending fragment on pull
+requests, in the merge queue and on `main`, and fails if changie cannot batch
+them. Create fragments with `changie new`: a fragment written by hand needs a
+valid project and kind, and a body in single quotes must double any apostrophe
+it contains.
+
 At release time, releasing a project turns its fragments into a version file and
 regenerates the changelogs:
 
