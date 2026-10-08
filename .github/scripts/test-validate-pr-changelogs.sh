@@ -69,18 +69,31 @@ body: An entry for ${project}."
 # A minimal workspace: the validator reads the publishable packages from
 # `cargo metadata`, and the project keys from `.changie.yaml`.
 write_file Cargo.toml '[workspace]
-members = ["zebrad", "zebra-example"]
+members = ["zebrad", "zebra-example", "fixture-helper"]
 resolver = "2"'
 write_file zebrad/Cargo.toml '[package]
 name = "zebrad"
 version = "1.0.0"
-edition = "2021"'
+edition = "2021"
+[features]
+default-release-binaries = []
+[dependencies]
+zebra-example = { path = "../zebra-example" }
+fixture-helper = { path = "../fixture-helper" }'
 write_file zebrad/src/main.rs 'fn main() {}'
 write_file zebra-example/Cargo.toml '[package]
 name = "zebra-example"
 version = "2.0.0"
 edition = "2021"'
 write_file zebra-example/src/lib.rs '// A library.'
+write_file fixture-helper/Cargo.toml '[package]
+name = "fixture-helper"
+version = "1.0.0"
+edition = "2021"
+publish = false
+[features]
+extra = []'
+write_file fixture-helper/src/lib.rs '// A private dependency.'
 write_file .changie.yaml 'changesDir: .changes
 unreleasedDir: unreleased
 projects:
@@ -98,6 +111,7 @@ kinds:
       auto: minor'
 write_file CHANGELOG.md '# Changelog'
 write_file zebra-example/CHANGELOG.md '# Changelog'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
 commit_fixture base
 
 # An invalid title fails whatever the diff contains.
@@ -166,14 +180,54 @@ write_file zebra-example/CHANGELOG.md '# Changelog
 commit_fixture regenerated-changelog
 expect_success "changelog-only package change" true feat false
 
-# Root manifest changes are attributed to zebrad.
-write_file Cargo.lock '# Lockfile'
-commit_fixture root-manifest
-expect_failure "root manifest without a zebrad fragment" true build false
+# Verification-only changes do not need package entries.
+write_file zebra-example/src/tests.rs '// Unit tests.'
+write_file zebra-example/src/module/tests.rs '// Nested unit tests.'
+write_file zebra-example/src/module/tests/vectors.rs '// Test vectors.'
+write_file zebra-example/tests/integration.rs '// Integration tests.'
+write_file zebrad/benches/startup.rs '// Benchmark.'
+write_file zebrad/README.md '# Node documentation'
+commit_fixture verification-only
+expect_success "verification and documentation need no fragment" true fix false
 
-write_file Cargo.lock '# Lockfile, again.'
-fragment zebrad-added-2.yaml zebrad Added
-commit_fixture root-manifest-with-fragment
-expect_success "root manifest with a zebrad fragment" true build false
+# A library's development dependency must not be attributed to the node.
+write_file zebra-example/src/lib.rs 'pub fn entry() {}'
+commit_fixture graph-baseline
+write_file zebra-example/Cargo.toml '[package]
+name = "zebra-example"
+version = "2.0.0"
+edition = "2021"
+[dev-dependencies]
+fixture-helper = { path = "../fixture-helper", features = ["extra"] }'
+write_file zebra-example/src/lib.rs 'pub fn entry(_argument: u8) {}'
+write_file zebrad/tests/config.rs '// Node configuration tests.'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
+fragment zebra-example-breaking-devdep.yaml zebra-example breaking
+commit_fixture library-only-lockfile
+expect_success "library-only lockfile update needs no operator entry" true fix true
+
+# A changed production dependency still requires an operator entry.
+write_file fixture-helper/Cargo.toml '[package]
+name = "fixture-helper"
+version = "1.1.0"
+edition = "2021"
+publish = false
+[features]
+extra = []'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
+commit_fixture production-lockfile
+expect_failure "production dependency update without operator entry" true build false
+
+write_file fixture-helper/Cargo.toml '[package]
+name = "fixture-helper"
+version = "1.2.0"
+edition = "2021"
+publish = false
+[features]
+extra = []'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
+fragment zebrad-dependency.yaml zebrad Added
+commit_fixture production-lockfile-with-fragment
+expect_success "production dependency update with operator entry" true build false
 
 echo "All PR changelog validator tests passed."

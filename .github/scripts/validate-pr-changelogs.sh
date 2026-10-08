@@ -150,11 +150,14 @@ package_changed() {
   local path
 
   while IFS= read -r -d '' path; do
-    # A regenerated changelog is not a change to the package: changie owns that
-    # file, and `changie merge` rewrites it from `.changes/`.
-    if [[ "$path" == "$package_path/CHANGELOG.md" ]]; then
+    # Verification files and documentation do not change the published interface.
+    case "$path" in
+    "$package_path/"*.md | "$package_path/tests/"* | "$package_path/benches/"* | \
+      "$package_path/src/tests.rs" | "$package_path/src/"*/tests.rs | \
+      "$package_path/src/tests/"* | "$package_path/src/"*/tests/*)
       continue
-    fi
+      ;;
+    esac
 
     if [[ "$path" == "$package_path/"* ]]; then
       return 0
@@ -163,6 +166,22 @@ package_changed() {
 
   return 1
 }
+
+# Compare production dependencies, including features and all target platforms.
+# Snapshots keep both graphs tied to the supplied revisions, not dirty files.
+node_dependency_graph() (
+  set -euo pipefail
+  snapshot="$(mktemp -d)"
+  git worktree add --quiet --detach "$snapshot" "$1"
+  trap 'git worktree remove "$snapshot"' EXIT
+  graph="$(
+    cd "$snapshot"
+    timeout 120s cargo tree --manifest-path "$snapshot/Cargo.toml" --locked \
+      --package zebrad --features zebrad/default-release-binaries \
+      --target all --edges normal,build,features --prefix none --format '{p} {f}'
+  )"
+  printf '%s\n' "${graph//"$snapshot"/.}"
+)
 
 if [[ "$requires_changelog" != "true" ]]; then
   if [[ "$failed" == "true" ]]; then
@@ -214,12 +233,21 @@ while IFS=$'\t' read -r package_name package_directory; do
 done <<< "$package_metadata"
 
 root_manifest_changed=false
+root_lock_changed=false
 while IFS= read -r -d '' path; do
-  if [[ "$path" == "Cargo.toml" || "$path" == "Cargo.lock" ]]; then
-    root_manifest_changed=true
-    break
-  fi
+  case "$path" in
+  Cargo.toml) root_manifest_changed=true ;;
+  Cargo.lock) root_lock_changed=true ;;
+  esac
 done < <(git diff --name-only -z "$base_revision" "$head_revision")
+
+if [[ "$root_lock_changed" == "true" && "$root_manifest_changed" != "true" && "$zebrad_checked" != "true" ]]; then
+  base_graph="$(node_dependency_graph "$base_revision")"
+  head_graph="$(node_dependency_graph "$head_revision")"
+  if [[ "$base_graph" != "$head_graph" ]]; then
+    root_manifest_changed=true
+  fi
+fi
 
 if [[ "$root_manifest_changed" == "true" && "$zebrad_checked" != "true" ]]; then
   if ! has_fragment_for_project zebrad; then
