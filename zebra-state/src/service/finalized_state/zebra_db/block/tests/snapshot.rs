@@ -526,9 +526,11 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         }
 
         let mut stored_transaction_locations = Vec::new();
-        for transaction_location in
-            state.address_transaction_locations(stored_address_location, ADDRESS_HEIGHTS_FULL_RANGE)
-        {
+        for transaction_location in state.address_transaction_locations(
+            stored_address_location,
+            ADDRESS_HEIGHTS_FULL_RANGE,
+            None,
+        ) {
             assert_eq!(
                 transaction_location.address_location(),
                 stored_address_location

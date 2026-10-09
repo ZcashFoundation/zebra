@@ -2089,6 +2089,68 @@ async fn rpc_getaddressutxos_limits() {
     mempool.expect_no_requests().await;
 }
 
+/// Checks that the address RPCs reject queries over the result cap, and requests
+/// with too many addresses, instead of doing unbounded work.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_address_queries_are_capped() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &Mainnet).await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests::<_, _, BoxError>(),
+        state,
+        Buffer::new(read_state, 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    let rpc = rpc.with_max_address_query_results(3);
+
+    // This address receives an output in every block, so it has 10 transactions and UTXOs.
+    let addresses = vec!["t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string()];
+    let invalid_params = i32::from(server::error::LegacyCode::InvalidParameter);
+    let tx_ids = |end| {
+        rpc.get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: Some(1),
+            end: Some(end),
+        })
+    };
+    let utxos = |max_entries| {
+        rpc.get_address_utxos(
+            GetAddressUtxosRequest::new(addresses.clone(), false).with_limits(0, max_entries),
+        )
+    };
+
+    assert_eq!(tx_ids(3).await.expect("at the cap").len(), 3);
+    assert_eq!(tx_ids(4).await.unwrap_err().code(), invalid_params);
+
+    assert!(utxos(3).await.is_ok());
+    assert_eq!(utxos(0).await.unwrap_err().code(), invalid_params);
+    assert_eq!(utxos(4).await.unwrap_err().code(), invalid_params);
+
+    let too_many_addresses = vec![addresses[0].clone(); MAX_REQUEST_ADDRESSES + 1];
+    let error = rpc
+        .get_address_balance(GetAddressBalanceRequest::new(too_many_addresses))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), invalid_params);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount() {
     let _init_guard = zebra_test::init();
