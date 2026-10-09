@@ -190,7 +190,7 @@ pub use crate::{
 pub use crate::{
     address_book::AddressBook,
     address_book_peers::AddressBookPeers,
-    ban_list::BanList,
+    ban_list::{BanList, MisbehaviorReport},
     config::{CacheDir, Config},
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
