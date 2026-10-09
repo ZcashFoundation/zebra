@@ -20,6 +20,21 @@ message BlockAndHash {
   
   // The encoded block data.
   bytes data = 2;
+
+  // The identifiers of the block's transactions, one per transaction, in block order.
+  repeated TransactionIdentifier transaction_identifiers = 3;
+};
+
+// The identifiers of a transaction in a block.
+message TransactionIdentifier {
+  // The transaction ID in display order, like `MempoolChangeMessage.tx_hash`.
+  bytes txid = 1;
+
+  // The authorizing data commitment in display order, like
+  // `MempoolChangeMessage.auth_digest`.
+  //
+  // Empty for V1 to V4 transactions, which don't have one.
+  bytes auth_digest = 2;
 };
 
 // A request for a single block by hash or height from the best chain.

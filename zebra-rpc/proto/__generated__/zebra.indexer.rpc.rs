@@ -16,7 +16,7 @@ pub struct BlockHashAndHeight {
 }
 /// An encoded block and its hash.
 #[derive(serde::Deserialize, serde::Serialize)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockAndHash {
     /// The hash of the block in display order.
     #[prost(bytes = "vec", tag = "1")]
@@ -24,6 +24,23 @@ pub struct BlockAndHash {
     /// The encoded block data.
     #[prost(bytes = "vec", tag = "2")]
     pub data: ::prost::alloc::vec::Vec<u8>,
+    /// The identifiers of the block's transactions, one per transaction, in block order.
+    #[prost(message, repeated, tag = "3")]
+    pub transaction_identifiers: ::prost::alloc::vec::Vec<TransactionIdentifier>,
+}
+/// The identifiers of a transaction in a block.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TransactionIdentifier {
+    /// The transaction ID in display order, like `MempoolChangeMessage.tx_hash`.
+    #[prost(bytes = "vec", tag = "1")]
+    pub txid: ::prost::alloc::vec::Vec<u8>,
+    /// The authorizing data commitment in display order, like
+    /// `MempoolChangeMessage.auth_digest`.
+    ///
+    /// Empty for V1 to V4 transactions, which don't have one.
+    #[prost(bytes = "vec", tag = "2")]
+    pub auth_digest: ::prost::alloc::vec::Vec<u8>,
 }
 /// A request for a single block by hash or height from the best chain.
 #[derive(serde::Deserialize, serde::Serialize)]
