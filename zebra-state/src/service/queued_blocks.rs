@@ -430,6 +430,7 @@ impl SentHashes {
     /// Called when the block write task rejects a block, so that a subsequent
     /// re-delivery of a block with the same hash is not short-circuited as a
     /// "duplicate" against a rejected variant that never reached any chain.
+    /// Also called for blocks the fork limit dropped, once a child of them arrives.
     pub fn remove(&mut self, hash: &block::Hash) {
         let Some(outpoints) = self.sent.remove(hash) else {
             return;

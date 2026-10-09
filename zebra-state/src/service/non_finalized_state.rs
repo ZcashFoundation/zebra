@@ -62,6 +62,14 @@ pub struct NonFinalizedState {
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
 
+    /// Blocks that the fork limit dropped from every chain, with their parent hash and height,
+    /// until they are finalized or forgotten. Not copied by `clone()`.
+    evicted_blocks: HashMap<block::Hash, (block::Hash, Height)>,
+
+    /// Evicted blocks that were forgotten so they could be downloaded again, with their height,
+    /// until they are finalized. Not copied by `clone()`.
+    recovered_blocks: HashMap<block::Hash, Height>,
+
     // Configuration
     //
     /// The configured Zcash network.
@@ -108,6 +116,8 @@ impl Clone for NonFinalizedState {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
+            evicted_blocks: HashMap::new(),
+            recovered_blocks: HashMap::new(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -125,6 +135,8 @@ impl NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
             invalidated_blocks: Default::default(),
+            evicted_blocks: HashMap::new(),
+            recovered_blocks: HashMap::new(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -269,6 +281,9 @@ impl NonFinalizedState {
 
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
     /// then limit the number of tracked chains.
+    ///
+    /// Records the blocks that are in no chain after the limit is applied,
+    /// see [`Self::forget_evicted_branch`].
     fn insert_with<F>(&mut self, chain: Arc<Chain>, chain_filter: F)
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
@@ -277,12 +292,43 @@ impl NonFinalizedState {
 
         chain_filter(&mut self.chain_set);
 
+        let mut evicted_chains = Vec::new();
         while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
             // The first chain is the chain with the lowest work.
-            self.chain_set.pop_first();
+            evicted_chains.extend(self.chain_set.pop_first());
+        }
+
+        for evicted_chain in evicted_chains {
+            // Blocks shared with a retained chain are still in the non-finalized state.
+            for block in evicted_chain.blocks.values() {
+                // Each block is only recovered once, so peers can't loop re-sending evicted
+                // blocks. An honest recovered branch gains work once its child commits.
+                if !self.any_chain_contains(&block.hash)
+                    && !self.recovered_blocks.contains_key(&block.hash)
+                {
+                    self.evicted_blocks.insert(
+                        block.hash,
+                        (block.block.header.previous_block_hash, block.height),
+                    );
+                }
+            }
         }
 
         self.update_metrics_bars();
+    }
+
+    /// If the fork limit evicted `hash`, stops tracking it and its evicted ancestors, and
+    /// returns their hashes. Otherwise, returns an empty list.
+    ///
+    /// Returned blocks are not recorded again if they are evicted again before they are finalized.
+    pub(crate) fn forget_evicted_branch(&mut self, mut hash: block::Hash) -> Vec<block::Hash> {
+        let mut branch = Vec::new();
+        while let Some((parent_hash, height)) = self.evicted_blocks.remove(&hash) {
+            self.recovered_blocks.insert(hash, height);
+            branch.push(hash);
+            hash = parent_hash;
+        }
+        branch
     }
 
     /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
@@ -346,6 +392,10 @@ impl NonFinalizedState {
         // Remove all invalidated_blocks at or below the finalized height
         self.invalidated_blocks
             .retain(|height, _blocks| *height >= best_chain_root.height);
+        self.evicted_blocks
+            .retain(|_hash, (_parent_hash, height)| *height > best_chain_root.height);
+        self.recovered_blocks
+            .retain(|_hash, height| *height > best_chain_root.height);
 
         self.update_metrics_for_chains();
 

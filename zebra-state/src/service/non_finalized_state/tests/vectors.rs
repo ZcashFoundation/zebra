@@ -1569,3 +1569,66 @@ fn equal_work_ties_prefer_first_received() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// When the fork limit evicts a multi-block chain, every block that no retained chain
+/// contains is recorded until it is forgotten or finalized, and is only forgotten once.
+#[test]
+fn fork_limit_records_unique_blocks_of_evicted_chains() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    let low2 = block1.make_fake_child().set_work(1);
+    let low3 = low2.make_fake_child().set_work(1);
+    state.commit_block(low2.clone().prepare(), &finalized_state)?;
+    state.commit_block(low3.clone().prepare(), &finalized_state)?;
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 0..max_forks {
+        let sibling = block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+
+    assert!(!state.any_chain_contains(&low2.hash()));
+    assert_eq!(
+        std::collections::HashSet::from([&low2.hash(), &low3.hash()]),
+        state.evicted_blocks.keys().collect(),
+        "the shared ancestor block 1 must not be recorded"
+    );
+
+    assert_eq!(
+        vec![low3.hash(), low2.hash()],
+        state.forget_evicted_branch(low3.hash())
+    );
+
+    // Recovered blocks are not recorded if they are evicted again.
+    state.commit_block(low2.clone().prepare(), &finalized_state)?;
+    let sibling = block1.make_fake_child().set_work(10);
+    state.commit_block(
+        sibling.set_block_commitment([max_forks; 32]).prepare(),
+        &finalized_state,
+    )?;
+    assert!(!state.any_chain_contains(&low2.hash()));
+    assert!(!state.evicted_blocks.contains_key(&low2.hash()));
+
+    // Finalizing block 1 and then a block at the height of `low2` prunes that height.
+    state.finalize();
+    state.finalize();
+    assert!(state.evicted_blocks.is_empty());
+    assert_eq!(
+        vec![&low3.hash()],
+        state.recovered_blocks.keys().collect::<Vec<_>>()
+    );
+
+    Ok(())
+}
