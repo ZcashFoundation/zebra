@@ -11,7 +11,7 @@
 fail-fast = true
 status-level = "pass"
 slow-timeout = { period = "60s", terminate-after = 3 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies) and not test(=integration::zcashd_compat::zcashd_compat_shielded_coinbase_spends_at_one_confirmation)'
 
 # --- CI Profile (PRs) ---
 
@@ -19,7 +19,7 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=u
 fail-fast = false
 failure-output = "immediate"
 slow-timeout = { period = "60s", terminate-after = 3 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies) and not test(=integration::zcashd_compat::zcashd_compat_shielded_coinbase_spends_at_one_confirmation)'
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
@@ -194,6 +194,10 @@ slow-timeout = { period = "15m", terminate-after = 2 }
 failure-output = "immediate"
 default-filter = 'package(zebrad) and test(~zcashd_compat)'
 
+[[profile.zcashd-compat-integration.overrides]]
+filter = 'test(=integration::zcashd_compat::zcashd_compat_shielded_coinbase_spends_at_one_confirmation)'
+slow-timeout = { period = "60s", terminate-after = 3 }
+
 [profile.zcashd-compat-soak]
 # Long-running local soak for the reorg churn stress test.
 test-threads = 1
@@ -209,4 +213,4 @@ default-filter = 'package(zebrad) and test(=integration::zcashd_compat::zcashd_c
 test-threads = 1
 slow-timeout = { period = "5m", terminate-after = 2 }
 failure-output = "immediate"
-default-filter = 'package(zebrad) and test(~zcashd_compat)'
+default-filter = 'package(zebrad) and test(~zcashd_compat) and not test(=integration::zcashd_compat::zcashd_compat_shielded_coinbase_spends_at_one_confirmation)'

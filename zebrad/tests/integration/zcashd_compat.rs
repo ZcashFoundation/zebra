@@ -4,8 +4,8 @@
 //! sidecar on Regtest, and verify startup, chain agreement, wallet RPCs,
 //! transaction flow, resilience, and reorg handling across the pair.
 //!
-//! They require a sidecar zcashd binary and are skipped unless
-//! `TEST_ZCASHD_COMPAT=1` is set. Run the full suite with:
+//! They require a sidecar zcashd binary and most skip unless `TEST_ZCASHD_COMPAT=1` is set.
+//! The one-confirmation coinbase case errors when disabled or external. Run the full suite with:
 //!
 //! ```console
 //! TEST_ZCASHD_COMPAT=1 cargo nextest run --profile zcashd-compat-integration --run-ignored=only
@@ -111,6 +111,16 @@ async fn zcashd_compat_shielded_tx_in_mempool() -> Result<()> {
 #[ignore]
 async fn zcashd_compat_shielded_tx_confirms() -> Result<()> {
     common::zcashd_compat::tx_flow::shielded_tx_confirms().await
+}
+
+/// Spends one Sapling coinbase at one confirmation to actual Sapling and p2pkh recipients.
+///
+/// Requires `TEST_ZCASHD_COMPAT=1` and managed Regtest; a disabled/external run is an error.
+/// See [`common::zcashd_compat::tx_flow::shielded_coinbase_spends_at_one_confirmation`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn zcashd_compat_shielded_coinbase_spends_at_one_confirmation() -> Result<()> {
+    common::zcashd_compat::tx_flow::shielded_coinbase_spends_at_one_confirmation().await
 }
 
 /// Verifies that an abruptly SIGKILLed zebrad exits while supervising a running zcashd.

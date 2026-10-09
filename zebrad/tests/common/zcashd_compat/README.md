@@ -29,11 +29,69 @@ TEST_ZCASHD_COMPAT=1 \
   cargo nextest run --profile zcashd-compat-integration --run-ignored=only
 ```
 
-The suite is **opt-in**: every test is `#[ignore]`d and skipped unless
-`TEST_ZCASHD_COMPAT=1` is set. In CI it runs on a weekly schedule and on
-manual dispatch — see
+The suite is **opt-in**: every test is `#[ignore]`d. Most also skip unless
+`TEST_ZCASHD_COMPAT=1` is set; the one-confirmation spend case errors instead.
+In CI it runs on a weekly schedule and on manual dispatch — see
 [`.github/workflows/zcashd-compat-regtest.yml`](../../../../.github/workflows/zcashd-compat-regtest.yml).
 It is not a required PR check yet.
+
+### One-confirmation mixed Sapling coinbase spend (#9690)
+
+The test `zcashd_compat_shielded_coinbase_spends_at_one_confirmation` is a
+separately ignored native consumer test. It requires **`TEST_ZCASHD_COMPAT=1`
+and managed Regtest**; selecting it without those settings fails rather than
+reporting a skipped case as coverage. Ordinary development, PR CI and
+external-node profiles exclude it; the managed compatibility profile selects it.
+
+Use the already downloaded and extracted **`zebra-compat-v1.2.0`** sidecar
+from `zebrad/zcashd-compat-manifest.json` (including its archive checksum).
+Cold download is preparation, not test-runtime evidence. With that pinned
+binary available:
+
+```console
+TEST_ZCASHD_COMPAT=1 TEST_ZCASHD_COMPAT_NETWORK=Regtest \
+  TEST_ZCASHD_PATH=/path/to/pinned/zcashd \
+  cargo nextest run -p zebrad --test zebrad-tests \
+    --profile zcashd-compat-integration --run-ignored=only \
+    -E 'test(=integration::zcashd_compat::zcashd_compat_shielded_coinbase_spends_at_one_confirmation)'
+```
+
+Required wallet interfaces are `z_getnewaccount`, `z_getaddressforaccount`
+with `["p2pkh", "sapling"]`, `z_listunifiedreceivers`,
+`z_getbalanceforaccount(account, 1)`, and asynchronous `z_sendmany` from a UA
+to standalone Sapling and p2pkh receivers. The sidecar must support the
+`AllowRevealedRecipients` policy and `z_getoperationstatus` success/txid
+results. An unsupported RPC, failed operation, or timeout is a test failure;
+there is no alternate source, maturity wait, or read-only fallback.
+
+The case creates two accounts, mines exactly one Sapling coinbase, and
+requires its full miner reward in the sender's Sapling pool at minconf 1 and
+sidecar height 1. It immediately sends 2 ZEC to each receiver, explicitly
+paying the pinned wallet's `conventional_fee(3)` of 15,000 zatoshis
+(0.00015000 ZEC). Zebra's newer marginal-fee constant is deliberately not
+substituted for the original wallet fee. The operation must complete and
+appear in Zebra's mempool before the single confirmation block is mined.
+
+Assertions decode Zebra's confirmed raw transaction and require its txid,
+one confirmation in that block, exactly one transparent output to the
+derived p2pkh receiver worth 200,000,000 zatoshis, and no Orchard bundle.
+The wallet must report 200,000,000 confirmed Sapling zatoshis for the
+receiver and `miner_reward - 400,000,000 - 15,000` for the sender. This does
+not assume that transparent coinbase credits a UA account or use a
+transparent account-balance assertion as a substitute for the real output.
+
+The behavior deadline is 150 seconds, with a fresh 30-second cleanup
+deadline (180 seconds total); startup, proofs, relay, mining, and wallet
+scanning have shorter phase bounds. Every invocation owns its processes
+and fresh datadir. Run through the serial compatibility profile: the
+existing harness bind-probes and releases randomized predetermined RPC
+ports; this is not atomic port reservation.
+
+This ports the immediate mixed-spend relevant part of
+[`mining_shielded_coinbase.py`](https://github.com/zcash/zcash/blob/master/qa/rpc-tests/mining_shielded_coinbase.py).
+All upgrades through NU5 are active at height 1. It does **not** cover the
+original pre-Heartwood rejection, height-10 activation, historical 5-ZEC
+reward schedule, or legacy wallet balance APIs.
 
 ### Reorg Stress Tests
 
@@ -84,7 +142,8 @@ make compat-test-soak \
 ### External — Mainnet / Testnet (deployment validation)
 
 The test harness connects to pre-running zebrad and zcashd instances.
-All tests that require block mining or wallet spends skip automatically.
+Most tests that require block mining or wallet spends skip automatically.
+The one-confirmation coinbase case instead rejects external mode explicitly.
 No writes are performed on a live network.
 
 ```
@@ -124,8 +183,9 @@ TEST_ZCASHD_COMPAT=1 \
 
 ### Skip behaviour
 
-If `TEST_ZCASHD_COMPAT` is not set, every test prints a message and exits
-`Ok(())` immediately.  The skip is silent in CI output — no failures, no noise.
+If `TEST_ZCASHD_COMPAT` is not set, most tests print a message and exit
+`Ok(())` immediately. The one-confirmation coinbase case requires the exact
+value `1` and returns an error when disabled; a skipped send is not coverage.
 
 If `TEST_ZCASHD_COMPAT_NETWORK` is set to `Mainnet` or `Testnet` but
 the required address or auth variables are missing, the test suite returns an
@@ -160,6 +220,7 @@ error (misconfiguration, not a skip).
 | `zcashd_compat_getwalletinfo_fields_present` | wallet | Full check | Full check |
 | `zcashd_compat_shielded_tx_in_mempool` | tx_flow | Mines coinbase to the account's Sapling receiver, `z_sendmany`s, polls zebrad mempool | Validates `getmempoolinfo` structure only |
 | `zcashd_compat_shielded_tx_confirms` | tx_flow | Shielded send + mines + checks confirmations on both sides | **Skipped** |
+| `zcashd_compat_shielded_coinbase_spends_at_one_confirmation` | tx_flow | One coinbase, immediate 2-ZEC Sapling + 2-ZEC p2pkh spend, actual confirmed output and pool/change balances | **Error** (managed Regtest required) |
 | `zcashd_compat_zebrad_abrupt_kill` | resilience | Mines 3, SIGKILLs zebrad, asserts it was killed; the harness kills the orphaned sidecar | **Skipped** (don't own process) |
 | `zcashd_compat_zebrad_graceful_shutdown_stops_zcashd` | resilience | SIGTERMs zebrad, asserts the supervised zcashd also exits | **Skipped** (unix only; don't own process) |
 | `zcashd_compat_zcashd_restarts_after_exit` | resilience | SIGTERMs zcashd, waits for supervisor restart | **Skipped** (unix only; don't own process) |
@@ -213,7 +274,8 @@ zebrad/tests/common/
     ├── chain.rs               height_and_hash_agree, getblock_hash_consistent
     ├── wallet.rs              address_generation, initial_balance_zero,
     │                          getwalletinfo_fields_present
-    ├── tx_flow.rs             shielded_tx_in_mempool, shielded_tx_confirms
+    ├── tx_flow.rs             shielded_tx_in_mempool, shielded_tx_confirms,
+    │                          shielded_coinbase_spends_at_one_confirmation
     ├── resilience.rs          zebrad_abrupt_kill,
     │                          zebrad_graceful_shutdown_stops_zcashd,
     │                          zcashd_restarts_after_exit
