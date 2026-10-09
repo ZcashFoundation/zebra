@@ -188,8 +188,7 @@ where
 {
     type Response = Resp;
     type Error = BoxError;
-    type Future =
-        Pin<Box<dyn future::Future<Output = Result<Resp, BoxError>> + Send + 'static>>;
+    type Future = Pin<Box<dyn future::Future<Output = Result<Resp, BoxError>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         Poll::Ready(Ok(()))
@@ -230,9 +229,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
             R::Transaction(_) => Ok(Resp::Transaction(None)),
             R::AnyChainTransaction(_) => Ok(Resp::AnyChainTransaction(None)),
             R::TransactionIdsForBlock(_) => Ok(Resp::TransactionIdsForBlock(None)),
-            R::AnyChainTransactionIdsForBlock(_) => {
-                Ok(Resp::AnyChainTransactionIdsForBlock(None))
-            }
+            R::AnyChainTransactionIdsForBlock(_) => Ok(Resp::AnyChainTransactionIdsForBlock(None)),
             R::UnspentBestChainUtxo(_) => Ok(Resp::UnspentBestChainUtxo(None)),
             R::AnyChainUtxo(_) => Ok(Resp::AnyChainUtxo(None)),
             R::Depth(_) => Ok(Resp::Depth(None)),
@@ -264,9 +261,7 @@ impl Service<zebra_state::Request> for MockState {
     type Response = zebra_state::Response;
     type Error = BoxError;
     type Future = Pin<
-        Box<
-            dyn future::Future<Output = Result<zebra_state::Response, BoxError>> + Send + 'static,
-        >,
+        Box<dyn future::Future<Output = Result<zebra_state::Response, BoxError>> + Send + 'static>,
     >;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
@@ -569,10 +564,10 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
     // tx-byte-shaped payloads.
     let hex_class = |class: u8, src: &[u8]| -> String {
         let len_target = match class & 0x03 {
-            0 => 64,                              // 32-byte hash
-            1 => 40,                              // 20-byte address-ish
-            2 => src.len().min(64).max(2),       // arbitrary
-            _ => src.len().min(2048).max(0),     // tx-byte sized hex
+            0 => 64,                         // 32-byte hash
+            1 => 40,                         // 20-byte address-ish
+            2 => src.len().min(64).max(2),   // arbitrary
+            _ => src.len().min(2048).max(0), // tx-byte sized hex
         };
         let raw = if src.len() >= len_target / 2 {
             &src[..len_target / 2]
@@ -587,11 +582,7 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
             // [hex_string, optional bool]
             let hex_tx = hex_class(take_u8(0), &payload[1.min(payload.len())..]);
             let allow = (take_u8(0) >> 4) & 0x1 == 1;
-            format!(
-                r#"["{}",{}]"#,
-                hex_tx,
-                if allow { "true" } else { "false" }
-            )
+            format!(r#"["{}",{}]"#, hex_tx, if allow { "true" } else { "false" })
         }
         "submitblock" => {
             // [hex_string]
@@ -714,11 +705,22 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
             format!(r#"[{}]"#, take_u32_le(0) % 64)
         }
         // No-arg methods. `[]` keeps the envelope parseable.
-        "getinfo" | "getblockchaininfo" | "getbestblockhash"
-        | "getbestblockheightandhash" | "getblockcount" | "getmempoolinfo"
-        | "getmininginfo" | "getdifficulty" | "getnetworkinfo" | "getpeerinfo"
-        | "getconnectioncount" | "ping" | "z_getnotescount"
-        | "getacceptedaddrs" | "estimatefee" | "getexperimentalfeatures"
+        "getinfo"
+        | "getblockchaininfo"
+        | "getbestblockhash"
+        | "getbestblockheightandhash"
+        | "getblockcount"
+        | "getmempoolinfo"
+        | "getmininginfo"
+        | "getdifficulty"
+        | "getnetworkinfo"
+        | "getpeerinfo"
+        | "getconnectioncount"
+        | "ping"
+        | "z_getnotescount"
+        | "getacceptedaddrs"
+        | "estimatefee"
+        | "getexperimentalfeatures"
         | "help" => "[]".to_string(),
         // For methods we don't have a template for, fall back to the raw-
         // body strategy (often produces invalid JSON, exercising envelope

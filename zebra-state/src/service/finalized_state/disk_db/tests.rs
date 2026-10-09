@@ -72,3 +72,82 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// An RPC clone observes completed measurements without scanning column-family properties.
+#[test]
+fn disk_size_measurement_is_shared_between_clones() {
+    let _init_guard = zebra_test::init();
+    let db = DiskDb::new(
+        &crate::Config::ephemeral(),
+        "state",
+        &crate::constants::state_database_format_version_in_code(),
+        &zebra_chain::parameters::Network::Mainnet,
+        ["size-test".to_owned()],
+        false,
+    )
+    .expect("isolated ephemeral database opens");
+    let reader = db.clone();
+    let cf = db
+        .cf_handle("size-test")
+        .expect("test column family exists");
+    db.put_cf(cf, b"key", [17; 4096])
+        .expect("test write succeeds");
+    db.flush_cf(cf).expect("test SST flush completes");
+    let measured = db.measure_size();
+    assert!(measured > 0, "flushed SST occupies disk space");
+    assert_eq!(
+        reader.size(),
+        0,
+        "unrefreshed estimate remains the startup measurement"
+    );
+    db.export_metrics();
+    assert_eq!(
+        reader.size(),
+        measured,
+        "completed refresh reaches existing readers"
+    );
+    assert_eq!(db.size(), measured);
+}
+
+/// Secondary readers observe disk growth when catching up, without a primary metrics task.
+#[test]
+fn secondary_disk_size_refreshes_after_catch_up() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().expect("isolated cache directory opens");
+    let config = crate::Config {
+        cache_dir: cache.path().to_path_buf(),
+        ephemeral: false,
+        ..crate::Config::default()
+    };
+    let open = |read_only| {
+        DiskDb::new(
+            &config,
+            "state",
+            &crate::constants::state_database_format_version_in_code(),
+            &zebra_chain::parameters::Network::Mainnet,
+            ["secondary-size-test".to_owned()],
+            read_only,
+        )
+        .expect("isolated primary or secondary database opens")
+    };
+    let primary = open(false);
+    let secondary = open(true);
+    let reader = secondary.clone();
+    let cf = primary
+        .cf_handle("secondary-size-test")
+        .expect("test column family exists");
+    primary
+        .put_cf(cf, b"key", [17; 4096])
+        .expect("primary write succeeds");
+    primary.flush_cf(cf).expect("primary SST flush completes");
+    secondary
+        .try_catch_up_with_primary()
+        .expect("secondary catches up to the flushed primary");
+    let measured = secondary.measure_size();
+    assert!(measured > 0, "secondary observes the flushed SST");
+    assert_eq!(
+        reader.size(),
+        measured,
+        "catch-up refreshes the estimate shared by secondary readers"
+    );
+}

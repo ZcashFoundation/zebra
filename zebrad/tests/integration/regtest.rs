@@ -21,7 +21,7 @@ use crate::common::{
     config::{
         default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir,
     },
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{ZebradTestDirExt, LAUNCH_DELAY, ZEBRAD_STARTUP_TIMEOUT},
     regtest::MiningRpcMethods,
 };
 
@@ -308,7 +308,7 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
 
     // Start a long poll against that id. It must block until the template is invalidated.
     let long_poll_client = client.clone();
-    let long_poll = tokio::spawn(async move {
+    let mut long_poll = tokio::spawn(async move {
         long_poll_client
             .json_result_from_call::<BlockTemplateResponse>(
                 "getblocktemplate",
@@ -319,11 +319,13 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
     });
 
     // Let the long poll reach the RPC and start waiting before the tip moves under it.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    assert!(
-        !long_poll.is_finished(),
-        "long poll must keep waiting while the template is still valid",
-    );
+    tokio::select! {
+        biased;
+        response = &mut long_poll => {
+            panic!("long poll must keep waiting while the template is still valid: {response:?}");
+        }
+        () = tokio::time::sleep(Duration::from_secs(1)) => {}
+    }
 
     // Invalidate the template by advancing the tip from a second client.
     client.generate(1).await?;
@@ -824,6 +826,8 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
     use serde_json::Value;
     use zebra_state::constants::MAX_BLOCK_REORG_HEIGHT;
 
+    const GENERATION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(
@@ -838,15 +842,15 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
 
     let mut zebrad = testdir()?
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(GENERATION_TIMEOUT + ZEBRAD_STARTUP_TIMEOUT + 3 * LAUNCH_DELAY);
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
     tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Use a longer timeout because generating MAX_BLOCK_REORG_HEIGHT + 10 blocks
     // in a single RPC call takes ~400s at ~400ms per block.
-    let client =
-        RpcRequestClient::new_with_timeout(rpc_address, std::time::Duration::from_secs(15 * 60));
+    let client = RpcRequestClient::new_with_timeout(rpc_address, GENERATION_TIMEOUT);
 
     // Mine enough blocks to push the first few blocks into the finalized state.
     // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT (= 1002).

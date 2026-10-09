@@ -340,8 +340,7 @@ where
 {
     type Response = Resp;
     type Error = BoxError;
-    type Future =
-        Pin<Box<dyn future::Future<Output = Result<Resp, BoxError>> + Send + 'static>>;
+    type Future = Pin<Box<dyn future::Future<Output = Result<Resp, BoxError>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         Poll::Ready(Ok(()))
@@ -397,9 +396,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
             R::Transaction(_) => Ok(Resp::Transaction(None)),
             R::AnyChainTransaction(_) => Ok(Resp::AnyChainTransaction(None)),
             R::TransactionIdsForBlock(_) => Ok(Resp::TransactionIdsForBlock(None)),
-            R::AnyChainTransactionIdsForBlock(_) => {
-                Ok(Resp::AnyChainTransactionIdsForBlock(None))
-            }
+            R::AnyChainTransactionIdsForBlock(_) => Ok(Resp::AnyChainTransactionIdsForBlock(None)),
             R::UnspentBestChainUtxo(_) => Ok(Resp::UnspentBestChainUtxo(None)),
             R::AnyChainUtxo(_) => Ok(Resp::AnyChainUtxo(None)),
             R::Depth(_) => Ok(Resp::Depth(None)),
@@ -453,11 +450,7 @@ impl Service<zebra_state::Request> for MockState {
     type Response = zebra_state::Response;
     type Error = BoxError;
     type Future = Pin<
-        Box<
-            dyn future::Future<Output = Result<zebra_state::Response, BoxError>>
-                + Send
-                + 'static,
-        >,
+        Box<dyn future::Future<Output = Result<zebra_state::Response, BoxError>> + Send + 'static>,
     >;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
@@ -595,10 +588,10 @@ fn make_rpc(network: Network) -> FuzzRpcImpl {
 
     let (rpc, _queue_join) = RpcImpl::new(
         network,
-        Default::default(),         // mining_config
-        true,                       // debug_force_finished_sync — gives a deterministic tip path
-        "0.0.1",                    // build_version
-        "rpc_handler_fuzz",         // user_agent
+        Default::default(), // mining_config
+        true,               // debug_force_finished_sync — gives a deterministic tip path
+        "0.0.1",            // build_version
+        "rpc_handler_fuzz", // user_agent
         mempool,
         state,
         read_state,
@@ -768,8 +761,8 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
         RpcCall::GetAddressUtxos(addrs, chain_info, start_height, max_entries) => {
             // `start_height` is passed through unclamped so the fuzzer can reach the
             // heights above `Height::MAX` that the RPC has to clamp rather than reject.
-            let req =
-                GetAddressUtxosRequest::new(addrs, chain_info).with_limits(start_height, max_entries);
+            let req = GetAddressUtxosRequest::new(addrs, chain_info)
+                .with_limits(start_height, max_entries);
             let _ = AssertUnwindSafe(rpc.get_address_utxos(req))
                 .catch_unwind()
                 .await;
@@ -878,9 +871,7 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
                 .await;
         }
         RpcCall::GetMiningInfo => {
-            let _ = AssertUnwindSafe(rpc.get_mining_info())
-                .catch_unwind()
-                .await;
+            let _ = AssertUnwindSafe(rpc.get_mining_info()).catch_unwind().await;
         }
         RpcCall::GetDifficulty => {
             let _ = AssertUnwindSafe(rpc.get_difficulty()).catch_unwind().await;
@@ -910,4 +901,3 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
         }
     }
 }
-

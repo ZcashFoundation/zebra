@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Retain bounded FIFO mined inventory for peers whose services are not ready, without blocking delivery to ready peers. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.835923111+02:00

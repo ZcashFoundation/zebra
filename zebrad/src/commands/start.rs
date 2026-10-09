@@ -648,8 +648,12 @@ impl StartCmd {
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(mempool_change_receiver, peer_set.clone())
-                .in_current_span(),
+            mempool::gossip_mempool_transaction_id(
+                mempool_change_receiver,
+                peer_set.clone(),
+                mempool.clone(),
+            )
+            .in_current_span(),
         );
 
         info!("spawning delete old databases task");

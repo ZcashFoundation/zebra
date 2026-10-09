@@ -12,7 +12,7 @@ use zebra_rpc::client::BlockTemplateTimeSource;
 #[command(version)]
 pub struct Args {
     /// The network to use for the block proposal.
-    #[arg(default_value = "Mainnet", short, long)]
+    #[arg(default_value = "Mainnet", short, long, value_parser = parse_network)]
     pub net: Network,
 
     /// The source of the time in the block proposal header.
@@ -28,4 +28,13 @@ pub struct Args {
     /// The template and proposal structures are printed to stderr.
     #[arg(last = true)]
     pub template: Option<String>,
+}
+
+/// Accepts the standard networks and the default Regtest activation schedule.
+fn parse_network(value: &str) -> Result<Network, String> {
+    if value.eq_ignore_ascii_case("regtest") {
+        Ok(Network::new_regtest(Default::default()))
+    } else {
+        value.parse::<Network>().map_err(|error| error.to_string())
+    }
 }

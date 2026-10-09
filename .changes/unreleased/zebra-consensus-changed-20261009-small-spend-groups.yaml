@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Avoid duplicate-spend lookup allocations for groups of up to four transparent inputs or shielded nullifiers.
+time: 2026-10-09T15:25:14.56537639+02:00

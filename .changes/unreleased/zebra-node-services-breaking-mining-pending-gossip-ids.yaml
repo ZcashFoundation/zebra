@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: breaking
+body: The added `mempool::Request::TakePendingGossipTransactionIds { limit }` variant requires updating exhaustive request matches. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.803838096+02:00

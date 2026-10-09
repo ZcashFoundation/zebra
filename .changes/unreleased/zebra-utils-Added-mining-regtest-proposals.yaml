@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Added
+body: The `block-template-to-proposal` command now accepts `--net Regtest` with the default activation schedule. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:36:05.481866709+02:00

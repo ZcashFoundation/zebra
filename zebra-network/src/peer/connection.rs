@@ -1154,7 +1154,10 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseBlock(hash, _) | AdvertiseBlockToAll(hash)) => {
+            (
+                AwaitingRequest,
+                AdvertiseBlock(hash, _) | AdvertiseBlockToAll(hash),
+            ) => {
                 self
                     .peer_tx
                     .send(Message::Inv(vec![hash.into()]))

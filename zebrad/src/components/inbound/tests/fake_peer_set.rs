@@ -575,8 +575,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Test the block is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Await the block gossip request rather than delaying its acknowledgement.
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash(), None))
         .await
@@ -676,8 +675,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
-        // Test the block is gossiped, after waiting for the multi-gossip delay
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Await the block gossip request rather than delaying its acknowledgement.
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
@@ -1100,11 +1098,6 @@ async fn setup(
         .in_current_span(),
     );
 
-    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_subscriber.subscribe(),
-        peer_set.clone(),
-    ));
-
     // Make sure there is an additional request broadcasting the
     // committed blocks to peers.
     //
@@ -1141,6 +1134,12 @@ async fn setup(
         latest_chain_tip.clone(),
         mining_tip_change,
     );
+
+    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
+        transaction_subscriber.subscribe(),
+        peer_set.clone(),
+        mempool_service.clone(),
+    ));
 
     let (setup_tx, setup_rx) = oneshot::channel();
 
@@ -1196,6 +1195,8 @@ fn add_some_stuff_to_mempool(
         .storage()
         .insert(last_transaction.clone(), Vec::new(), None)
         .unwrap();
+    // This helper intentionally seeds transactions without peer broadcasts.
+    mempool_service.storage().take_pending_gossip(usize::MAX);
 
     vec![last_transaction]
 }

@@ -9,10 +9,10 @@ use std::{
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result, WrapErr};
 use indexmap::IndexSet;
 use tempfile::TempDir;
 
@@ -24,7 +24,7 @@ use zebrad::{
     config::ZebradConfig,
 };
 
-use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
+use crate::common::{cached_state::DATABASE_FORMAT_CHECK_INTERVAL, launch::ZEBRAD_STARTUP_TIMEOUT};
 
 /// Returns a config with:
 /// - a Zcash listener on an unused port on IPv4 localhost,
@@ -179,12 +179,37 @@ pub fn rpc_port_config(
     Ok(config)
 }
 
-/// Reads Zebra's RPC server listen address from a testchild's logs
+/// Reads Zebra's listen address from startup logs, with a bounded wait.
+///
+/// Compile-time tracing filters that remove INFO logs cannot support log-based port discovery.
 pub fn read_listen_addr_from_logs(
     child: &mut TestChild<TempDir>,
     expected_msg: &str,
 ) -> Result<SocketAddr> {
-    let line = child.expect_stdout_line_matches(expected_msg)?;
+    if ::tracing::level_filters::STATIC_MAX_LEVEL < ::tracing::Level::INFO {
+        return Err(eyre!(
+            "cannot discover {expected_msg:?}: this binary's compile-time tracing filter removes \
+             INFO startup logs; build endpoint-discovery tests without max_level_warn or \
+             release_max_level_warn"
+        ));
+    }
+
+    // Keep the caller's overall deadline, but never spend it all on a missing startup log.
+    let original_deadline = child.deadline;
+    let original_timeout = child.timeout;
+    let startup_deadline = Instant::now() + ZEBRAD_STARTUP_TIMEOUT;
+    child.deadline = Some(original_deadline.map_or(startup_deadline, |d| d.min(startup_deadline)));
+    child.timeout =
+        Some(original_timeout.map_or(ZEBRAD_STARTUP_TIMEOUT, |t| t.min(ZEBRAD_STARTUP_TIMEOUT)));
+    let line = child.expect_stdout_line_matches(regex::escape(expected_msg));
+    child.deadline = original_deadline;
+    child.timeout = original_timeout;
+    let line = line.wrap_err_with(|| {
+        format!(
+            "could not discover {expected_msg:?} from startup logs; ensure INFO startup logging \
+             is enabled"
+        )
+    })?;
     let rpc_addr_position =
         line.find(expected_msg).expect("already checked for match") + expected_msg.len();
     let rpc_addr = line[rpc_addr_position..].trim().to_string();

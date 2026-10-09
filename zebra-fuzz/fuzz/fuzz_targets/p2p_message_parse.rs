@@ -279,7 +279,11 @@ fuzz_target!(|data: &[u8]| {
                 // No assertion on value; reading is the invariant.
                 // We touch the field through a black_box-like sink so
                 // the optimizer can't elide it.
-                let _sink = (v, v < PROTO_VERSION_PLAUSIBLE_MIN, v > PROTO_VERSION_PLAUSIBLE_MAX);
+                let _sink = (
+                    v,
+                    v < PROTO_VERSION_PLAUSIBLE_MIN,
+                    v > PROTO_VERSION_PLAUSIBLE_MAX,
+                );
             }
         }));
 
@@ -349,7 +353,8 @@ fuzz_target!(|data: &[u8]| {
             let header_body_len = u32::from_le_bytes([out[16], out[17], out[18], out[19]]) as usize;
             let actual_body_len = out.len() - FUZZ_HEADER_LEN;
             assert_eq!(
-                header_body_len, actual_body_len,
+                header_body_len,
+                actual_body_len,
                 "I-5 violated: header.body_len ({}) != encoded body bytes ({}) for {}",
                 header_body_len,
                 actual_body_len,
@@ -382,9 +387,9 @@ fuzz_target!(|data: &[u8]| {
             })
         }));
         match cross_network {
-            Ok(Some(CrossNetwork::Accepted(command))) => panic!(
-                "I-6 violated: Testnet codec accepted a Mainnet-encoded {command} frame"
-            ),
+            Ok(Some(CrossNetwork::Accepted(command))) => {
+                panic!("I-6 violated: Testnet codec accepted a Mainnet-encoded {command} frame")
+            }
             Ok(Some(CrossNetwork::Incomplete)) => panic!(
                 "I-6 violated: Testnet codec returned Ok(None) for a complete Mainnet frame \
                  of {}; the magic check should have rejected it",

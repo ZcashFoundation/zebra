@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Measure isolated Regtest mining RPCs; PoW performance is measured separately."""
+
+import argparse
+import concurrent.futures
+import hashlib
+import json
+import math
+import pathlib
+import re
+import statistics
+import subprocess
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+
+
+def rpc(address, method, params=(), started=None):
+    request = urllib.request.Request(
+        f"http://{address}",
+        json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        ).encode(),
+        {"Content-Type": "application/json"},
+    )
+    if started is not None:
+        started.set()
+    with urllib.request.urlopen(request, timeout=40) as response:
+        body = json.load(response)
+    if body.get("error") is not None:
+        raise RuntimeError(f"{method}: {body['error']}")
+    return body["result"]
+
+
+def summary(samples):
+    ordered = sorted(samples)
+    return {
+        "samples_ms": samples,
+        "median_ms": statistics.median(samples),
+        "p95_ms": ordered[math.ceil(0.95 * len(ordered)) - 1],
+    }
+
+
+def header_end(block):
+    prefix = block[140]
+    width = {253: 2, 254: 4, 255: 8}.get(prefix, 0)
+    size = int.from_bytes(block[141 : 141 + width], "little") if width else prefix
+    return 141 + width + size
+
+
+def benchmark(args, process, log_path):
+    deadline = time.monotonic() + 60
+    address = None
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError("node exited during startup")
+        logs = log_path.read_text(errors="replace")
+        match = re.search(
+            r"Opened RPC endpoint.*?(127\.0\.0\.1:\d+)", logs, re.IGNORECASE
+        )
+        if match:
+            address = match.group(1)
+            try:
+                template = rpc(address, "getblocktemplate")
+                break
+            except (RuntimeError, urllib.error.URLError, TimeoutError):
+                pass
+        time.sleep(0.1)
+    else:
+        raise RuntimeError("node did not serve a template within 60 seconds")
+
+    timings = {"stable_gbt": [], "prepared_submit": [], "tip_to_longpoll": []}
+    evidence = []
+    for sample in range(args.samples):
+        # Exclude startup and RPC connection initialization from the steady-state samples.
+        for _ in range(5):
+            rpc(address, "getblocktemplate")
+        for _ in range(args.iterations):
+            started = time.perf_counter_ns()
+            template = rpc(address, "getblocktemplate")
+            timings["stable_gbt"].append((time.perf_counter_ns() - started) / 1e6)
+        if args.require_workid:
+            assert re.fullmatch(r"[0-9a-f]{64}", template["workid"]), template
+
+        serialized = subprocess.run(
+            [str(args.serializer), "--net", "Regtest"],
+            input=json.dumps(template),
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        assert (
+            rpc(address, "getblocktemplate", [{"mode": "proposal", "data": serialized}])
+            is None
+        )
+        block = bytearray.fromhex(serialized)
+        # Only nonce and solution may change while reusing completed verification.
+        block[108:140] = (sample + 1).to_bytes(32, "little")
+        work = {"workid": template["workid"]} if "workid" in template else {}
+        damaged = bytearray(block)
+        damaged[-1] ^= 1
+        assert rpc(address, "submitblock", [damaged.hex(), work]) == "rejected"
+        assert rpc(address, "getbestblockhash") == template["previousblockhash"]
+
+        started = time.perf_counter_ns()
+        assert rpc(address, "submitblock", [block.hex(), work]) is None
+        timings["prepared_submit"].append((time.perf_counter_ns() - started) / 1e6)
+        final_hash = (
+            hashlib.sha256(hashlib.sha256(block[: header_end(block)]).digest())
+            .digest()[::-1]
+            .hex()
+        )
+        assert rpc(address, "getbestblockhash") == final_hash
+        assert rpc(address, "getblockhash", [template["height"]]) == final_hash
+        assert rpc(address, "getblock", [final_hash, 0]) == block.hex()
+        assert rpc(address, "submitblock", [block.hex(), work]) == "duplicate"
+        evidence.append(
+            {
+                "height": template["height"],
+                "hash": final_hash,
+                "body_mutation_rejected": True,
+                "final_hash_body_binding": True,
+            }
+        )
+
+        template = rpc(address, "getblocktemplate")
+        time_window_refreshes = 0
+        deadline = time.monotonic() + 5
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            while True:
+                assert (
+                    time.monotonic() < deadline
+                ), "longpoll timestamp refreshes did not settle"
+                barrier = threading.Event()
+                pending = pool.submit(
+                    rpc,
+                    address,
+                    "getblocktemplate",
+                    [{"longpollid": template["longpollid"]}],
+                    barrier,
+                )
+                assert barrier.wait(5), "longpoll client failed to start"
+                time.sleep(0.05)
+                if not pending.done():
+                    break
+                # A timestamp-window refresh may wake polling without changing the chain.
+                refreshed = pending.result()
+                assert refreshed["previousblockhash"] == template["previousblockhash"]
+                assert refreshed["height"] == template["height"]
+                assert refreshed["mintime"] == template["mintime"]
+                assert not refreshed["transactions"]
+                assert refreshed["maxtime"] != template["maxtime"]
+                assert refreshed["longpollid"] != template["longpollid"]
+                assert refreshed["submitold"] is False
+                template = refreshed
+                time_window_refreshes += 1
+            started = time.perf_counter_ns()
+            mined = rpc(address, "generate", [1])
+            updated = pending.result(timeout=10)
+            timings["tip_to_longpoll"].append((time.perf_counter_ns() - started) / 1e6)
+        assert updated["previousblockhash"] == mined[-1]
+        assert updated["submitold"] is False
+        assert updated["height"] == template["height"] + 1
+        evidence[-1]["longpoll_time_window_refreshes"] = time_window_refreshes
+    return {
+        "binary": str(args.binary),
+        "samples": args.samples,
+        "gbt_iterations_per_sample": args.iterations,
+        "network": "Regtest",
+        "pow_disabled": True,
+        "miner_address": args.miner_address,
+        "mempool": "empty",
+        "rayon_threads": 4,
+        "timings": {name: summary(values) for name, values in timings.items()},
+        "evidence": evidence,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary", type=lambda value: pathlib.Path(value).resolve())
+    parser.add_argument("serializer", type=lambda value: pathlib.Path(value).resolve())
+    parser.add_argument("--samples", type=int, default=7)
+    parser.add_argument("--iterations", type=int, default=30)
+    parser.add_argument(
+        "--miner-address", default="tmJymvcUCn1ctbghvTJpXBwHiMEB8P6wxNV"
+    )
+    parser.add_argument("--require-workid", action="store_true")
+    parser.add_argument("--output", type=pathlib.Path)
+    args = parser.parse_args()
+    if args.samples < 1 or args.iterations < 1:
+        parser.error("samples and iterations must be positive")
+    with tempfile.TemporaryDirectory(prefix="mining-optimization-") as temporary:
+        directory = pathlib.Path(temporary)
+        config = directory / "zebrad.toml"
+        config.write_text(f"""[network]
+network = "Regtest"
+listen_addr = "127.0.0.1:0"
+cache_dir = false
+initial_mainnet_peers = []
+initial_testnet_peers = []
+[state]
+ephemeral = true
+cache_dir = "{directory / 'state'}"
+[rpc]
+listen_addr = "127.0.0.1:0"
+enable_cookie_auth = false
+parallel_cpu_threads = 4
+[mining]
+miner_address = "{args.miner_address}"
+[mempool]
+debug_enable_at_height = 0
+""")
+        log_path = directory / "node.log"
+        with log_path.open("wb") as logfile:
+            process = subprocess.Popen(
+                [str(args.binary), "--config", str(config), "start"],
+                stdout=logfile,
+                stderr=subprocess.STDOUT,
+            )
+            try:
+                result = benchmark(args, process, log_path)
+            except BaseException:
+                print(log_path.read_text(errors="replace"))
+                raise
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+        payload = json.dumps(result, indent=2)
+        if args.output:
+            args.output.write_text(payload + "\n")
+        print(payload)
+
+
+if __name__ == "__main__":
+    main()

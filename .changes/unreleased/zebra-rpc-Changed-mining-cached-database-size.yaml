@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The `getblockchaininfo` response now reads `size_on_disk` from a cached estimate refreshed by periodic metrics or secondary catch-up rather than measuring it on each request. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:36:05.477419485+02:00

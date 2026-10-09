@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Pace transaction gossip independently at two-second intervals and recover pending verified transactions after notification lag. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T11:27:28.041632042+02:00

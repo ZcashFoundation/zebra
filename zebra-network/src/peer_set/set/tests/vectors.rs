@@ -2,7 +2,6 @@
 
 use std::{
     cmp::max,
-    collections::HashSet,
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
@@ -313,38 +312,58 @@ fn broadcast_all_queued_removes_banned_peers() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
-    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
     let (minimum_peer_version, _best_tip_height) =
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version.clone())
-            .build();
+        timeout(Duration::from_secs(10), async {
+            let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+                .with_discover(discovered_peers)
+                .with_minimum_peer_version(minimum_peer_version)
+                .build();
+            peer_set.ready().await.unwrap();
+            let banned_addr = *peer_set.ready_services.keys().next().unwrap();
 
-        let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let mut bans = crate::BanList::default();
-        bans.ban(banned_ip);
+            let busy = peer_set.call(Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            });
+            let request = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .unwrap();
+            let broadcast =
+                peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([1; 32])));
+            tokio::pin!(broadcast);
+            assert!(broadcast.as_mut().now_or_never().is_none());
+            assert_eq!(peer_set.queued_broadcast_all.len(), 1);
+            assert!(peer_set.queued_broadcast_all[0].2.contains(&banned_addr));
 
-        let (bans_tx, bans_rx) = watch::channel(bans);
-        let _ = bans_tx;
-        peer_set.bans_receiver = bans_rx;
+            request.tx.send(Ok(Response::BlockHashes(vec![]))).unwrap();
+            busy.await.unwrap();
+            // Make the original peer ready without delivering queued inventory yet.
+            futures::future::poll_fn(|cx| peer_set.poll_unready(cx))
+                .await
+                .unwrap();
+            assert!(peer_set.ready_services.contains_key(&banned_addr));
 
-        let banned_addr: PeerSocketAddr = SocketAddr::new(banned_ip, 1).into();
-        let mut remaining_peers = HashSet::new();
-        remaining_peers.insert(banned_addr);
+            let mut bans = crate::BanList::default();
+            bans.ban(banned_addr.ip());
+            let (_bans_tx, bans_rx) = watch::channel(bans);
+            peer_set.bans_receiver = bans_rx;
+            peer_set.broadcast_all_queued();
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
-        peer_set.queued_broadcast_all = Some((Request::Peers, sender, remaining_peers));
-
-        peer_set.broadcast_all_queued();
-
-        if let Some((_req, _sender, remaining_peers)) = peer_set.queued_broadcast_all.take() {
-            assert!(remaining_peers.is_empty());
-        } else {
-            assert!(receiver.try_recv().is_ok());
-        }
+            assert!(peer_set.queued_broadcast_all.is_empty());
+            assert!(handles[0]
+                .try_to_receive_outbound_client_request()
+                .is_empty());
+            // Pruning the last recipient closes the delivery stream, not a successful send.
+            let error = broadcast.await.unwrap_err();
+            assert_eq!(error.to_string(), "block broadcast reached no peers");
+        })
+        .await
+        .unwrap();
     });
 }
 

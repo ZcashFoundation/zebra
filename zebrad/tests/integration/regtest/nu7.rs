@@ -148,7 +148,8 @@ async fn nu7_v4_mempool_activation() -> Result<()> {
         );
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -272,7 +273,8 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         );
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let test_dir = child
             .dir
             .take()
@@ -550,7 +552,9 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         })
         .await??;
 
-        let mut child = test_dir.spawn_child(args!["start"])?;
+        let mut child = test_dir
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -829,7 +833,8 @@ async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
         config.mining.miner_address = Some(miner.to_string().parse()?);
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -1056,7 +1061,8 @@ async fn nu7_block_rules_at_activation() -> Result<()> {
         );
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -1159,7 +1165,8 @@ async fn lockbox_disbursements_at_activation_and_p2pkh_funding_stream() -> Resul
         config.mining.miner_address = Some(miner.to_string().parse()?);
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -1469,7 +1476,8 @@ async fn nu7_stretched_first_halving() -> Result<()> {
         config.mining.miner_address = Some(miner.to_string().parse()?);
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -1590,7 +1598,8 @@ async fn nu7_funding_streams_at_boundary_activation() -> Result<()> {
         config.mining.miner_address = Some(miner.to_string().parse()?);
         let mut child = testdir()?
             .with_config(&mut config)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
@@ -1770,7 +1779,8 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
         config_a.mining.miner_address = Some(miner.to_string().parse()?);
         let mut node_a = testdir()?
             .with_config(&mut config_a)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_a = read_listen_addr_from_logs(&mut node_a, OPENED_RPC_ENDPOINT_MSG)?;
         tokio::time::sleep(LAUNCH_DELAY).await;
         let a = RpcRequestClient::new(rpc_a);
@@ -1806,7 +1816,8 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
         config_b.network.peerset_initial_target_size = 1;
         let mut node_b = testdir()?
             .with_config(&mut config_b)?
-            .spawn_child(args!["start"])?;
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(300) + LAUNCH_DELAY);
         let rpc_b = read_listen_addr_from_logs(&mut node_b, OPENED_RPC_ENDPOINT_MSG)?;
         let b = RpcRequestClient::new(rpc_b);
         tokio::time::timeout(Duration::from_secs(120), async {

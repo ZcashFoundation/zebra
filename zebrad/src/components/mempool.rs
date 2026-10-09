@@ -1053,6 +1053,13 @@ impl Service<Request> for Mempool {
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
 
+                Request::TakePendingGossipTransactionIds { limit } => {
+                    let max_ids = usize::try_from(zn::MAX_TX_INV_IN_SENT_MESSAGE)
+                        .expect("the network transaction inventory limit fits in usize");
+                    let ids = storage.take_pending_gossip(limit.min(max_ids));
+                    async move { Ok(Response::TransactionIds(ids)) }.boxed()
+                }
+
                 Request::TransactionsById(ref ids) => {
                     trace!(?req, "got mempool request");
 
@@ -1281,7 +1288,9 @@ impl Service<Request> for Mempool {
 
                 let resp = match req {
                     // Return empty responses for queries.
-                    Request::TransactionIds => Response::TransactionIds(Default::default()),
+                    Request::TransactionIds | Request::TakePendingGossipTransactionIds { .. } => {
+                        Response::TransactionIds(Default::default())
+                    }
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),

@@ -21,6 +21,7 @@ use zebra_test::{args, prelude::*};
 use crate::common::{
     config::{default_test_config, persistent_test_config, testdir},
     launch::{spawn_zebrad_without_rpc, ZebradTestDirExt, LAUNCH_DELAY},
+    sync::TINY_CHECKPOINT_TIMEOUT,
     test_type::TestType::*,
 };
 
@@ -433,6 +434,7 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         testnet::{ConfiguredCheckpoints, RegtestParameters},
         Network,
     };
+    use zebra_chain::serialization::ZcashSerialize;
     use zebra_node_services::rpc_client::RpcRequestClient;
     use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 
@@ -450,23 +452,74 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     // Start Zebra and generate some blocks.
 
     tracing::info!("starting Zebra and generating some blocks");
-    let mut child = test_dir.spawn_child(args!["start"])?;
+    let mut child = test_dir
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(30));
     // Avoid dropping the test directory and cleanup of the state cache needed by the next zebrad instance.
     let test_dir = child.dir.take().expect("should have test directory");
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // Startup has its own 30-second bound; generation, backup observation and cleanup need longer.
+    let mut child = child.with_timeout(TINY_CHECKPOINT_TIMEOUT + LAUNCH_DELAY);
     let rpc_client = RpcRequestClient::new(rpc_address);
+    let genesis = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(block) = rpc_client.get_block(0).await.map_err(|err| eyre!(err))? {
+                return Ok::<_, color_eyre::Report>(block);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .wrap_err("timed out waiting for committed genesis body")??;
+    assert_eq!(genesis.hash(), network.genesis_hash());
     let generated_block_hashes = rpc_client.generate(50).await?;
-    // Wait for non-finalized backup task to make a second write to the backup cache
-    tokio::time::sleep(Duration::from_secs(6)).await;
+    let mut checkpointed_blocks = Vec::new();
+    for height in 1..=50 {
+        checkpointed_blocks.push(
+            rpc_client
+                .get_block(height)
+                .await
+                .map_err(|err| eyre!(err))?
+                .expect("generated block must exist at its height"),
+        );
+    }
+
+    // Wait for complete backup contents, not an assumed number of backup-task intervals.
+    let backup_dir = config
+        .state
+        .non_finalized_state_backup_dir(&network)
+        .expect("persistent state has non-finalized backups enabled");
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for block in &checkpointed_blocks {
+            // Backup filenames use the hash's display byte order, not its serialized bytes.
+            let path = backup_dir.join(block.hash().to_string());
+            let expected = block.zcash_serialize_to_vec()?;
+            loop {
+                match tokio::fs::read(&path).await {
+                    // Backup files prefix the serialized block with its deferred pool balance.
+                    Ok(bytes)
+                        if bytes.get(size_of::<zebra_chain::amount::Amount>()..)
+                            == Some(expected.as_slice()) =>
+                    {
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await
+    .wrap_err("timed out waiting for complete non-finalized block backups")??;
 
     child.kill(true)?;
     // Wait for zebrad to fully terminate to ensure database lock is released.
     child
         .wait_with_output()
         .wrap_err("failed to wait for zebrad to fully terminate")?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
     // Prepare checkpoint heights/hashes
     let last_hash = *generated_block_hashes
         .last()
@@ -485,8 +538,6 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let rpc_client = RpcRequestClient::new(rpc_address);
 
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
     let blockchain_info = rpc_client.blockchain_info().await?;
     tracing::info!(
         ?blockchain_info,
@@ -500,25 +551,15 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     );
 
     tracing::info!("checking that Zebra can commit blocks after restoring non-finalized state");
-    rpc_client
+    let new_block_hashes = rpc_client
         .generate(10)
         .await
         .expect("should successfully commit more blocks to the state");
-
-    tracing::info!("retrieving blocks to be used with configured checkpoints");
-    let checkpointed_blocks = {
-        let mut blocks = Vec::new();
-        for height in 1..=50 {
-            blocks.push(
-                rpc_client
-                    .get_block(height)
-                    .await
-                    .map_err(|err| eyre!(err))?
-                    .expect("should have block at height"),
-            )
-        }
-        blocks
-    };
+    assert_eq!(
+        rpc_client.blockchain_info().await?.best_block_hash(),
+        *new_block_hashes.last().expect("ten blocks were generated"),
+        "new blocks must extend the restored chain"
+    );
 
     tracing::info!(
         "restarting Zebra to check that non-finalized state is _not_ restored when \
@@ -529,7 +570,6 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     child
         .wait_with_output()
         .wrap_err("failed to wait for zebrad to fully terminate")?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
     // max checkpoint height and that it can still commit more blocks to its state
@@ -543,11 +583,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     config.state.ephemeral = false;
     let mut child = test_dir
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(TINY_CHECKPOINT_TIMEOUT + LAUNCH_DELAY);
     let test_dir = child.dir.take().expect("should have test directory");
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
     let rpc_client = RpcRequestClient::new(rpc_address);
 
     assert_eq!(
@@ -563,9 +602,19 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         .map(|block| rpc_client.submit_block(block))
         .collect();
 
-    while let Some(result) = submit_block_futs.next().await {
-        result?
-    }
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(result) = submit_block_futs.next().await {
+            result?;
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await
+    .wrap_err("timed out replaying checkpointed blocks")??;
+    assert_eq!(
+        rpc_client.blockchain_info().await?.best_block_hash(),
+        last_hash,
+        "replayed checkpointed blocks must reach the original chain tip"
+    );
 
     // Commit some blocks to check that Zebra's state will still commit blocks, and generate enough blocks
     // for Zebra's finalized tip to pass the max checkpoint height.
@@ -580,7 +629,6 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     child
         .wait_with_output()
         .wrap_err("failed to wait for zebrad process to exit after kill")?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.
@@ -595,9 +643,6 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let rpc_client = RpcRequestClient::new(rpc_address);
-
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
 
     tracing::info!("checking that Zebra commits blocks with empty non-finalized state");
     rpc_client

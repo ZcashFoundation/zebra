@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'The `ReadRequest::UsageInfo` response now uses a shared database-size estimate, refreshed at startup, by periodic metrics, and after secondary catch-up, instead of scanning every column family on each query. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:36:05.472765611+02:00

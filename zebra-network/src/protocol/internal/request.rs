@@ -205,10 +205,16 @@ pub enum Request {
     /// Returns [`Response::Nil`](super::Response::Nil).
     AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
 
-    /// Advertise a block to all ready peers. This is equivalent to
-    /// [`Request::AdvertiseBlock`] except that the peer set will route
-    /// this request to all available ready peers. Used by the gossip task
-    /// to broadcast mined blocks to all ready peers.
+    /// Advertise a committed block to all connected peers.
+    ///
+    /// This is equivalent to [`Request::AdvertiseBlock`] except that the peer set routes it to all
+    /// connected peers, including peers temporarily busy with other requests. It completes after
+    /// delivery.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil) if at least one peer received inventory,
+    /// or an error if no peer did.
     AdvertiseBlockToAll(block::Hash),
 
     /// Request the contents of this node's mempool.

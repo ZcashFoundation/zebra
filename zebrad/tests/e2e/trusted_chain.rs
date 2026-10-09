@@ -278,7 +278,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let indexer_listen_addr = config.rpc.indexer_listen_addr.unwrap();
     let test_dir = testdir()?.with_config(&mut config)?;
 
-    let _child = test_dir.spawn_child(args!["start"])?;
+    let _child = test_dir
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(200) + 2 * LAUNCH_DELAY);
 
     tracing::info!("waiting for Zebra state cache to be opened");
 

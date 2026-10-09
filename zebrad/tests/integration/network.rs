@@ -484,7 +484,8 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     let mut upstream = testdir()?
         .with_config(&mut upstream_config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(5 * 60) + LAUNCH_DELAY);
 
     let upstream_rpc_addr = read_listen_addr_from_logs(&mut upstream, OPENED_RPC_ENDPOINT_MSG)?;
 
@@ -505,7 +506,8 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     let mut internal = testdir()?
         .with_config(&mut internal_config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(5 * 60) + LAUNCH_DELAY);
 
     let internal_rpc_addr = read_listen_addr_from_logs(&mut internal, OPENED_RPC_ENDPOINT_MSG)?;
 

@@ -28,7 +28,8 @@ use zebra_test::args;
 
 use crate::common::{
     config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{ZebradTestDirExt, LAUNCH_DELAY, ZEBRAD_STARTUP_TIMEOUT},
+    sync::TINY_CHECKPOINT_TIMEOUT,
 };
 
 /// Number of blocks that should be submitted before the test is considered successful.
@@ -49,7 +50,8 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
     let mut zebrad = testdir()?
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(TINY_CHECKPOINT_TIMEOUT + ZEBRAD_STARTUP_TIMEOUT + 2 * LAUNCH_DELAY);
 
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 

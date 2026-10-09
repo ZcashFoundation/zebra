@@ -94,7 +94,7 @@
 //! [ZIP-201]: https://zips.z.cash/zip-0201
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     convert,
     fmt::Debug,
     marker::PhantomData,
@@ -236,12 +236,17 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
-    /// Stores requests that should be routed to peers once they are ready.
-    queued_broadcast_all: Option<(
+    /// Queued all-peer broadcasts, bounded by admission backpressure in `poll_ready`.
+    queued_broadcast_all: VecDeque<(
         Request,
         tokio::sync::mpsc::Sender<ResponseFuture>,
         HashSet<D::Key>,
     )>,
+
+    /// Last successfully completed block inventory send for each peer.
+    ///
+    /// Per-peer cells let completion futures update delivery state without retaining the peer set.
+    completed_block_adverts: HashMap<D::Key, watch::Sender<Option<zebra_chain::block::Hash>>>,
 
     /// Inbound peer IPs that must always receive block inventory broadcasts.
     block_gossip_peer_ips: HashSet<IpAddr>,
@@ -387,7 +392,8 @@ where
             ready_services: HashMap::new(),
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
-            queued_broadcast_all: None,
+            queued_broadcast_all: VecDeque::new(),
+            completed_block_adverts: HashMap::new(),
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
             zcashd_compat_peer_keys: HashSet::new(),
             queued_sidecar_broadcast: None,
@@ -1210,23 +1216,56 @@ where
         req: Request,
         peers: Vec<D::Key>,
     ) -> <Self as tower::Service<Request>>::Future {
-        let futs = FuturesUnordered::new();
+        let block_advert = match &req {
+            Request::AdvertiseBlock(hash, _) | Request::AdvertiseBlockToAll(hash) => Some(*hash),
+            _ => None,
+        };
+        let require_delivery = matches!(&req, Request::AdvertiseBlockToAll(_));
+        let ready = &self.ready_services;
+        let unready = &self.cancel_handles;
+        self.completed_block_adverts
+            .retain(|key, _| ready.contains_key(key) || unready.contains_key(key));
+        let mut futs = FuturesUnordered::new();
+        let mut already_delivered = false;
         for key in peers {
+            let completed = block_advert.map(|_| {
+                self.completed_block_adverts
+                    .entry(key)
+                    .or_insert_with(|| watch::channel(None).0)
+                    .clone()
+            });
+            if let (Some(hash), Some(completed)) = (block_advert, &completed) {
+                if *completed.borrow() == Some(hash) {
+                    already_delivered = true;
+                    continue;
+                }
+            }
             let mut svc = self
                 .take_ready_service(&key)
                 .expect("selected peers are ready");
-            futs.push(svc.call(req.clone()).map_err(|_| ()));
+            let response = svc.call(req.clone());
+            futs.push(async move {
+                let result = response.await;
+                if result.is_ok() {
+                    if let (Some(hash), Some(completed)) = (block_advert, completed) {
+                        let _ = completed.send_replace(Some(hash));
+                    }
+                }
+                result
+            });
             self.push_unready(key, svc);
         }
 
         async move {
-            let results = futs.collect::<Vec<Result<_, _>>>().await;
-            tracing::debug!(
-                ok.len = results.iter().filter(|r| r.is_ok()).count(),
-                err.len = results.iter().filter(|r| r.is_err()).count(),
-                "sent peer request to multiple peers"
-            );
-            Ok(Response::Nil)
+            let mut succeeded = already_delivered;
+            while let Some(result) = futs.next().await {
+                succeeded |= result.is_ok();
+            }
+            if require_delivery && !succeeded {
+                Err(std::io::Error::other("block broadcast reached no peers").into())
+            } else {
+                Ok(Response::Nil)
+            }
         }
         .boxed()
     }
@@ -1287,16 +1326,10 @@ where
         for key in ready_sidecars {
             remaining_sidecars.remove(&key);
 
-            let mut svc = self
-                .take_ready_service(&key)
-                .expect("sidecars are ready because they were filtered from ready_services above");
-            let req_fut = svc.call(req.clone());
-            self.push_unready(key, svc);
-
             // Detach the response future: the connection cancels requests whose
             // response channel is dropped, and there is no caller left to drive
             // this delivery.
-            tokio::spawn(req_fut.map(|_| ()));
+            tokio::spawn(self.send_multiple(req.clone(), vec![key]).map(|_| ()));
         }
 
         // Drop sidecars that disconnected while the request was queued.
@@ -1310,73 +1343,76 @@ where
         }
     }
 
-    /// Broadcasts the same request to all ready peers, ignoring return values.
+    /// Broadcasts to all connected peers, including peers temporarily busy with other requests.
     fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Snapshot busy peers before sending: sending moves ready peers into the busy set.
+        let queued = self.queue_broadcast_all_unready(&req);
         let ready_peers = self.ready_services.keys().copied().collect();
-        let send_multiple_fut = self.send_multiple(req.clone(), ready_peers);
-        let Some(mut queued_broadcast_fut_receiver) = self.queue_broadcast_all_unready(&req) else {
-            return send_multiple_fut;
-        };
-
+        let immediate = self.send_multiple(req, ready_peers);
         async move {
-            let _ = send_multiple_fut.await?;
-            while queued_broadcast_fut_receiver.recv().await.is_some() {}
-            Ok(Response::Nil)
+            let mut succeeded = immediate.await.is_ok();
+            if let Some(mut queued) = queued {
+                while let Some(send) = queued.recv().await {
+                    // Keep response receivers alive until the connection actually sends the INV.
+                    succeeded |= send.await.is_ok();
+                }
+            }
+            if succeeded {
+                Ok(Response::Nil)
+            } else {
+                Err(std::io::Error::other("block broadcast reached no peers").into())
+            }
         }
         .boxed()
     }
 
-    /// If there are unready peers, queues a request to be broadcasted to them and
-    /// returns a channel receiver for callers to await the broadcast_all() futures, or
-    /// returns None if there are no unready peers.
+    /// Queues one bounded snapshot of currently busy connected peers.
     fn queue_broadcast_all_unready(
         &mut self,
         req: &Request,
     ) -> Option<tokio::sync::mpsc::Receiver<ResponseFuture>> {
-        if !self.cancel_handles.is_empty() {
-            /// How many broadcast all futures to send to the channel until the peer set should wait for the channel consumer
-            /// to read a message before continuing to send the queued broadcast request to peers that were originally unready.
-            const QUEUED_BROADCAST_FUTS_CHANNEL_SIZE: usize = 3;
-
-            let (sender, receiver) = tokio::sync::mpsc::channel(QUEUED_BROADCAST_FUTS_CHANNEL_SIZE);
-            let unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
-            let queued = (req.clone(), sender, unready_peers);
-
-            // Drop the existing queued broadcast all request, if any.
-            self.queued_broadcast_all = Some(queued);
-
-            Some(receiver)
-        } else {
-            None
+        if self.cancel_handles.is_empty() {
+            return None;
         }
+        let peers: HashSet<_> = self.cancel_handles.keys().copied().collect();
+        // Each delivery wave removes at least one original peer, so this capacity cannot fill.
+        let (sender, receiver) = tokio::sync::mpsc::channel(peers.len());
+        self.queued_broadcast_all
+            .push_back((req.clone(), sender, peers));
+        Some(receiver)
     }
 
-    /// Broadcasts the same requests to all ready peers which were unready when
-    /// [`PeerSet::broadcast_all()`] was last called, ignoring return values.
+    /// Delivers queued broadcasts when their original peers become ready.
     fn broadcast_all_queued(&mut self) {
-        let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all.take() else {
-            return;
-        };
-
-        let bans = self.bans_receiver.borrow().clone();
-        remaining_peers.retain(|addr| !bans.is_banned(addr.ip()));
-
-        let Ok(reserved_send_slot) = sender.try_reserve() else {
-            self.queued_broadcast_all = Some((req, sender, remaining_peers));
-            return;
-        };
-
-        let peers: Vec<_> = self
-            .ready_services
-            .keys()
-            .filter(|ready_peer| remaining_peers.remove(ready_peer))
-            .copied()
-            .collect();
-
-        reserved_send_slot.send(self.send_multiple(req.clone(), peers).boxed());
-
-        if !remaining_peers.is_empty() {
-            self.queued_broadcast_all = Some((req, sender, remaining_peers));
+        let mut queued = std::mem::take(&mut self.queued_broadcast_all);
+        while let Some((req, sender, mut remaining)) = queued.pop_front() {
+            if sender.is_closed() {
+                continue;
+            }
+            let bans = self.bans_receiver.borrow();
+            remaining.retain(|key| {
+                !bans.is_banned(key.ip())
+                    && (self.ready_services.contains_key(key)
+                        || self.cancel_handles.contains_key(key))
+            });
+            drop(bans);
+            let peers: Vec<_> = remaining
+                .iter()
+                .filter(|key| self.ready_services.contains_key(*key))
+                .copied()
+                .collect();
+            for peer in &peers {
+                remaining.remove(peer);
+            }
+            if !peers.is_empty() {
+                let send = self.send_multiple(req.clone(), peers);
+                // Receiver cancellation just cancels this caller's pending delivery.
+                let _ = sender.try_send(send);
+            }
+            if !remaining.is_empty() {
+                self.queued_broadcast_all
+                    .push_back((req, sender, remaining));
+            }
         }
     }
 
@@ -1549,6 +1585,15 @@ where
 
         let ready_peers = self.poll_peers(cx)?;
 
+        // Bound pending inventory bookkeeping without replacing an undelivered mined INV.
+        const MAX_PENDING_ALL_PEER_BROADCASTS: usize = 32;
+        self.prune_disconnected_sidecar_keys();
+        self.broadcast_all_queued();
+        self.send_queued_sidecar_broadcast();
+        if self.queued_broadcast_all.len() >= MAX_PENDING_ALL_PEER_BROADCASTS {
+            return Poll::Pending;
+        }
+
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
         self.update_metrics();
@@ -1576,10 +1621,6 @@ where
             //   update task exits.
             return Poll::Pending;
         }
-
-        self.prune_disconnected_sidecar_keys();
-        self.broadcast_all_queued();
-        self.send_queued_sidecar_broadcast();
 
         if self.ready_services.is_empty() {
             self.poll_peers(cx)

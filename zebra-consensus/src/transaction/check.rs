@@ -27,6 +27,9 @@ use zebra_chain::{
 
 use crate::error::TransactionError;
 
+#[cfg(test)]
+mod tests;
+
 /// Checks if the transaction's lock time allows this transaction to be included in a block.
 ///
 /// Arguments:
@@ -382,32 +385,42 @@ pub fn disabled_add_to_sprout_pool(
 pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
     use crate::error::TransactionError::*;
 
-    // All the nullifier accessors yield owned values, so they are wrapped as `Cow::Owned`.
-    // Ironwood and Orchard nullifiers are disjoint.
-    let transparent_outpoints: Vec<_> = transaction.spent_outpoints().collect();
-    let sprout_nullifiers: Vec<_> = transaction.sprout_nullifiers().collect();
-    let sapling_nullifiers: Vec<_> = transaction.sapling_nullifiers().collect();
-    let orchard_nullifiers: Vec<_> = transaction.orchard_nullifiers().collect();
-    let ironwood_nullifiers: Vec<_> = transaction.ironwood_nullifiers().collect();
-
+    // Borrow native outpoints and byte nullifiers; convert only the reported conflict.
+    // Orchard/Ironwood field nullifiers need their canonical byte representation.
     check_for_duplicates(
-        transparent_outpoints.into_iter().map(Cow::Owned),
-        DuplicateTransparentSpend,
+        transaction
+            .transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| &bundle.vin)
+            .map(|input| input.prevout())
+            .filter(|outpoint| **outpoint != zcash_transparent::bundle::OutPoint::NULL)
+            .map(Cow::Borrowed),
+        |outpoint| {
+            DuplicateTransparentSpend(transparent::OutPoint {
+                hash: zebra_chain::transaction::Hash(*outpoint.hash()),
+                index: outpoint.n(),
+            })
+        },
     )?;
     check_for_duplicates(
-        sprout_nullifiers.into_iter().map(Cow::Owned),
-        DuplicateSproutNullifier,
+        transaction
+            .sprout_joinsplit_descriptions()
+            .flat_map(|joinsplit| joinsplit.nullifiers())
+            .map(Cow::Borrowed),
+        |nullifier| DuplicateSproutNullifier(nullifier.into()),
     )?;
     check_for_duplicates(
-        sapling_nullifiers.into_iter().map(Cow::Owned),
-        DuplicateSaplingNullifier,
+        transaction
+            .sapling_spends()
+            .map(|spend| Cow::Borrowed(&spend.nullifier().0)),
+        |nullifier| DuplicateSaplingNullifier(nullifier.into()),
     )?;
     check_for_duplicates(
-        orchard_nullifiers.into_iter().map(Cow::Owned),
+        transaction.orchard_nullifiers().map(Cow::Owned),
         DuplicateOrchardNullifier,
     )?;
     check_for_duplicates(
-        ironwood_nullifiers.into_iter().map(Cow::Owned),
+        transaction.ironwood_nullifiers().map(Cow::Owned),
         DuplicateIronwoodNullifier,
     )?;
 
@@ -427,14 +440,38 @@ fn check_for_duplicates<'t, T>(
 where
     T: Clone + Eq + Hash + 't,
 {
-    let mut hash_set = HashSet::new();
+    let mut items = items.into_iter();
+    // Most spend groups have at most four items: compare those on the stack.
+    let mut small: [Option<Cow<'t, T>>; 4] = [None, None, None, None];
+    let mut small_len = 0;
 
-    for item in items {
-        if let Some(duplicate) = hash_set.replace(item) {
-            return Err(error_wrapper(duplicate.into_owned()));
+    while let Some(item) = items.next() {
+        for previous in small[..small_len].iter().flatten() {
+            if previous == &item {
+                return Err(error_wrapper(previous.clone().into_owned()));
+            }
         }
-    }
+        if small_len < small.len() {
+            small[small_len] = Some(item);
+            small_len += 1;
+            continue;
+        }
 
+        // Bound preallocation so an early conflict cannot allocate for every later input.
+        let capacity = small
+            .len()
+            .saturating_add(1)
+            .saturating_add(items.size_hint().1.unwrap_or(0))
+            .min(1_024);
+        let mut hash_set = HashSet::with_capacity(capacity);
+        hash_set.extend(small.into_iter().flatten());
+        for item in std::iter::once(item).chain(items) {
+            if let Some(duplicate) = hash_set.replace(item) {
+                return Err(error_wrapper(duplicate.into_owned()));
+            }
+        }
+        return Ok(());
+    }
     Ok(())
 }
 

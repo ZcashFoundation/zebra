@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Advertise committed mined blocks without the fixed seven-second delay. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.773501334+02:00

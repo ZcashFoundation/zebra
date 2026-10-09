@@ -253,6 +253,11 @@ impl Storage {
         }
     }
 
+    /// Drains at most `limit` accepted transaction IDs waiting for peer gossip.
+    pub(crate) fn take_pending_gossip(&mut self, limit: usize) -> HashSet<UnminedTxId> {
+        self.verified.take_pending_gossip(limit)
+    }
+
     /// Check and reject non-standard transaction.
     ///
     /// Zcashd defines non-consensus standard transaction checks in

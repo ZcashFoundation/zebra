@@ -55,6 +55,12 @@ pub struct VerifiedSet {
     /// The total cost of the verified transactions in the set.
     total_cost: u64,
 
+    /// Incrementally maintained fee-weight metric buckets.
+    metric_totals: MetricTotals,
+
+    /// Accepted IDs awaiting gossip, bounded by the live verified transaction set.
+    pending_gossip: HashSet<UnminedTxId>,
+
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
 
@@ -75,6 +81,68 @@ pub struct VerifiedSet {
     pub(super) eviction_victim: Option<transaction::Hash>,
 }
 
+/// Mutations update these totals once per transaction, not once per mempool scan.
+#[derive(Default, Debug, Eq, PartialEq)]
+struct MetricTotals {
+    unpaid_actions: [u64; 5],
+    paid_actions: u64,
+    weighted_sizes: [usize; 5],
+}
+
+impl MetricTotals {
+    fn buckets(tx: &VerifiedUnminedTx) -> (usize, Option<usize>) {
+        let weight = tx.fee_weight_ratio;
+        let size = if weight > 3.0 {
+            4
+        } else if weight > 2.0 {
+            3
+        } else if weight > 1.0 {
+            2
+        } else if weight == 1.0 {
+            1
+        } else {
+            0
+        };
+        let unpaid = if size == 0 {
+            Some(if weight < 0.2 {
+                0
+            } else if weight < 0.4 {
+                1
+            } else if weight < 0.6 {
+                2
+            } else if weight < 0.8 {
+                3
+            } else {
+                4
+            })
+        } else {
+            None
+        };
+        (size, unpaid)
+    }
+
+    fn insert(&mut self, tx: &VerifiedUnminedTx) {
+        let (size, unpaid) = Self::buckets(tx);
+        self.weighted_sizes[size] += tx.transaction.size;
+        self.paid_actions += u64::from(tx.conventional_actions - tx.unpaid_actions);
+        if let Some(unpaid) = unpaid {
+            self.unpaid_actions[unpaid] += u64::from(tx.unpaid_actions);
+        }
+    }
+
+    fn remove(&mut self, tx: &VerifiedUnminedTx) {
+        let (size, unpaid) = Self::buckets(tx);
+        self.weighted_sizes[size] -= tx.transaction.size;
+        self.paid_actions -= u64::from(tx.conventional_actions - tx.unpaid_actions);
+        if let Some(unpaid) = unpaid {
+            self.unpaid_actions[unpaid] -= u64::from(tx.unpaid_actions);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
 impl Drop for VerifiedSet {
     fn drop(&mut self) {
         // zero the metrics on drop
@@ -86,6 +154,18 @@ impl VerifiedSet {
     /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the set.
     pub fn transactions(&self) -> &HashMap<transaction::Hash, VerifiedUnminedTx> {
         &self.transactions
+    }
+
+    /// Drains at most `limit` live transaction IDs waiting for gossip.
+    pub fn take_pending_gossip(&mut self, limit: usize) -> HashSet<UnminedTxId> {
+        if self.pending_gossip.len() <= limit {
+            return std::mem::take(&mut self.pending_gossip);
+        }
+        let ids: HashSet<_> = self.pending_gossip.iter().copied().take(limit).collect();
+        for id in &ids {
+            self.pending_gossip.remove(id);
+        }
+        ids
     }
 
     /// Returns a reference to the [`TransactionDependencies`] in the set.
@@ -144,6 +224,8 @@ impl VerifiedSet {
         self.created_outputs.clear();
         self.transactions_serialized_size = 0;
         self.total_cost = 0;
+        self.metric_totals = MetricTotals::default();
+        self.pending_gossip.clear();
         self.update_metrics();
     }
 
@@ -192,6 +274,14 @@ impl VerifiedSet {
         self.orchard_nullifiers.extend(tx.orchard_nullifiers());
         self.ironwood_nullifiers.extend(tx.ironwood_nullifiers());
 
+        if let Some(previous) = self.transactions.get(&tx_id) {
+            self.transactions_serialized_size -= previous.transaction.size;
+            self.total_cost -= previous.cost();
+            self.metric_totals.remove(previous);
+            self.pending_gossip.remove(&previous.transaction.id);
+        }
+        self.metric_totals.insert(&transaction);
+        self.pending_gossip.insert(transaction.transaction.id);
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
         transaction.time = Some(chrono::Utc::now());
@@ -311,6 +401,8 @@ impl VerifiedSet {
 
                 self.transactions_serialized_size -= removed_tx.transaction.size;
                 self.total_cost -= removed_tx.cost();
+                self.metric_totals.remove(&removed_tx);
+                self.pending_gossip.remove(&removed_tx.transaction.id);
                 self.remove_outputs(&removed_tx.transaction);
 
                 Some(removed_tx)
@@ -397,55 +489,12 @@ impl VerifiedSet {
         }
     }
 
-    fn update_metrics(&mut self) {
-        // Track the sum of unpaid actions within each transaction (as they are subject to the
-        // unpaid action limit). Transactions that have weight >= 1 have no unpaid actions by
-        // definition.
-        let mut unpaid_actions_with_weight_lt20pct = 0;
-        let mut unpaid_actions_with_weight_lt40pct = 0;
-        let mut unpaid_actions_with_weight_lt60pct = 0;
-        let mut unpaid_actions_with_weight_lt80pct = 0;
-        let mut unpaid_actions_with_weight_lt1 = 0;
-
-        // Track the total number of paid actions across all transactions in the mempool. This
-        // added to the bucketed unpaid actions above is equal to the total number of conventional
-        // actions in the mempool.
-        let mut paid_actions = 0;
-
-        // Track the sum of transaction sizes (the metric by which they are mainly limited) across
-        // several buckets.
-        let mut size_with_weight_lt1 = 0;
-        let mut size_with_weight_eq1 = 0;
-        let mut size_with_weight_gt1 = 0;
-        let mut size_with_weight_gt2 = 0;
-        let mut size_with_weight_gt3 = 0;
-
-        for entry in self.transactions().values() {
-            paid_actions += entry.conventional_actions - entry.unpaid_actions;
-
-            if entry.fee_weight_ratio > 3.0 {
-                size_with_weight_gt3 += entry.transaction.size;
-            } else if entry.fee_weight_ratio > 2.0 {
-                size_with_weight_gt2 += entry.transaction.size;
-            } else if entry.fee_weight_ratio > 1.0 {
-                size_with_weight_gt1 += entry.transaction.size;
-            } else if entry.fee_weight_ratio == 1.0 {
-                size_with_weight_eq1 += entry.transaction.size;
-            } else {
-                size_with_weight_lt1 += entry.transaction.size;
-                if entry.fee_weight_ratio < 0.2 {
-                    unpaid_actions_with_weight_lt20pct += entry.unpaid_actions;
-                } else if entry.fee_weight_ratio < 0.4 {
-                    unpaid_actions_with_weight_lt40pct += entry.unpaid_actions;
-                } else if entry.fee_weight_ratio < 0.6 {
-                    unpaid_actions_with_weight_lt60pct += entry.unpaid_actions;
-                } else if entry.fee_weight_ratio < 0.8 {
-                    unpaid_actions_with_weight_lt80pct += entry.unpaid_actions;
-                } else {
-                    unpaid_actions_with_weight_lt1 += entry.unpaid_actions;
-                }
-            }
-        }
+    fn update_metrics(&self) {
+        let [unpaid_actions_with_weight_lt20pct, unpaid_actions_with_weight_lt40pct, unpaid_actions_with_weight_lt60pct, unpaid_actions_with_weight_lt80pct, unpaid_actions_with_weight_lt1] =
+            self.metric_totals.unpaid_actions;
+        let paid_actions = self.metric_totals.paid_actions;
+        let [size_with_weight_lt1, size_with_weight_eq1, size_with_weight_gt1, size_with_weight_gt2, size_with_weight_gt3] =
+            self.metric_totals.weighted_sizes;
 
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",

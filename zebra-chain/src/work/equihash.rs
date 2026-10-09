@@ -6,7 +6,7 @@ use hex::{FromHex, FromHexError, ToHex};
 use serde_big_array::BigArray;
 
 use crate::{
-    block::Header,
+    block::{Header, ZCASH_BLOCK_VERSION},
     parameters::Network,
     serialization::{
         zcash_deserialize_bytes_external_count, zcash_serialize_bytes, CompactSizeMessage,
@@ -68,26 +68,46 @@ impl Solution {
         }
     }
 
-    /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
+    /// Serializes just the header fields committed to by Equihash, excluding nonce and solution.
+    ///
+    /// Keep the field order and encodings identical to `Header::zcash_serialize`.
+    pub(super) fn input(header: &Header) -> [u8; Self::INPUT_LENGTH] {
+        // Preserve the serializer's invariants for headers constructed in memory.
+        assert!(
+            (ZCASH_BLOCK_VERSION..0x8000_0000).contains(&header.version),
+            "deserialized and generated block versions are at least 4 with the high bit unset"
+        );
+        let time: u32 = header
+            .time
+            .timestamp()
+            .try_into()
+            .expect("deserialized and generated timestamps are u32 values");
+
+        let mut input = [0; Self::INPUT_LENGTH];
+        input[..4].copy_from_slice(&header.version.to_le_bytes());
+        input[4..36].copy_from_slice(&header.previous_block_hash.0);
+        input[36..68].copy_from_slice(&header.merkle_root.0);
+        input[68..100].copy_from_slice(header.commitment_bytes.as_ref());
+        input[100..104].copy_from_slice(&time.to_le_bytes());
+        input[104..].copy_from_slice(&header.difficulty_threshold.0.to_le_bytes());
+        input
+    }
+
+    /// Verifies the production Equihash (200, 9) proof for `header`.
+    ///
+    /// Regtest's short proofs are not accepted by this network-independent verifier.
     #[allow(clippy::unwrap_in_result)]
     pub fn check(&self, header: &Header) -> Result<(), Error> {
-        // TODO:
-        // - Add Equihash parameters field to `testnet::Parameters`
-        // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters - rename to `Other`
-        let n = 200;
-        let k = 9;
-        let nonce = &header.nonce;
+        self.check_with_input(header, &Self::input(header))
+    }
 
-        let mut input = Vec::new();
-        header
-            .zcash_serialize(&mut input)
-            .expect("serialization into a vec can't fail");
-
-        // The part of the header before the nonce and solution.
-        // This data is kept constant during solver runs, so the verifier API takes it separately.
-        let input = &input[0..Solution::INPUT_LENGTH];
-
-        equihash::is_valid_solution(n, k, input, nonce.as_ref(), self.value())?;
+    /// Checks a solution using a prefix already serialized for this header.
+    fn check_with_input(
+        &self,
+        header: &Header,
+        input: &[u8; Self::INPUT_LENGTH],
+    ) -> Result<(), Error> {
+        equihash::is_valid_solution(200, 9, input, header.nonce.as_ref(), self.value())?;
 
         Ok(())
     }
@@ -165,20 +185,15 @@ impl Solution {
     {
         use crate::shutdown::is_shutting_down;
 
-        let mut input = Vec::new();
-        header
-            .zcash_serialize(&mut input)
-            .expect("serialization into a vec can't fail");
-        // Take the part of the header before the nonce and solution.
-        // This data is kept constant for this solver run.
-        let input = &input[0..Solution::INPUT_LENGTH];
+        // This prefix stays constant for the entire solver run.
+        let input = Self::input(&header);
 
         while !is_shutting_down() {
             // Don't run the solver if we'd just cancel it anyway.
             cancel_fn()?;
 
             let mut cancelled = false;
-            let solutions = equihash::tromp::solve_200_9(input, || {
+            let solutions = equihash::tromp::solve_200_9(&input, || {
                 if is_shutting_down() || cancel_fn().is_err() {
                     cancelled = true;
                     return None;
@@ -204,7 +219,7 @@ impl Solution {
                     .expect("unexpected invalid solution: incorrect length");
 
                 // TODO: work out why we sometimes get invalid solutions here
-                if let Err(error) = header.solution.check(&header) {
+                if let Err(error) = header.solution.check_with_input(&header, &input) {
                     info!(?error, "found invalid solution for header");
                     continue;
                 }

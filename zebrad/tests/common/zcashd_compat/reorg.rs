@@ -14,7 +14,7 @@ use super::{
     setup_zcashd_compat, ZcashdRpcClient, TEST_ZCASHD_COMPAT_REORG_ITERATIONS,
     TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG,
 };
-use crate::common::regtest::MiningRpcMethods;
+use crate::common::{launch::LAUNCH_DELAY, regtest::MiningRpcMethods};
 
 const DEFAULT_REORG_CHURN_ITERATIONS: u32 = 30;
 const CHAIN_HEIGHT_DEEP: u32 = 295;
@@ -381,12 +381,17 @@ pub async fn reorg_context_zebra_tip_behind_recovers() -> Result<()> {
 
 /// Repeatedly forces small reorgs and occasional mid-sync depth-1 churn.
 pub async fn churn() -> Result<()> {
-    let Some(setup) = setup_zcashd_compat().await? else {
+    let Some(mut setup) = setup_zcashd_compat().await? else {
         return Ok(());
     };
 
     if !setup.can_mutate() {
         return setup.teardown();
+    }
+
+    // The soak profile allows four hours of churn, beyond the normal integration lifetime.
+    if let Some(zebrad) = setup.managed.take() {
+        setup.managed = Some(zebrad.with_timeout(Duration::from_secs(4 * 60 * 60) + LAUNCH_DELAY));
     }
 
     setup.zebra_client.generate(12).await?;

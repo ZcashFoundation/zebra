@@ -36,6 +36,8 @@ use crate::common::{
 /// metrics or tracing test failures in Windows CI.
 pub const LAUNCH_DELAY: Duration = Duration::from_secs(20);
 
+/// Bounds startup log checks even when a node is silent or startup logging is disabled.
+pub const ZEBRAD_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 /// After we launch `lightwalletd`, wait this long for the command to start up,
 /// take the actions expected by the quick tests, and log the expected logs.
 ///
@@ -77,6 +79,10 @@ where
     /// child process.
     ///
     /// If there is a config in the test directory, pass it to `zebrad`.
+    ///
+    /// The default deadline covers startup and short tests. Longer tests must set an overall
+    /// lifetime with [`TestChild::with_timeout`], including observation and output cleanup.
+    /// Endpoint discovery still has its own [`ZEBRAD_STARTUP_TIMEOUT`] bound.
     fn spawn_child(self, args: Arguments) -> Result<TestChild<Self>>;
 
     /// Create a config file and use it for all subsequently spawned `zebrad` processes.
@@ -140,7 +146,9 @@ where
 
         args.merge_with(extra_args);
 
-        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
+        Ok(self
+            .spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)?
+            .with_timeout(ZEBRAD_STARTUP_TIMEOUT))
     }
 
     fn with_config(self, config: &mut ZebradConfig) -> Result<Self> {

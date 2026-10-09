@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: Added
+body: Allow bounded recovery of verified transaction announcements with `mempool::Request::TakePendingGossipTransactionIds { limit }`. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-09T15:25:19.489718928+02:00

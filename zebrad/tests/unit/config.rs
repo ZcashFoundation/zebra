@@ -18,13 +18,42 @@ use zebrad::config::ZebradConfig;
 use crate::common::{
     check::{EphemeralCheck, EphemeralConfig},
     config::{
-        config_file_full_path, configs_dir, default_test_config, persistent_test_config,
-        random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
+        config_file_full_path, configs_dir, default_test_config, os_assigned_rpc_port_config,
+        persistent_test_config, random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
     },
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
     sync::TINY_CHECKPOINT_TIMEOUT,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
+
+/// Suppressed startup logs must fail promptly without changing the caller's overall deadline.
+#[test]
+fn suppressed_startup_logs_fail_boundedly() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let network = zebra_chain::parameters::Network::new_regtest(Default::default());
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.tracing.filter = Some("warn".to_string());
+    let timeout = Duration::from_secs(2);
+    let mut child = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(timeout);
+    let deadline = child.deadline;
+    let started = Instant::now();
+
+    let result = read_listen_addr_from_logs(&mut child, zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG);
+    assert!(
+        result.is_err(),
+        "suppressed startup logs cannot reveal port 0"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(child.deadline, deadline);
+    assert_eq!(child.timeout, Some(timeout));
+    child = child.with_timeout(Duration::from_secs(2));
+    child.kill(true)?;
+    child.wait_with_output()?.assert_was_killed()?;
+    Ok(())
+}
 
 #[test]
 fn ephemeral_existing_directory() -> Result<()> {

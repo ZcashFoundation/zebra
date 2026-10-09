@@ -38,6 +38,15 @@ pub enum Request {
     /// Query all [`UnminedTxId`]s in the mempool.
     TransactionIds,
 
+    /// Drain accepted, still-live transaction IDs waiting for peer gossip.
+    ///
+    /// Notifications are only wakeups: this set survives subscriber lag. The response uses
+    /// [`Response::TransactionIds`] and is capped at the network inventory limit.
+    TakePendingGossipTransactionIds {
+        /// Maximum number of IDs to drain; zero leaves pending IDs unchanged.
+        limit: usize,
+    },
+
     /// Query matching [`UnminedTx`] in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
     TransactionsById(HashSet<UnminedTxId>),

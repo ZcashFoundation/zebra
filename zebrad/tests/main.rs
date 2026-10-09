@@ -41,6 +41,10 @@
 //! cargo nextest run --profile ci-stateful --run-ignored=all -E 'test(=stateful::sync::sync_update_mainnet)'
 //! cargo nextest run --profile ci-e2e --run-ignored=all -E 'test(=e2e::sync::sync_full_mainnet)'
 //! ```
+//!
+//! Endpoint-discovery tests use OS-assigned ports and require INFO startup logs. Run them
+//! without `max_level_warn` or `release_max_level_warn`, which remove those logs at compile time.
+//! Missing startup output is bounded by the test child's deadline instead of hanging the suite.
 
 #![allow(clippy::unwrap_in_result)]
 

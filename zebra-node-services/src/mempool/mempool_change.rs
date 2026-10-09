@@ -34,6 +34,10 @@ pub enum MempoolChangeKind {
 }
 
 /// Represents a change in the mempool's verified set of transactions
+///
+/// Notifications are not atomic with chain commits. An [`Added`](MempoolChangeKind::Added)
+/// transaction can be mined or invalidated by a concurrent tip change before delivery.
+/// Consumers needing current validity must verify against the chain state they use.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MempoolChange {
     /// The kind of change that occurred in the mempool.

@@ -1,119 +1,106 @@
-//! A task that gossips any [`zebra_chain::transaction::UnminedTxId`] that enters the mempool to peers.
-//!
-//! This module is just a function [`gossip_mempool_transaction_id`] that waits for mempool
-//! insertion events received in a channel and broadcasts the transactions to peers.
+//! Gossip accepted transaction IDs, treating the change channel as a wakeup rather than storage.
+
+use std::time::Duration;
 
 use tokio::sync::broadcast::{
     self,
     error::{RecvError, TryRecvError},
 };
-use tower::{timeout::Timeout, Service, ServiceExt};
-
-use zebra_network::MAX_TX_INV_IN_SENT_MESSAGE;
+use tower::{Service, ServiceExt};
 
 use zebra_network as zn;
-use zebra_node_services::mempool::MempoolChange;
+use zebra_node_services::mempool::{MempoolChange, Request, Response};
 
-use crate::{
-    components::sync::{PEER_GOSSIP_DELAY, TIPS_RESPONSE_TIMEOUT},
-    BoxError,
-};
+use crate::{components::sync::TIPS_RESPONSE_TIMEOUT, BoxError};
 
-/// The maximum number of channel messages we will combine into a single peer broadcast.
+/// Maximum number of change notifications consumed between bounded pending-set drains.
 pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
 
-/// Runs continuously, gossiping new [`UnminedTxId`](zebra_chain::transaction::UnminedTxId) to peers.
+/// Minimum interval between transaction inventory batches, independent of block gossip.
+pub const TRANSACTION_GOSSIP_DELAY: Duration = Duration::from_secs(2);
+
+/// Gossips still-live accepted IDs from the mempool's bounded pending set.
 ///
-/// Broadcasts any new [`UnminedTxId`](zebra_chain::transaction::UnminedTxId)s that
-/// are stored in the mempool to multiple ready peers.
-pub async fn gossip_mempool_transaction_id<ZN>(
+/// Lagged notifications cannot lose IDs. Full batches are drained without another wakeup,
+/// and a failed network send retains its batch for retry.
+pub async fn gossip_mempool_transaction_id<ZN, ZM>(
     mut receiver: broadcast::Receiver<MempoolChange>,
     broadcast_network: ZN,
+    mempool: ZM,
 ) -> Result<(), BoxError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
+    ZM: Service<Request, Response = Response, Error = BoxError> + Send + Clone + 'static,
+    ZM::Future: Send,
 {
-    let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE
-        .try_into()
-        .expect("constant fits in usize");
-
-    info!("initializing transaction gossip task");
-
-    // use the same timeout as tips requests,
-    // so broadcasts don't delay the syncer too long
-    let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
+    let limit = usize::try_from(zn::MAX_TX_INV_IN_SENT_MESSAGE)
+        .expect("the network transaction inventory limit fits in usize");
+    // Drain at startup as well: there may have been no subscriber when IDs were accepted.
+    let mut drain_without_wakeup = true;
 
     loop {
-        let mut combined_changes = 1;
-
-        // once we get new data in the channel, broadcast to peers
-        //
-        // the mempool automatically combines some transaction IDs that arrive close together,
-        // and this task also combines the changes that are in the channel before sending
-        let mut txs = loop {
-            match receiver.recv().await {
-                Ok(mempool_change) if mempool_change.is_added() => {
-                    break mempool_change.into_tx_ids()
+        if !drain_without_wakeup {
+            loop {
+                match receiver.recv().await {
+                    Ok(change) if change.is_added() => break,
+                    Ok(_) => continue,
+                    Err(RecvError::Lagged(count)) => {
+                        metrics::counter!("mempool.gossip.lagged.events.total").increment(count);
+                        break;
+                    }
+                    Err(closed @ RecvError::Closed) => return Err(closed.into()),
                 }
-                Ok(_) => {
-                    // ignore other changes, we only want to gossip added transactions
-                    continue;
-                }
-                Err(RecvError::Lagged(skip_count)) => info!(
-                    ?skip_count,
-                    "dropped transactions before gossiping due to heavy mempool or network load"
-                ),
-                Err(closed @ RecvError::Closed) => Err(closed)?,
             }
-        };
-
-        // also combine transaction IDs that arrived shortly after this one,
-        // but limit the number of changes and the number of transaction IDs
-        // (the network layer handles the actual limits, this just makes sure the loop terminates)
-        //
-        // TODO: If some amount of time passes (300ms?) before reaching MAX_CHANGES_BEFORE_SEND or
-        //       max_tx_inv_in_message, flush messages anyway.
-        while combined_changes <= MAX_CHANGES_BEFORE_SEND && txs.len() < max_tx_inv_in_message {
-            match receiver.try_recv() {
-                Ok(mempool_change) if mempool_change.is_added() => {
-                    txs.extend(mempool_change.into_tx_ids())
+            for _ in 0..MAX_CHANGES_BEFORE_SEND {
+                match receiver.try_recv() {
+                    Ok(_) => {}
+                    Err(TryRecvError::Lagged(count)) => {
+                        metrics::counter!("mempool.gossip.lagged.events.total").increment(count);
+                    }
+                    Err(TryRecvError::Empty | TryRecvError::Closed) => break,
                 }
-                Ok(_) => {
-                    // ignore other changes, we only want to gossip added transactions
-                    continue;
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Lagged(skip_count)) => info!(
-                    ?skip_count,
-                    "dropped transactions before gossiping due to heavy mempool or network load"
-                ),
-                Err(closed @ TryRecvError::Closed) => Err(closed)?,
             }
-
-            combined_changes += 1;
         }
 
-        let txs_len = txs.len();
-        // Zebra is the originator of this advertisement, so no peer source.
-        let request = zn::Request::AdvertiseTransactionIds(txs, None);
+        let Response::TransactionIds(ids) = tokio::time::timeout(
+            TIPS_RESPONSE_TIMEOUT,
+            mempool
+                .clone()
+                .oneshot(Request::TakePendingGossipTransactionIds { limit }),
+        )
+        .await??
+        else {
+            return Err("pending gossip drain must return transaction IDs".into());
+        };
+        drain_without_wakeup = !ids.is_empty();
+        if ids.is_empty() {
+            continue;
+        }
 
-        info!(%request, changes = %combined_changes, "sending mempool transaction broadcast");
-        debug!(
-            ?request,
-            changes = ?combined_changes,
-            "full list of mempool transactions in broadcast"
-        );
-
-        // broadcast requests don't return errors, and we'd just want to ignore them anyway
-        let _ = broadcast_network.ready().await?.call(request).await;
-
-        metrics::counter!("mempool.gossiped.transactions.total").increment(txs_len as u64);
-
-        // wait for at least the network timeout between gossips
-        //
-        // in practice, transactions arrive every 1-20 seconds,
-        // so waiting 6 seconds can delay transaction propagation, in order to reduce peer load
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        let count = u64::try_from(ids.len()).expect("a bounded inventory count fits in u64");
+        let request = zn::Request::AdvertiseTransactionIds(ids, None);
+        loop {
+            match tokio::time::timeout(
+                TIPS_RESPONSE_TIMEOUT,
+                broadcast_network.clone().oneshot(request.clone()),
+            )
+            .await
+            {
+                Ok(Ok(_)) => break,
+                result => {
+                    debug!(
+                        ?result,
+                        "transaction gossip failed, retaining batch for retry"
+                    );
+                    tokio::time::sleep(TRANSACTION_GOSSIP_DELAY).await;
+                }
+            }
+        }
+        metrics::counter!("mempool.gossiped.transactions.total").increment(count);
+        tokio::time::sleep(TRANSACTION_GOSSIP_DELAY).await;
     }
 }
+
+#[cfg(test)]
+mod tests;

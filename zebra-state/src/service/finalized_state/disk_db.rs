@@ -17,7 +17,7 @@ use std::{
     ops::RangeBounds,
     path::Path,
     sync::{
-        atomic::{self, AtomicBool},
+        atomic::{self, AtomicBool, AtomicU64},
         Arc,
     },
 };
@@ -110,6 +110,9 @@ pub struct DiskDb {
     /// In [`MultiThreaded`](rocksdb::MultiThreaded) mode,
     /// only [`Drop`] requires exclusive access.
     db: Arc<DB>,
+
+    /// The most recent complete SST-size measurement, shared by RPC and metrics readers.
+    estimated_disk_size: Arc<AtomicU64>,
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
@@ -625,6 +628,8 @@ impl DiskDb {
             )
             .unwrap();
         }
+        self.estimated_disk_size
+            .store(total_size_on_disk, atomic::Ordering::Relaxed);
 
         debug!("{}", column_families_log_string);
         info!(
@@ -683,6 +688,8 @@ impl DiskDb {
                     .set(mem as f64);
             }
         }
+        self.estimated_disk_size
+            .store(total_disk, atomic::Ordering::Relaxed);
 
         metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
         metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
@@ -711,8 +718,13 @@ impl DiskDb {
         }
     }
 
-    /// Returns the estimated total disk space usage of the database.
+    /// Returns the most recent complete estimate of disk space usage.
     pub fn size(&self) -> u64 {
+        self.estimated_disk_size.load(atomic::Ordering::Relaxed)
+    }
+
+    /// Measures the current SST size across column families.
+    fn measure_size(&self) -> u64 {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
         let mut total_size_on_disk = 0;
@@ -745,9 +757,12 @@ impl DiskDb {
         self.finished_format_upgrades.load(atomic::Ordering::SeqCst)
     }
 
-    /// When called with a secondary DB instance, tries to catch up with the primary DB instance
+    /// Catches a secondary up to its primary and refreshes its shared disk-size estimate.
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
-        self.db.try_catch_up_with_primary()
+        self.db.try_catch_up_with_primary()?;
+        self.estimated_disk_size
+            .store(self.measure_size(), atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     /// Returns a forward iterator over the items in `cf` in `range`.
@@ -1079,9 +1094,12 @@ impl DiskDb {
                     mode,
                     db: Arc::new(db),
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+                    estimated_disk_size: Arc::new(AtomicU64::new(0)),
                 };
 
                 db.assert_default_cf_is_empty();
+                db.estimated_disk_size
+                    .store(db.measure_size(), atomic::Ordering::Relaxed);
 
                 Ok(db)
             }
