@@ -338,9 +338,11 @@ pub async fn show_block_chain_progress(
             #[cfg(feature = "progress-bar")]
             let network_upgrade = NetworkUpgrade::Genesis;
 
-            if is_syncer_stopped {
-                // We've stopped syncing blocks,
-                // but we haven't downloaded and verified the genesis block.
+            if is_syncer_stopped
+                && instant_now.saturating_duration_since(last_log_time) >= LOG_INTERVAL
+            {
+                // An empty state during genesis initialization is not a stalled sync.
+                last_log_time = instant_now;
                 warn!(
                     %sync_percent,
                     current_height = %"None",
