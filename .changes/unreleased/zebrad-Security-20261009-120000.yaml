@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: '`getaddresstxids` and `getaddressutxos` return an error instead of doing unbounded work when a query matches more than 100,000 results, and the address RPCs accept at most 10,000 addresses. Narrow the height range, or page with `startHeight` and `maxEntries` ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).'
+time: 2026-10-09T12:00:00.000000000Z

@@ -257,7 +257,7 @@ impl ZebraDb {
     }
 
     /// Returns the transaction IDs that sent or received funds to `address`,
-    /// in the finalized chain `query_height_range`.
+    /// in the finalized chain `query_height_range`, at most `limit` of them.
     ///
     /// If address has no finalized sends or receives,
     /// or the `query_height_range` is totally outside the finalized block range,
@@ -266,6 +266,7 @@ impl ZebraDb {
         &self,
         address: &transparent::Address,
         query_height_range: RangeInclusive<Height>,
+        limit: Option<usize>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         let address_location = match self.address_location(address) {
             Some(address_location) => address_location,
@@ -281,7 +282,7 @@ impl ZebraDb {
         }
 
         let transaction_locations =
-            self.address_transaction_locations(address_location, query_height_range);
+            self.address_transaction_locations(address_location, query_height_range, limit);
 
         transaction_locations
             .iter()
@@ -296,11 +297,12 @@ impl ZebraDb {
     }
 
     /// Returns the locations of any transactions that sent or received from a [`transparent::Address`],
-    /// if they are in the finalized state.
+    /// in the finalized chain `query_height_range`, at most `limit` of them.
     pub fn address_transaction_locations(
         &self,
         address_location: AddressLocation,
         query_height_range: RangeInclusive<Height>,
+        limit: Option<usize>,
     ) -> BTreeSet<AddressTransaction> {
         let tx_loc_by_transparent_addr_loc =
             self.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
@@ -313,6 +315,7 @@ impl ZebraDb {
         self.db
             .zs_forward_range_iter(&tx_loc_by_transparent_addr_loc, transaction_location_range)
             .map(|(tx_loc, ())| tx_loc)
+            .take(limit.unwrap_or(usize::MAX))
             .collect()
     }
 
@@ -349,13 +352,12 @@ impl ZebraDb {
     }
 
     /// Returns the UTXOs for `addresses` in the finalized chain `query_height_range`,
-    /// at most `limit` of them per address.
+    /// at most `limit` of them in total, the first in chain order.
     ///
     /// If none of the addresses has finalized UTXOs, returns an empty list.
     ///
-    /// The per-address `limit` is enough for the caller to apply a global limit of the same
-    /// size: the first `limit` UTXOs across all addresses can only contain UTXOs that are
-    /// among the first `limit` for their own address.
+    /// Scanning each address up to `limit` is enough: the first `limit` UTXOs across all
+    /// addresses can only contain UTXOs that are among the first `limit` for their own address.
     ///
     /// # Correctness
     ///
@@ -372,14 +374,17 @@ impl ZebraDb {
         query_height_range: RangeInclusive<Height>,
         limit: Option<usize>,
     ) -> BTreeMap<OutputLocation, transparent::Output> {
-        addresses
-            .iter()
-            .flat_map(|address| self.address_utxos(address, query_height_range.clone(), limit))
-            .collect()
+        let mut utxos = BTreeMap::new();
+        for address in addresses {
+            utxos.extend(self.address_utxos(address, query_height_range.clone(), limit));
+            truncate_to_limit(&mut utxos, limit);
+        }
+        utxos
     }
 
     /// Returns the transaction IDs that sent or received funds to `addresses`,
-    /// in the finalized chain `query_height_range`.
+    /// in the finalized chain `query_height_range`, at most `limit` of them in total,
+    /// the first in chain order.
     ///
     /// If none of the addresses has finalized sends or receives,
     /// or the `query_height_range` is totally outside the finalized block range,
@@ -403,11 +408,24 @@ impl ZebraDb {
         &self,
         addresses: &HashSet<transparent::Address>,
         query_height_range: RangeInclusive<Height>,
+        limit: Option<usize>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
-        addresses
-            .iter()
-            .flat_map(|address| self.address_tx_ids(address, query_height_range.clone()))
-            .collect()
+        let mut tx_ids = BTreeMap::new();
+        for address in addresses {
+            tx_ids.extend(self.address_tx_ids(address, query_height_range.clone(), limit));
+            truncate_to_limit(&mut tx_ids, limit);
+        }
+        tx_ids
+    }
+}
+
+/// Drops the last entries of `map` until it has at most `limit`, so memory stays bounded by
+/// the limit across all addresses, not just per address.
+fn truncate_to_limit<K: Ord, V>(map: &mut BTreeMap<K, V>, limit: Option<usize>) {
+    if let Some(limit) = limit {
+        while map.len() > limit {
+            map.pop_last();
+        }
     }
 }
 

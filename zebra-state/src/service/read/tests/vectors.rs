@@ -846,3 +846,79 @@ async fn any_chain_treestate_requests_find_finalized_trees() -> Result<()> {
 
     Ok(())
 }
+
+/// A limited tx ID query across finalized and non-finalized blocks keeps the first
+/// `max_entries` transactions in chain order, without duplicates.
+#[test]
+fn address_tx_ids_limit_spans_finalized_and_non_finalized_blocks() -> Result<()> {
+    use std::collections::HashSet;
+
+    use zebra_chain::{parameters::NetworkKind, transparent};
+
+    use crate::{
+        arbitrary::Prepare,
+        service::read::{transparent_tx_ids, ADDRESS_HEIGHTS_FULL_RANGE},
+        tests::setup::new_state_with_mainnet_genesis,
+        CheckpointVerifiedBlock,
+    };
+
+    let _init_guard = zebra_test::init();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+
+    // Pay odd-height coinbases to a second address, so both addresses have entries in both states.
+    let other = transparent::Address::from_pub_key_hash(NetworkKind::Mainnet, [7; 20]);
+    let mut addresses = HashSet::from([other]);
+    for (&height, bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.range(1..=10) {
+        let mut block: Arc<Block> = bytes.zcash_deserialize_into()?;
+        let coinbase = Arc::make_mut(&mut Arc::make_mut(&mut block).transactions[0]);
+        let mut outputs = coinbase.outputs().to_vec();
+        for output in &mut outputs {
+            if let Some(address) = output.address(&Mainnet) {
+                addresses.insert(address);
+                if height % 2 == 1 {
+                    output.lock_script = other.script();
+                }
+            }
+        }
+        coinbase.set_outputs(outputs);
+
+        // Finalize blocks 1..=5, and keep 6..=10 in the non-finalized chain.
+        if height <= 5 {
+            finalized_state.commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block).into(),
+                None,
+                "test",
+            )?;
+        } else if height == 6 {
+            non_finalized_state.commit_new_chain(block.prepare(), &finalized_state.db)?;
+        } else {
+            non_finalized_state.commit_block(block.prepare(), &finalized_state.db)?;
+        }
+    }
+    assert_eq!(addresses.len(), 2);
+
+    let query = |max_entries| {
+        transparent_tx_ids(
+            non_finalized_state.best_chain(),
+            &finalized_state.db,
+            addresses.clone(),
+            ADDRESS_HEIGHTS_FULL_RANGE,
+            max_entries,
+        )
+    };
+
+    let all: Vec<_> = query(None).expect("query succeeds").into_iter().collect();
+    assert!(all.iter().any(|(location, _)| location.height <= Height(5)));
+    assert!(all.iter().any(|(location, _)| location.height > Height(5)));
+
+    // Small limits cut each address's finalized scan, larger ones cut after the merge.
+    for limit in 1..all.len() {
+        let limited: Vec<_> = query(Some(limit))
+            .expect("query succeeds")
+            .into_iter()
+            .collect();
+        assert_eq!(limited, all[..limit], "limit {limit}");
+    }
+
+    Ok(())
+}

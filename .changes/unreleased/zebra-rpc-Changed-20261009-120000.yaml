@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getaddresstxids` and `getaddressutxos` return an `InvalidParameter` error when a query matches more than 100,000 results or `maxEntries` is above 100,000, and the address methods reject more than 10,000 addresses ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).'
+time: 2026-10-09T12:00:00.000000000Z

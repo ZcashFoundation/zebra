@@ -1530,7 +1530,7 @@ pub enum ReadRequest {
     AddressBalance(HashSet<transparent::Address>),
 
     /// Looks up transaction hashes that were sent or received from addresses,
-    /// in an inclusive blockchain height range.
+    /// in an inclusive blockchain height range, returning at most `max_entries` of them.
     ///
     /// Returns
     ///
@@ -1546,6 +1546,10 @@ pub enum ReadRequest {
 
         /// The blocks to be queried for transactions.
         height_range: RangeInclusive<block::Height>,
+
+        /// The maximum number of transaction IDs to return, the first ones in chain order,
+        /// or `None` for no limit. The limit bounds the index scan, not just the response.
+        max_entries: Option<usize>,
     },
 
     /// Looks up a spending transaction id by its spent transparent input.
