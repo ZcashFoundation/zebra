@@ -6,7 +6,7 @@ use std::{
     fmt::{self, Debug},
     io::{ErrorKind, Write as _},
     path::Path,
-    process::{Child, Command, ExitStatus, Output, Stdio},
+    process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -26,6 +26,14 @@ use tracing::instrument;
 
 #[macro_use]
 mod arguments;
+
+#[cfg(unix)]
+#[path = "command/process_group/unix.rs"]
+mod process_group;
+#[cfg(windows)]
+#[path = "command/process_group/windows.rs"]
+#[allow(unsafe_code)]
+mod process_group;
 
 pub mod to_regex;
 
@@ -408,8 +416,12 @@ pub trait CommandExt {
     /// reports
     fn output2(&mut self) -> Result<TestOutput<NoDir>, Report>;
 
-    /// wrapper for `spawn` fn on `Command` that constructs informative error
-    /// reports using the original `command_path`
+    /// Spawns a command with informative errors and owned descendant cleanup.
+    ///
+    /// On Unix, children that leave the process group are outside the cleanup boundary.
+    /// Callers must not externally reap the leader or enable SIGCHLD auto-reaping.
+    /// On Windows, creation flags must remain at their default zero; the child starts suspended
+    /// so its job is attached before command execution. Job assignment restrictions cause an error.
     fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report>;
 }
 
@@ -449,9 +461,9 @@ impl CommandExt for Command {
     /// reports using the original `command_path`
     fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report> {
         let command_and_args = format!("{self:?}");
-        let child = self.spawn();
+        let child = process_group::spawn(self);
 
-        let child = child
+        let (child, process_group) = child
             .wrap_err("failed to execute process")
             .with_section(|| command_and_args.clone().header("Command:"))?;
 
@@ -460,6 +472,7 @@ impl CommandExt for Command {
             cmd: command_and_args,
             command_path: command_path.to_string(),
             child: Some(child),
+            process_group,
             stdout: None,
             stderr: None,
             failure_regexes: RegexSet::empty(),
@@ -551,11 +564,11 @@ pub struct TestChild<T> {
     /// The path of the command, as passed to spawn2().
     pub command_path: String,
 
-    /// The child process itself.
-    ///
-    /// `None` when the command has been waited on,
-    /// and its output has been taken.
-    pub child: Option<Child>,
+    /// The process remains private so callers cannot reap it before group cleanup.
+    child: Option<Child>,
+
+    /// The group or job is retired before the leader is reaped.
+    process_group: process_group::ProcessGroup,
 
     /// The demand-driven standard output stream of the child process.
     pub stdout: Option<ChildOutput>,
@@ -694,6 +707,23 @@ where
 pub const NO_MATCHES_REGEX_ITER: &[&str] = &[];
 
 impl<T> TestChild<T> {
+    /// Returns the command's process ID.
+    ///
+    /// A process ID is an observation, not an ownership token for later cleanup.
+    pub fn id(&self) -> u32 {
+        self.child
+            .as_ref()
+            .expect("TestChild owns its process until wait_with_output consumes it")
+            .id()
+    }
+
+    /// Borrows piped standard input without exposing process reaping.
+    ///
+    /// Returns `None` if standard input was not piped.
+    pub fn stdin_mut(&mut self) -> Option<&mut ChildStdin> {
+        self.child.as_mut().and_then(|child| child.stdin.as_mut())
+    }
+
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
     ///
@@ -857,7 +887,7 @@ impl<T> TestChild<T> {
         };
 
         /// SPANDOC: Killing child process
-        let kill_result = child.kill().or_else(|error| {
+        let kill_result = self.process_group.kill(child).or_else(|error| {
             if ignore_exited && error.kind() == ErrorKind::InvalidInput {
                 Ok(())
             } else {
@@ -1027,7 +1057,7 @@ impl<T> TestChild<T> {
     /// Waits for natural child exit while draining both remaining output streams.
     ///
     /// Honors the command deadline, including after earlier log matches. On timeout or
-    /// reader error the child is killed and reaped, and the error includes captured output.
+    /// reader error the owned group is killed and the leader reaped; errors include captured output.
     /// Output already consumed by matchers is not included.
     #[spandoc::spandoc]
     pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
@@ -1038,7 +1068,7 @@ impl<T> TestChild<T> {
         // Match std::process::Child::wait_with_output: a piped-input child needs EOF to exit.
         drop(child.stdin.take());
         self.start_output_drain(self.deadline);
-        let status = loop {
+        let mut status = loop {
             let read_error = [&mut self.stdout, &mut self.stderr]
                 .into_iter()
                 .flatten()
@@ -1046,7 +1076,7 @@ impl<T> TestChild<T> {
             if let Some(error) = read_error {
                 break Err(Report::from(error));
             }
-            match child.try_wait() {
+            match self.process_group.try_wait(&mut child) {
                 Ok(Some(status)) => break Ok(status),
                 Err(error) => break Err(Report::from(error)),
                 Ok(None) if self.past_deadline() => {
@@ -1056,9 +1086,13 @@ impl<T> TestChild<T> {
             }
         };
         if status.is_err() {
-            // Use the owned Child handle, never a saved PID that could have been reused.
-            if child.kill().is_ok() {
-                let _ = child.wait();
+            // Retire group ownership before reaping; never signal a reusable saved PID.
+            let cleanup = self
+                .process_group
+                .kill(&mut child)
+                .and_then(|()| child.wait().map(|_| ()));
+            if let Err(error) = cleanup {
+                status = status.map_err(|cause| cause.wrap_err(error));
             }
             for output in [&self.stdout, &self.stderr].into_iter().flatten() {
                 let _ = output.cancelled.send(true);
@@ -1504,13 +1538,18 @@ impl<T> TestChild<T> {
     ///
     /// If the child process was already been taken using wait_with_output.
     pub fn is_running(&mut self) -> bool {
-        matches!(
-            self.child
-                .as_mut()
-                .expect("child has not been taken")
-                .try_wait(),
-            Ok(None),
-        )
+        let child = self.child.as_mut().expect("child has not been taken");
+        matches!(self.process_group.try_wait(child), Ok(None))
+    }
+}
+
+#[cfg(windows)]
+impl<T> std::os::windows::io::AsHandle for TestChild<T> {
+    fn as_handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
+        self.child
+            .as_ref()
+            .expect("TestChild owns its process until wait_with_output consumes it")
+            .as_handle()
     }
 }
 
@@ -1849,15 +1888,19 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
         self = self.section(source.cmd.clone().header("Command:"));
 
         if let Some(child) = &mut source.child {
-            if let Ok(Some(status)) = child.try_wait() {
+            if let Ok(Some(status)) = source.process_group.try_wait(child) {
                 self = self.context_from(&status);
             }
         }
 
         source.apply_failure_regexes_to_outputs();
         if let Some(child) = source.child.as_mut() {
-            if child.kill().is_ok() {
-                let _ = child.wait();
+            if let Err(error) = source
+                .process_group
+                .kill(child)
+                .and_then(|()| child.wait().map(|_| ()))
+            {
+                self = self.wrap_err(error);
             }
         }
         source.start_output_drain(Some(Instant::now() + Duration::from_secs(1)));

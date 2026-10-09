@@ -1,0 +1,10 @@
+project: zebra-test
+kind: breaking
+body: >-
+  Run spawned test commands in an owned Unix process group or Windows job, terminating remaining
+  members before reaping the leader. Removed `command::TestChild::child`; use the process ID,
+  piped-input, and Windows borrowed-handle accessors instead. Unix callers must not externally reap
+  the leader or enable SIGCHLD auto-reaping; descendants leaving the group are outside cleanup
+  ownership. Windows callers must leave creation flags at their default zero.
+  ([#11598](https://github.com/ZcashFoundation/zebra/pull/11598))
+time: 2026-10-09T16:15:07.946823528+02:00

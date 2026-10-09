@@ -591,6 +591,86 @@ fn child_deadline_wait_for_exit() -> Result<()> {
     assert!(format!("{error:?}").contains("deadline"));
     Ok(())
 }
+/// Cleanup must terminate quiet descendants, not merely stop their inherited pipe readers.
+#[cfg(target_os = "linux")]
+#[test]
+fn child_cleanup_terminates_owned_descendants() -> Result<()> {
+    use std::os::unix::process::ExitStatusExt;
+
+    fn is_alive(pid: u32) -> std::io::Result<bool> {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => {
+                let (_, state) = stat
+                    .rsplit_once(") ")
+                    .expect("Linux process status includes its command and state");
+                Ok(!matches!(state.as_bytes()[0], b'Z' | b'X'))
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(nix::libc::ESRCH) =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    let realtime_signal = nix::libc::SIGRTMIN();
+    for cleanup in [
+        "deadline",
+        "matcher",
+        "kill",
+        "drop",
+        "natural_exit",
+        "realtime_exit",
+    ] {
+        // A failing cleanup leaves only a short-lived fixture, never a persistent orphan.
+        let script = match cleanup {
+            "natural_exit" => {
+                "sleep 10 & descendant=$!; printf '%s\\n' \"$descendant\"; exit 7".to_owned()
+            }
+            "realtime_exit" => format!(
+                "sleep 10 & descendant=$!; printf '%s\\n' \"$descendant\"; \
+                 kill -{realtime_signal} $$"
+            ),
+            _ => "sleep 10 & descendant=$!; printf '%s\\n' \"$descendant\"; wait \"$descendant\""
+                .to_owned(),
+        };
+        let mut child = shell_child(&script)?.with_timeout(Duration::from_secs(3));
+        let pid: u32 = child
+            .expect_stdout_line_matches("^[0-9]+$")?
+            .trim()
+            .parse()?;
+        assert!(
+            is_alive(pid)?,
+            "the descendant must be alive before cleanup"
+        );
+        child = child.with_timeout(Duration::from_secs(1));
+        let start = Instant::now();
+        match cleanup {
+            "deadline" => assert!(child.wait_with_output().is_err()),
+            "matcher" => assert!(child.expect_stdout_line_matches("never").is_err()),
+            "kill" => child.kill_and_consume_output(false)?,
+            "drop" => drop(child),
+            "natural_exit" => assert_eq!(child.wait_with_output()?.output.status.code(), Some(7)),
+            "realtime_exit" => assert_eq!(
+                child.wait_with_output()?.output.status.signal(),
+                Some(realtime_signal)
+            ),
+            _ => unreachable!("all cleanup paths are listed above"),
+        }
+        while is_alive(pid)? && start.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !is_alive(pid)?,
+            "{cleanup} must terminate the owned descendant before its natural exit"
+        );
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+    Ok(())
+}
 
 /// Matchers take both pipe handles, but exit waiting must still drain more than pipe capacity.
 #[cfg(unix)]
@@ -658,11 +738,7 @@ fn child_output_closes_stdin_before_waiting() -> Result<()> {
         .spawn2(tempdir()?, "cat")?
         .with_timeout(Duration::from_secs(2));
     child
-        .child
-        .as_mut()
-        .expect("spawn2 retains the child")
-        .stdin
-        .as_mut()
+        .stdin_mut()
         .expect("stdin was piped")
         .write_all(b"input until EOF")?;
 
@@ -742,11 +818,7 @@ fn child_startup_deadline_preserves_long_observation_and_kill() -> Result<()> {
         startup_deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(50),
     );
     child
-        .child
-        .as_mut()
-        .expect("spawn2 retains the child")
-        .stdin
-        .as_mut()
+        .stdin_mut()
         .expect("stdin was piped")
         .write_all(b"observe\n")?;
     child.expect_stdout_line_matches("^observed$")?;
@@ -821,12 +893,7 @@ fn child_deadline_wait_for_exit_windows() -> Result<()> {
 
     let _init_guard = zebra_test::init();
     let child = quiet_windows_child("$null")?;
-    let process = child
-        .child
-        .as_ref()
-        .expect("the spawned child remains owned until wait_with_output")
-        .as_handle()
-        .try_clone_to_owned()?;
+    let process = child.as_handle().try_clone_to_owned()?;
     let start = Instant::now();
     assert!(child.wait_with_output().is_err());
     assert!(start.elapsed() < Duration::from_secs(5));

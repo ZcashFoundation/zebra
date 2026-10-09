@@ -7650,6 +7650,7 @@ dependencies = [
  "insta",
  "itertools 0.14.0",
  "lazy_static",
+ "nix",
  "once_cell",
  "owo-colors",
  "proptest",
