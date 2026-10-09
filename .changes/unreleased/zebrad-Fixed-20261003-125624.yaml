@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Zebra no longer stalls on a losing branch when a late fork arrives while 10 forks are already tracked, as during Testnet minimum-difficulty bursts. A late block is no longer dropped as soon as it is committed, and a dropped branch is downloaded again when the network builds on it. Thanks to @tuan-phan for the Testnet diagnosis and @SphereDonout for the reproduction on a stock build ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+time: 2026-10-03T12:56:24.000000+00:00
