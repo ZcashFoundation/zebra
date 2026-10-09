@@ -288,14 +288,31 @@ impl NonFinalizedState {
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
     {
-        self.chain_set.insert(chain);
+        self.chain_set.insert(chain.clone());
 
         chain_filter(&mut self.chain_set);
 
         let mut evicted_chains = Vec::new();
         while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
-            // The first chain is the chain with the lowest work.
-            evicted_chains.extend(self.chain_set.pop_first());
+            // Keep the inserted chain and the best chain, so late forks can grow. Evict the
+            // lowest-work chain, and on a work tie the one whose tip was received first.
+            let best_chain = self.chain_set.last().cloned();
+            let evicted = self
+                .chain_set
+                .iter()
+                .filter(|c| **c != chain && Some(*c) != best_chain.as_ref())
+                .min_by(|a, b| {
+                    let received_time = |c: &Chain| c.tip_block().map(|tip| tip.received_time);
+                    a.partial_cumulative_work
+                        .cmp(&b.partial_cumulative_work)
+                        .then_with(|| received_time(a).cmp(&received_time(b)))
+                        .then_with(|| a.cmp(b))
+                })
+                .expect("the fork limit allows more than two chains")
+                .clone();
+
+            self.chain_set.remove(&evicted);
+            evicted_chains.push(evicted);
         }
 
         for evicted_chain in evicted_chains {
