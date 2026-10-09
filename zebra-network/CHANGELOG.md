@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.0] - 2026-10-09
+
+### Breaking Changes
+
+- The misbehavior sender returned by `init` and `init_with_block_gossip_peer_ips` now takes a `MisbehaviorReport` instead of a `(PeerSocketAddr, u32)` tuple; the report also carries the `reason` the peer was scored. `MetaAddrChange::UpdateMisbehavior` has a new `reason` field, `MetaAddr::new_misbehavior` takes a `reason` argument, and `MetaAddrChange::misbehavior_reason` returns it.
+
 ## [14.0.0] - 2026-10-01
 
 ### Breaking Changes
