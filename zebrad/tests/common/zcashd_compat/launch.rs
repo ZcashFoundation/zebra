@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use color_eyre::eyre::{eyre, Result};
 use tempfile::TempDir;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use zebra_chain::parameters::{Network, NetworkKind};
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
@@ -22,11 +22,15 @@ use super::{
 use crate::common::{
     config::{read_listen_addr_from_logs, testdir},
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    regtest::MiningRpcMethods,
 };
 
 /// How long to poll zcashd's own RPC before giving up.
 const ZCASHD_RPC_POLL_ATTEMPTS: u32 = 60;
 const ZCASHD_RPC_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Startup must not inherit the long integration or soak observation deadline.
+const MANAGED_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The live context for a zcashd-compat integration test.
 pub struct ZcashdCompatSetup {
@@ -80,7 +84,9 @@ impl ZcashdCompatSetup {
         // is dropped with the zebrad `TestChild`.
         let zcashd_pid = self.zcashd_pid().ok();
 
-        if let Some(mut z) = self.managed.take() {
+        if let Some(z) = self.managed.take() {
+            // Cleanup gets a fresh short deadline, independent of startup or soak observation.
+            let mut z = z.with_timeout(Duration::from_secs(30));
             // Kill zebrad first so its supervisor cannot respawn zcashd,
             // then kill zcashd BEFORE the fallible asserts: an early `?`
             // return would drop the testdir (and pid file), turning the
@@ -145,14 +151,15 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
 
     let zebra_rpc_addr = compat_cfg.zebra_rpc_addr;
     let zcashd_own_rpc_addr = compat_cfg.zcashd_own_rpc_addr;
+    let startup_started = std::time::Instant::now();
 
     // `--unsafe-low-specs` skips the hardware preflight minimums (550 GiB disk
     // etc.), which regtest doesn't need and CI runners don't have.
-    let zebrad = dir.with_config(&mut zebrad_config)?.spawn_child(args![
-        "start",
-        "--zcashd-compat",
-        "--unsafe-low-specs"
-    ])?;
+    // Bound synchronous startup log reads before granting long-running tests their lifetime.
+    let zebrad = dir
+        .with_config(&mut zebrad_config)?
+        .spawn_child(args!["start", "--zcashd-compat", "--unsafe-low-specs"])?
+        .with_timeout(MANAGED_STARTUP_TIMEOUT);
 
     let zebra_client = RpcRequestClient::new(zebra_rpc_addr);
     let zcashd_client = ZcashdRpcClient::new(
@@ -169,7 +176,7 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
         zcashd_datadir: Some(compat_cfg.zcashd_datadir),
         zebra_client,
         zcashd_client,
-        network: Network::new_regtest(Default::default()),
+        network: zebrad_config.network.network.clone(),
         zebra_rpc_addr,
     };
 
@@ -179,10 +186,32 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
         .expect("managed zebrad child was just spawned");
     let _ = read_listen_addr_from_logs(zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    // Extra stability margin before poking zcashd
-    sleep(LAUNCH_DELAY).await;
+    // The log wait and sidecar readiness share one short startup budget.
+    timeout(
+        MANAGED_STARTUP_TIMEOUT.saturating_sub(startup_started.elapsed()),
+        async {
+            loop {
+                if let Some(genesis) = setup
+                    .zebra_client
+                    .get_block(0)
+                    .await
+                    .map_err(|error| eyre!(error))?
+                {
+                    assert_eq!(genesis.hash(), setup.network.genesis_hash());
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+            wait_for_zcashd_rpc(&setup.zcashd_client).await
+        },
+    )
+    .await
+    .map_err(|_| eyre!("managed Zebra/zcashd startup exceeded 60 s; prefetch the sidecar"))??;
 
-    wait_for_zcashd_rpc(&setup.zcashd_client).await?;
+    // Only ready nodes receive the integration observation budget. The soak case extends it.
+    if let Some(zebrad) = setup.managed.take() {
+        setup.managed = Some(zebrad.with_timeout(Duration::from_secs(30 * 60) + LAUNCH_DELAY));
+    }
 
     Ok(setup)
 }
