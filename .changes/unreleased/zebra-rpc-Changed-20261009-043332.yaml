@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Cached and on-demand block templates respect current clock bounds and update long-poll identities when those bounds change.
+time: 2026-10-09T04:33:32.467660541+02:00

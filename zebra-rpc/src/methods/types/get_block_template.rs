@@ -34,7 +34,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, ZcashDeserializeInto},
+    serialization::{DateTime32, Duration32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
@@ -261,7 +261,51 @@ impl fmt::Debug for BlockTemplateResponse {
     }
 }
 
+/// Intersects an already valid template range with the current local-clock upper bound.
+///
+/// Shrinking the range preserves the snapshot's median-time and difficulty restrictions.
+pub(crate) fn clamp_template_time_range(
+    min_time: DateTime32,
+    cur_time: DateTime32,
+    max_time: DateTime32,
+    now: DateTime32,
+) -> RpcResult<(DateTime32, DateTime32)> {
+    if min_time > cur_time || cur_time > max_time {
+        return Err(ErrorObject::owned(
+            i32::from(crate::server::error::LegacyCode::Misc),
+            "invalid block template timestamp range",
+            None::<()>,
+        ));
+    }
+
+    let max_time = max_time.min(now.saturating_add(Duration32::from_hours(2)));
+    if min_time > max_time {
+        return Err(ErrorObject::owned(
+            i32::from(crate::server::error::LegacyCode::Misc),
+            "local clock moved backwards while building the block template",
+            None::<()>,
+        ));
+    }
+
+    Ok((cur_time.min(max_time), max_time))
+}
+
 impl BlockTemplateResponse {
+    /// Narrows the timestamp range after construction without changing its difficulty family.
+    ///
+    /// A changed maximum changes work identity and invalidates retention of the old range.
+    pub(crate) fn clamp_time_range(&mut self, now: DateTime32) -> RpcResult<()> {
+        let (cur_time, max_time) =
+            clamp_template_time_range(self.min_time, self.cur_time, self.max_time, now)?;
+        if max_time != self.max_time {
+            self.long_poll_id.max_timestamp = max_time.timestamp();
+            self.submit_old = self.submit_old.map(|_| false);
+        }
+        self.cur_time = cur_time;
+        self.max_time = max_time;
+        Ok(())
+    }
+
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
     pub fn all_capabilities() -> Vec<String> {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()

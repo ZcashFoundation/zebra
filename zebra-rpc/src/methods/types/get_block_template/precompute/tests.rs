@@ -110,6 +110,14 @@ fn only_current_work_is_served() {
         .saturating_sub(Duration32::from_minutes(90))
         .saturating_add(Duration32::from_seconds(1));
     cache.publish(median_capped);
+    let rollback = max_time
+        .saturating_sub(Duration32::from_hours(2))
+        .saturating_sub(Duration32::from_seconds(1));
+    let narrowed = cache
+        .template_for_tip(tip_hash, &network, rollback)
+        .unwrap();
+    assert!(narrowed.max_time < max_time);
+    // A served copy is now abbreviated, but the cache retains the true median-time cap.
     assert!(
         cache
             .template_for_tip(tip_hash, &network, after_max_time)
@@ -197,9 +205,9 @@ fn wide_testnet_ranges_expire_before_mtp_maximum_activation() {
     }
 }
 
-/// A clock rollback must invalidate any template advertising timestamps beyond the new bound.
+/// A clock rollback narrows only the served copy, including its current time and work identity.
 #[test]
-fn clock_rollback_invalidates_cached_timestamp_range() {
+fn clock_rollback_clamps_cached_timestamp_range() {
     let _init_guard = zebra_test::init();
     let regtest = Network::new_regtest(
         zebra_chain::parameters::testnet::ConfiguredActivationHeights {
@@ -211,23 +219,69 @@ fn clock_rollback_invalidates_cached_timestamp_range() {
 
     for network in [Network::Mainnet, Network::new_default_testnet(), regtest] {
         let cache = TemplateCache::default();
-        let current = template_with_max_time(&network, DateTime32::from(1654008719));
+        let mut current = template_with_max_time(&network, DateTime32::from(1654008719));
+        current.submit_old = Some(true);
         let tip_hash = current.previous_block_hash;
         let boundary = current.max_time.saturating_sub(Duration32::from_hours(2));
         let rollback = boundary.saturating_sub(Duration32::from_seconds(1));
         // Checking only cur_time would miss the invalid advertised maximum.
         assert!(current.cur_time <= rollback.saturating_add(Duration32::from_hours(2)));
-        cache.publish(current);
+        cache.publish(current.clone());
 
         assert!(cache
             .template_for_tip(tip_hash, &network, boundary)
             .is_some());
+        let served = cache
+            .template_for_tip(tip_hash, &network, rollback)
+            .expect("a nonempty narrowed range can be served immediately");
+        assert_eq!(
+            served.max_time,
+            current.max_time.saturating_sub(Duration32::from_seconds(1))
+        );
+        assert_eq!(served.cur_time, current.cur_time);
+        assert_ne!(served.long_poll_id, current.long_poll_id);
+        assert!(!served.long_poll_id.submit_old(&current.long_poll_id));
+        assert_eq!(served.submit_old, Some(false));
+        assert_eq!(served.coinbase_txn, current.coinbase_txn);
+        // On-demand construction uses the same boundary after its coinbase proof completes.
+        let mut completed = current.clone();
+        completed.clamp_time_range(rollback).unwrap();
+        assert_eq!(&completed, served.as_ref());
+        assert_eq!(served.bits, current.bits);
+        assert_eq!(cache.0.borrow().as_deref(), Some(&current));
+
+        // A larger rollback can require reducing cur_time, but never below min_time.
+        let at_minimum = current.min_time.saturating_sub(Duration32::from_hours(2));
+        let served = cache
+            .template_for_tip(tip_hash, &network, at_minimum)
+            .unwrap();
+        assert_eq!(served.cur_time, current.min_time);
+        assert_eq!(served.max_time, current.min_time);
         assert!(
             cache
-                .template_for_tip(tip_hash, &network, rollback)
+                .template_for_tip(
+                    tip_hash,
+                    &network,
+                    at_minimum.saturating_sub(Duration32::from_seconds(1)),
+                )
                 .is_none(),
-            "every advertised timestamp must remain inside the local-clock bound on {network:?}",
+            "an empty range must not be fabricated"
         );
+
+        for (min_time, cur_time, max_time) in [
+            (current.cur_time, current.min_time, current.max_time),
+            (current.min_time, current.max_time, current.cur_time),
+            (current.max_time, current.cur_time, current.min_time),
+        ] {
+            let mut invalid = current.clone();
+            invalid.min_time = min_time;
+            invalid.cur_time = cur_time;
+            invalid.max_time = max_time;
+            cache.publish(invalid);
+            assert!(cache
+                .template_for_tip(tip_hash, &network, boundary)
+                .is_none());
+        }
     }
 }
 
