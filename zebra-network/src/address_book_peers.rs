@@ -15,6 +15,14 @@ pub trait AddressBookPeers {
     /// Return an Vec of peers we've seen recently, in reconnection attempt order.
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr>;
 
+    /// Returns whether any peer has responded recently at `now`.
+    ///
+    /// Implementations with direct access to peer entries should override this to avoid building
+    /// a peer list. Freshness must use response timestamps, not a cached connection count.
+    fn has_recently_live_peers(&self, now: chrono::DateTime<Utc>) -> bool {
+        !self.recently_live_peers(now).is_empty()
+    }
+
     /// Add a peer to the address book.
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool;
 

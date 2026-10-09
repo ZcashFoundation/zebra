@@ -1,0 +1,6 @@
+project: zebra-network
+kind: Added
+body: |-
+    Add `AddressBookPeers::has_recently_live_peers` with a default implementation. The production
+    address book checks response freshness without allocating a peer list.
+time: 2026-10-09T07:58:07.70345778+02:00

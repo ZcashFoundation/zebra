@@ -1095,6 +1095,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         miner_memo: None,
         // TODO: Use default field values when optional features are enabled in tests #8183
         internal_miner: true,
+        internal_miner_private_testnet: false,
     };
 
     // nu5 block height

@@ -105,7 +105,10 @@ Add `internal_miner = true` in the mining section of its configuration and compi
 internal_miner = true
 ```
 
-Zebra should now mine blocks on Regtest when it starts after a short delay (of around 30 seconds).
+Zebra mines once genesis is committed and its initial template is ready. Regtest requires neither
+public peers nor synchronization, and uses null solutions instead of the production Equihash solver.
+The miner waits for each of its submitted blocks to commit before extending it. The
+`internal_miner_private_testnet` option is unnecessary on Regtest and never bypasses Mainnet checks.
 
 To confirm that it's working, look for `successfully mined a new block` messages in the logs, or that the tip height is increasing.
 

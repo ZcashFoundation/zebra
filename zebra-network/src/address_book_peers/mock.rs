@@ -47,6 +47,12 @@ impl AddressBookPeers for MockAddressBookPeers {
             .collect()
     }
 
+    fn has_recently_live_peers(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        self.recently_live_peers
+            .iter()
+            .any(|peer| peer.was_recently_live(now))
+    }
+
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
         self.add_peer(peer)
     }
@@ -75,6 +81,13 @@ impl Default for SharedMockAddressBookPeers {
 impl AddressBookPeers for SharedMockAddressBookPeers {
     fn recently_live_peers(&self, now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
         self.inner.lock().unwrap().recently_live_peers(now)
+    }
+
+    fn has_recently_live_peers(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        self.inner
+            .lock()
+            .expect("test peer lock is not poisoned")
+            .has_recently_live_peers(now)
     }
 
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {

@@ -1,9 +1,6 @@
 //! Internal mining in Zebra.
 //!
 //! # TODO
-//! - pause mining if we have no peers, like `zcashd` does,
-//!   and add a developer config that mines regardless of how many peers we have.
-//!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
 use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
@@ -39,7 +36,11 @@ use zebra_rpc::{
 };
 use zebra_state::WatchReceiver;
 
-use crate::components::metrics::Config;
+use zebra_chain::parameters::Network;
+use zebra_rpc::{
+    client::{SubmitBlockErrorResponse, SubmitBlockResponse},
+    config::mining::Config,
+};
 
 #[cfg(test)]
 mod tests;
@@ -53,16 +54,59 @@ fn should_replace_mining_template(
     current_header != Some(new_header) && (current_header.is_none() || submit_old != Some(true))
 }
 
+/// Mainnet never permits private mining, even if the Testnet-only option is enabled.
+fn is_private_mining(network: &Network, config: &Config) -> bool {
+    network.is_regtest()
+        || (!matches!(network, Network::Mainnet) && config.internal_miner_private_testnet)
+}
+
+/// One unresolved local submission is enough to prevent a self-amplifying private fork.
+#[derive(Clone, Copy, Debug)]
+struct SubmittedBlock {
+    hash: block::Hash,
+    height: block::Height,
+}
+
+impl SubmittedBlock {
+    /// Never extend an uncommitted local parent; public networks also wait for another miner.
+    ///
+    /// An inconclusive or transport response can precede admission. Until the public chain has
+    /// reached this height, do not submit additional siblings or forget the submitted identity.
+    fn permits_work(
+        self,
+        parent: block::Hash,
+        committed: Option<(block::Height, block::Hash)>,
+        private: bool,
+    ) -> bool {
+        let Some((height, hash)) = committed else {
+            return false;
+        };
+        height >= self.height && (parent != self.hash || (private && hash == self.hash))
+    }
+}
+
+/// Only a definitive invalid-block verdict releases an unresolved submission.
+fn submission_was_rejected(response: &Result<SubmitBlockResponse, impl std::fmt::Debug>) -> bool {
+    matches!(
+        response,
+        Ok(SubmitBlockResponse::ErrorResponse(
+            SubmitBlockErrorResponse::Rejected
+        ))
+    )
+}
+
 /// Checks both the published work and its parent, including after the solver returns.
 fn cancel_if_mining_template_changed(
     template_receiver: &WatchReceiver<Option<Arc<Block>>>,
     mining_tip: &watch::Receiver<Option<(block::Height, block::Hash)>>,
     old_header: block::Header,
+    eligible: bool,
 ) -> Result<(), SolverCancelled> {
     if template_receiver.has_changed().is_err()
         || mining_tip.has_changed().is_err()
         || template_receiver.cloned_watch_data().map(|b| *b.header) != Some(old_header)
         || mining_tip.borrow().map(|(_, hash)| hash) != Some(old_header.previous_block_hash)
+        || !eligible
     {
         Err(SolverCancelled)
     } else {
@@ -105,6 +149,8 @@ pub const BLOCK_TEMPLATE_REFRESH_LIMIT: Duration = Duration::from_secs(2);
 pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 
 /// Initialize the miner based on its config, and spawn a task for it.
+///
+/// Uses the mining policy in `config`; the RPC supplies current peer, sync, and committed-tip data.
 ///
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core per configured
 /// mining thread.
@@ -159,12 +205,15 @@ where
 
 /// Initialize the miner based on its config.
 ///
+/// Public work requires live peers and synchronization. Private Testnet requires explicit opt-in;
+/// Regtest is inherently private. Mainnet always retains the public policy.
+///
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core per configured
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
 pub async fn init<Mempool, State, ReadState, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
-    _config: Config,
+    config: Config,
     rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
@@ -205,7 +254,6 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -228,7 +276,7 @@ where
     let mut abort_handles = Vec::new();
 
     let template_generator = tokio::task::spawn(
-        generate_block_templates(rpc.clone(), template_sender).in_current_span(),
+        generate_block_templates(config.clone(), rpc.clone(), template_sender).in_current_span(),
     );
     abort_handles.push(template_generator.abort_handle());
     let template_generator = template_generator.wait_for_panics();
@@ -241,7 +289,13 @@ where
             .expect("just limited to u8::MAX");
 
         let solver = tokio::task::spawn(
-            run_mining_solver(solver_id, template_receiver.clone(), rpc.clone()).in_current_span(),
+            run_mining_solver(
+                solver_id,
+                config.clone(),
+                template_receiver.clone(),
+                rpc.clone(),
+            )
+            .in_current_span(),
         );
         abort_handles.push(solver.abort_handle());
 
@@ -273,6 +327,9 @@ where
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
+///
+/// Public work is withheld without synchronization and recently live peers. Private Testnet and
+/// Regtest use the same prepared-work long polling without public synchronization prerequisites.
 #[instrument(skip(rpc, template_sender))]
 pub async fn generate_block_templates<
     Mempool,
@@ -283,6 +340,7 @@ pub async fn generate_block_templates<
     SyncStatus,
     AddressBook,
 >(
+    config: Config,
     rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
     template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
@@ -328,11 +386,26 @@ where
     let mut parameters =
         GetBlockTemplateParameters::new(Template, None, vec![LongPoll, CoinbaseTxn], None, None);
     let mut mining_tip = rpc.mining_tip_change().await?.receiver;
+    let mut private_long_poll_id = None;
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
         mining_tip.borrow_and_update();
-        let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
+        let template = if is_private_mining(rpc.network(), &config) {
+            rpc.private_mining_template(private_long_poll_id).await
+        } else if rpc.public_mining_is_eligible() {
+            rpc.get_block_template(Some(parameters.clone()))
+                .await
+                .map(|response| {
+                    response
+                        .try_into_template()
+                        .expect("invalid RPC response: proposal in response to a template request")
+                })
+        } else {
+            template_sender.send_if_modified(|template| template.take().is_some());
+            wait_for_mining_tip_change(&mut mining_tip, BLOCK_TEMPLATE_REFRESH_LIMIT).await?;
+            continue;
+        };
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
@@ -351,11 +424,8 @@ where
             continue;
         };
 
-        // Convert from RPC GetBlockTemplate to Block
-        let template = template
-            .try_into_template()
-            .expect("invalid RPC response: proposal in response to a template request");
         let submit_old = template.submit_old();
+        private_long_poll_id = Some(template.long_poll_id());
 
         info!(
             height = ?template.height(),
@@ -416,6 +486,10 @@ where
 /// Runs a single mining thread that gets blocks from the `template_receiver`, calculates equihash
 /// solutions with nonces based on `solver_id`, and submits valid blocks to Zebra's block validator.
 ///
+/// Cancels on parent/template changes and loss of public eligibility, including before submission.
+/// Remembers one local submission before awaiting its result, and never extends an uncommitted
+/// local parent. Public mining also refuses to extend a committed block from this process.
+///
 /// This method is CPU and memory-intensive. It uses 144 MB of RAM and one CPU core while running.
 /// It can run for minutes or hours if the network difficulty is high. Mining uses a thread with
 /// low CPU priority.
@@ -430,6 +504,7 @@ pub async fn run_mining_solver<
     AddressBook,
 >(
     solver_id: u8,
+    config: Config,
     mut template_receiver: WatchReceiver<Option<Arc<Block>>>,
     rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
@@ -472,6 +547,8 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     let mining_tip = rpc.mining_tip_change().await?.receiver;
+    let private = is_private_mining(rpc.network(), &config);
+    let mut submitted: Option<SubmittedBlock> = None;
     // Shut down the task when the template sender is dropped, or Zebra shuts down.
     while template_receiver.has_changed().is_ok() && !is_shutting_down() {
         // Get the latest block template, and mark the current value as seen.
@@ -504,15 +581,39 @@ where
 
         let height = template.coinbase_height().expect("template is valid");
 
+        if (!private && !rpc.public_mining_is_eligible())
+            || submitted.is_some_and(|submitted| {
+                !submitted.permits_work(
+                    template.header.previous_block_hash,
+                    rpc.committed_mining_tip(),
+                    private,
+                )
+            })
+        {
+            tokio::select! {
+                _ = template_receiver.changed() => {},
+                _ = sleep(BLOCK_TEMPLATE_REFRESH_LIMIT) => {},
+            }
+            continue;
+        }
+
         // Set up the cancellation conditions for the miner.
         let cancel_receiver = template_receiver.clone();
         let cancel_tip = mining_tip.clone();
         let old_header = *template.header;
-        let cancel_fn =
-            move || cancel_if_mining_template_changed(&cancel_receiver, &cancel_tip, old_header);
+        let cancel_rpc = rpc.clone();
+        let cancel_fn = move || {
+            cancel_if_mining_template_changed(
+                &cancel_receiver,
+                &cancel_tip,
+                old_header,
+                private || cancel_rpc.public_mining_is_eligible(),
+            )
+        };
 
         // Mine at least one block using the equihash solver.
-        let Ok(blocks) = mine_a_block(solver_id, template, cancel_fn).await else {
+        let Ok(blocks) = mine_a_block(solver_id, template, rpc.network().clone(), cancel_fn).await
+        else {
             // If the solver was cancelled, we're either shutting down, or we have a new template.
             if solver_id == 0 {
                 info!(
@@ -544,9 +645,21 @@ where
         // check. Check each solution, since submitting the previous one can also change the tip.
         let mut any_success = false;
         for block in blocks {
-            if cancel_if_mining_template_changed(&template_receiver, &mining_tip, old_header)
-                .is_err()
+            if cancel_if_mining_template_changed(
+                &template_receiver,
+                &mining_tip,
+                old_header,
+                private || rpc.public_mining_is_eligible(),
+            )
+            .is_err()
                 || is_shutting_down()
+                || submitted.is_some_and(|submitted| {
+                    !submitted.permits_work(
+                        old_header.previous_block_hash,
+                        rpc.committed_mining_tip(),
+                        private,
+                    )
+                })
             {
                 break;
             }
@@ -554,24 +667,32 @@ where
                 .zcash_serialize_to_vec()
                 .expect("serializing to Vec never fails");
 
-            match rpc.submit_block(HexData(data), None).await {
-                Ok(success) => {
-                    info!(
-                        ?height,
-                        hash = ?block.hash(),
-                        ?solver_id,
-                        ?success,
-                        "successfully mined a new block",
-                    );
+            // Publish the local identity before awaiting: admission can change the mining parent
+            // before submitblock responds, including on an inconclusive or transport outcome.
+            submitted = Some(SubmittedBlock {
+                hash: block.hash(),
+                height,
+            });
+            let response = rpc.submit_block(HexData(data), None).await;
+            if submission_was_rejected(&response) {
+                submitted = None;
+            }
+            match response {
+                Ok(SubmitBlockResponse::Accepted) => {
+                    info!(?height, hash = ?block.hash(), ?solver_id, "successfully mined a new block");
                     any_success = true;
                 }
-                Err(error) => info!(
+                response => info!(
                     ?height,
                     hash = ?block.hash(),
                     ?solver_id,
-                    ?error,
-                    "validating a newly mined block failed, trying again",
+                    ?response,
+                    "mined block was not confirmed accepted",
                 ),
+            }
+            // A non-rejected result might still commit later. Keep only one pending submission.
+            if submitted.is_some() {
+                break;
             }
         }
 
@@ -605,17 +726,19 @@ where
 ///
 /// If `cancel_fn()` returns an error, returns early with `Err(SolverCancelled)`.
 ///
+/// Regtest returns a null-solution candidate without production Equihash solving; submission still
+/// performs the network's normal verification. Mainnet and Testnet retain the production solver.
+///
 /// See [`run_mining_solver()`] for more details.
 pub async fn mine_a_block<F>(
     solver_id: u8,
     template: Arc<Block>,
-    cancel_fn: F,
+    network: Network,
+    mut cancel_fn: F,
 ) -> Result<AtLeastOne<Block>, SolverCancelled>
 where
     F: FnMut() -> Result<(), SolverCancelled> + Send + Sync + 'static,
 {
-    // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
-    // https://github.com/rust-lang/rust/issues/93610
     let mut header = *template.header;
 
     // Use a different nonce for each solver thread.
@@ -623,6 +746,20 @@ where
     // big-endian or little-endian order. And we can see the thread that mined a block from the nonce.
     *header.nonce.first_mut().unwrap() = solver_id;
     *header.nonce.last_mut().unwrap() = solver_id;
+
+    // Regtest follows generate's null-solution path, never the production Tromp(200,9) solver.
+    if network.is_regtest() {
+        cancel_fn()?;
+        if is_shutting_down() {
+            return Err(SolverCancelled);
+        }
+        header.solution = Solution::Regtest([0; 36]);
+        let mut block = (*template).clone();
+        block.header = Arc::new(header);
+        return Ok(vec![block]
+            .try_into()
+            .expect("one Regtest candidate is nonempty"));
+    }
 
     // Mine one or more blocks using the solver, in a low-priority blocking thread.
     let span = Span::current();

@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: breaking
+body: |-
+    Add the public `config::mining::Config::internal_miner_private_testnet` field. Update complete
+    Rust struct literals with `false`, or use a struct update; this option never overrides Mainnet.
+time: 2026-10-09T08:01:30.34511223+02:00

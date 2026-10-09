@@ -194,6 +194,8 @@ max_datacarrier_bytes = 83
 miner_address = "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
 # if you want to enable mining, which also requires selecting the `internal-miner` compilation feature
 internal_miner = true
+# Explicitly allow isolated Testnet mining; never bypasses Mainnet safeguards.
+internal_miner_private_testnet = true
 
 [network]
 # Only use explicitly configured participants; do not load a previous peer cache.

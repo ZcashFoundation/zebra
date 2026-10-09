@@ -1055,6 +1055,7 @@ where
         &self,
         client_long_poll_id: Option<LongPollId>,
         long_poll_started: DateTime32,
+        private: bool,
     ) -> Result<BlockTemplateResponse> {
         // Clone before reading so a publication between inspecting work and waiting isn't lost.
         let mut templates = self
@@ -1067,11 +1068,13 @@ where
         let mut mining_changes = None;
 
         loop {
-            types::get_block_template::check_synced_to_tip(
-                &self.network,
-                self.latest_chain_tip.clone(),
-                self.gbt.sync_status(),
-            )?;
+            if !private || matches!(self.network, Network::Mainnet) {
+                types::get_block_template::check_synced_to_tip(
+                    &self.network,
+                    self.latest_chain_tip.clone(),
+                    self.gbt.sync_status(),
+                )?;
+            }
             let mut template = self
                 .precomputed_template_for_state_tip(&mut templates)
                 .await?;
@@ -1255,6 +1258,44 @@ where
     /// Returns a reference to the configured network.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// Returns whether public mining currently has both synchronization and live peers.
+    ///
+    /// Recomputes peer freshness from the address book at the current time, rather than using
+    /// cached metrics. Callers must recheck this while solving and before submitting work.
+    pub fn public_mining_is_eligible(&self) -> bool {
+        types::get_block_template::check_synced_to_tip(
+            &self.network,
+            self.latest_chain_tip.clone(),
+            self.gbt.sync_status(),
+        )
+        .is_ok()
+            && self.address_book.has_recently_live_peers(Utc::now())
+    }
+
+    /// Returns the publicly committed best tip, excluding speculative mining parents.
+    pub fn committed_mining_tip(&self) -> Option<(Height, block::Hash)> {
+        self.latest_chain_tip.best_tip_height_and_hash()
+    }
+
+    /// Requests private-network work without public synchronization prerequisites.
+    ///
+    /// Only Testnet and Regtest permit this override. Internal miners must separately require
+    /// explicit private-Testnet configuration; Mainnet cannot bypass public checks.
+    pub async fn private_mining_template(
+        &self,
+        client_long_poll_id: Option<LongPollId>,
+    ) -> Result<BlockTemplateResponse> {
+        if matches!(self.network, Network::Mainnet) {
+            return Err(ErrorObject::borrowed(
+                0,
+                "private mining is not allowed on Mainnet",
+                None,
+            ));
+        }
+        self.precomputed_block_template(client_long_poll_id, self.template_clock_now(), true)
+            .await
     }
 
     /// Sets the estimated end of support height reported by the `getdeprecationinfo` RPC.
@@ -2738,7 +2779,7 @@ where
             .miner_params()
             .ok_or_error(0, "miner parameters are required for get_block_template")?;
 
-        self.precomputed_block_template(client_long_poll_id, long_poll_started)
+        self.precomputed_block_template(client_long_poll_id, long_poll_started, false)
             .await
             .map(Into::into)
     }

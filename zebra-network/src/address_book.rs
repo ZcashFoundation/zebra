@@ -890,6 +890,12 @@ impl AddressBookPeers for AddressBook {
             .collect()
     }
 
+    fn has_recently_live_peers(&self, now: chrono::DateTime<Utc>) -> bool {
+        self.by_addr
+            .values()
+            .any(|peer| peer.was_recently_live(now))
+    }
+
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
         if self.get(peer).is_some() {
             // Peer already exists in the address book, so we don't need to add it again.
@@ -908,6 +914,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .recently_live_peers(now)
+    }
+
+    fn has_recently_live_peers(&self, now: chrono::DateTime<Utc>) -> bool {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .has_recently_live_peers(now)
     }
 
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {

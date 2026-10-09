@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: Added
+body: |-
+    Add `config::mining::Config::internal_miner_private_testnet` for explicitly isolated Testnet
+    mining. Regtest already uses private mining; the default is false.
+time: 2026-10-09T08:01:31.451074398+02:00

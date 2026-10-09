@@ -1,0 +1,6 @@
+project: zebra-rpc
+kind: Added
+body: |-
+    Add `methods::RpcImpl::{public_mining_is_eligible, committed_mining_tip, private_mining_template}`
+    for current peer/synchronization eligibility, committed-tip observation and private-network work.
+time: 2026-10-09T07:58:07.700929026+02:00

@@ -3062,6 +3062,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         extra_coinbase_data: None,
         miner_memo: None,
         internal_miner: true,
+        internal_miner_private_testnet: false,
     };
 
     // nu5 block height
@@ -3292,6 +3293,7 @@ async fn getblocktemplate_precomputed() {
         extra_coinbase_data: None,
         miner_memo: None,
         internal_miner: false,
+        internal_miner_private_testnet: false,
     };
 
     let tip_height = NetworkUpgrade::Nu5
@@ -3570,6 +3572,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         extra_coinbase_data: None,
         miner_memo: None,
         internal_miner: false,
+        internal_miner_private_testnet: false,
     };
 
     let tip_height = NetworkUpgrade::Nu5
@@ -4098,6 +4101,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
         extra_coinbase_data: None,
         miner_memo: None,
         internal_miner: false,
+        internal_miner_private_testnet: false,
     };
 
     let tip_height = NetworkUpgrade::Nu5
@@ -4579,6 +4583,7 @@ async fn rpc_getdifficulty() {
         extra_coinbase_data: None,
         miner_memo: None,
         internal_miner: true,
+        internal_miner_private_testnet: false,
     };
 
     // nu5 block height
@@ -5262,6 +5267,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
         extra_coinbase_data: None,
         miner_memo: None,
         internal_miner: false,
+        internal_miner_private_testnet: false,
     };
 
     let tip_height = NetworkUpgrade::Nu5

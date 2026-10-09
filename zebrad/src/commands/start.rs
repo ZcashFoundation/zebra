@@ -730,12 +730,10 @@ impl StartCmd {
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
-        //
-        // TODO: add a config to enable the miner rather than a feature.
         #[cfg(feature = "internal-miner")]
         let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
-            components::miner::spawn_init(&config.metrics, rpc_impl)
+            components::miner::spawn_init(&config.mining, rpc_impl)
         } else {
             tokio::spawn(std::future::pending().in_current_span())
         };

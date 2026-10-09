@@ -54,21 +54,25 @@ pub struct Config {
 
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
-    /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
-    /// for a valid Proof of Work.
+    /// Public Mainnet and Testnet mining requires synchronization near the network tip and
+    /// recently responding peers. Regtest uses null solutions without production proof of work.
     ///
     /// The internal miner is off by default.
     #[serde(default)]
     pub internal_miner: bool,
+
+    /// Allow the internal miner to operate on an isolated Testnet.
+    ///
+    /// Defaults to false. On Testnet only, bypasses synchronization and live-peer prerequisites,
+    /// and permits extending this process's own blocks once they are committed. Never bypasses
+    /// Mainnet safeguards. Regtest already has this private behavior without setting this option.
+    pub internal_miner_private_testnet: bool,
 }
 
 impl Config {
-    /// Is the internal miner enabled using at least one thread?
+    /// Returns whether the internal miner is enabled.
     #[cfg(feature = "internal-miner")]
     pub fn is_internal_miner_enabled(&self) -> bool {
-        // TODO: Changed to return always false so internal miner is never started. Part of https://github.com/ZcashFoundation/zebra/issues/8180
-        // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L83
-        // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
         self.internal_miner
     }
 }

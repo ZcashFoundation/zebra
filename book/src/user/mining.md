@@ -9,6 +9,7 @@ Contents:
   - [Miner address](#miner-address)
   - [Extra coinbase data](#extra-coinbase-data)
   - [Miner memo](#miner-memo)
+  - [Internal miner](#internal-miner)
   - [RPC section](#rpc-section)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
@@ -91,6 +92,38 @@ miner_memo = "Mined by MyPoolName"
 
 - Like `extra_coinbase_data`, the value is always encoded as raw UTF-8 bytes (no hex-decoding), and is limited to 512 bytes.
 - It only takes effect if the block reward is actually paid to a shielded receiver. That means `miner_address` must be a Sapling address, or a Unified Address whose preferred receiver (per the [miner address](#miner-address) rules above) is Orchard or Sapling. If `miner_address` resolves to a transparent receiver, `miner_memo` is configured but silently has no effect, since there is no shielded output to attach it to.
+
+### Internal miner
+
+The experimental internal miner requires a build with the `internal-miner` feature and
+`mining.internal_miner = true`. It is disabled by default.
+
+On public Mainnet and Testnet, the miner only works while Zebra is synchronized near the network
+tip and has recently responding peers. Peer liveness comes from current address-book response
+timestamps, not a cached connection count. Losing either prerequisite cancels solver work; both
+are rechecked before submission. A changed mining parent or withdrawn template also cancels work,
+including solutions returned just before the change.
+
+The public miner will not extend a block submitted by this process, even after it commits.
+It waits for another miner's block rather than building a run of blocks on a potentially isolated
+fork. A rejected submission can be retried; an accepted, duplicate, inconclusive, or transport
+result retains the local block identity because admission or commit may happen after the response.
+Until the committed chain reaches that block's height, the miner pauses rather than submitting
+additional siblings. An inconclusive result is not reported as successful mining.
+
+For an intentionally isolated Testnet, set:
+
+```toml
+[mining]
+internal_miner = true
+internal_miner_private_testnet = true
+```
+
+This Testnet-only option bypasses public sync and live-peer prerequisites and allows mining on this
+process's own **committed** blocks. It never disables Mainnet safeguards. Do not enable it on public
+Testnet: it permits an isolated fork. Regtest inherently has this private behavior without the option,
+and uses null solutions rather than the production Equihash solver. Mainnet and Testnet still use
+the production solver and normal proof-of-work verification.
 
 ### RPC section
 

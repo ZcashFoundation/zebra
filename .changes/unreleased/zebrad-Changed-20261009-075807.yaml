@@ -1,0 +1,7 @@
+project: zebrad
+kind: Changed
+body: |-
+    Require synchronization and recently responding peers for public internal mining. Enable
+    isolated Testnet mining explicitly with `internal_miner_private_testnet`; Regtest uses null
+    solutions. Retain uncertain submissions and wait for commitment before private own-parent work.
+time: 2026-10-09T07:58:07.706115497+02:00
