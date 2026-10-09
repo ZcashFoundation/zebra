@@ -717,6 +717,10 @@ where
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         T::zcash_serialize(self, writer)
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        T::zcash_serialized_size(self)
+    }
 }
 
 /// A Tx Input must have an Outpoint (32 byte hash + 4 byte index), a 4 byte sequence number,

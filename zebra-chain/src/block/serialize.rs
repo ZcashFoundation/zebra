@@ -81,6 +81,14 @@ impl ZcashSerialize for Header {
         self.solution.zcash_serialize(&mut writer)?;
         Ok(())
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        check_version(self.version).expect("serialized header version must be valid");
+        u32::try_from(self.time.timestamp())
+            .expect("deserialized and generated timestamps are u32 values");
+        // All fixed fields, followed by the actual solution and its CompactSize prefix.
+        140 + self.solution.zcash_serialized_size()
+    }
 }
 
 impl ZcashDeserialize for Header {
@@ -119,6 +127,10 @@ impl ZcashSerialize for CountedHeader {
 
         Ok(())
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        self.header.zcash_serialized_size() + 1
+    }
 }
 
 impl ZcashDeserialize for CountedHeader {
@@ -143,6 +155,10 @@ impl ZcashSerialize for Block {
         self.header.zcash_serialize(&mut writer)?;
         self.transactions.zcash_serialize(&mut writer)?;
         Ok(())
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        self.header.zcash_serialized_size() + self.transactions.zcash_serialized_size()
     }
 }
 

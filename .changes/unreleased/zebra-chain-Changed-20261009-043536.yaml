@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Serialized-size calculations avoid encoding transaction, block, header and transparent-component contents.
+time: 2026-10-09T04:35:36.656905286+02:00

@@ -280,6 +280,14 @@ impl ZcashSerialize for Solution {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_bytes(&self.value().to_vec(), writer)
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        let len = self.value().len();
+        CompactSizeMessage::try_from(len)
+            .expect("solution length fits in MAX_PROTOCOL_MESSAGE_LEN")
+            .zcash_serialized_size()
+            + len
+    }
 }
 
 impl ZcashDeserialize for Solution {
