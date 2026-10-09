@@ -1,0 +1,6 @@
+project: zebra-test
+kind: Added
+body: >-
+  Added `command::TestChild::{id, stdin_mut}` and Windows `AsHandle` access without exposing process
+  reaping. ([#11598](https://github.com/ZcashFoundation/zebra/pull/11598))
+time: 2026-10-09T16:15:07.948415738+02:00

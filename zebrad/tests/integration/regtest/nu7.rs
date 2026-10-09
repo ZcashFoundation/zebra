@@ -479,11 +479,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         assert_eq!(persisted_template.previous_block_hash(), restored.hash());
         #[cfg(unix)]
         {
-            let pid = child
-                .child
-                .as_ref()
-                .expect("the node is still owned until shutdown")
-                .id();
+            let pid = child.id();
             crate::common::zcashd_compat::launch::send_signal(pid, "-TERM")?;
         }
         #[cfg(not(unix))]
