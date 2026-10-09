@@ -121,25 +121,21 @@ impl MiningRpcMethods for RpcRequestClient {
     }
 
     async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError> {
-        match self
-            .json_result_from_call("getblock", format!(r#"["{height}", 0]"#))
-            .await
-        {
-            Ok(HexData(raw_block)) => {
-                let block = raw_block.zcash_deserialize_into::<Block>()?;
+        let response = self
+            .text_from_call("getblock", format!(r#"["{height}", 0]"#))
+            .await?;
+        let response: jsonrpsee_types::Response<HexData> = serde_json::from_str(&response)?;
+        match response.payload {
+            jsonrpsee_types::ResponsePayload::Success(block) => {
+                let block = block.into_owned().0.zcash_deserialize_into::<Block>()?;
                 Ok(Some(Arc::new(block)))
             }
-            Err(err)
-                if err
-                    .downcast_ref::<jsonrpsee_types::ErrorObject>()
-                    .is_some_and(|err| {
-                        let error: i32 = server::error::LegacyCode::InvalidParameter.into();
-                        err.code() == error
-                    }) =>
+            jsonrpsee_types::ResponsePayload::Error(error)
+                if error.code() == i32::from(server::error::LegacyCode::InvalidParameter) =>
             {
                 Ok(None)
             }
-            Err(err) => Err(err),
+            jsonrpsee_types::ResponsePayload::Error(error) => Err(error.to_string().into()),
         }
     }
 

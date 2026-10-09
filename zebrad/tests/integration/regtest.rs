@@ -63,6 +63,185 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     Ok(())
 }
 
+/// Ports the Unified receiver-selection and zero-OVK payout checks from issue #9690.
+///
+/// This short Canopy-to-NU5 chain does not cover the original Heartwood activation rejection,
+/// wallet balances, or spending a shielded coinbase at one confirmation.
+#[tokio::test(flavor = "multi_thread")]
+async fn shielded_coinbase_unified_receiver_switches_at_nu5() -> Result<()> {
+    use sapling_crypto::{
+        keys::OutgoingViewingKey,
+        note_encryption::{try_sapling_output_recovery, Zip212Enforcement},
+    };
+    use zcash_keys::address::UnifiedAddress;
+    use zebra_chain::parameters::{
+        subsidy::{miner_subsidy, scheduled_block_subsidy},
+        NetworkUpgrade,
+    };
+    use zebra_rpc::{
+        config::mining::{default_miner_address, MinerAddressType},
+        methods::GetBlockHash,
+    };
+
+    const TEST_TIMEOUT: Duration = Duration::from_secs(180);
+    const RPC_TIMEOUT: Duration = Duration::from_secs(60);
+    const COMMIT_TIMEOUT: Duration = Duration::from_secs(15);
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let started = std::time::Instant::now();
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(3),
+                ..Default::default()
+            }
+            .into(),
+        );
+        assert_eq!(
+            NetworkUpgrade::Nu6.activation_height(&network),
+            None,
+            "later upgrades must remain unscheduled"
+        );
+
+        let miner_address = default_miner_address(network.kind(), &MinerAddressType::Unified);
+        let recipient = UnifiedAddress::decode(&network, miner_address)?;
+        let mut receiver_types: Vec<u32> = recipient
+            .receiver_types()
+            .into_iter()
+            .map(u32::from)
+            .collect();
+        receiver_types.sort_unstable();
+        assert_eq!(
+            receiver_types,
+            [0, 2, 3],
+            "UA contains p2pkh, Sapling, and Orchard"
+        );
+
+        // Keep background templates and the sole seed block transparent: only the two
+        // boundary payouts need shielded proofs.
+        let mut config = os_assigned_rpc_port_config(false, &network)?;
+        config.mempool.debug_enable_at_height = Some(0);
+        let mut zebrad = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?
+            .with_timeout(Duration::from_secs(30));
+        let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+        zebrad = zebrad.with_timeout(TEST_TIMEOUT.saturating_sub(started.elapsed()));
+        let client = RpcRequestClient::new_with_timeout(rpc_address, RPC_TIMEOUT);
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                if let Some(genesis) = client.get_block(0).await.map_err(|err| eyre!(err))? {
+                    assert_eq!(genesis.hash(), network.genesis_hash());
+                    return Ok::<_, color_eyre::Report>(());
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await??;
+        // Missing committed blocks must remain retryable during startup and generation.
+        assert!(client
+            .get_block(1)
+            .await
+            .map_err(|err| eyre!(err))?
+            .is_none());
+        let seed = tokio::time::timeout(Duration::from_secs(30), client.generate(1)).await??;
+        assert_eq!(seed.len(), 1);
+
+        for height in [Height(2), Height(3)] {
+            // This RPC reuses the native template constructor and submits the resulting block
+            // to consensus; using the same address exercises the activation-dependent fallback.
+            let hashes: Vec<GetBlockHash> = tokio::time::timeout(
+                RPC_TIMEOUT,
+                client.json_result_from_call(
+                    "generatetoaddress",
+                    serde_json::json!([1, miner_address]).to_string(),
+                ),
+            )
+            .await?
+            .map_err(|err| eyre!(err))?;
+            assert_eq!(hashes.len(), 1);
+
+            let block = tokio::time::timeout(COMMIT_TIMEOUT, async {
+                loop {
+                    if let Some(block) = client
+                        .get_block(i32::try_from(u32::from(height))?)
+                        .await
+                        .map_err(|err| eyre!(err))?
+                    {
+                        return Ok::<_, color_eyre::Report>(block);
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await??;
+            assert_eq!(
+                block.hash(),
+                hashes[0].hash(),
+                "retrieve the accepted chain block"
+            );
+            assert_eq!(block.coinbase_height(), Some(height));
+            assert_eq!(
+                block.transactions.len(),
+                1,
+                "no fees or wallet transactions"
+            );
+            let coinbase = &block.transactions[0];
+            assert!(coinbase.is_coinbase());
+            assert!(coinbase.outputs().is_empty(), "no transparent miner payout");
+            assert!(coinbase.ironwood_bundle().is_none());
+            let expected_value = u64::from(miner_subsidy(
+                height,
+                &network,
+                scheduled_block_subsidy(height, &network)?,
+            )?);
+
+            if height == Height(2) {
+                assert_eq!(coinbase.version(), 4);
+                assert!(coinbase.orchard_bundle().is_none(), "Orchard is not active");
+                let sapling = coinbase
+                    .sapling_bundle()
+                    .expect("pre-NU5 payout uses Sapling");
+                assert!(sapling.shielded_spends().is_empty());
+                assert_eq!(sapling.shielded_outputs().len(), 1);
+                let (note, address, _) = try_sapling_output_recovery(
+                    &OutgoingViewingKey([0; 32]),
+                    &sapling.shielded_outputs()[0],
+                    Zip212Enforcement::On,
+                )
+                .expect("committed Sapling coinbase recovers with the zero outgoing viewing key");
+                assert_eq!(Some(&address), recipient.sapling());
+                assert_eq!(note.value().inner(), expected_value);
+            } else {
+                assert_eq!(coinbase.version(), 5);
+                assert_eq!(coinbase.network_upgrade(), Some(NetworkUpgrade::Nu5));
+                assert!(
+                    coinbase.sapling_bundle().is_none(),
+                    "NU5 must prefer Orchard"
+                );
+                let orchard = coinbase.orchard_bundle().expect("NU5 payout uses Orchard");
+                assert!(!orchard.flags().spends_enabled());
+                assert_eq!(orchard.actions().len(), 1);
+                let (note, address, _) =
+                    orchard.recover_output_with_ovk(0, &[0; 32].into()).expect(
+                        "committed Orchard coinbase recovers with the zero outgoing viewing key",
+                    );
+                assert_eq!(Some(&address), recipient.orchard());
+                assert_eq!(note.value().inner(), expected_value);
+            }
+        }
+
+        zebrad.kill(false)?;
+        zebrad
+            .with_timeout(LAUNCH_DELAY)
+            .wait_with_output()?
+            .assert_failure()?
+            .assert_was_killed()?;
+        Ok(())
+    })
+    .await?
+}
+
 /// A `getblocktemplate` long poll request must return promptly with `submit_old: false` when the
 /// chain tip changes, and the template it returns must be a valid block proposal.
 ///
