@@ -65,6 +65,15 @@ pub enum ExactTipRejectionError {
     FailedVerification(#[from] zebra_consensus::error::TransactionError),
     #[error("transaction did not pass standard validation: {0}")]
     FailedStandard(#[from] NonStandardTransactionError),
+
+    /// A deterministic package failure, valid only for these exact ancestors at this tip.
+    /// Ancestor witnesses are bounded by the admission package-count limit.
+    #[error("transaction package did not pass proposal admission: {reason}")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    FailedProposal {
+        reason: String,
+        ancestors: Arc<[UnminedTxId]>,
+    },
 }
 
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).
@@ -479,21 +488,18 @@ impl Storage {
             // > EvictTransaction MUST do the following:
             // > Select a random transaction to evict, with probability in direct proportion to
             // > eviction weight. (...) Remove it from the mempool.
-            let victim_tx = self
-                .verified
-                .evict_one()
-                .expect("mempool is empty, but was expected to be full");
+            for victim_tx in self.verified.evict_one() {
+                // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
+                // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
+                self.reject(
+                    victim_tx.transaction.id,
+                    SameEffectsChainRejectionError::RandomlyEvicted.into(),
+                );
 
-            // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
-            // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
-            self.reject(
-                victim_tx.transaction.id,
-                SameEffectsChainRejectionError::RandomlyEvicted.into(),
-            );
-
-            // If this transaction gets evicted, set its result to the same error
-            if victim_tx.transaction.id == unmined_tx_id {
-                result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+                // An incoming transaction can be evicted directly or through an ancestor.
+                if victim_tx.transaction.id == unmined_tx_id {
+                    result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+                }
             }
         }
 
@@ -663,6 +669,18 @@ impl Storage {
         self.transactions().values().map(|tx| tx.transaction.id)
     }
 
+    /// Returns `true` if every witnessed proposal ancestor is still stored with its exact ID.
+    ///
+    /// Removing or replacing any of them changes the package a proposal result applies to.
+    pub fn contains_exact_ancestors(&self, ancestors: &[UnminedTxId]) -> bool {
+        ancestors.iter().all(|id| {
+            self.transactions()
+                .get(&id.mined_id())
+                .map(|tx| tx.transaction.id)
+                == Some(*id)
+        })
+    }
+
     /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the verified set.
     ///
     /// Each [`VerifiedUnminedTx`] contains an [`UnminedTx`],
@@ -813,7 +831,15 @@ impl Storage {
     ///
     /// Returns an arbitrary error if the transaction is in multiple lists.
     pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
-        if let Some(error) = self.tip_rejected_exact.get(txid) {
+        if let Some(error) = self.tip_rejected_exact.get(txid).filter(|error| {
+            // Removing or replacing a witnessed ancestor changes the proposal context.
+            match error {
+                ExactTipRejectionError::FailedProposal { ancestors, .. } => {
+                    self.contains_exact_ancestors(ancestors)
+                }
+                _ => true,
+            }
+        }) {
             return Some(error.clone().into());
         }
 

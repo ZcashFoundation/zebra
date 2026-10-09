@@ -2,7 +2,6 @@
 
 pub mod constants;
 pub mod parameters;
-pub(crate) mod precompute;
 pub mod proposal;
 pub mod zip317;
 
@@ -20,7 +19,10 @@ use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::{
+    mpsc::{self, error::TrySendError},
+    oneshot, watch,
+};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
@@ -33,17 +35,16 @@ use zebra_chain::{
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{subsidy::subsidy_is_valid, Network},
+    parameters::{subsidy::subsidy_is_valid, Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
 use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
-use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
@@ -67,12 +68,18 @@ pub use parameters::{
 };
 pub use proposal::{BlockProposalResponse, BlockTemplateTimeSource};
 
-/// An alias to indicate that a usize value represents the depth of in-block dependencies of a
-/// transaction.
+/// A request for a caller-specific template from the mempool-owned builder.
 ///
-/// See the `dependencies_depth()` function in [`zip317`] for more details.
-#[cfg(test)]
-type InBlockTxDependenciesDepth = usize;
+/// This does not publish to the configured miner's template channel. Each request carries its
+/// own payout, coinbase data, and memo, including regtest's per-block randomization.
+#[derive(Debug)]
+pub struct BlockTemplateRequest {
+    /// The exact miner parameters to use for this template.
+    pub miner_params: MinerParams,
+    /// Receives the validated template or the construction error.
+    pub response:
+        oneshot::Sender<Result<BlockTemplateResponse, Box<dyn std::error::Error + Send + Sync>>>,
+}
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 ///
@@ -83,12 +90,8 @@ type InBlockTxDependenciesDepth = usize;
 pub struct BlockTemplateResponse {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
-    /// At the moment, Zebra does not support any of the extra capabilities from the specification:
-    /// - `proposal`: <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-    /// - `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
-    /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
-    ///
-    /// By the above, Zebra will always return an empty vector here.
+    /// Zebra advertises proposal validation as specified by
+    /// <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>.
     pub(crate) capabilities: Vec<String>,
 
     /// The version of the block format.
@@ -313,16 +316,24 @@ impl BlockTemplateResponse {
 
     /// Returns a new [`BlockTemplateResponse`] struct, based on the supplied arguments and defaults.
     ///
-    /// The result of this method only depends on the supplied arguments and constants.
+    /// Transactions must already be selected and ordered with dependencies before their spenders.
+    /// The cache must belong to the same immutable network and miner parameters. Select its height
+    /// and parent NSM balance before starting construction, as ZIP-317 selection does.
+    /// Shielded coinbase construction can be expensive, so asynchronous callers must run this on a
+    /// blocking worker.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the next height, total fees, or coinbase are invalid. Callers must preflight these
+    /// bounds and validate the resulting proposal before publishing it.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_internal(
+    pub fn from_transactions(
         net: &Network,
         coinbase_cache: &CoinbaseCache,
         miner_params: &MinerParams,
         chain_info: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
-        #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
-        #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
+        mempool_txs: Vec<VerifiedUnminedTx>,
         submit_old: Option<bool>,
     ) -> Self {
         // Determine the next block height.
@@ -331,43 +342,9 @@ impl BlockTemplateResponse {
             .next()
             .expect("chain tip must be below Height::MAX");
 
-        // Convert transactions into TransactionTemplates.
-        #[cfg(not(test))]
-        let (mut mempool_tx_templates, mempool_txs): (
-            Vec<TransactionTemplate<NonNegative>>,
-            Vec<_>,
-        ) = mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
-
-        // Transaction selection returns transactions in an arbitrary order,
-        // but Zebra's snapshot tests expect the same order every time.
-        //
-        // # Correctness
-        //
-        // Transactions that spend outputs created in the same block must appear
-        // after the transactions that create those outputs.
-        #[cfg(test)]
-        let (mut mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) = {
-            let mut mempool_txs_with_templates: Vec<(
-                InBlockTxDependenciesDepth,
-                TransactionTemplate<amount::NonNegative>,
-                VerifiedUnminedTx,
-            )> = mempool_txs
-                .into_iter()
-                .map(|(min_tx_index, tx)| (min_tx_index, (&tx).into(), tx))
-                .collect();
-
-            // `zcashd` sorts in serialized data order, excluding the length byte.
-            // It sometimes seems to do this, but other times the order is arbitrary.
-            // Sort by hash, this is faster.
-            mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
-                (*min_tx_index, tx_template.hash.bytes_in_display_order())
-            });
-
-            mempool_txs_with_templates
-                .into_iter()
-                .map(|(_, template, tx)| (template, tx))
-                .unzip()
-        };
+        // Selection already orders dependencies before their spenders, including in tests.
+        let mut mempool_tx_templates: Vec<TransactionTemplate<NonNegative>> =
+            mempool_txs.iter().map(TransactionTemplate::from).collect();
 
         // BIP 22 dependencies refer to the final, 1-based template order, not mempool order.
         let mut transaction_indices = HashMap::with_capacity(mempool_txs.len());
@@ -491,6 +468,45 @@ impl BlockTemplateResponse {
 
             submit_old,
         }
+    }
+
+    /// Whether this template still extends the committed tip with usable time-dependent difficulty.
+    ///
+    /// Rechecks the advertised timestamp range against the local clock, including clock rollback,
+    /// and expires standard-difficulty Testnet work after an abbreviated difficulty boundary.
+    /// Historical Regtest timestamps and an enforced median-time cap do not expire the template.
+    /// The producer must still verify the proposal before publishing it.
+    pub fn is_valid_for_tip(
+        &self,
+        tip_hash: block::Hash,
+        network: &Network,
+        now: DateTime32,
+    ) -> bool {
+        if self.previous_block_hash != tip_hash {
+            return false;
+        }
+
+        // A failed refresh or clock rollback must not leave an invalid advertised time range.
+        if self.max_time > now.saturating_add(Duration32::from_hours(2)) {
+            return false;
+        }
+
+        // Only an abbreviated standard-difficulty Testnet range can become unprofitable.
+        // The full median-time cap cannot be extended by rebuilding. Regtest uses chain time.
+        !(now > self.max_time
+            && !network.is_regtest()
+            && NetworkUpgrade::minimum_difficulty_spacing_for_height(
+                network,
+                block::Height(self.height),
+            )
+            .is_some()
+            && self.bits != network.target_difficulty_limit().to_compact()
+            && (!network.is_max_block_time_enforced(block::Height(self.height))
+                || self
+                    .max_time
+                    .saturating_duration_since(self.min_time)
+                    .seconds()
+                    < Duration32::from_minutes(90).seconds() - 1))
     }
 }
 
@@ -651,7 +667,7 @@ impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
 /// Returns the parent NSM balance when the next block's subsidy depends on it.
 ///
 /// Before deployment, a coinbase built ahead of time without the balance is cached under `None`.
-pub(crate) fn nsm_value_balance_for_next_block(
+pub fn nsm_value_balance_for_next_block(
     network: &Network,
     chain_info: &GetBlockTemplateChainInfo,
 ) -> Option<Amount<NonNegative>> {
@@ -665,8 +681,11 @@ pub(crate) fn nsm_value_balance_for_next_block(
 /// Shielded coinbases require expensive proofs. Keep zero-fee sizing and real-fee coinbases for
 /// the selected context, discarding old proof completions rather than evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
+///
+/// One cache belongs to one immutable network and payout/data/memo context. Never reuse it for
+/// overridden miner parameters; its keys intentionally do not include that context.
 #[derive(Clone, Default)]
-pub(crate) struct CoinbaseCache(Arc<Mutex<CachedCoinbases>>);
+pub struct CoinbaseCache(Arc<Mutex<CachedCoinbases>>);
 
 /// The context selected by the latest request and its bounded fee variants.
 #[derive(Default)]
@@ -676,8 +695,14 @@ struct CachedCoinbases {
 }
 
 impl CoinbaseCache {
-    /// Selects the context before a template starts constructing either coinbase.
-    fn select(&self, height: block::Height, parent_nsm_value_balance: Option<Amount<NonNegative>>) {
+    /// Selects the height and parent balance before constructing either coinbase.
+    ///
+    /// Clear superseded work before starting a proof so late completions cannot replace it.
+    pub fn select(
+        &self,
+        height: block::Height,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) {
         let mut cache = self
             .0
             .lock()
@@ -689,7 +714,7 @@ impl CoinbaseCache {
     }
 
     /// Returns a built fee variant without reviving a superseded template's context.
-    fn get(
+    pub fn get(
         &self,
         height: block::Height,
         fee: Amount<NonNegative>,
@@ -706,7 +731,7 @@ impl CoinbaseCache {
     }
 
     /// Stores a completed build only if its height and parent balance are still selected.
-    fn store(
+    pub fn store(
         &self,
         height: block::Height,
         fee: Amount<NonNegative>,
@@ -759,17 +784,11 @@ where
     /// so they can be advertised to peers.
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
 
-    /// Caches the most recently built coinbase transaction, so short-polling miners don't re-run
-    /// the shielded-coinbase proof on every request within a block.
-    coinbase_cache: CoinbaseCache,
+    /// Validated default-payout templates published by the mempool.
+    pub(crate) templates: Option<watch::Receiver<Option<Arc<BlockTemplateResponse>>>>,
 
-    /// A block template for the current chain tip, kept up to date by the task spawned by
-    /// `RpcImpl::spawn_block_template_updater()`, so `getblocktemplate` can answer without reading
-    /// the state and the mempool.
-    ///
-    /// This is `None` on handlers whose miner parameters were overridden after cloning, because the
-    /// precomputed template pays the configured miner address.
-    template_cache: Option<precompute::TemplateCache>,
+    /// Bounded requests for caller-specific templates, separate from default publications.
+    pub(crate) template_requests: Option<mpsc::Sender<BlockTemplateRequest>>,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -791,8 +810,8 @@ where
             sync_status,
             mined_block_sender: mined_block_sender
                 .unwrap_or(SubmitBlockChannel::default().sender()),
-            coinbase_cache: CoinbaseCache::default(),
-            template_cache: Some(precompute::TemplateCache::default()),
+            templates: None,
+            template_requests: None,
         }
     }
 
@@ -807,24 +826,6 @@ where
     /// address on a cloned handler, without changing the configured default.
     pub fn set_miner_params(&mut self, miner_params: MinerParams) {
         self.miner_params = Some(miner_params);
-        // Cached coinbases pay the previous miner address, and this handler shares
-        // its cache with the handler it was cloned from. Detach to a fresh cache so
-        // neither handler can serve a coinbase built for the other's address.
-        self.coinbase_cache = CoinbaseCache::default();
-        // The precomputed template pays the previous miner address, and it's shared with the
-        // handler this one was cloned from, so stop using it.
-        self.template_cache = None;
-    }
-
-    /// Returns a handle to the coinbase transaction cache.
-    pub(crate) fn coinbase_cache(&self) -> CoinbaseCache {
-        self.coinbase_cache.clone()
-    }
-
-    /// Returns a handle to the precomputed block template, unless this handler's miner parameters
-    /// were overridden after cloning.
-    pub(crate) fn template_cache(&self) -> Option<&precompute::TemplateCache> {
-        self.template_cache.as_ref()
     }
 
     /// Returns the sync status.
@@ -851,11 +852,6 @@ where
         if let Some(miner_params) = &mut self.miner_params {
             miner_params.randomize_data();
             miner_params.randomize_memo();
-            // The cached coinbases were built with the previous data, and both caches are shared
-            // with the handler this one was cloned from. Detach from them, so neither handler can
-            // serve a coinbase built for the other's data.
-            self.coinbase_cache = CoinbaseCache::default();
-            self.template_cache = None;
         }
     }
 }
@@ -1107,41 +1103,4 @@ where
     };
 
     Ok(chain_info)
-}
-
-/// Returns the transactions that are currently in `mempool`, or None if the
-/// `last_seen_tip_hash` from the mempool response doesn't match the tip hash from the state.
-///
-/// You should call `check_synced_to_tip()` before calling this function.
-/// If the mempool is inactive because Zebra is not synced to the tip, returns no transactions.
-pub async fn fetch_mempool_transactions<Mempool>(
-    mempool: Mempool,
-    chain_tip_hash: block::Hash,
-) -> RpcResult<Option<(Vec<VerifiedUnminedTx>, TransactionDependencies)>>
-where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + 'static,
-    Mempool::Future: Send,
-{
-    let response = mempool
-        .oneshot(mempool::Request::FullTransactions)
-        .await
-        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
-
-    // TODO: Order transactions in block templates based on their dependencies
-
-    let mempool::Response::FullTransactions {
-        transactions,
-        transaction_dependencies,
-        last_seen_tip_hash,
-    } = response
-    else {
-        unreachable!("unmatched response to a mempool::FullTransactions request")
-    };
-
-    // Check that the mempool and state were in sync when we made the requests
-    Ok((last_seen_tip_hash == chain_tip_hash).then_some((transactions, transaction_dependencies)))
 }

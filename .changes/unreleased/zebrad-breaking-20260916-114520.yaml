@@ -1,0 +1,12 @@
+project: zebrad
+kind: breaking
+body: 'Zebra now admits a transaction to the mempool only after it and its required unmined
+  ancestors pass next-block proposal verification. Each package is limited to 100 transactions,
+  including the candidate, and must fit block byte and signature-operation limits. This is mempool
+  policy, not a change to block consensus rules, and applies even without a mining address, RPC
+  server, or internal miner. Rejected candidates are not exposed or gossiped. Deterministic proposal
+  rejections are reused only for the same transaction, committed tip, and required unmined ancestors.
+  Newly verified transactions are checked together as one proposal, which is split into concurrently
+  checked pieces when it fails, so only the transactions that fail alone are rejected
+  ([#11453](https://github.com/ZcashFoundation/zebra/pull/11453)).'
+time: 2026-09-16T11:45:20.000000000Z
