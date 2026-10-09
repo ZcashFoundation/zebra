@@ -36,8 +36,8 @@ use crate::{
 };
 
 use super::{
-    check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, nsm_value_balance_for_next_block,
+    check_synced_to_tip, clamp_template_time_range, constants::MEMPOOL_LONG_POLL_INTERVAL,
+    fetch_chain_info, fetch_mempool_transactions, nsm_value_balance_for_next_block,
     zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
 
@@ -130,12 +130,15 @@ impl TemplateCache {
     }
 
     /// Publishes `template` as the precomputed template.
+    ///
+    /// Retain the original range so clock-dependent served copies cannot hide an enforced
+    /// median-time cap or be mistaken for an abbreviated Testnet difficulty range.
     pub(crate) fn publish(&self, template: BlockTemplateResponse) {
         self.0.send_replace(Some(Arc::new(template)));
     }
 
-    /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
-    /// bound, unless Testnet's time-dependent difficulty may have become easier since it was built.
+    /// Returns a template for `tip_hash`, narrowing its range after a clock rollback.
+    /// Rejects work if Testnet's time-dependent difficulty may have become easier since its build.
     pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
@@ -147,12 +150,6 @@ impl TemplateCache {
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.
         if template.previous_block_hash != tip_hash {
-            return None;
-        }
-
-        // Recheck the whole advertised range: the clock can move backwards between refreshes,
-        // and a failed refresh leaves the previous template cached.
-        if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
             return None;
         }
 
@@ -177,7 +174,17 @@ impl TemplateCache {
             return None;
         }
 
-        Some(Arc::clone(template))
+        let (_, max_time) =
+            clamp_template_time_range(template.min_time, template.cur_time, template.max_time, now)
+                .ok()?;
+        if max_time != template.max_time {
+            // Never narrow the shared snapshot: another request can observe a different clock.
+            let mut template = (**template).clone();
+            template.clamp_time_range(now).ok()?;
+            Some(Arc::new(template))
+        } else {
+            Some(Arc::clone(template))
+        }
     }
 }
 

@@ -3343,6 +3343,9 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     // Simulate a state snapshot captured before a backwards wall-clock adjustment.
     // Its cur_time still fits, but its advertised maximum no longer does.
     let mut rollback_state = read_state.clone();
+    let rollback_now = DateTime32::now();
+    let mut rpc = rpc.clone();
+    rpc.template_clock = Some(Arc::new(AtomicU32::new(rollback_now.timestamp())));
     let (rollback_result, ..) = tokio::join!(
         rpc.get_block_template(None),
         make_mock_mempool_request_handler(vec![], fake_tip_hash),
@@ -3357,17 +3360,23 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                     tip_hash: fake_tip_hash,
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
-                    max_time: DateTime32::now()
-                        .saturating_add(zebra_chain::serialization::Duration32::from_hours(3)),
+                    max_time: rollback_now.saturating_add(Duration32::from_hours(3)),
                     chain_history_root: fake_history_tree(&Mainnet).hash(),
                 }));
         },
     );
+    let served = rollback_result
+        .expect("a rollback with a nonempty range must succeed")
+        .try_into_template()
+        .unwrap();
     assert_eq!(
-        rollback_result
-            .expect_err("the whole range must fit the current clock bound")
-            .code(),
-        i32::from(server::error::LegacyCode::Misc),
+        served.max_time,
+        rollback_now.saturating_add(Duration32::from_hours(2))
+    );
+    assert_eq!(served.cur_time, fake_cur_time);
+    assert_eq!(
+        served.long_poll_id.max_timestamp,
+        served.max_time.timestamp()
     );
 
     mempool.expect_no_requests().await;
@@ -3800,6 +3809,196 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     read_state_responder.abort();
     mempool_responder.abort();
     updater.abort();
+}
+
+/// Rollback immediately replaces work without waiting for the producer or repeating a proof.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_clock_rollback_serves_valid_work() {
+    let _init_guard = zebra_test::init();
+    let net = Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+    let tip_hash = Hash([1; 32]);
+    let now = DateTime32::from(1_700_000_000);
+    let max_time = now.saturating_add(Duration32::from_hours(2));
+    let chain_info = GetBlockTemplateChainInfo {
+        expected_difficulty: net.target_difficulty_limit().to_compact(),
+        tip_height,
+        tip_hash,
+        cur_time: now.saturating_sub(Duration32::from_seconds(100)),
+        min_time: now.saturating_sub(Duration32::from_seconds(100)),
+        max_time,
+        chain_history_root: fake_history_tree(&net).hash(),
+        chain_value_pools: Default::default(),
+    };
+
+    for mode in ["cached", "fallback", "address", "randomized"] {
+        let info = chain_info.clone();
+        let chain_info_reads = Arc::new(AtomicUsize::new(0));
+        let read_state = tower::service_fn({
+            let chain_info_reads = chain_info_reads.clone();
+            move |request| {
+                let info = info.clone();
+                let chain_info_reads = chain_info_reads.clone();
+                async move {
+                    Ok::<_, BoxError>(match request {
+                        ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                        ReadRequest::ChainInfo => {
+                            chain_info_reads.fetch_add(1, Ordering::SeqCst);
+                            ReadResponse::ChainInfo(info)
+                        }
+                        other => panic!("unexpected state request: {other:?}"),
+                    })
+                }
+            }
+        });
+        let mempool = tower::service_fn(move |request| async move {
+            assert!(matches!(request, mempool::Request::FullTransactions));
+            Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                transactions: vec![],
+                transaction_dependencies: Default::default(),
+                last_seen_tip_hash: tip_hash,
+            })
+        });
+        let (tip, sender) = MockChainTip::new();
+        sender.send_best_tip_height(tip_height);
+        sender.send_best_tip_hash(tip_hash);
+        sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (mut rpc, queue) = RpcImpl::new(
+            net.clone(),
+            mining::Config {
+                miner_address: Some(
+                    mining::default_miner_address(net.kind(), &mining::MinerAddressType::Unified)
+                        .parse()
+                        .unwrap(),
+                ),
+                ..Default::default()
+            },
+            false,
+            "0.0.1",
+            "RPC test",
+            mempool,
+            MockService::build().for_unit_tests(),
+            read_state,
+            MockService::build().for_unit_tests(),
+            sync,
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let clock = Arc::new(AtomicU32::new(now.timestamp()));
+        rpc.template_clock = Some(clock.clone());
+        let cache = rpc.gbt.template_cache().unwrap().clone();
+        let configured = BlockTemplateResponse::new_internal(
+            &net,
+            &rpc.gbt.coinbase_cache(),
+            rpc.gbt.miner_params().unwrap(),
+            &chain_info,
+            LongPollInput::new(tip_height, tip_hash, max_time, std::iter::empty()).generate_id(),
+            vec![],
+            None,
+        );
+        if mode != "fallback" {
+            cache.publish(configured.clone());
+        }
+        if mode == "address" {
+            rpc.gbt.set_miner_params(MinerParams::from(
+                Address::decode(
+                    &net,
+                    mining::default_miner_address(net.kind(), &mining::MinerAddressType::Sapling),
+                )
+                .unwrap(),
+            ));
+        } else if mode == "randomized" {
+            rpc.gbt.randomize_coinbase_data();
+        }
+        assert_eq!(
+            rpc.gbt.template_cache().is_none(),
+            mode == "address" || mode == "randomized"
+        );
+        let original = rpc
+            .get_block_template(None)
+            .await
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        if mode == "address" || mode == "randomized" {
+            assert_ne!(original.coinbase_txn, configured.coinbase_txn);
+        }
+        let reads_before = chain_info_reads.load(Ordering::SeqCst);
+
+        clock.store(now.timestamp() - 3, Ordering::SeqCst);
+        let served = tokio::time::timeout(
+            Duration::from_millis(100),
+            rpc.get_block_template(Some(GetBlockTemplateParameters {
+                long_poll_id: Some(original.long_poll_id),
+                ..Default::default()
+            })),
+        )
+        .await
+        .expect("valid rollback work must not wait for the producer")
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+        assert_eq!(
+            served.max_time.timestamp(),
+            max_time.timestamp() - 3,
+            "{mode}"
+        );
+        assert_eq!(served.min_time, original.min_time);
+        assert_eq!(served.cur_time, original.cur_time);
+        assert!(served.min_time <= served.cur_time && served.cur_time <= served.max_time);
+        assert_ne!(served.long_poll_id, original.long_poll_id);
+        assert_eq!(
+            served.long_poll_id.max_timestamp,
+            served.max_time.timestamp()
+        );
+        assert_eq!(served.submit_old, Some(false));
+        assert_eq!(served.bits, original.bits);
+        assert_eq!(
+            served.coinbase_txn, original.coinbase_txn,
+            "reuse the shielded proof"
+        );
+        if mode != "fallback" {
+            assert_eq!(
+                cache.template_for_tip(tip_hash, &net, now).as_deref(),
+                Some(&configured),
+                "the configured shared snapshot is unchanged"
+            );
+        }
+        assert_eq!(
+            chain_info_reads.load(Ordering::SeqCst) - reads_before,
+            usize::from(mode != "cached"),
+        );
+
+        // Re-polling the new ID waits for actual changed work, rather than oscillating IDs.
+        {
+            let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+                long_poll_id: Some(served.long_poll_id),
+                ..Default::default()
+            }));
+            tokio::pin!(waiting);
+            assert!(futures::poll!(&mut waiting).is_pending(), "{mode}");
+        }
+        if mode == "fallback" {
+            clock.store(chain_info.min_time.timestamp() - 7_201, Ordering::SeqCst);
+            let error = rpc
+                .get_block_template(None)
+                .await
+                .expect_err("a truly empty range must still fail");
+            assert_eq!(error.code(), i32::from(server::error::LegacyCode::Misc));
+        }
+        queue.abort();
+    }
 }
 
 /// Expiry notifies a waiting miner once, but re-polling expired work waits for a real change.
