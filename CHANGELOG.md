@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.1) - 2026-10-09
+
+### Added
+
+- New [zcashd API Migration Guide](https://zebra.zfnd.org/user/zcashd-api-migration-guide.html) book page, recording which component owns each of the 135 RPC methods `zcashd` 6.20.0 registers, plus its ZMQ topics, REST interface, and notification hooks: whether Zebra or Zallet provides it, what replaces it, or why it was retired, with notes on how Zebra's responses differ from `zcashd`'s ([#11021](https://github.com/ZcashFoundation/zebra/issues/11021)). New [Running Zallet with Zebra](https://zebra.zfnd.org/user/zallet.html) page describing the `zebrad` build and configuration Zallet needs.
+
+### Changed
+
+- The `banned ip and removed banned peer addresses from address book` warning now logs the misbehavior `score` and the `reason` the peer was banned, such as the block or transaction verification error.
+
+### Fixed
+
+- The block gossip task no longer stalls when there are no ready peers, which could fill the mined block channel and make `submitblock` return errors for blocks that were committed ([#11475](https://github.com/ZcashFoundation/zebra/issues/11475)).
+
+### Security
+
+- The mempool per-peer inbound-download cap is now keyed on the peer's IP address instead of its full socket address, so a single host can no longer exceed the cap by opening connections from multiple source ports. This matches the inbound-block download cap ([#10685](https://github.com/ZcashFoundation/zebra/issues/10685)).
+
 ## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
 
 This release candidate supports the NU7 network upgrade on Testnet, which
