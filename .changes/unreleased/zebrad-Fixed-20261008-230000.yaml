@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'The mempool no longer bans peers that relay a transaction rejected for its lock time. Lock times are checked against the local tip, so a better-synced peer could relay a transaction that becomes valid one block later and be banned for 24 hours. Thanks to @sangsoo-osec for the report ([#11623](https://github.com/ZcashFoundation/zebra/issues/11623)).'
+time: 2026-10-08T23:00:00.000000000Z

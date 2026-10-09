@@ -136,6 +136,26 @@ fn stale_branch_id_at_max_nu6_3_height_has_no_mempool_score() {
     );
 }
 
+/// Lock-time rejections depend on our tip, so they have no peer score, unlike other errors.
+#[test]
+fn lock_time_rejections_have_no_mempool_score() {
+    let network = Network::Mainnet;
+    let height = Height(1_000_000);
+    let score = |error| adjusted_mempool_misbehavior_score(&error, None, height, &network);
+
+    assert_eq!(
+        score(TransactionError::LockedUntilAfterBlockHeight(height)),
+        0
+    );
+    assert_eq!(
+        score(TransactionError::LockedUntilAfterBlockTime(
+            chrono::Utc::now()
+        )),
+        0
+    );
+    assert_eq!(score(TransactionError::NoInputs), 100);
+}
+
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Test multiple times to catch intermittent bugs since eviction is randomized
