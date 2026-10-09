@@ -844,7 +844,10 @@ where
                 peer: addr,
                 connection_id,
                 outcome,
-            } = event;
+            } = event
+            else {
+                continue;
+            };
 
             if self.tracked_connections.get(&addr) != Some(&connection_id) {
                 continue;

@@ -10,6 +10,11 @@ pub(crate) enum PeerStallEvent {
         connection_id: ConnectionId,
         outcome: StallOutcome,
     },
+    #[allow(dead_code)]
+    ConnectionClosed {
+        peer: PeerSocketAddr,
+        connection_id: ConnectionId,
+    },
 }
 
 /// Identifies one admitted connection within a peer set, independently of its address.
