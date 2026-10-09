@@ -24,8 +24,6 @@ impl MetricsEndpoint {
 
             match endpoint_result {
                 Ok(()) => {
-                    info!("Opened metrics endpoint at {}", addr);
-
                     // Expose binary metadata to metrics, using a single time series with
                     // value 1:
                     //     https://www.robustperception.io/exposing-the-software-version-to-prometheus
@@ -34,6 +32,8 @@ impl MetricsEndpoint {
                         "version" => env!("CARGO_PKG_VERSION")
                     )
                     .increment(1);
+
+                    info!("Opened metrics endpoint at {}", addr);
                 }
                 Err(e) => panic!(
                     "Opening metrics endpoint listener {addr:?} failed: {e:?}. \

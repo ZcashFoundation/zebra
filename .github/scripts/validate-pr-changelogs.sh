@@ -3,8 +3,8 @@
 set -euo pipefail
 
 if [[ $# -ne 5 ]]; then
-  echo "usage: $0 <base-revision> <head-revision> <conventional> <declared-type> <breaking>" >&2
-  exit 2
+	echo "usage: $0 <base-revision> <head-revision> <conventional> <declared-type> <breaking>" >&2
+	exit 2
 fi
 
 base_revision="$1"
@@ -28,33 +28,33 @@ breaking_kind="breaking"
 
 allowed_type=false
 case "$declared_type" in
-  feat|fix|perf|refactor|build|chore|docs|test|ci|style|revert|release)
-    allowed_type=true
-    ;;
+feat | fix | perf | refactor | build | chore | docs | test | ci | style | revert | release)
+	allowed_type=true
+	;;
 esac
 
 if [[ "$conventional" != "true" || "$allowed_type" != "true" ]]; then
-  echo "::error title=Invalid PR title::Add a conventional commit PR title with an allowed type: feat, fix, perf, refactor, build, chore, docs, test, ci, style, revert, or release."
-  exit 1
+	echo "::error title=Invalid PR title::Add a conventional commit PR title with an allowed type: feat, fix, perf, refactor, build, chore, docs, test, ci, style, revert, or release."
+	exit 1
 fi
 
 requires_changelog=false
 case "$declared_type" in
-  feat|fix|perf|refactor|build)
-    requires_changelog=true
-    ;;
+feat | fix | perf | refactor | build)
+	requires_changelog=true
+	;;
 esac
 
 if [[ "$breaking" == "true" ]]; then
-  requires_changelog=true
+	requires_changelog=true
 fi
 
 # Reads one top-level scalar field from a fragment, as of the PR head.
 fragment_field() {
-  local path="$1"
-  local field="$2"
+	local path="$1"
+	local field="$2"
 
-  git show "${head_revision}:${path}" | awk -v field="$field" '
+	git show "${head_revision}:${path}" | awk -v field="$field" '
     index($0, field ": ") == 1 {
       value = substr($0, length(field) + 3)
       sub(/^[[:space:]]+/, "", value)
@@ -73,9 +73,9 @@ fragment_field() {
 # same way rewording a bullet used to count.
 fragment_paths=()
 while IFS= read -r -d '' path; do
-  case "$path" in
-    "$unreleased_directory"/*.yaml) fragment_paths+=("$path") ;;
-  esac
+	case "$path" in
+	"$unreleased_directory"/*.yaml) fragment_paths+=("$path") ;;
+	esac
 done < <(git diff --name-only -z --diff-filter=AM "$base_revision" "$head_revision" -- "$unreleased_directory")
 
 failed=false
@@ -83,99 +83,124 @@ fragment_projects=()
 breaking_fragment_projects=()
 
 for path in ${fragment_paths[@]+"${fragment_paths[@]}"}; do
-  project="$(fragment_field "$path" project)"
-  kind="$(fragment_field "$path" kind)"
-  body="$(fragment_field "$path" body)"
+	project="$(fragment_field "$path" project)"
+	kind="$(fragment_field "$path" kind)"
+	body="$(fragment_field "$path" body)"
 
-  if [[ -z "$project" || -z "$kind" || -z "$body" ]]; then
-    printf 'Malformed change fragment: %s\n' "$path" >&2
-    echo "::error title=Malformed change fragment::${path} needs a project, a kind and a body. Create fragments with 'changie new' rather than by hand." >&2
-    failed=true
-    continue
-  fi
+	if [[ -z "$project" || -z "$kind" || -z "$body" ]]; then
+		printf 'Malformed change fragment: %s\n' "$path" >&2
+		echo "::error title=Malformed change fragment::${path} needs a project, a kind and a body. Create fragments with 'changie new' rather than by hand." >&2
+		failed=true
+		continue
+	fi
 
-  # Catches a mistyped project before it reaches the release, where an unknown
-  # project silently keeps the entry out of every changelog. Kind keys live in
-  # the same file, but no kind key collides with a package name.
-  if ! grep -Eq "^[[:space:]]+key: ${project}\$" .changie.yaml; then
-    printf 'Unknown project in change fragment: %s declares %s\n' "$path" "$project" >&2
-    echo "::error title=Unknown fragment project::${path} declares project '${project}', which is not a project in .changie.yaml." >&2
-    failed=true
-    continue
-  fi
+	# Catches a mistyped project before it reaches the release, where an unknown
+	# project silently keeps the entry out of every changelog. Kind keys live in
+	# the same file, but no kind key collides with a package name.
+	if ! grep -Eq "^[[:space:]]+key: ${project}\$" .changie.yaml; then
+		printf 'Unknown project in change fragment: %s declares %s\n' "$path" "$project" >&2
+		echo "::error title=Unknown fragment project::${path} declares project '${project}', which is not a project in .changie.yaml." >&2
+		failed=true
+		continue
+	fi
 
-  fragment_projects+=("$project")
+	fragment_projects+=("$project")
 
-  if [[ "$kind" == "$breaking_kind" ]]; then
-    breaking_fragment_projects+=("$project")
-  fi
+	if [[ "$kind" == "$breaking_kind" ]]; then
+		breaking_fragment_projects+=("$project")
+	fi
 done
 
 # A break has to be declared in both places, so the version bump changie derives
 # from the fragment and the `semver-checks` skip derived from the title agree.
 if [[ "$breaking" != "true" && ${#breaking_fragment_projects[@]} -gt 0 ]]; then
-  echo "Breaking fragment without a breaking PR title." >&2
-  echo "::error title=Undeclared breaking change::This PR adds a '${breaking_kind}' fragment, so its title needs a conventional commit break marker, for example 'feat!: ...'." >&2
-  failed=true
+	echo "Breaking fragment without a breaking PR title." >&2
+	echo "::error title=Undeclared breaking change::This PR adds a '${breaking_kind}' fragment, so its title needs a conventional commit break marker, for example 'feat!: ...'." >&2
+	failed=true
 fi
 
 has_fragment_for_project() {
-  local wanted="$1"
-  local project
+	local wanted="$1"
+	local project
 
-  for project in ${fragment_projects[@]+"${fragment_projects[@]}"}; do
-    if [[ "$project" == "$wanted" ]]; then
-      return 0
-    fi
-  done
+	for project in ${fragment_projects[@]+"${fragment_projects[@]}"}; do
+		if [[ "$project" == "$wanted" ]]; then
+			return 0
+		fi
+	done
 
-  return 1
-}
-
-has_breaking_fragment_for_project() {
-  local wanted="$1"
-  local project
-
-  for project in ${breaking_fragment_projects[@]+"${breaking_fragment_projects[@]}"}; do
-    if [[ "$project" == "$wanted" ]]; then
-      return 0
-    fi
-  done
-
-  return 1
+	return 1
 }
 
 package_changed() {
-  local package_path="$1"
-  local path
+	local package_path="$1"
+	local path
 
-  while IFS= read -r -d '' path; do
-    # A regenerated changelog is not a change to the package: changie owns that
-    # file, and `changie merge` rewrites it from `.changes/`.
-    if [[ "$path" == "$package_path/CHANGELOG.md" ]]; then
-      continue
-    fi
+	while IFS= read -r -d '' path; do
+		# Verification files and documentation do not change the published interface.
+		case "$path" in
+		"$package_path/"*.md | "$package_path/tests/"* | "$package_path/benches/"* | \
+			"$package_path/src/tests.rs" | "$package_path/src/"*/tests.rs | \
+			"$package_path/src/tests/"* | "$package_path/src/"*/tests/*)
+			continue
+			;;
+		esac
 
-    if [[ "$path" == "$package_path/"* ]]; then
-      return 0
-    fi
-  done < <(git diff --name-only -z "$base_revision" "$head_revision")
+		if [[ "$path" == "$package_path/"* ]]; then
+			return 0
+		fi
+	done < <(git diff --name-only -z "$base_revision" "$head_revision")
 
-  return 1
+	return 1
 }
 
-if [[ "$requires_changelog" != "true" ]]; then
-  if [[ "$failed" == "true" ]]; then
-    exit 1
-  fi
+# Compare production dependencies, including features and all target platforms.
+# Snapshots keep both graphs tied to the supplied revisions, not dirty files.
+node_dependency_graph() (
+	set -euo pipefail
+	snapshot="$(mktemp -d)"
+	git worktree add --quiet --detach "$snapshot" "$1"
+	trap 'git worktree remove "$snapshot"' EXIT
+	graph="$(
+		cd "$snapshot"
+		features="$(
+			timeout 120s cargo metadata --no-deps --locked --format-version 1 |
+				jq -r '
+          .packages[]
+          | select(.name == "zebrad")
+          | .features | keys
+          | map(select(
+              . != "proptest-impl" and
+              . != "zebra-checkpoints" and
+              . != "lightwalletd-grpc-tests" and
+              . != "proptest" and
+              . != "proptest-derive" and
+              . != "zebra-utils" and
+              . != "tonic-prost-build"
+            ))
+          | map("zebrad/" + .) | join(",")
+        '
+		)"
+		timeout 120s cargo tree --manifest-path "$snapshot/Cargo.toml" --locked \
+			--package zebrad --features "$features" \
+			--target all --edges normal,build,features --prefix none --format '{p} {f}'
+	)"
+	printf '%s\n' "${graph//"$snapshot"/.}"
+)
 
-  exit 0
+if [[ "$requires_changelog" != "true" ]]; then
+	if [[ "$failed" == "true" ]]; then
+		exit 1
+	fi
+
+	exit 0
 fi
 
 zebrad_checked=false
+package_changed_in_pr=false
 package_metadata="$(
-  cargo metadata --no-deps --format-version 1 |
-    jq -r '
+	cargo metadata --no-deps --format-version 1 |
+		jq -r '
       .packages[]
       | select(.publish != [])
       | [.name, (.manifest_path | sub("/Cargo.toml$"; ""))]
@@ -184,57 +209,66 @@ package_metadata="$(
 )"
 
 while IFS=$'\t' read -r package_name package_directory; do
-  if [[ -z "$package_name" ]]; then
-    continue
-  fi
+	if [[ -z "$package_name" ]]; then
+		continue
+	fi
 
-  package_path="${package_directory#"${repository_root}/"}"
+	package_path="${package_directory#"${repository_root}/"}"
 
-  if [[ "$package_path" == "$package_directory" ]] || ! package_changed "$package_path"; then
-    continue
-  fi
+	if [[ "$package_path" == "$package_directory" ]] || ! package_changed "$package_path"; then
+		continue
+	fi
 
-  # Changie project keys are the package names, so a changed package maps
-  # straight onto the `-j` value its fragment must carry.
-  if [[ "$package_name" == "zebrad" ]]; then
-    zebrad_checked=true
-  fi
+	package_changed_in_pr=true
 
-  if ! has_fragment_for_project "$package_name"; then
-    printf 'Missing change fragment for package %s\n' "$package_name" >&2
-    echo "::error title=Missing package changelog entry::Each directly changed publishable package needs a change fragment: run 'changie new -j ${package_name}'." >&2
-    failed=true
-  fi
+	# Changie project keys are the package names, so a changed package maps
+	# straight onto the `-j` value its fragment must carry.
+	if [[ "$package_name" == "zebrad" ]]; then
+		zebrad_checked=true
+	fi
 
-  if [[ "$breaking" == "true" ]] && ! has_breaking_fragment_for_project "$package_name"; then
-    printf 'Missing breaking change fragment for package %s\n' "$package_name" >&2
-    echo "::error title=Missing package breaking change fragment::A breaking PR needs a '${breaking_kind}' fragment for each directly changed publishable package: run 'changie new -j ${package_name} -k ${breaking_kind}'." >&2
-    failed=true
-  fi
-done <<< "$package_metadata"
+	if ! has_fragment_for_project "$package_name"; then
+		printf 'Missing change fragment for package %s\n' "$package_name" >&2
+		echo "::error title=Missing package changelog entry::Each directly changed publishable package needs a change fragment: run 'changie new -j ${package_name}'." >&2
+		failed=true
+	fi
+done <<<"$package_metadata"
 
 root_manifest_changed=false
+root_lock_changed=false
 while IFS= read -r -d '' path; do
-  if [[ "$path" == "Cargo.toml" || "$path" == "Cargo.lock" ]]; then
-    root_manifest_changed=true
-    break
-  fi
+	case "$path" in
+	Cargo.toml) root_manifest_changed=true ;;
+	Cargo.lock) root_lock_changed=true ;;
+	esac
 done < <(git diff --name-only -z "$base_revision" "$head_revision")
 
-if [[ "$root_manifest_changed" == "true" && "$zebrad_checked" != "true" ]]; then
-  if ! has_fragment_for_project zebrad; then
-    echo "Root Cargo.toml or Cargo.lock changed without a zebrad change fragment." >&2
-    echo "::error title=Missing root changelog entry::Root Cargo.toml or Cargo.lock changes need a zebrad change fragment: run 'changie new -j zebrad'." >&2
-    failed=true
-  fi
+if [[ "$root_lock_changed" == "true" && "$root_manifest_changed" != "true" && "$zebrad_checked" != "true" ]]; then
+	base_graph="$(node_dependency_graph "$base_revision")"
+	head_graph="$(node_dependency_graph "$head_revision")"
+	if [[ "$base_graph" != "$head_graph" ]]; then
+		root_manifest_changed=true
+	fi
+fi
 
-  if [[ "$breaking" == "true" ]] && ! has_breaking_fragment_for_project zebrad; then
-    echo "Root Cargo.toml or Cargo.lock changed without a breaking zebrad change fragment." >&2
-    echo "::error title=Missing root breaking change fragment::Breaking root Cargo.toml or Cargo.lock changes need a zebrad '${breaking_kind}' fragment: run 'changie new -j zebrad -k ${breaking_kind}'." >&2
-    failed=true
-  fi
+if [[ "$root_manifest_changed" == "true" && "$zebrad_checked" != "true" ]]; then
+	if ! has_fragment_for_project zebrad; then
+		echo "Root Cargo.toml or Cargo.lock changed without a zebrad change fragment." >&2
+		echo "::error title=Missing root changelog entry::Root Cargo.toml or Cargo.lock changes need a zebrad change fragment: run 'changie new -j zebrad'." >&2
+		failed=true
+	fi
+
+	package_changed_in_pr=true
+fi
+
+# A break marker means at least one changed package breaks, not every one: the
+# other packages keep their own kinds, so changie only bumps the major where it applies.
+if [[ "$breaking" == "true" && "$package_changed_in_pr" == "true" && ${#breaking_fragment_projects[@]} -eq 0 ]]; then
+	echo "Breaking PR title without a breaking change fragment." >&2
+	echo "::error title=Missing breaking change fragment::A breaking PR needs a '${breaking_kind}' fragment for the package that breaks: run 'changie new -j <package> -k ${breaking_kind}'." >&2
+	failed=true
 fi
 
 if [[ "$failed" == "true" ]]; then
-  exit 1
+	exit 1
 fi

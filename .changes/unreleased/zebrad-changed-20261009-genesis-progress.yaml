@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Defer missing-genesis stall warnings until the first progress reporting interval.
+time: 2026-10-09T14:45:04.257676863+02:00

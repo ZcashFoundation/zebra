@@ -108,10 +108,9 @@ fn ensure_timeouts_consistent() {
 }
 
 /// Test that calls to [`ChainSync::request_genesis`] are rate limited.
-#[test]
-fn request_genesis_is_rate_limited() {
-    let (runtime, _init_guard) = zebra_test::init_async();
-    let _guard = runtime.enter();
+#[tokio::test(start_paused = true)]
+async fn request_genesis_is_rate_limited() {
+    let _init_guard = zebra_test::init();
 
     // The number of calls to `request_genesis()` we are going to be testing for
     const RETRIES_TO_RUN: u8 = 3;
@@ -178,17 +177,14 @@ fn request_genesis_is_rate_limited() {
         misbehavior_tx,
     );
 
-    // run `request_genesis()` with a timeout of 13 seconds
-    runtime.block_on(async move {
-        // allow extra wall clock time for tests on CPU-bound machines
-        let retries_timeout = (RETRIES_TO_RUN - 1) as u64 * GENESIS_TIMEOUT_RETRY.as_secs()
-            + GENESIS_TIMEOUT_RETRY.as_secs() / 2;
-        let _ = timeout(
-            Duration::from_secs(retries_timeout),
-            chain_sync.request_genesis(),
-        )
-        .await;
-    });
+    // Observe three genesis attempts, stopping halfway to the fourth retry.
+    let retries_timeout = (RETRIES_TO_RUN - 1) as u64 * GENESIS_TIMEOUT_RETRY.as_secs()
+        + GENESIS_TIMEOUT_RETRY.as_secs() / 2;
+    let _ = timeout(
+        Duration::from_secs(retries_timeout),
+        chain_sync.request_genesis(),
+    )
+    .await;
 
     let peer_requests_counter = peer_requests_counter.load(Ordering::SeqCst);
     assert!(peer_requests_counter >= RETRIES_TO_RUN);
