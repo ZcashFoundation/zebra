@@ -413,6 +413,7 @@ mod tests {
     //! `adjust_difficulty_and_time_for_testnet` deterministically without reading the real
     //! clock (the `DateTime32::now()` call lives only in its caller).
 
+    mod activation;
     mod vectors;
 
     use super::*;
