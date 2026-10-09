@@ -148,6 +148,14 @@ fragment zebra-example-breaking.yaml zebra-example breaking
 commit_fixture breaking-declared
 expect_success "breaking title with a breaking fragment" true feat true
 
+# One breaking package is enough: the other changed packages keep their own kinds.
+write_file zebra-example/src/lib.rs '// Breaking change in one of two packages.'
+write_file zebrad/src/main.rs 'fn main() { /* log change */ }'
+fragment zebra-example-breaking-3.yaml zebra-example breaking
+fragment zebrad-added-3.yaml zebrad Added
+commit_fixture breaking-one-of-two-packages
+expect_success "breaking title with one breaking package of two" true feat true
+
 # ... and the reverse: a breaking fragment needs the title marker, on any type.
 write_file zebra-example/src/lib.rs '// Undeclared break.'
 fragment zebra-example-breaking-2.yaml zebra-example breaking
@@ -229,5 +237,18 @@ cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
 fragment zebrad-dependency.yaml zebrad Added
 commit_fixture production-lockfile-with-fragment
 expect_success "production dependency update with operator entry" true build false
+
+# A breaking root manifest change needs a breaking fragment, but not for zebrad.
+write_file Cargo.lock '# Lockfile, breaking.'
+fragment zebrad-added-4.yaml zebrad Added
+commit_fixture breaking-root-manifest-without-breaking-fragment
+expect_failure "breaking root manifest without a breaking fragment" true build true
+
+write_file Cargo.lock '# Lockfile, breaking, declared.'
+write_file zebra-example/src/lib.rs '// Breaking dependency bump.'
+fragment zebrad-added-5.yaml zebrad Added
+fragment zebra-example-breaking-4.yaml zebra-example breaking
+commit_fixture breaking-root-manifest-with-library-break
+expect_success "breaking root manifest with a library break" true build true
 
 echo "All PR changelog validator tests passed."

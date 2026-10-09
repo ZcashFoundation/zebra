@@ -132,19 +132,6 @@ has_fragment_for_project() {
   return 1
 }
 
-has_breaking_fragment_for_project() {
-  local wanted="$1"
-  local project
-
-  for project in ${breaking_fragment_projects[@]+"${breaking_fragment_projects[@]}"}; do
-    if [[ "$project" == "$wanted" ]]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
 package_changed() {
   local package_path="$1"
   local path
@@ -192,6 +179,7 @@ if [[ "$requires_changelog" != "true" ]]; then
 fi
 
 zebrad_checked=false
+package_changed_in_pr=false
 package_metadata="$(
   cargo metadata --no-deps --format-version 1 |
     jq -r '
@@ -213,6 +201,8 @@ while IFS=$'\t' read -r package_name package_directory; do
     continue
   fi
 
+  package_changed_in_pr=true
+
   # Changie project keys are the package names, so a changed package maps
   # straight onto the `-j` value its fragment must carry.
   if [[ "$package_name" == "zebrad" ]]; then
@@ -222,12 +212,6 @@ while IFS=$'\t' read -r package_name package_directory; do
   if ! has_fragment_for_project "$package_name"; then
     printf 'Missing change fragment for package %s\n' "$package_name" >&2
     echo "::error title=Missing package changelog entry::Each directly changed publishable package needs a change fragment: run 'changie new -j ${package_name}'." >&2
-    failed=true
-  fi
-
-  if [[ "$breaking" == "true" ]] && ! has_breaking_fragment_for_project "$package_name"; then
-    printf 'Missing breaking change fragment for package %s\n' "$package_name" >&2
-    echo "::error title=Missing package breaking change fragment::A breaking PR needs a '${breaking_kind}' fragment for each directly changed publishable package: run 'changie new -j ${package_name} -k ${breaking_kind}'." >&2
     failed=true
   fi
 done <<< "$package_metadata"
@@ -256,11 +240,15 @@ if [[ "$root_manifest_changed" == "true" && "$zebrad_checked" != "true" ]]; then
     failed=true
   fi
 
-  if [[ "$breaking" == "true" ]] && ! has_breaking_fragment_for_project zebrad; then
-    echo "Root Cargo.toml or Cargo.lock changed without a breaking zebrad change fragment." >&2
-    echo "::error title=Missing root breaking change fragment::Breaking root Cargo.toml or Cargo.lock changes need a zebrad '${breaking_kind}' fragment: run 'changie new -j zebrad -k ${breaking_kind}'." >&2
-    failed=true
-  fi
+  package_changed_in_pr=true
+fi
+
+# A break marker means at least one changed package breaks, not every one: the
+# other packages keep their own kinds, so changie only bumps the major where it applies.
+if [[ "$breaking" == "true" && "$package_changed_in_pr" == "true" && ${#breaking_fragment_projects[@]} -eq 0 ]]; then
+  echo "Breaking PR title without a breaking change fragment." >&2
+  echo "::error title=Missing breaking change fragment::A breaking PR needs a '${breaking_kind}' fragment for the package that breaks: run 'changie new -j <package> -k ${breaking_kind}'." >&2
+  failed=true
 fi
 
 if [[ "$failed" == "true" ]]; then
