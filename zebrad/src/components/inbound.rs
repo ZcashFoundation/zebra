@@ -113,7 +113,7 @@ pub struct InboundSetupData {
     pub latest_chain_tip: zs::LatestChainTip,
 
     /// A channel to send misbehavior reports to the [`AddressBook`].
-    pub misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+    pub misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -158,7 +158,7 @@ pub enum Setup {
         state: State,
 
         /// A channel to send misbehavior reports to the [`AddressBook`].
-        misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
     },
 
     /// Temporary state used in the inbound service's internal initialization code.
@@ -369,7 +369,19 @@ impl Service<zn::Request> for Inbound {
                     };
 
                     if score != 0 {
-                        let _ = misbehavior_sender.try_send((advertiser_addr, score));
+                        // Height limit drops are only attributed when the parent proves a rewrite.
+                        let reason = if err.is::<HeightLimitError>() {
+                            format!(
+                                "invalid gossiped block: parent header contradicts coinbase height: {err}"
+                            )
+                        } else {
+                            format!("invalid gossiped block: {err}")
+                        };
+                        let _ = misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                            advertiser_addr,
+                            score,
+                            reason,
+                        ));
                     }
                 }
 

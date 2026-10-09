@@ -1681,7 +1681,10 @@ async fn behind_tip_height_limit_scores_peer_and_requeues_hash() {
         .expect("behind-tip drop is non-fatal and must not restart the syncer");
 
     assert_eq!(
-        misbehavior_rx.try_recv().ok(),
+        misbehavior_rx
+            .try_recv()
+            .ok()
+            .map(|report| (report.addr, report.score)),
         Some((advertiser, 100)),
         "BehindTipHeightLimit must score the supplying peer at the ban threshold"
     );
@@ -1810,7 +1813,10 @@ async fn auth_commitment_mismatch_scores_peer_and_requeues_hash_without_restart(
         .expect("a forged body is non-fatal and must not restart the syncer");
 
     assert_eq!(
-        misbehavior_rx.try_recv().ok(),
+        misbehavior_rx
+            .try_recv()
+            .ok()
+            .map(|report| (report.addr, report.score)),
         Some((advertiser, 100)),
         "the peer that served the forged body must be scored at the ban threshold"
     );
@@ -2112,10 +2118,21 @@ async fn far_ahead_block_does_not_produce_misbehavior_score() {
         hash: block::Hash::from([0xAB; 32]),
         advertiser_addr: Some(peer),
     }));
+    let report = misbehavior_rx
+        .try_recv()
+        .expect("consensus-invalid blocks must still score the serving peer");
     assert_eq!(
-        misbehavior_rx.try_recv(),
-        Ok((peer, expected_score)),
+        (report.addr, report.score),
+        (peer, expected_score),
         "consensus-invalid blocks must still score the serving peer"
+    );
+    assert!(
+        report
+            .reason
+            .starts_with("block failed consensus validation: ")
+            && report.reason.contains("NoCoinbase"),
+        "the report must explain why the peer was scored, got: {:?}",
+        report.reason,
     );
 
     // The fix: an above-lookahead block must not produce any misbehavior score.
@@ -2146,7 +2163,7 @@ fn new_chain_sync_with_misbehavior() -> (
         MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
         MockChainTip,
     >,
-    tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+    tokio::sync::mpsc::Receiver<zn::MisbehaviorReport>,
 ) {
     let _init_guard = zebra_test::init();
 

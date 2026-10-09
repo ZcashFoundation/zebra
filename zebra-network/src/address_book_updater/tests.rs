@@ -233,6 +233,7 @@ async fn banning_an_ipv6_group_publishes_the_ban() {
         .oneshot(AddressBookRequest::Change(MetaAddr::new_misbehavior(
             misbehaving,
             MAX_PEER_MISBEHAVIOR_SCORE,
+            "test misbehavior",
         )))
         .await
         .expect("service should be running");
