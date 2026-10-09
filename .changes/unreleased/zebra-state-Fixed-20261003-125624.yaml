@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: When the non-finalized state is at its fork limit, the chain that was just committed and the best chain are never evicted, and equal-work ties evict the chain whose tip was received first. When a child of a block that the fork limit evicted arrives, the evicted block and its evicted ancestors are removed from the sent-block cache, so they can be downloaded and committed again, once per block until it is finalized ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+time: 2026-10-03T12:56:24.000000+00:00

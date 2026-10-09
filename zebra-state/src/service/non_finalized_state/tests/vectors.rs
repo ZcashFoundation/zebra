@@ -1569,3 +1569,186 @@ fn equal_work_ties_prefer_first_received() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// When the fork limit evicts a multi-block chain, every block that no retained chain
+/// contains is recorded until it is forgotten or finalized, and is only forgotten once.
+#[test]
+fn fork_limit_records_unique_blocks_of_evicted_chains() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    let low2 = block1.make_fake_child().set_work(1);
+    let low3 = low2.make_fake_child().set_work(1);
+    state.commit_block(low2.clone().prepare(), &finalized_state)?;
+    state.commit_block(low3.clone().prepare(), &finalized_state)?;
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 0..max_forks {
+        let sibling = block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+
+    assert!(!state.any_chain_contains(&low2.hash()));
+    assert_eq!(
+        std::collections::HashSet::from([&low2.hash(), &low3.hash()]),
+        state.evicted_blocks.keys().collect(),
+        "the shared ancestor block 1 must not be recorded"
+    );
+
+    assert_eq!(
+        vec![low3.hash(), low2.hash()],
+        state.forget_evicted_branch(low3.hash())
+    );
+
+    // Recovered blocks are not recorded if they are evicted again.
+    state.commit_block(low2.clone().prepare(), &finalized_state)?;
+    let sibling = block1.make_fake_child().set_work(10);
+    state.commit_block(
+        sibling.set_block_commitment([max_forks; 32]).prepare(),
+        &finalized_state,
+    )?;
+    assert!(!state.any_chain_contains(&low2.hash()));
+    assert!(!state.evicted_blocks.contains_key(&low2.hash()));
+
+    // Finalizing block 1 and then a block at the height of `low2` prunes that height.
+    state.finalize();
+    state.finalize();
+    assert!(state.evicted_blocks.is_empty());
+    assert_eq!(
+        vec![&low3.hash()],
+        state.recovered_blocks.keys().collect::<Vec<_>>()
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// At the fork limit, a newly inserted chain is kept even if it has the lowest work, and
+/// equal-work ties evict the earliest-received chain other than the best chain. So a late
+/// sibling survives both its own insertion and the insertion of another sibling after it.
+#[test]
+fn fork_limit_keeps_new_chains_and_evicts_earliest_received_ties() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    let received = std::time::Instant::now();
+    let mut commit = |block: &Arc<Block>, secs: u64| {
+        let mut prepared = block.clone().prepare();
+        prepared.received_time = Some(received + Duration::from_secs(secs));
+        state.commit_block(prepared, &finalized_state)
+    };
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    let siblings: Vec<_> = (0..=max_forks + 1).map(sibling).collect();
+    for (secs, block) in (0..).zip(&siblings) {
+        commit(block, secs)?;
+    }
+    let late = &siblings[usize::from(max_forks)];
+
+    // A chain with strictly less work than all the others.
+    let low = block1.make_fake_child().set_work(1);
+    commit(&low, u64::from(max_forks) + 2)?;
+
+    let late_child = late.make_fake_child().set_work(10);
+    commit(&late_child, u64::from(max_forks) + 3)?;
+
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+    for (i, block) in siblings.iter().enumerate() {
+        assert_eq!(
+            !(1..=3).contains(&i),
+            state.any_chain_contains(&block.hash()),
+            "only the earliest-received siblings after the best one are evicted, sibling {i}",
+        );
+    }
+    assert!(state.any_chain_contains(&low.hash()));
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        late_child.hash(),
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// After a restart that restores 10 equal-work forks from the non-finalized backup, a live
+/// sibling is kept at the fork limit, and its child becomes the best chain tip. Restored
+/// blocks have no receipt time, so they rank as received first.
+#[test]
+fn fork_limit_keeps_live_sibling_after_backup_restore() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 0..max_forks {
+        state.commit_block(sibling(i).prepare(), &finalized_state)?;
+    }
+
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+    let mut state = super::super::backup::restore_backup(
+        NonFinalizedState::new(&network),
+        backup_dir.path(),
+        &finalized_state.db,
+    );
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+    assert!(state
+        .chain_iter()
+        .all(|chain| chain.tip_block().unwrap().received_time.is_none()));
+
+    let live = sibling(max_forks);
+    let mut prepared = live.clone().prepare();
+    prepared.received_time = Some(std::time::Instant::now());
+    state.commit_block(prepared, &finalized_state)?;
+    assert!(state.any_chain_contains(&live.hash()));
+
+    let live_child = live.make_fake_child().set_work(10);
+    state.commit_block(live_child.clone().prepare(), &finalized_state)?;
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        live_child.hash(),
+    );
+
+    Ok(())
+}

@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use tokio::sync::oneshot;
 
-use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::{self, Block},
+    serialization::ZcashDeserializeInto,
+};
 use zebra_test::prelude::*;
 
 use crate::{
@@ -242,6 +245,65 @@ fn dequeue_children_preserves_same_height_siblings() -> Result<()> {
             .contains(&right_grandchild.hash()),
         "sibling must remain indexed by height after unrelated dequeue"
     );
+
+    Ok(())
+}
+
+/// Blocks with the same transactions share outpoints, so removing one of them from the
+/// sent blocks must keep the shared outpoints known until the other is removed too.
+#[test]
+fn sent_hashes_keep_shared_outpoints_until_last_owner_is_removed() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let first = block.clone().prepare();
+    let second = block.set_block_commitment([1; 32]).prepare();
+    let shared = *first.new_outputs.keys().next().expect("block has outputs");
+    assert!(second.new_outputs.contains_key(&shared));
+
+    let mut sent = SentHashes::default();
+    sent.add(&first);
+    sent.add(&second);
+
+    sent.remove(&first.hash);
+    assert!(sent.utxo(&shared).is_some());
+
+    sent.remove(&second.hash);
+    assert!(sent.utxo(&shared).is_none());
+
+    Ok(())
+}
+
+/// Like `sent_hashes_keep_shared_outpoints_until_last_owner_is_removed`, for queued blocks
+/// with different parents.
+#[test]
+fn queued_blocks_keep_shared_outpoints_until_last_owner_is_dequeued() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let mut other = Block::clone(&block);
+    Arc::make_mut(&mut other.header).previous_block_hash = block::Hash([1; 32]);
+    let other = Arc::new(other);
+
+    let shared = *block
+        .clone()
+        .prepare()
+        .new_outputs
+        .keys()
+        .next()
+        .expect("block has outputs");
+
+    let mut queue = QueuedBlocks::default();
+    queue.queue(block.clone().into_queued());
+    queue.queue(other.clone().into_queued());
+
+    queue.dequeue_children(block.header.previous_block_hash);
+    assert!(queue.utxo(&shared).is_some());
+
+    queue.dequeue_children(other.header.previous_block_hash);
+    assert!(queue.utxo(&shared).is_none());
 
     Ok(())
 }

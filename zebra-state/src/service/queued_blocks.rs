@@ -41,7 +41,42 @@ pub struct QueuedBlocks {
     /// Hashes from `queued_blocks`, indexed by block height.
     by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
     /// Known UTXOs.
-    known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    known_utxos: KnownUtxos,
+}
+
+/// UTXOs created by queued or sent blocks, with the number of those blocks that create each one.
+///
+/// Blocks with the same transaction create the same outpoints, so an outpoint is only
+/// forgotten when the last block that creates it is removed.
+#[derive(Debug, Default)]
+struct KnownUtxos(HashMap<transparent::OutPoint, (transparent::Utxo, usize)>);
+
+impl KnownUtxos {
+    /// Records that one more block creates `outpoint`.
+    fn insert(&mut self, outpoint: transparent::OutPoint, utxo: transparent::Utxo) {
+        let entry = self.0.entry(outpoint).or_insert((utxo.clone(), 0));
+        entry.0 = utxo;
+        entry.1 += 1;
+    }
+
+    /// Records that one fewer block creates `outpoint`, and forgets it when none do.
+    fn remove(&mut self, outpoint: &transparent::OutPoint) {
+        if let Some(entry) = self.0.get_mut(outpoint) {
+            entry.1 -= 1;
+            if entry.1 == 0 {
+                self.0.remove(outpoint);
+            }
+        }
+    }
+
+    fn get(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
+        self.0.get(outpoint).map(|(utxo, _)| utxo.clone())
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl QueuedBlocks {
@@ -121,8 +156,6 @@ impl QueuedBlocks {
                 }
             }
 
-            // TODO: only remove UTXOs if there are no queued blocks with that UTXO
-            //       (known_utxos is best-effort, so this is ok for now)
             for outpoint in queued.0.new_outputs.keys() {
                 self.known_utxos.remove(outpoint);
             }
@@ -165,8 +198,6 @@ impl QueuedBlocks {
             )
             .into()));
 
-            // TODO: only remove UTXOs if there are no queued blocks with that UTXO
-            //       (known_utxos is best-effort, so this is ok for now)
             for outpoint in expired_block.new_outputs.keys() {
                 self.known_utxos.remove(outpoint);
             }
@@ -223,7 +254,7 @@ impl QueuedBlocks {
     /// Try to look up this UTXO in any queued block.
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        self.known_utxos.get(outpoint).cloned()
+        self.known_utxos.get(outpoint)
     }
 
     /// Clears known_utxos, by_parent, and by_height, then drains blocks.
@@ -231,8 +262,8 @@ impl QueuedBlocks {
     ///
     /// Doesn't update the metrics, because it is only used when the state is being dropped.
     pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedSemanticallyVerified> {
-        self.known_utxos.clear();
-        self.known_utxos.shrink_to_fit();
+        self.known_utxos.0.clear();
+        self.known_utxos.0.shrink_to_fit();
         self.by_parent.clear();
         self.by_parent.shrink_to_fit();
         self.by_height.clear();
@@ -255,7 +286,7 @@ pub(crate) struct SentHashes {
     pub sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
 
     /// Known UTXOs.
-    known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    known_utxos: KnownUtxos,
 
     /// Whether the hashes in this struct can be used check if the chain can be forked.
     /// This is set to false until all checkpoint-verified block hashes have been pruned.
@@ -299,7 +330,7 @@ impl SentHashes {
             .collect();
 
         self.curr_buf.push_back((block.hash, block.height));
-        self.sent.insert(block.hash, outpoints);
+        self.insert_sent(block.hash, outpoints);
 
         self.update_metrics_for_block(block.height);
     }
@@ -328,15 +359,24 @@ impl SentHashes {
             .collect();
 
         self.curr_buf.push_back((block.hash, block.height));
-        self.sent.insert(block.hash, outpoints);
+        self.insert_sent(block.hash, outpoints);
 
         self.update_metrics_for_block(block.height);
+    }
+
+    /// Records `hash` as sent, releasing the outpoints of any earlier entry for the same hash.
+    fn insert_sent(&mut self, hash: block::Hash, outpoints: Vec<transparent::OutPoint>) {
+        if let Some(old_outpoints) = self.sent.insert(hash, outpoints) {
+            for outpoint in &old_outpoints {
+                self.known_utxos.remove(outpoint);
+            }
+        }
     }
 
     /// Try to look up this UTXO in any sent block.
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        self.known_utxos.get(outpoint).cloned()
+        self.known_utxos.get(outpoint)
     }
 
     /// Finishes the current block batch, and stores it for efficient pruning.
@@ -363,8 +403,6 @@ impl SentHashes {
                     buf.push_front((hash, height));
                     return true;
                 } else if let Some(expired_outpoints) = self.sent.remove(&hash) {
-                    // TODO: only remove UTXOs if there are no queued blocks with that UTXO
-                    //       (known_utxos is best-effort, so this is ok for now)
                     for outpoint in expired_outpoints.iter() {
                         self.known_utxos.remove(outpoint);
                     }
@@ -375,7 +413,7 @@ impl SentHashes {
         });
 
         self.sent.shrink_to_fit();
-        self.known_utxos.shrink_to_fit();
+        self.known_utxos.0.shrink_to_fit();
         self.bufs.shrink_to_fit();
 
         self.update_metrics_for_cache();
@@ -392,6 +430,7 @@ impl SentHashes {
     /// Called when the block write task rejects a block, so that a subsequent
     /// re-delivery of a block with the same hash is not short-circuited as a
     /// "duplicate" against a rejected variant that never reached any chain.
+    /// Also called for blocks the fork limit dropped, once a child of them arrives.
     pub fn remove(&mut self, hash: &block::Hash) {
         let Some(outpoints) = self.sent.remove(hash) else {
             return;
