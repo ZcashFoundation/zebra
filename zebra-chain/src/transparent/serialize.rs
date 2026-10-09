@@ -174,6 +174,38 @@ impl ZcashSerialize for Input {
         }
         Ok(())
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        let script_len = match self {
+            Input::PrevOut { unlock_script, .. } => {
+                return 40 + unlock_script.zcash_serialized_size()
+            }
+            Input::Coinbase { height, data, .. } => {
+                // Match push_num's minimal signed integer encoding without building the script.
+                let height_len = match height.0 {
+                    0 => {
+                        assert_eq!(
+                            data.as_slice(),
+                            GENESIS_COINBASE_SCRIPT_SIG,
+                            "genesis coinbase data must match the genesis script"
+                        );
+                        0
+                    }
+                    1..=16 => 1,
+                    17..=0x7f => 2,
+                    0x80..=0x7fff => 3,
+                    0x8000..=0x7f_ffff => 4,
+                    0x80_0000..=0x7fff_ffff => 5,
+                    _ => 6,
+                };
+                height_len + data.len()
+            }
+        };
+        40 + CompactSizeMessage::try_from(script_len)
+            .expect("coinbase script length fits in MAX_PROTOCOL_MESSAGE_LEN")
+            .zcash_serialized_size()
+            + script_len
+    }
 }
 
 impl ZcashDeserialize for Input {
@@ -245,6 +277,10 @@ impl ZcashSerialize for Output {
         self.value.zcash_serialize(&mut writer)?;
         self.lock_script.zcash_serialize(&mut writer)?;
         Ok(())
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        8 + self.lock_script.zcash_serialized_size()
     }
 }
 

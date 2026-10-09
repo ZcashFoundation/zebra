@@ -837,6 +837,142 @@ impl crate::serialization::ZcashSerialize for Transaction {
     fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
         self.0.write(writer)
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        use crate::serialization::CompactSize64;
+        use zp_tx::components::{orchard as orchard_encoding, sapling as sapling_encoding};
+
+        // Preserve the upstream Vector and Script encoders' CompactSize limit.
+        let compact = |len: usize| {
+            let len = u64::try_from(len).expect("length fits in u64");
+            assert!(
+                len <= u64::from(zcash_encoding::MAX_COMPACT_SIZE),
+                "transaction length must fit the upstream CompactSize encoding limit"
+            );
+            CompactSize64::from(len).zcash_serialized_size()
+        };
+        let transparent_size = self.0.transparent_bundle().map_or(2, |bundle| {
+            compact(bundle.vin.len())
+                + compact(bundle.vout.len())
+                + bundle
+                    .vin
+                    .iter()
+                    .map(|input| {
+                        let len = input.script_sig().0 .0.len();
+                        40 + compact(len) + len
+                    })
+                    .sum::<usize>()
+                + bundle
+                    .vout
+                    .iter()
+                    .map(|output| {
+                        let len = output.script_pubkey().0 .0.len();
+                        8 + compact(len) + len
+                    })
+                    .sum::<usize>()
+        });
+        let version = self.tx_version();
+        let legacy = matches!(
+            version,
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4
+        );
+        let mut size = transparent_size
+            + if legacy {
+                if version.has_overwinter() {
+                    16
+                } else {
+                    8
+                }
+            } else {
+                20
+            };
+
+        // v4 carries each spend anchor; v5+ carries one anchor only when there are spends.
+        if version.has_sapling() {
+            size += self
+                .0
+                .sapling_bundle()
+                .map_or(if legacy { 10 } else { 2 }, |bundle| {
+                    let spends = bundle.shielded_spends().len();
+                    let outputs = bundle.shielded_outputs().len();
+                    compact(spends)
+                        + compact(outputs)
+                        + spends
+                            * (sapling_encoding::SPEND_DESCRIPTION_SIZE
+                                - if legacy { 0 } else { 32 })
+                        + outputs * sapling_encoding::OUTPUT_DESCRIPTION_SIZE
+                        + if legacy || spends + outputs > 0 {
+                            8 + 64
+                        } else {
+                            0
+                        }
+                        + if !legacy && spends > 0 { 32 } else { 0 }
+                });
+        } else {
+            assert!(
+                self.0.sapling_bundle().is_none(),
+                "Sapling components cannot be encoded before v4"
+            );
+        }
+
+        if version.has_sprout() {
+            size += self.0.sprout_bundle().map_or(1, |bundle| {
+                // JsDescription::write chooses its actual proof variant, not the tx version.
+                compact(bundle.joinsplits.len())
+                    + 32
+                    + 64
+                    + bundle
+                        .joinsplits
+                        .iter()
+                        .map(|js| 1506 + js.groth_proof_bytes().map_or(296, |proof| proof.len()))
+                        .sum::<usize>()
+            });
+        } else if !legacy {
+            assert!(
+                self.0.sprout_bundle().is_none(),
+                "Sprout components cannot be encoded in v5 or later"
+            );
+        }
+
+        let orchard_size = |bundle: Option<
+            &::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>,
+        >| {
+            bundle.map_or(1, |bundle| {
+                if version.has_ironwood() {
+                    let bundle_version = bundle.bundle_version();
+                    assert!(
+                        bundle_version == ::orchard::bundle::BundleVersion::orchard_v3()
+                            || bundle_version == ::orchard::bundle::BundleVersion::ironwood_v3(),
+                        "v6 or later requires NU6.3 Orchard/Ironwood bundle versions"
+                    );
+                }
+                let actions = bundle.actions().len();
+                let proof_len = bundle.authorization().proof().as_ref().len();
+                compact(actions)
+                    + actions
+                        * (orchard_encoding::ACTION_SIZE + orchard_encoding::SPEND_AUTH_SIG_SIZE)
+                    + 1
+                    + 8
+                    + 32
+                    + compact(proof_len)
+                    + proof_len
+                    + 64
+            })
+        };
+        if version.has_orchard() {
+            size += orchard_size(self.0.orchard_bundle());
+        } else {
+            assert!(
+                self.0.orchard_bundle().is_none(),
+                "Orchard components cannot be encoded before v5"
+            );
+        }
+        // This also covers cfg(nutachyon)'s v7, whose encoder currently uses the v6 layout.
+        if version.has_ironwood() {
+            size += orchard_size(self.0.ironwood_bundle());
+        }
+        size
+    }
 }
 
 impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus::BranchId>

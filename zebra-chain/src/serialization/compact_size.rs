@@ -301,6 +301,15 @@ impl ZcashSerialize for CompactSizeMessage {
         let size: u64 = self.0.into();
         CompactSize64(size).zcash_serialize(writer)
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        assert!(
+            usize::try_from(self.0).expect("CompactSizeMessage fits in usize")
+                <= MAX_PROTOCOL_MESSAGE_LEN,
+            "CompactSize larger than protocol message limit"
+        );
+        CompactSize64(self.0.into()).zcash_serialized_size()
+    }
 }
 
 impl ZcashDeserialize for CompactSizeMessage {
@@ -332,6 +341,15 @@ impl ZcashSerialize for CompactSize64 {
                 writer.write_u8(0xff)?;
                 writer.write_u64::<LittleEndian>(n)
             }
+        }
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        match self.0 {
+            0..=0xfc => 1,
+            0xfd..=0xffff => 3,
+            0x1_0000..=0xffff_ffff => 5,
+            _ => 9,
         }
     }
 }

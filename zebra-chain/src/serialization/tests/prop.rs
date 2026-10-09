@@ -110,6 +110,8 @@ proptest! {
     fn transaction_serialized_size(transaction in any::<UnminedTx>()) {
         let _init_guard = zebra_test::init();
 
-        prop_assert_eq!(transaction.transaction.zcash_serialized_size(), transaction.size);
+        let encoded = transaction.transaction.zcash_serialize_to_vec().unwrap();
+        prop_assert_eq!(transaction.transaction.zcash_serialized_size(), encoded.len());
+        prop_assert_eq!(transaction.size, encoded.len());
     }
 }

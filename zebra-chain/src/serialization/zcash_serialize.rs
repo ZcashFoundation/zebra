@@ -42,7 +42,7 @@ pub trait ZcashSerialize: Sized {
         Ok(data)
     }
 
-    /// Get the size of `self` by using a fake writer.
+    /// Get the encoded size of `self`, using a counting writer unless overridden.
     fn zcash_serialized_size(&self) -> usize {
         let mut writer = FakeWriter(0);
         self.zcash_serialize(&mut writer)
@@ -54,6 +54,10 @@ pub trait ZcashSerialize: Sized {
 impl ZcashSerialize for u8 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u8(*self)
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        1
     }
 }
 
@@ -87,6 +91,16 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
 
         zcash_serialize_external_count(self, writer)
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        let len =
+            CompactSizeMessage::try_from(self.len()).expect("len fits in MAX_PROTOCOL_MESSAGE_LEN");
+        len.zcash_serialized_size()
+            + self
+                .iter()
+                .map(ZcashSerialize::zcash_serialized_size)
+                .sum::<usize>()
+    }
 }
 
 /// Serialize an `AtLeastOne` vector as a CompactSize number of items, then the
@@ -94,6 +108,10 @@ impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
 impl<T: ZcashSerialize> ZcashSerialize for AtLeastOne<T> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.as_vec().zcash_serialize(&mut writer)
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        self.as_vec().zcash_serialized_size()
     }
 }
 
