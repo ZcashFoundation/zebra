@@ -12,6 +12,8 @@ use zebra_test::mock_service::{MockService, PanicAssertion, ResponseSender};
 
 use super::*;
 
+mod startup;
+
 fn parameters() -> (Network, MinerParams, Height) {
     let network = Network::Mainnet;
     let miner_params = MinerParams::from(

@@ -86,13 +86,33 @@ fn mock_templates(
         )
         .expect("the hard-coded transparent address is valid"),
     );
+    // Match the mocked chain-info height while forwarding real parent hashes and notifications.
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&mempool.network)
+        .unwrap();
+    let mut mining_tip_change = mempool.block_templates.mining_tip_change();
+    let initial_parent = mining_tip_change
+        .receiver
+        .borrow_and_update()
+        .map(|(_, hash)| (height, hash));
+    let (parent_sender, receiver) = tokio::sync::watch::channel(initial_parent);
+    tokio::spawn(async move {
+        while mining_tip_change.receiver.changed().await.is_ok() {
+            parent_sender.send_replace(
+                mining_tip_change
+                    .receiver
+                    .borrow_and_update()
+                    .map(|(_, hash)| (height, hash)),
+            );
+        }
+    });
 
     let (templates, published, requests) = super::super::block_template::BlockTemplates::new(
         mempool.network.clone(),
         Some(miner_params),
         admission_read_state(mempool.state.clone(), &mempool.network),
         Buffer::new(BoxService::new(verifier.clone()), 1),
-        mempool.block_templates.mining_tip_change(),
+        zebra_state::MiningTipChange { receiver },
     );
     mempool.block_templates = templates;
 

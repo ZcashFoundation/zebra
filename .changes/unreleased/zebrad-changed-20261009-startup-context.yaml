@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Wait for committed, Canopy-capable mining context before preparing default block templates.
+time: 2026-10-09T14:45:04.256185694+02:00

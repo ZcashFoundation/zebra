@@ -158,11 +158,8 @@ impl BlockTemplates {
             // An error for the previous context must not delay work for the new parent.
             self.refresh.as_mut().reset(Instant::now());
         }
-        let tip = self
-            .mining_tip_change
-            .receiver
-            .borrow_and_update()
-            .map(|(_, hash)| hash);
+        let mining_parent = *self.mining_tip_change.receiver.borrow_and_update();
+        let tip = mining_parent.map(|(_, hash)| hash);
         if let Some(build) = &mut self.build {
             let Poll::Ready((mut result, next_coinbase)) = build.future.poll_unpin(cx) else {
                 return Poll::Ready(Ok(()));
@@ -277,8 +274,16 @@ impl BlockTemplates {
             tip != self.published_for_tip
                 && tip.is_some_and(|tip| template.previous_block_hash() != tip)
         });
-        let default_available =
-            self.miner_params.is_some() && (storage.is_some() || self.network.is_regtest());
+        // Mining parents are announced after their state context is committed. A configured
+        // regtest miner can run without enabled storage, but not without Canopy-capable context.
+        // Foreground overrides still go through the normal chain-info and proposal error paths.
+        let default_available = self.miner_params.is_some()
+            && (storage.is_some() || self.network.is_regtest())
+            && mining_parent.is_some_and(|(height, _)| {
+                height.next().is_ok_and(|height| {
+                    NetworkUpgrade::current(&self.network, height) >= NetworkUpgrade::Canopy
+                })
+            });
         // Poll even under override load: due refreshes and error recovery must make progress.
         let elapsed = self.refresh.as_mut().poll(cx).is_ready();
         let changed = self.dirty && self.debounce.as_mut().poll(cx).is_ready();
