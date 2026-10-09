@@ -1,0 +1,4 @@
+project: tower-batch-control
+kind: Changed
+body: Clamp zero batch concurrency to one and bound queue-capacity and request-weight arithmetic in `Batch::{new, pair}` and its worker. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:36:05.4477898+02:00

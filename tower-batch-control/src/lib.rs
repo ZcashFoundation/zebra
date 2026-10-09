@@ -84,6 +84,9 @@
 //! a `Service<R>`. The wrapped service does not need to implement any batch
 //! control logic, as it will receive explicit [`Flush`](BatchControl::Flush)
 //! requests from the wrapper.
+//! Call [`Batch::try_flush`] at a logical request boundary to start a partial batch immediately.
+//! The flush follows previously enqueued items; callers must still await their response futures.
+//! Saturation preserves the normal size and latency policies rather than waiting for capacity.
 //!
 //! ## Implementation History
 //!
@@ -125,6 +128,9 @@ pub use self::service::Batch;
 pub trait RequestWeight {
     /// Returns the weight of a request relative to the maximum threshold for flushing
     /// requests to the underlying service.
+    ///
+    /// The worker treats zero as one so every item starts a timer and can be flushed.
+    /// Accumulated weights saturate on overflow, triggering a full-batch flush.
     fn request_weight(&self) -> usize {
         1
     }

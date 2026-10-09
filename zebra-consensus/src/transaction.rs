@@ -298,6 +298,7 @@ where
         let height = req.height;
         let time = req.time;
         let known_utxos = req.known_utxos.clone();
+        let block_batch_flush_key = primitives::block_verifier_batch_flush_key(&req.known_utxos);
         let nu = NetworkUpgrade::current(&network, height);
         let span = tracing::debug_span!("tx", ?tx_id);
 
@@ -343,7 +344,7 @@ where
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
-            async_checks.check().await?;
+            async_checks.check(Some(block_batch_flush_key)).await?;
 
             tracing::trace!(?tx_id, "finished async checks");
 
@@ -577,7 +578,7 @@ where
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
-            async_checks.check().await?;
+            async_checks.check(None).await?;
 
             tracing::trace!(?tx_id, "finished async checks");
 
@@ -1558,15 +1559,39 @@ impl AsyncChecks {
     ///
     /// If any of the checks fail, this method immediately returns the error and cancels all other
     /// checks by dropping them.
-    async fn check(mut self) -> Result<(), BoxError> {
-        // Wait for all asynchronous checks to complete
-        // successfully, or fail verification if they error.
-        while let Some(check) = self.0.next().await {
-            tracing::trace!(?check, remaining = self.0.len());
-            check?;
-        }
+    async fn check(
+        mut self,
+        block_batch_flush_key: Option<primitives::BlockVerifierBatchFlushKey>,
+    ) -> Result<(), BoxError> {
+        let mut needs_flush = block_batch_flush_key.is_some();
+        let block_batch_flush = async move {
+            if let Some(key) = block_batch_flush_key {
+                tokio::task::yield_now().await;
+                primitives::start_block_transaction_async_checks(key);
+            }
+        };
+        tokio::pin!(block_batch_flush);
 
-        Ok(())
+        // Poll checks before the flush boundary, so available queues receive their items
+        // first. Checks waiting on saturated queues retain the normal timed-flush fallback.
+        loop {
+            tokio::select! {
+                biased;
+                check = self.0.next() => {
+                    let Some(check) = check else {
+                        if needs_flush {
+                            block_batch_flush.await;
+                        }
+                        return Ok(());
+                    };
+                    tracing::trace!(?check, remaining = self.0.len());
+                    check?;
+                }
+                () = &mut block_batch_flush, if needs_flush => {
+                    needs_flush = false;
+                }
+            }
+        }
     }
 }
 

@@ -98,3 +98,44 @@ async fn fallback_verification() -> Result<(), Report> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn partial_batch_boundary_verifies_before_the_latency_timer() {
+    let mut verifier = Batch::new(Verifier::default(), 64, 1, Duration::from_secs(3600));
+    let sk = SigningKey::new(rand::rng());
+    let message = b"BlockBatchBoundary";
+    let item = (VerificationKeyBytes::from(&sk), sk.sign(message), message).into();
+    let response = verifier.ready().await.unwrap().call(item);
+    assert!(verifier.try_flush().unwrap());
+    tokio::time::timeout(Duration::from_secs(5), response)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn partial_batch_failure_keeps_individual_signature_results() {
+    let mut verifier = Fallback::new(
+        Batch::new(Verifier::default(), 64, 1, Duration::from_secs(3600)),
+        tower::service_fn(|item: Item| async move { item.verify_single() }),
+    );
+    let sk = SigningKey::new(rand::rng());
+    let message = b"BlockBatchBoundary";
+    let good = (VerificationKeyBytes::from(&sk), sk.sign(message), message).into();
+    let bad = (
+        VerificationKeyBytes::from(&sk),
+        sk.sign(b"WrongMessage"),
+        message,
+    )
+        .into();
+    let good_response = verifier.ready().await.unwrap().call(good);
+    let bad_response = verifier.ready().await.unwrap().call(bad);
+    assert!(verifier.primary().clone().try_flush().unwrap());
+    let (good, bad) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(good_response, bad_response)
+    })
+    .await
+    .unwrap();
+    assert!(good.is_ok());
+    assert!(bad.is_err());
+}

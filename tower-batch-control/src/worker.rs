@@ -146,7 +146,9 @@ where
 
         match self.service.ready().await {
             Ok(svc) => {
-                self.pending_items_weight += req.request_weight();
+                self.pending_items_weight = self
+                    .pending_items_weight
+                    .saturating_add(req.request_weight().max(1));
                 let rsp = svc.call(req.into());
                 let _ = tx.send(Ok(rsp));
             }
@@ -166,6 +168,11 @@ where
     /// Waits until the inner service is ready,
     /// then stores a future which resolves when the batch finishes.
     async fn flush_service(&mut self) {
+        if self.pending_items_weight == 0 {
+            self.pending_batch_timer = None;
+            return;
+        }
+
         if self.failed.is_some() {
             tracing::trace!("worker failure: skipping flush");
             return;
@@ -233,7 +240,7 @@ where
                 },
 
                 maybe_msg = self.rx.recv(), if self.can_spawn_new_batches() => match maybe_msg {
-                    Some(msg) => {
+                    Some(Message::Item { request, tx, span, _permit }) => {
                         tracing::trace!(
                             pending_items_weight = self.pending_items_weight,
                             batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
@@ -241,10 +248,9 @@ where
                             "batch message received",
                         );
 
-                        let span = msg.span;
                         let is_new_batch = self.pending_items_weight == 0;
 
-                        self.process_req(msg.request, msg.tx)
+                        self.process_req(request, tx)
                             // Apply the provided span to request processing.
                             .instrument(span)
                             .await;
@@ -278,6 +284,9 @@ where
                                 "waiting for full batch or batch timer",
                             );
                         }
+                    }
+                    Some(Message::Flush { span, _permit }) => {
+                        self.flush_service().instrument(span).await;
                     }
                     None => {
                         tracing::trace!("batch channel closed and emptied, exiting worker task");
@@ -375,9 +384,9 @@ where
 
         // Fail queued requests
         while let Ok(msg) = self.rx.try_recv() {
-            let _ = msg
-                .tx
-                .send(Err(self.failed.as_ref().expect("just set failed").clone()));
+            if let Message::Item { tx, .. } = msg {
+                let _ = tx.send(Err(self.failed.as_ref().expect("just set failed").clone()));
+            }
         }
 
         // Clear any finished batches, ignoring any errors.

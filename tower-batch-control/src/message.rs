@@ -6,11 +6,17 @@ use super::error::ServiceError;
 
 /// Message sent to the batch worker
 #[derive(Debug)]
-pub(crate) struct Message<Request, Fut> {
-    pub(crate) request: Request,
-    pub(crate) tx: Tx<Fut>,
-    pub(crate) span: tracing::Span,
-    pub(super) _permit: OwnedSemaphorePermit,
+pub(crate) enum Message<Request, Fut> {
+    Item {
+        request: Request,
+        tx: Tx<Fut>,
+        span: tracing::Span,
+        _permit: OwnedSemaphorePermit,
+    },
+    Flush {
+        span: tracing::Span,
+        _permit: OwnedSemaphorePermit,
+    },
 }
 
 /// Response sender

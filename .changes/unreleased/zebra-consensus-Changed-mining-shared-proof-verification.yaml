@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Share Sapling verifying keys across batch and fallback checks and size shielded verification batches by their action counts. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.800767221+02:00

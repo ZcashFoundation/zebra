@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Flush partial proof and signature verification batches after the block transactions have started their asynchronous checks, retaining timed flushing under saturation and awaiting every verification result. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:36:05.463034895+02:00

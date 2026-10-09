@@ -381,9 +381,7 @@ impl<S> Cached<S> {
 
     /// Returns the wrapped verification service.
     ///
-    /// Test-only: it lets a test read back the inner service it installed with
-    /// [`Self::with_inner`].
-    #[cfg(test)]
+    /// Used to control the batch worker without consulting or changing cached results.
     pub(super) fn inner(&self) -> &S {
         &self.inner
     }

@@ -12,7 +12,7 @@ use std::{
 use futures_core::ready;
 use tokio::{
     pin,
-    sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
+    sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore, TryAcquireError},
     task::JoinHandle,
 };
 use tokio_util::sync::PollSemaphore;
@@ -170,10 +170,13 @@ where
 
         // Clamp config to sensible values.
         let max_items_weight_in_batch = max(max_items_weight_in_batch, 1);
-        let max_batches = max_batches
-            .into()
-            .unwrap_or_else(rayon::current_num_threads);
-        let max_batches_in_queue = max_batches.clamp(1, QUEUE_BATCH_LIMIT);
+        let max_batches = max(
+            max_batches
+                .into()
+                .unwrap_or_else(rayon::current_num_threads),
+            1,
+        );
+        let max_batches_in_queue = max_batches.min(QUEUE_BATCH_LIMIT);
 
         // The semaphore bound limits the maximum number of concurrent requests
         // (specifically, requests which got a `Ready` from `poll_ready`, but haven't
@@ -185,7 +188,10 @@ where
         //
         // Requests with a request weight greater than 1 won't typically exhaust the number of available
         // permits, but will still be bounded to the maximum possible number of concurrent requests.
-        let semaphore = Semaphore::new(max_items_weight_in_batch * max_batches_in_queue);
+        let queue_capacity = max_items_weight_in_batch
+            .saturating_mul(max_batches_in_queue)
+            .min(Semaphore::MAX_PERMITS);
+        let semaphore = Semaphore::new(queue_capacity);
         let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
         let (error_handle, worker) = Worker::new(
@@ -223,6 +229,30 @@ where
     fn get_worker_error(&self) -> crate::BoxError {
         self.error_handle.get_error_on_closed()
     }
+
+    /// Queues an explicit flush after already submitted items without waiting for capacity.
+    ///
+    /// Returns `Ok(true)` when queued, not when verification completes. A saturated queue
+    /// returns `Ok(false)` and keeps the normal size and latency flush policies.
+    /// Consumes any existing readiness reservation; poll readiness again before calling.
+    pub fn try_flush(&mut self) -> Result<bool, crate::BoxError> {
+        let _permit = match self.permit.take() {
+            Some(permit) => permit,
+            None => match self.semaphore.clone_inner().try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => return Ok(false),
+                Err(TryAcquireError::Closed) => return Err(self.get_worker_error()),
+            },
+        };
+
+        self.tx
+            .send(Message::Flush {
+                span: tracing::Span::current(),
+                _permit,
+            })
+            .map(|()| true)
+            .map_err(|_| self.get_worker_error())
+    }
 }
 
 impl<T, Request: RequestWeight> Service<Request> for Batch<T, Request>
@@ -236,43 +266,36 @@ where
     type Future = ResponseFuture<T::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Check to see if the worker has returned or panicked.
-        //
-        // Correctness: Registers this task for wakeup when the worker finishes.
-        if let Some(worker_handle) = self
-            .worker_handle
-            .lock()
-            .expect("previous task panicked while holding the worker handle mutex")
-            .as_mut()
-        {
-            // # Correctness
-            //
-            // The inner service used with `Batch` MUST NOT return recoverable errors from its:
-            // - `poll_ready` method, or
-            // - `call` method when called with a `BatchControl::Flush` request.
-            //
-            // If the inner service returns an error in those cases, this `poll_ready` method will
-            // return an error the first time its called, and will panic the second time its called
-            // as it attempts to call `poll` on a `JoinHandle` that has already completed.
-            match Pin::new(worker_handle).poll(cx) {
-                Poll::Ready(Ok(())) => {
-                    let worker_error = self.get_worker_error();
-                    tracing::warn!(?worker_error, "batch worker finished unexpectedly");
-                    return Poll::Ready(Err(worker_error));
+        // Remove a completed handle before any clone can poll it again. Unwind outside
+        // the mutex so a worker panic does not poison readiness for every other clone.
+        let worker_result = {
+            let mut worker_handle = self
+                .worker_handle
+                .lock()
+                .expect("previous task panicked while holding the worker handle mutex");
+            match worker_handle
+                .as_mut()
+                .map(|handle| Pin::new(handle).poll(cx))
+            {
+                Some(Poll::Ready(result)) => {
+                    *worker_handle = None;
+                    Some(result)
                 }
-                Poll::Ready(Err(task_cancelled)) if task_cancelled.is_cancelled() => {
-                    tracing::warn!(
-                        "batch task cancelled: {task_cancelled}\n\
-                         Is Zebra shutting down?"
-                    );
-
-                    return Poll::Ready(Err(task_cancelled.into()));
-                }
-                Poll::Ready(Err(task_panic)) => {
-                    std::panic::resume_unwind(task_panic.into_panic());
-                }
-                Poll::Pending => {}
+                Some(Poll::Pending) | None => None,
             }
+        };
+
+        match worker_result {
+            Some(Ok(())) => {
+                let worker_error = self.get_worker_error();
+                tracing::warn!(?worker_error, "batch worker finished unexpectedly");
+                return Poll::Ready(Err(worker_error));
+            }
+            Some(Err(task_cancelled)) if task_cancelled.is_cancelled() => {
+                return Poll::Ready(Err(task_cancelled.into()));
+            }
+            Some(Err(task_panic)) => std::panic::resume_unwind(task_panic.into_panic()),
+            None => {}
         }
 
         // Check if the worker has set an error and closed its channels.
@@ -330,7 +353,7 @@ where
         // acquired, so we can freely allocate a oneshot.
         let (tx, rx) = oneshot::channel();
 
-        match self.tx.send(Message {
+        match self.tx.send(Message::Item {
             request,
             tx,
             span,

@@ -74,6 +74,11 @@ impl<S1, S2: Clone, F: Clone> Fallback<S1, S2, F> {
     pub fn new_with_policy(svc1: S1, svc2: S2, policy: F) -> Self {
         Self { svc1, svc2, policy }
     }
+
+    /// Returns the primary service, for controls that do not process a request.
+    pub fn primary(&self) -> &S1 {
+        &self.svc1
+    }
 }
 
 impl<S1, S2, F, Request> Service<Request> for Fallback<S1, S2, F>

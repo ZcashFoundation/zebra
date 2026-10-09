@@ -1,0 +1,4 @@
+project: tower-fallback
+kind: Added
+body: '`Fallback::primary` ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.782467346+02:00

@@ -434,6 +434,10 @@ where
                 &block,
                 &transaction_hashes,
             ));
+            let _block_batch_flush = crate::primitives::register_block_verifier_batch_flush(
+                &known_utxos,
+                block.transactions.len(),
+            );
 
             for (&transaction_hash, transaction) in
                 transaction_hashes.iter().zip(block.transactions.iter())

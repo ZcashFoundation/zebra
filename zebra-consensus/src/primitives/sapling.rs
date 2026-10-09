@@ -5,6 +5,7 @@ use std::{
     future::Future,
     mem,
     pin::Pin,
+    sync::LazyLock,
     task::{Context, Poll},
 };
 
@@ -15,7 +16,11 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
-use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
+use sapling_crypto::{
+    bundle::Authorized,
+    circuit::{OutputVerifyingKey, SpendVerifyingKey},
+    BatchValidator, Bundle,
+};
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::transaction::{SigHash, UnminedTxId};
@@ -34,6 +39,10 @@ mod tests;
 /// - construct Sapling outputs in coinbase txs, and
 /// - verify Sapling shielded data in the tx verifier.
 static SAPLING: Lazy<LocalTxProver> = Lazy::new(LocalTxProver::bundled);
+
+/// Shared verifying keys avoid cloning the prover's keys for each batch and fallback check.
+static VERIFYING_KEYS: LazyLock<(SpendVerifyingKey, OutputVerifyingKey)> =
+    LazyLock::new(|| SAPLING.verifying_keys());
 
 /// Returns the shared Sapling prover.
 ///
@@ -102,7 +111,14 @@ impl CachedItem for Item {
     }
 }
 
-impl RequestWeight for Item {}
+impl RequestWeight for Item {
+    fn request_weight(&self) -> usize {
+        self.bundle
+            .shielded_spends()
+            .len()
+            .saturating_add(self.bundle.shielded_outputs().len())
+    }
+}
 
 /// A service that verifies Sapling shielded data in batches.
 ///
@@ -139,10 +155,10 @@ impl Drop for Verifier {
 
         // The validation is CPU-intensive; do it on a dedicated thread so it does not block.
         rayon::spawn_fifo(move || {
-            let (spend_vk, output_vk) = SAPLING.verifying_keys();
+            let (spend_vk, output_vk) = &*VERIFYING_KEYS;
 
             // Validate the batch and send the result through the channel.
-            let res = batch.validate(&spend_vk, &output_vk, rand::rng());
+            let res = batch.validate(spend_vk, output_vk, rand::rng());
             let _ = tx.send(Some(res));
         });
     }
@@ -199,8 +215,8 @@ impl Service<BatchControl<Item>> for Verifier {
                 async move {
                     let start = std::time::Instant::now();
                     let spawn_result = tokio::task::spawn_blocking(move || {
-                        let (spend_vk, output_vk) = SAPLING.verifying_keys();
-                        batch.validate(&spend_vk, &output_vk, rand::rng())
+                        let (spend_vk, output_vk) = &*VERIFYING_KEYS;
+                        batch.validate(spend_vk, output_vk, rand::rng())
                     })
                     .await;
                     let duration = start.elapsed().as_secs_f64();
@@ -242,9 +258,9 @@ pub fn verify_single(
         check.map_err(BoxError::from)?;
 
         let is_valid = tokio::task::spawn_blocking(move || {
-            let (spend_vk, output_vk) = SAPLING.verifying_keys();
+            let (spend_vk, output_vk) = &*VERIFYING_KEYS;
 
-            mem::take(&mut verifier.batch).validate(&spend_vk, &output_vk, rand::rng())
+            mem::take(&mut verifier.batch).validate(spend_vk, output_vk, rand::rng())
         })
         .await
         .map_err(|_| BoxError::from("Sapling bundle validation thread panicked"))?;

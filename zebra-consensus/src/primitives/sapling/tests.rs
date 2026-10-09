@@ -352,3 +352,20 @@ async fn a_bundle_verified_under_one_upgrade_is_not_reused_under_another() {
         "expected SaplingVerificationFailed, got: {error:?}"
     );
 }
+
+#[test]
+fn request_weight_counts_every_spend_and_output_proof() {
+    use tower_batch_control::RequestWeight;
+
+    let mut saw_multiple_proofs = false;
+    for (upgrade, transaction) in mined_sapling_transactions() {
+        let expected = transaction.sapling_spends_count() + transaction.sapling_outputs().count();
+        let item = item(&transaction, upgrade).unwrap();
+        assert_eq!(item.request_weight(), expected);
+        saw_multiple_proofs |= expected > 1;
+    }
+    assert!(
+        saw_multiple_proofs,
+        "vectors must exercise multiple proofs in one bundle"
+    );
+}
