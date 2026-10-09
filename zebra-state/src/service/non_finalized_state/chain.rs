@@ -40,6 +40,7 @@ use crate::{
 use crate::request::Spend;
 
 use self::index::TransparentTransfers;
+use super::{AddressTransfers, CreatedUtxos};
 
 pub mod index;
 
@@ -87,7 +88,7 @@ pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
-    pub(crate) blocks: BTreeMap<block::Height, ContextuallyVerifiedBlock>,
+    pub(crate) blocks: BTreeMap<block::Height, Arc<ContextuallyVerifiedBlock>>,
 
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
@@ -103,7 +104,7 @@ pub struct ChainInner {
     /// Outputs can be spent by later transactions or blocks in the chain.
     //
     // TODO: replace OutPoint with OutputLocation?
-    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub(crate) created_utxos: CreatedUtxos,
     /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
     /// including spent outputs created by earlier transactions or blocks in the chain.
     ///
@@ -228,7 +229,7 @@ pub struct ChainInner {
     // TODO: move to the transparent section
     //
     /// Partial transparent address index data from `blocks`.
-    pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
+    pub(super) partial_transparent_transfers: AddressTransfers,
 
     // Chain Work
     //
@@ -369,7 +370,7 @@ impl Chain {
         self.update_chain_tip_with(&block)?;
 
         tracing::debug!(block = %block.block, "adding block to chain");
-        self.blocks.insert(block.height, block);
+        self.blocks.insert(block.height, Arc::new(block));
 
         Ok(self)
     }
@@ -405,13 +406,16 @@ impl Chain {
             .expect("only called while blocks is populated");
 
         // Update cumulative data members.
-        self.revert_chain_with(&block, RevertPosition::Root);
+        self.revert_chain_with(block.as_ref(), RevertPosition::Root);
 
-        (block, treestate)
+        (Arc::unwrap_or_clone(block), treestate)
     }
 
     /// Returns the block at the provided height and all of its descendant blocks.
-    pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
+    pub fn child_blocks(
+        &self,
+        block_height: &block::Height,
+    ) -> Vec<Arc<ContextuallyVerifiedBlock>> {
         self.blocks
             .range(block_height..)
             .map(|(_h, b)| b.clone())
@@ -422,7 +426,7 @@ impl Chain {
     pub fn invalidate_block(
         &self,
         block_hash: block::Hash,
-    ) -> Option<(Self, Vec<ContextuallyVerifiedBlock>)> {
+    ) -> Option<(Self, Vec<Arc<ContextuallyVerifiedBlock>>)> {
         let block_height = self.height_by_hash(block_hash)?;
         let mut new_chain = self.fork(block_hash)?;
         new_chain.pop_tip();
@@ -469,7 +473,7 @@ impl Chain {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.blocks.get(&height)
+        self.blocks.get(&height).map(Arc::as_ref)
     }
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in this chain.
@@ -1490,7 +1494,7 @@ impl Chain {
             "Non-finalized chains must have at least one block to be valid"
         );
 
-        self.revert_chain_with(&block, RevertPosition::Tip);
+        self.revert_chain_with(block.as_ref(), RevertPosition::Tip);
     }
 
     /// Return the non-finalized tip height for this chain.
@@ -1513,7 +1517,7 @@ impl Chain {
     /// Return the non-finalized tip block for this chain,
     /// or `None` if `self.blocks` is empty.
     pub fn tip_block(&self) -> Option<&ContextuallyVerifiedBlock> {
-        self.blocks.values().next_back()
+        self.blocks.values().next_back().map(Arc::as_ref)
     }
 
     /// Returns true if the non-finalized part of this chain is empty.
@@ -1533,10 +1537,11 @@ impl Chain {
     /// If UTXOs remain unspent when a block is finalized, they are stored in the finalized state,
     /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
-        let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains_key(outpoint));
-
-        unspent_utxos
+        self.created_utxos
+            .iter()
+            .filter(|(outpoint, _)| !self.spent_utxos.contains_key(*outpoint))
+            .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+            .collect()
     }
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
@@ -1799,8 +1804,8 @@ impl Chain {
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
-            &contextually_valid.new_outputs,
-            &contextually_valid.spent_outputs,
+            contextually_valid.new_outputs.as_ref(),
+            contextually_valid.spent_outputs.as_ref(),
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
         );
@@ -1971,8 +1976,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
-            &contextually_valid.new_outputs,
-            &contextually_valid.spent_outputs,
+            contextually_valid.new_outputs.as_ref(),
+            contextually_valid.spent_outputs.as_ref(),
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
         );
@@ -2089,7 +2094,9 @@ impl
                 .expect("new_outputs contains all created UTXOs");
 
             // Update the chain's created UTXOs
-            let previous_entry = self.created_utxos.insert(outpoint, created_utxo.clone());
+            let previous_entry = self
+                .created_utxos
+                .insert(outpoint, Arc::new(created_utxo.clone()));
             assert_eq!(
                 previous_entry, None,
                 "unexpected created output: duplicate update or duplicate UTXO",
@@ -2099,8 +2106,7 @@ impl
             if let Some(receiving_address) = created_utxo.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
-                    .entry(receiving_address)
-                    .or_default();
+                    .get_or_insert_mut(receiving_address);
 
                 address_transfers.update_chain_tip_with(&(&outpoint, created_utxo))?;
             }
@@ -2210,8 +2216,7 @@ impl
             if let Some(spending_address) = spent_output.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
-                    .entry(spending_address)
-                    .or_default();
+                    .get_or_insert_mut(spending_address);
 
                 address_transfers.update_chain_tip_with(&(
                     spending_input,

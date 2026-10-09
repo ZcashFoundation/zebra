@@ -27,6 +27,12 @@ pub struct Utxo {
     pub from_coinbase: bool,
 }
 
+impl AsRef<Utxo> for Utxo {
+    fn as_ref(&self) -> &Utxo {
+        self
+    }
+}
+
 /// A [`Utxo`], and the index of its transaction within its block.
 ///
 /// This extra index is used to check that spends come after outputs,

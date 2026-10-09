@@ -79,7 +79,16 @@ impl ContextuallyVerifiedBlock {
             .map(AsRef::as_ref)
             .flat_map(Transaction::inputs)
             .flat_map(|input| input.outpoint())
-            .map(|outpoint| (outpoint, zero_utxo.clone()))
+            .map(|outpoint| {
+                (
+                    outpoint,
+                    block
+                        .new_outputs
+                        .get(&outpoint)
+                        .unwrap_or(&zero_utxo)
+                        .clone(),
+                )
+            })
             .collect();
 
         ContextuallyVerifiedBlock::with_block_and_spent_utxos(

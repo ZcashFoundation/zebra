@@ -309,6 +309,48 @@ impl Block {
         previous_value_pools: ValueBalance<NonNegative>,
     ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
     {
+        self.chain_value_pool_change_and_fees_from_utxos(
+            utxos,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+    }
+
+    /// Like [`Self::chain_value_pool_change_and_fees`], using borrowed ordered UTXOs.
+    ///
+    /// The same parent-dependent requirements apply. The map must contain every transparent
+    /// input's UTXO, including outputs created earlier in this block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a transparent input's UTXO is missing.
+    pub fn chain_value_pool_change_and_fees_from_ordered_utxos(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
+    {
+        self.chain_value_pool_change_and_fees_from_utxos(
+            utxos,
+            deferred_pool_balance_change,
+            network,
+            previous_value_pools,
+        )
+    }
+
+    fn chain_value_pool_change_and_fees_from_utxos<U>(
+        &self,
+        utxos: &HashMap<transparent::OutPoint, U>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+        network: &Network,
+        previous_value_pools: ValueBalance<NonNegative>,
+    ) -> Result<(ValueBalance<NegativeAllowed>, Option<Amount<NonNegative>>), ValueBalanceError>
+    where
+        U: AsRef<transparent::Utxo>,
+    {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
         // to propagate the first error instead.
@@ -332,7 +374,7 @@ impl Block {
                 Amount::<NonNegative>::zero(),
             ),
             |(pool_sum, fees), tx| {
-                let value_balance = tx.value_balance(utxos)?;
+                let value_balance = tx.value_balance_from_utxos(utxos)?;
 
                 // The coinbase transaction consumes the fees rather than paying them, so it is
                 // excluded from the total, exactly as in the block verifier's miner fee sum.

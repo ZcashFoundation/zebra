@@ -126,7 +126,7 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         block: block.clone(),
         hash: block::Hash([0x00; 32]),
         height,
-        new_outputs,
+        new_outputs: Arc::new(new_outputs),
         transaction_hashes,
         received_time: None,
     };

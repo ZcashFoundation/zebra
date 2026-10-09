@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Reuse shared transparent outputs during block verification.
+time: 2026-10-09T15:20:57.269327326+02:00

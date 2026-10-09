@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`SemanticallyVerifiedBlock::new_outputs` now uses `Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>`; wrap constructed maps in `Arc::new` and use `Arc::make_mut` for copy-on-write mutation. `NonFinalizedState::invalidated_blocks` now returns `IndexMap<Height, Arc<Vec<Arc<ContextuallyVerifiedBlock>>>>`; each returned block is shared through an additional `Arc`. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.833170005+02:00

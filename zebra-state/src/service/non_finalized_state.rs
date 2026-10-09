@@ -30,8 +30,10 @@ use crate::{
     SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod address_transfers;
 mod backup;
 mod chain;
+mod created_utxos;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -39,7 +41,9 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 #[cfg(test)]
 mod tests;
 
+use address_transfers::AddressTransfers;
 pub(crate) use chain::{Chain, SpendingTransactionId};
+pub(crate) use created_utxos::CreatedUtxos;
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -60,7 +64,7 @@ pub struct NonFinalizedState {
 
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
-    invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
+    invalidated_blocks: IndexMap<Height, Arc<Vec<Arc<ContextuallyVerifiedBlock>>>>,
 
     // Configuration
     //
@@ -489,7 +493,7 @@ impl NonFinalizedState {
         let mut modified_chain = Arc::unwrap_or_clone(chain_result);
         for block in invalidated_blocks {
             modified_chain = modified_chain
-                .push(block)
+                .push(Arc::unwrap_or_clone(block))
                 .map_err(ReconsiderError::ReplayFailed)?;
         }
 
@@ -558,7 +562,7 @@ impl NonFinalizedState {
     ///
     /// `new_chain` should start as a clone of the parent chain fork,
     /// or the finalized tip.
-    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain, prepared))]
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
@@ -580,7 +584,7 @@ impl NonFinalizedState {
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &new_chain.unspent_utxos(),
+            &new_chain.created_utxos,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
@@ -645,7 +649,7 @@ impl NonFinalizedState {
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
     #[allow(clippy::unwrap_in_result)]
-    #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
+    #[tracing::instrument(skip(new_chain, contextual, sprout_final_treestates), fields(height = ?contextual.height, hash = %contextual.hash))]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
@@ -885,7 +889,7 @@ impl NonFinalizedState {
     }
 
     /// Return the invalidated blocks.
-    pub fn invalidated_blocks(&self) -> IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>> {
+    pub fn invalidated_blocks(&self) -> IndexMap<Height, Arc<Vec<Arc<ContextuallyVerifiedBlock>>>> {
         self.invalidated_blocks.clone()
     }
 

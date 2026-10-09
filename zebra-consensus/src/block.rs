@@ -506,8 +506,7 @@ where
             }
 
             // Finally, submit the block for contextual verification.
-            let new_outputs = Arc::into_inner(known_utxos)
-                .expect("all verification tasks using known_utxos are complete");
+            let new_outputs = known_utxos;
 
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,

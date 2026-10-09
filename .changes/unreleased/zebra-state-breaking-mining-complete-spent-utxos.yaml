@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ContextuallyVerifiedBlock::with_block_and_spent_utxos` now requires `spent_outputs` to include every transparent input, including outputs created by earlier transactions in the same block. Supply those outputs explicitly; missing inputs panic rather than being filled from `new_outputs`. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:36:05.468005046+02:00

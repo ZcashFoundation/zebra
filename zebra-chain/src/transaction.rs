@@ -249,9 +249,16 @@ impl Transaction {
 
     /// Returns the outpoints spent by this transaction's transparent inputs.
     pub fn spent_outpoints(&self) -> impl Iterator<Item = transparent::OutPoint> + '_ {
-        self.inputs()
+        self.0
+            .transparent_bundle()
             .into_iter()
-            .filter_map(|input| input.outpoint())
+            .flat_map(|bundle| &bundle.vin)
+            .map(|input| input.prevout())
+            .filter(|outpoint| **outpoint != zcash_transparent::bundle::OutPoint::NULL)
+            .map(|outpoint| transparent::OutPoint {
+                hash: Hash(*outpoint.hash()),
+                index: outpoint.n(),
+            })
     }
 
     /// Compute the hash (txid) of this transaction.
@@ -720,19 +727,62 @@ impl Transaction {
         &self,
         utxos: &std::collections::HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
-        // Collect only the outputs this transaction spends. Cloning the whole UTXO map here
-        // would make block validation quadratic in the number of transactions, since
-        // `remaining_transaction_value` calls this once per transaction.
-        let outputs: std::collections::HashMap<_, _> = self
+        self.value_balance_from_utxos(utxos)
+    }
+
+    /// Returns this transaction's value balance from borrowed ordered UTXOs.
+    ///
+    /// The map must include every transparent input, including outputs created earlier in the
+    /// same block. Unrelated outputs are ignored.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a transparent input's UTXO is missing.
+    pub fn value_balance_from_ordered_utxos(
+        &self,
+        utxos: &std::collections::HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
+        self.value_balance_from_utxos(utxos)
+    }
+
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn value_balance_from_utxos<U>(
+        &self,
+        utxos: &std::collections::HashMap<transparent::OutPoint, U>,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError>
+    where
+        U: AsRef<transparent::Utxo>,
+    {
+        let input_value = self
             .spent_outpoints()
-            .filter_map(|outpoint| {
+            .map(|outpoint| {
                 utxos
                     .get(&outpoint)
-                    .map(|utxo| (outpoint, utxo.output.clone()))
+                    .expect("callers supply every spent OutPoint's UTXO")
+                    .as_ref()
+                    .output
+                    .value()
             })
-            .collect();
-
-        let transparent = self.transparent_value_balance_from_outputs(&outputs)?;
+            .sum::<Result<Amount<NonNegative>, crate::amount::Error>>()
+            .map_err(crate::value_balance::ValueBalanceError::Transparent)?
+            .constrain::<NegativeAllowed>()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+        let output_value = self
+            .0
+            .transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| &bundle.vout)
+            .map(|output| {
+                Amount::<NonNegative>::try_from(u64::from(output.value()))
+                    .expect("librustzcash Zatoshis is always a valid non-negative Amount")
+            })
+            .sum::<Result<Amount<NonNegative>, crate::amount::Error>>()
+            .map_err(crate::value_balance::ValueBalanceError::Transparent)?
+            .constrain::<NegativeAllowed>()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+        let transparent = (input_value - output_value)
+            .map(ValueBalance::from_transparent_amount)
+            .map_err(crate::value_balance::ValueBalanceError::Transparent)?;
         let sprout = self.sprout_value_balance()?;
         let sapling = self.sapling_value_balance();
         let orchard = self.orchard_value_balance();

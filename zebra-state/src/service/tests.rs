@@ -451,7 +451,7 @@ proptest! {
 
         let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
         for block in non_finalized_blocks {
-            let utxos = block.new_outputs.clone();
+            let utxos = block.new_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.clone()));
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 

@@ -1246,12 +1246,12 @@ fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
     };
     let prepare_with_funding = |block: Arc<Block>, height: Height| {
         let mut prepared = block.prepare();
-        prepared
-            .new_outputs
-            .extend(funding_outpoints(height).map(|outpoint| {
+        Arc::make_mut(&mut prepared.new_outputs).extend(funding_outpoints(height).map(
+            |outpoint| {
                 let utxo = transparent::Utxo::new(funding_output(), height, false);
                 (outpoint, transparent::OrderedUtxo::from_utxo(utxo, 0))
-            }));
+            },
+        ));
         prepared
     };
 

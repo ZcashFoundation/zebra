@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'Add `block::Block::chain_value_pool_change_and_fees_from_ordered_utxos`, `transaction::Transaction::value_balance_from_ordered_utxos`, and `AsRef<transparent::Utxo>` for `transparent::Utxo` for borrowed UTXO accounting. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.785369002+02:00

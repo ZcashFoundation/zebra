@@ -50,7 +50,7 @@ impl QueuedBlocks {
     /// # Panics
     ///
     /// - if a block with the same `block::Hash` has already been queued.
-    #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
+    #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
@@ -266,11 +266,10 @@ impl SentHashes {
     /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
     pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
         let mut sent_hashes = Self::default();
-        for (_, block) in non_finalized_state
-            .chain_iter()
-            .flat_map(|c| c.blocks.clone())
-        {
-            sent_hashes.add(&block.into());
+        for chain in non_finalized_state.chain_iter() {
+            for block in chain.blocks.values() {
+                sent_hashes.add(&block.as_ref().into());
+            }
         }
 
         if !sent_hashes.sent.is_empty() {
