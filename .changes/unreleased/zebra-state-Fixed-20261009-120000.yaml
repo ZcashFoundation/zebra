@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: The queued-block and sent-block UTXO caches keep an output while any queued or sent block still creates it, so removing one of two blocks with the same transaction no longer makes the shared outputs wait for the UTXO lookup timeout. Thanks to @ouicate for the report ([#11619](https://github.com/ZcashFoundation/zebra/issues/11619)).
+time: 2026-10-09T12:00:00.000000+00:00
