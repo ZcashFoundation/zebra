@@ -30,7 +30,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
-use zebra_network::{AddressBook, InventoryResponse};
+use zebra_network::{AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE};
 use zebra_node_services::mempool;
 
 use crate::BoxError;
@@ -74,6 +74,17 @@ pub const GETDATA_SENT_BYTES_LIMIT: usize = 1_000_000;
 /// (Zebra's request limit is one block in transit per peer, because it fans out block requests to
 /// many peers instead of just a few peers.)
 pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
+
+/// The maximum number of transaction IDs the [`Inbound`] service will look up in the mempool in
+/// response to a transaction request, before ignoring any additional transaction IDs in that
+/// request.
+///
+/// Derived from [`MAX_TX_INV_IN_SENT_MESSAGE`]: Zebra never advertises more transactions than
+/// that in a single `inv` message, so an honest peer following our advertisements never requests
+/// more than this in a single `getdata`. The wire format allows larger requests
+/// (`MAX_INV_IN_RECEIVED_MESSAGE` is 50,000), so the limit is taken from the protocol constant,
+/// not the message size.
+pub const GETDATA_MAX_TRANSACTION_COUNT: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 
 type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -498,6 +509,19 @@ impl Service<zn::Request> for Inbound {
                     return async { Ok(zn::Response::Nil) }.boxed();
                 }
 
+                // Ignore any transaction IDs past the request limit, before the mempool
+                // lookup, matching the block path above. This saves us mempool lookups,
+                // and bounds the `notfound` response size.
+                let req_tx_ids: HashSet<UnminedTxId> =
+                    if req_tx_ids.len() > GETDATA_MAX_TRANSACTION_COUNT {
+                        req_tx_ids
+                            .into_iter()
+                            .take(GETDATA_MAX_TRANSACTION_COUNT)
+                            .collect()
+                    } else {
+                        req_tx_ids
+                    };
+
                 let request = mempool::Request::TransactionsById(req_tx_ids.clone());
                 mempool.clone().oneshot(request).map_ok(move |resp| {
                     let mut total_size = 0;
@@ -510,8 +534,8 @@ impl Service<zn::Request> for Inbound {
                     // Work out which transaction IDs were missing.
                     let available_tx_ids: HashSet<UnminedTxId> = transactions.iter().map(|tx| tx.id).collect();
                     // We don't need to limit the size of the missing transaction IDs list,
-                    // because it is already limited to the size of the getdata request
-                    // sent by the peer. (Their content and encodings are the same.)
+                    // because it is already limited to `GETDATA_MAX_TRANSACTION_COUNT` by
+                    // the cap above.
                     let missing = req_tx_ids.into_iter().filter(|tx_id| !available_tx_ids.contains(tx_id)).map(Missing);
 
                     // If we skip sending some transactions because the limit has been reached,
