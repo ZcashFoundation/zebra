@@ -15,53 +15,53 @@ git -C "$fixture" config user.email changelog-validator@example.com
 git -C "$fixture" config user.name "Changelog Validator"
 
 write_file() {
-  local path="$1"
-  local content="$2"
+	local path="$1"
+	local content="$2"
 
-  mkdir -p "$(dirname "${fixture}/${path}")"
-  printf '%s\n' "$content" > "${fixture}/${path}"
+	mkdir -p "$(dirname "${fixture}/${path}")"
+	printf '%s\n' "$content" >"${fixture}/${path}"
 }
 
 remove_file() {
-  rm -f "${fixture}/$1"
+	rm -f "${fixture}/$1"
 }
 
 commit_fixture() {
-  local message="$1"
+	local message="$1"
 
-  git -C "$fixture" add --all
-  git -C "$fixture" commit --quiet --message "$message"
+	git -C "$fixture" add --all
+	git -C "$fixture" commit --quiet --message "$message"
 }
 
 # Runs the validator over the last commit, the way the changelog gate runs it
 # over a pull request's merge base and head.
 expect_success() {
-  local description="$1"
-  shift
+	local description="$1"
+	shift
 
-  if ! (cd "$fixture" && "$validator" HEAD^ HEAD "$@" >/dev/null 2>&1); then
-    echo "expected validation to pass: $description" >&2
-    (cd "$fixture" && "$validator" HEAD^ HEAD "$@") || true
-    exit 1
-  fi
+	if ! (cd "$fixture" && "$validator" HEAD^ HEAD "$@" >/dev/null 2>&1); then
+		echo "expected validation to pass: $description" >&2
+		(cd "$fixture" && "$validator" HEAD^ HEAD "$@") || true
+		exit 1
+	fi
 }
 
 expect_failure() {
-  local description="$1"
-  shift
+	local description="$1"
+	shift
 
-  if (cd "$fixture" && "$validator" HEAD^ HEAD "$@" >/dev/null 2>&1); then
-    echo "expected validation to fail: $description" >&2
-    exit 1
-  fi
+	if (cd "$fixture" && "$validator" HEAD^ HEAD "$@" >/dev/null 2>&1); then
+		echo "expected validation to fail: $description" >&2
+		exit 1
+	fi
 }
 
 fragment() {
-  local path="$1"
-  local project="$2"
-  local kind="$3"
+	local path="$1"
+	local project="$2"
+	local kind="$3"
 
-  write_file ".changes/unreleased/${path}" "project: ${project}
+	write_file ".changes/unreleased/${path}" "project: ${project}
 kind: ${kind}
 body: An entry for ${project}."
 }
@@ -69,7 +69,7 @@ body: An entry for ${project}."
 # A minimal workspace: the validator reads the publishable packages from
 # `cargo metadata`, and the project keys from `.changie.yaml`.
 write_file Cargo.toml '[workspace]
-members = ["zebrad", "zebra-example", "fixture-helper"]
+members = ["zebrad", "zebra-example", "fixture-helper", "fixture-optional", "fixture-verification"]
 resolver = "2"'
 write_file zebrad/Cargo.toml '[package]
 name = "zebrad"
@@ -77,9 +77,13 @@ version = "1.0.0"
 edition = "2021"
 [features]
 default-release-binaries = []
+optional-production = ["dep:fixture-optional"]
+lightwalletd-grpc-tests = ["tonic-prost-build"]
 [dependencies]
 zebra-example = { path = "../zebra-example" }
-fixture-helper = { path = "../fixture-helper" }'
+fixture-helper = { path = "../fixture-helper" }
+fixture-optional = { path = "../fixture-optional", optional = true }
+tonic-prost-build = { package = "fixture-verification", path = "../fixture-verification", optional = true }'
 write_file zebrad/src/main.rs 'fn main() {}'
 write_file zebra-example/Cargo.toml '[package]
 name = "zebra-example"
@@ -94,6 +98,18 @@ publish = false
 [features]
 extra = []'
 write_file fixture-helper/src/lib.rs '// A private dependency.'
+write_file fixture-optional/Cargo.toml '[package]
+name = "fixture-optional"
+version = "1.0.0"
+edition = "2021"
+publish = false'
+write_file fixture-optional/src/lib.rs '// A non-default production dependency.'
+write_file fixture-verification/Cargo.toml '[package]
+name = "fixture-verification"
+version = "1.0.0"
+edition = "2021"
+publish = false'
+write_file fixture-verification/src/lib.rs '// A verification-only dependency.'
 write_file .changie.yaml 'changesDir: .changes
 unreleasedDir: unreleased
 projects:
@@ -238,13 +254,46 @@ fragment zebrad-dependency.yaml zebrad Added
 commit_fixture production-lockfile-with-fragment
 expect_success "production dependency update with operator entry" true build false
 
+# Non-default production dependencies need entries; verification-only features do not.
+write_file fixture-optional/Cargo.toml '[package]
+name = "fixture-optional"
+version = "1.1.0"
+edition = "2021"
+publish = false'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
+commit_fixture optional-production-lockfile
+expect_failure "non-default production dependency update without operator entry" true build false
+
+write_file fixture-optional/Cargo.toml '[package]
+name = "fixture-optional"
+version = "1.2.0"
+edition = "2021"
+publish = false'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
+fragment zebrad-optional-dependency.yaml zebrad Added
+commit_fixture optional-production-lockfile-with-fragment
+expect_success "non-default production dependency update with operator entry" true build false
+
+write_file fixture-verification/Cargo.toml '[package]
+name = "fixture-verification"
+version = "1.1.0"
+edition = "2021"
+publish = false'
+cargo generate-lockfile --manifest-path "$fixture/Cargo.toml" --offline
+commit_fixture verification-feature-lockfile
+expect_success "verification-only feature dependency needs no operator entry" true build false
+
 # A breaking root manifest change needs a breaking fragment, but not for zebrad.
-write_file Cargo.lock '# Lockfile, breaking.'
+write_file Cargo.toml '[workspace]
+members = ["zebrad", "zebra-example", "fixture-helper"]
+resolver = "3"'
 fragment zebrad-added-4.yaml zebrad Added
 commit_fixture breaking-root-manifest-without-breaking-fragment
 expect_failure "breaking root manifest without a breaking fragment" true build true
 
-write_file Cargo.lock '# Lockfile, breaking, declared.'
+write_file Cargo.toml '[workspace]
+members = ["zebrad", "zebra-example", "fixture-helper"]
+resolver = "2"'
 write_file zebra-example/src/lib.rs '// Breaking dependency bump.'
 fragment zebrad-added-5.yaml zebrad Added
 fragment zebra-example-breaking-4.yaml zebra-example breaking

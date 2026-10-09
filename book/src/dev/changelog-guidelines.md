@@ -86,7 +86,8 @@ Each distinct user-visible change gets one bullet entry (one `-` item, which may
 
 Verification-only files and documentation do not need fragments. A lockfile-only
 change needs an operator entry only when it changes the node's production
-dependency graph, including enabled features and target-specific dependencies.
+dependency graph, including supported non-default features and target-specific
+dependencies. Test-only features and development dependencies are excluded.
 
 Good:
 
