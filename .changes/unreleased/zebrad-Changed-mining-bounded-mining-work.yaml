@@ -1,0 +1,7 @@
+project: zebrad
+kind: Changed
+body: >-
+  Serialize shielded coinbase proof construction and continue serving current cached templates
+  while obsolete proof work finishes.
+  ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.769997654+02:00

@@ -1,7 +1,7 @@
 //! Zebra Mempool queue checker.
 //!
-//! The queue checker drives completed downloads, retained background work, and chain-tip changes
-//! immediately, with a periodic fallback for queue maintenance and expiry.
+//! The queue checker drives completed downloads, retained background work, and committed or private
+//! mining-parent changes immediately, with a periodic fallback for queue maintenance and expiry.
 //!
 //! The mempool performs these actions on every request,
 //! but we can't guarantee that requests will arrive from peers
@@ -20,6 +20,9 @@ use zebra_chain::chain_tip::ChainTip;
 use zebra_state::LatestChainTip;
 
 use crate::components::mempool;
+
+#[cfg(test)]
+mod tests;
 
 /// The longest the queue checker waits between queue check events.
 ///
@@ -46,6 +49,8 @@ pub struct QueueChecker<Mempool> {
     background_work: Arc<mempool::BackgroundWork>,
     /// Wakes the service when committed-chain notifications change.
     latest_chain_tip: LatestChainTip,
+    /// Includes private-parent invalidation and equal-value validation-completion changes.
+    mining_tip_change: zebra_state::MiningTipChange,
 }
 
 impl<Mempool> QueueChecker<Mempool>
@@ -60,12 +65,14 @@ where
         transaction_verified: Arc<Notify>,
         background_work: Arc<mempool::BackgroundWork>,
         latest_chain_tip: LatestChainTip,
+        mining_tip_change: zebra_state::MiningTipChange,
     ) -> JoinHandle<Result<(), BoxError>> {
         let queue_checker = QueueChecker {
             mempool,
             transaction_verified,
             background_work,
             latest_chain_tip,
+            mining_tip_change,
         };
 
         tokio::spawn(queue_checker.run().in_current_span())
@@ -81,6 +88,7 @@ where
         loop {
             // Mark before polling: a tip change during the request must wake the next check.
             self.latest_chain_tip.mark_best_tip_seen();
+            let _ = self.mining_tip_change.receiver.borrow_and_update();
             self.check_queue().await?;
 
             tokio::select! {
@@ -93,6 +101,11 @@ where
                     }
                 }
                 _ = sleep(RATE_LIMIT_DELAY) => {}
+                changed = self.mining_tip_change.receiver.changed() => {
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                }
             }
         }
     }

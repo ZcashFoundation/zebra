@@ -1,0 +1,8 @@
+project: zebra-rpc
+kind: breaking
+body: >-
+  Add `client::BlockTemplateResponse::{work_id, set_work_id}` and a `work_id` argument after
+  `long_poll_id` in `client::BlockTemplateResponse::new`. Pass the optional normalized proposal
+  identifier.
+  ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.8069666+02:00

@@ -18,9 +18,10 @@ mod tests;
 
 pub use methods::types::{
     get_block_template::{
-        constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info, nsm_value_balance_for_next_block,
-        proposal::proposal_block_from_template, zip317::select_mempool_transactions,
-        BlockTemplateRequest, BlockTemplateResponse, CoinbaseCache, MinerParams,
+        constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info, fetch_mining_chain_info,
+        nsm_value_balance_for_next_block, proposal::proposal_block_from_template,
+        zip317::select_mempool_transactions, BlockTemplateRequest, BlockTemplateResponse,
+        CoinbaseCache, MinerParams,
     },
     long_poll::LongPollInput,
     submit_block::SubmitBlockChannel,

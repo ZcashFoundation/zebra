@@ -440,6 +440,7 @@ fn setup(
         ChainTipSender::new(None, network);
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mining_tip_sender, mining_tip_receiver) = tokio::sync::watch::channel(None);
     let (
         mempool,
         mempool_transaction_subscriber,
@@ -460,10 +461,13 @@ fn setup(
         chain_tip_change,
         misbehavior_tx,
         Buffer::new(
-            BoxService::new(tower::service_fn(|_| async {
-                Err::<zs::ReadResponse, crate::BoxError>(
-                    "no proposal state in storage-only tests".into(),
-                )
+            BoxService::new(tower::service_fn(move |_| {
+                let _keep_subscription_open = &mining_tip_sender;
+                async {
+                    Err::<zs::ReadResponse, crate::BoxError>(
+                        "no proposal state in storage-only tests".into(),
+                    )
+                }
             })),
             1,
         ),
@@ -476,6 +480,9 @@ fn setup(
             1,
         ),
         None,
+        zs::MiningTipChange {
+            receiver: mining_tip_receiver,
+        },
     );
 
     let mut transaction_receiver = mempool_transaction_subscriber.subscribe();

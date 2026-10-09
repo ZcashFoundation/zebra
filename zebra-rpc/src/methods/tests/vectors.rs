@@ -57,6 +57,9 @@ use super::super::*;
 use config::mining;
 use types::long_poll::LONG_POLL_ID_LENGTH;
 
+/// Tests that fill the process-wide submission queue must not change other submission responses.
+pub(super) static SUBMISSION_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
     let _init_guard = zebra_test::init();
@@ -76,6 +79,7 @@ async fn rpc_getinfo() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -142,6 +146,7 @@ async fn rpc_getdeprecationinfo() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -198,6 +203,7 @@ async fn rpc_getdeprecationinfo_estimates_time_from_tip_with_safety_margin() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         latest_chain_tip,
         MockAddressBookPeers::default(),
@@ -246,6 +252,7 @@ async fn rpc_getdeprecationinfo_omits_end_of_service_off_mainnet() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -286,6 +293,7 @@ async fn rpc_getdeprecationinfo_estimated_time_is_never_negative() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         latest_chain_tip,
         MockAddressBookPeers::default(),
@@ -408,6 +416,7 @@ async fn rpc_getblock() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -963,6 +972,7 @@ async fn rpc_getblock_parse_error() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -1013,6 +1023,7 @@ async fn rpc_getblock_missing_error() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -1095,6 +1106,7 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -1197,6 +1209,7 @@ async fn rpc_getblockheader() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -1330,6 +1343,7 @@ async fn rpc_getbestblockhash() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -1381,6 +1395,7 @@ async fn rpc_getrawtransaction() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -1568,6 +1583,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -1758,6 +1774,7 @@ async fn rpc_getaddresstxids_response_with(
         state,
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -1833,6 +1850,7 @@ async fn getaddresstxids_single_equals_object_full_range() {
         state,
         Buffer::new(read_state, 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -1886,6 +1904,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         Buffer::new(state, 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -1945,6 +1964,7 @@ async fn rpc_getaddressutxos_response() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -2030,6 +2050,7 @@ async fn rpc_getaddressutxos_limits() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -2108,7 +2129,7 @@ async fn rpc_getblockcount() {
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, max_checkpoint_height) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
@@ -2127,6 +2148,7 @@ async fn rpc_getblockcount() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        max_checkpoint_height,
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -2152,7 +2174,7 @@ async fn rpc_getblockcount_empty_state() {
     // Create an empty state
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, max_checkpoint_height) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
@@ -2171,6 +2193,7 @@ async fn rpc_getblockcount_empty_state() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        max_checkpoint_height,
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -2201,7 +2224,7 @@ async fn rpc_getpeerinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, max_checkpoint_height) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
@@ -2273,6 +2296,7 @@ async fn rpc_getpeerinfo() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        max_checkpoint_height,
         MockSyncStatus::default(),
         tip.clone(),
         mock_address_book,
@@ -2322,7 +2346,7 @@ async fn rpc_getblockhash() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, max_checkpoint_height) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
@@ -2341,6 +2365,7 @@ async fn rpc_getblockhash() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        max_checkpoint_height,
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -2399,6 +2424,7 @@ async fn rpc_getmininginfo() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -2436,6 +2462,7 @@ async fn rpc_getnetworksolps() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -2540,6 +2567,7 @@ async fn rpc_getnetworksolps_uses_the_effective_height() {
             state,
             Buffer::new(read_state, 1),
             MockService::build().for_unit_tests(),
+            zebra_chain::block::Height(0),
             MockSyncStatus::default(),
             tip,
             MockAddressBookPeers::default(),
@@ -2593,6 +2621,7 @@ async fn rpc_getnetworksolps_rejects_unrepresentable_rates() {
                 MockService::build().for_unit_tests(),
                 read_state,
                 MockService::build().for_unit_tests(),
+                zebra_chain::block::Height(0),
                 MockSyncStatus::default(),
                 NoChainTip,
                 MockAddressBookPeers::default(),
@@ -2730,22 +2759,7 @@ async fn rpc_proposal_rejects_invalid_subsidy_before_verification() {
             tip_sender.send_best_tip_block_time(chrono::Utc::now());
             let mut sync_status = MockSyncStatus::default();
             sync_status.set_is_close_to_tip(true);
-            let (rpc, _) = RpcImpl::new(
-                network.clone(),
-                Default::default(),
-                Default::default(),
-                "0.0.1",
-                "RPC test",
-                MockService::build().for_unit_tests(),
-                MockService::build().for_unit_tests(),
-                read_state,
-                verifier,
-                sync_status,
-                mock_tip,
-                MockAddressBookPeers::default(),
-                rx,
-                None,
-            );
+            let (rpc, _) = RpcImpl::new(network.clone(), Default::default(), Default::default(), "0.0.1", "RPC test", MockService::build().for_unit_tests(), MockService::build().for_unit_tests(), read_state, verifier, zebra_chain::block::Height(0), sync_status, mock_tip, MockAddressBookPeers::default(), rx, None);
             let response = rpc
                 .get_block_template(Some(GetBlockTemplateParameters {
                     mode: GetBlockTemplateRequestMode::Proposal,
@@ -2797,6 +2811,7 @@ async fn rpc_getblocksubsidy_rejects_out_of_range_heights() {
             MockService::build().for_unit_tests(),
             read_state,
             MockService::build().for_unit_tests(),
+            zebra_chain::block::Height(0),
             MockSyncStatus::default(),
             NoChainTip,
             MockAddressBookPeers::default(),
@@ -2852,6 +2867,7 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
             state,
             Buffer::new(read_state.clone(), 1),
             MockService::build().for_unit_tests(),
+            zebra_chain::block::Height(0),
             MockSyncStatus::default(),
             NoChainTip,
             MockAddressBookPeers::default(),
@@ -2903,15 +2919,7 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                 std::iter::empty(),
             )
             .generate_id();
-            let _ = types::get_block_template::zip317::select_mempool_transactions(
-                &network,
-                height,
-                &miner,
-                Vec::new(),
-                Default::default(),
-                Some(&cache),
-                Some(pools.nsm_amount()),
-            );
+            cache.select(height, Some(pools.nsm_amount()));
             let make_template = |fees: i64| {
                 let mut transaction = Mainnet
                     .unmined_transactions_in_blocks(..)
@@ -3088,6 +3096,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         mock_sync_status.clone(),
         mock_tip,
         MockAddressBookPeers::default(),
@@ -3119,9 +3128,10 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let rpc = rpc.with_block_templates(receiver, requests);
     let make_mock_read_state_request_handler = || {
         let mut read_state = read_state.clone();
+
         async move {
             read_state
-                .expect_request(ReadRequest::Tip)
+                .expect_request(ReadRequest::MiningTip)
                 .await
                 .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
         }
@@ -3255,7 +3265,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 }
 
 /// Published work is served without reading the mempool; unavailable providers fail explicitly.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn getblocktemplate_precomputed() {
     let _init_guard = zebra_test::init();
 
@@ -3294,7 +3304,6 @@ async fn getblocktemplate_precomputed() {
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
     mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
-
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         net.clone(),
@@ -3305,7 +3314,8 @@ async fn getblocktemplate_precomputed() {
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
+        reject_synthetic_template_proposal(),
+        zebra_chain::block::Height(0),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -3323,7 +3333,7 @@ async fn getblocktemplate_precomputed() {
 
     let (unready, ()) = tokio::join!(rpc.get_block_template(None), async {
         read_state
-            .expect_request(ReadRequest::Tip)
+            .expect_request(ReadRequest::MiningTip)
             .await
             .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
     });
@@ -3337,13 +3347,12 @@ async fn getblocktemplate_precomputed() {
     ))));
     let (served, ()) = tokio::join!(rpc.get_block_template(None), async {
         read_state
-            .expect_request(ReadRequest::Tip)
+            .expect_request(ReadRequest::MiningTip)
             .await
             .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
     });
     let served = served.unwrap().try_into_template().unwrap();
     assert_eq!(served.previous_block_hash, tip_hash);
-    assert_eq!(served.submit_old, None);
 
     let next_height = tip_height.next().unwrap();
     let next_hash = Hash([0x22; 32]);
@@ -3356,7 +3365,7 @@ async fn getblocktemplate_precomputed() {
     ))));
     let (served, ()) = tokio::join!(rpc.get_block_template(None), async {
         read_state
-            .expect_request(ReadRequest::Tip)
+            .expect_request(ReadRequest::MiningTip)
             .await
             .respond(ReadResponse::Tip(Some((next_height, next_hash))));
     });
@@ -3376,110 +3385,86 @@ async fn getblocktemplate_precomputed() {
     );
 }
 
-/// Shielded mining allows a late publication, but both address types bound readiness waits.
+/// Current-parent publication can follow transient producer recovery.
 #[tokio::test(start_paused = true)]
-async fn getblocktemplate_waits_longer_for_shielded_publications() {
+async fn getblocktemplate_waits_for_current_parent_publication() {
     let _init_guard = zebra_test::init();
     let net = Network::Mainnet;
     let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
     let tip_hash = Hash([0xab; 32]);
 
-    for (address_type, timeout_secs) in [
-        (mining::MinerAddressType::Transparent, 1),
-        (mining::MinerAddressType::Sapling, 10),
-    ] {
-        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-        let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
-            .with_max_request_delay(Duration::from_secs(30))
-            .for_unit_tests();
-        let (mock_tip, mock_tip_sender) = MockChainTip::new();
-        mock_tip_sender.send_best_tip_height(tip_height);
-        mock_tip_sender.send_best_tip_hash(tip_hash);
-        mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
-        let mut sync_status = MockSyncStatus::default();
-        sync_status.set_is_close_to_tip(true);
-        let (_logs, logs) = watch::channel(None);
-        let (rpc, _queue) = RpcImpl::new(
-            net.clone(),
-            mining::Config {
-                miner_address: Some(
-                    mining::default_miner_address(net.kind(), &address_type)
-                        .parse()
-                        .unwrap(),
-                ),
-                ..Default::default()
-            },
-            Default::default(),
-            "0.0.1",
-            "RPC test",
-            Buffer::new(mempool, 1),
-            state,
-            read_state.clone(),
-            MockService::build().for_unit_tests(),
-            sync_status,
-            mock_tip,
-            MockAddressBookPeers::default(),
-            logs,
-            None,
-        );
-        let (templates, receiver) = watch::channel(None);
-        let (requests, _overrides) = mpsc::channel(1);
-        let rpc = rpc.with_block_templates(receiver, requests);
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(Duration::from_secs(30))
+        .for_unit_tests();
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(tip_height);
+    mock_tip_sender.send_best_tip_hash(tip_hash);
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+    let (_logs, logs) = watch::channel(None);
+    let (rpc, _queue) = RpcImpl::new(
+        net.clone(),
+        mining::Config {
+            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                NetworkType::from(NetworkKind::from(&net)),
+                [0x7e; 20],
+            )),
+            ..Default::default()
+        },
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        state,
+        read_state.clone(),
+        MockService::build().for_unit_tests(),
+        Height(0),
+        sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        logs,
+        None,
+    );
+    let (templates, receiver) = watch::channel(None);
+    templates.send_replace(Some(Arc::new(template_extending(
+        &net,
+        tip_height,
+        Hash([0xcd; 32]),
+    ))));
+    let (requests, _overrides) = mpsc::channel(1);
+    let rpc = rpc.with_block_templates(receiver, requests);
 
-        let waiting = rpc.get_block_template(None);
-        tokio::pin!(waiting);
-        tokio::select! {
-            biased;
-            _ = &mut waiting => panic!("an open provider must get time to publish work"),
-            request = read_state.expect_request(ReadRequest::Tip) => {
-                request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-            }
+    let waiting = rpc.get_block_template(None);
+    tokio::pin!(waiting);
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("current-parent work has not been published"),
+        request = read_state.expect_request(ReadRequest::MiningTip) => {
+            request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
         }
-        assert!(futures::poll!(&mut waiting).is_pending());
-        tokio::time::advance(Duration::from_secs(timeout_secs) - Duration::from_millis(1)).await;
-        assert!(futures::poll!(&mut waiting).is_pending());
-        tokio::time::advance(Duration::from_millis(1)).await;
-        assert!(tokio::time::timeout(Duration::from_millis(1), waiting)
-            .await
-            .expect("unavailable work must fail at the readiness deadline")
-            .is_err(),);
-
-        if address_type == mining::MinerAddressType::Transparent {
-            continue;
-        }
-
-        let waiting = rpc.get_block_template(None);
-        tokio::pin!(waiting);
-        tokio::select! {
-            biased;
-            _ = &mut waiting => panic!("shielded mining must wait for its publication"),
-            request = read_state.expect_request(ReadRequest::Tip) => {
-                request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-            }
-        }
-        assert!(futures::poll!(&mut waiting).is_pending());
-        tokio::time::advance(Duration::from_secs(2)).await;
-        assert!(
-            futures::poll!(&mut waiting).is_pending(),
-            "shielded work can arrive after the transparent readiness deadline",
-        );
-        let template = template_extending(&net, tip_height, tip_hash);
-        let expected_id = template.long_poll_id;
-        templates.send_replace(Some(Arc::new(template)));
-        let (served, ()) = tokio::join!(waiting, async {
-            read_state
-                .expect_request(ReadRequest::Tip)
-                .await
-                .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-        });
-        let served = served
-            .expect("shielded mining must accept work published after two seconds")
-            .try_into_template()
-            .unwrap();
-        assert_eq!(served.previous_block_hash, tip_hash);
-        assert_eq!(served.long_poll_id, expected_id);
     }
+    assert!(futures::poll!(&mut waiting).is_pending());
+    tokio::time::advance(Duration::from_secs(2)).await;
+    assert!(
+        futures::poll!(&mut waiting).is_pending(),
+        "recovery can publish after a one-second backoff and verification",
+    );
+    let template = template_extending(&net, tip_height, tip_hash);
+    templates.send_replace(Some(Arc::new(template)));
+    let (served, ()) = tokio::join!(waiting, async {
+        read_state
+            .expect_request(ReadRequest::MiningTip)
+            .await
+            .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
+    });
+    let served = served
+        .expect("mining must accept current work published after transient recovery")
+        .try_into_template()
+        .unwrap();
+    assert_eq!(served.previous_block_hash, tip_hash);
 }
 
 /// A publication after a tip response is captured must survive consuming that older response.
@@ -3519,6 +3504,7 @@ async fn getblocktemplate_observes_publication_before_tip_response_is_consumed()
         state,
         read_state.clone(),
         MockService::build().for_unit_tests(),
+        Height(0),
         sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -3533,7 +3519,7 @@ async fn getblocktemplate_observes_publication_before_tip_response_is_consumed()
     tokio::select! {
         biased;
         _ = &mut waiting => panic!("no template has been published yet"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
+        request = read_state.expect_request(ReadRequest::MiningTip) => {
             request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
         }
     }
@@ -3547,7 +3533,7 @@ async fn getblocktemplate_observes_publication_before_tip_response_is_consumed()
     tokio::select! {
         biased;
         result = &mut waiting => panic!("publication B must trigger a fresh tip read: {result:?}"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
+        request = read_state.expect_request(ReadRequest::MiningTip) => {
             request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
         }
     }
@@ -3572,9 +3558,6 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         .with_max_request_delay(request_delay)
         .for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
-        .with_max_request_delay(request_delay)
-        .for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -3594,12 +3577,23 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         .expect("nu5 activation height");
     let tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+    let (_mining_tip_tx, mining_tip_rx) = watch::channel(Some((tip_height, tip_hash)));
+    let read_state = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, BoxError>(match request {
+            ReadRequest::MiningTip => ReadResponse::Tip(*mining_tip_rx.borrow()),
+            ReadRequest::MiningTipChange => {
+                ReadResponse::MiningTipChange(zebra_state::MiningTipChange {
+                    receiver: mining_tip_rx.clone(),
+                })
+            }
+            request => panic!("unexpected mining state request: {request:?}"),
+        }))
+    });
 
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
     mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
-
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         net.clone(),
@@ -3609,8 +3603,9 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         state.clone(),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
+        read_state,
+        reject_synthetic_template_proposal(),
+        zebra_chain::block::Height(0),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -3633,13 +3628,6 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         if let Some(template) = publication {
             templates.send_replace(Some(Arc::new(template)));
         }
-        tokio::select! {
-            biased;
-            _ = &mut waiting => panic!("unchanged work must keep long polling"),
-            request = read_state.expect_request(ReadRequest::Tip) => {
-                request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-            }
-        }
         assert!(futures::poll!(&mut waiting).is_pending());
     }
 
@@ -3650,12 +3638,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
             .generate_id();
     let changed_id = changed.long_poll_id;
     templates.send_replace(Some(Arc::new(changed)));
-    let (served, ()) = tokio::join!(waiting, async {
-        read_state
-            .expect_request(ReadRequest::Tip)
-            .await
-            .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
-    });
+    let served = waiting.await;
     let served = served.unwrap().try_into_template().unwrap();
     assert_eq!(served.long_poll_id, changed_id);
     assert_eq!(
@@ -3690,9 +3673,17 @@ async fn getblocktemplate_clock_rollback_serves_valid_work() {
         chain_history_root: fake_history_tree(&net).hash(),
         chain_value_pools: Default::default(),
     };
-    let read_state = tower::service_fn(move |request| async move {
-        assert!(matches!(request, ReadRequest::Tip));
-        Ok::<_, BoxError>(ReadResponse::Tip(Some((tip_height, tip_hash))))
+    let (_mining_tip_tx, mining_tip_rx) = watch::channel(Some((tip_height, tip_hash)));
+    let read_state = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, BoxError>(match request {
+            ReadRequest::MiningTip => ReadResponse::Tip(*mining_tip_rx.borrow()),
+            ReadRequest::MiningTipChange => {
+                ReadResponse::MiningTipChange(zebra_state::MiningTipChange {
+                    receiver: mining_tip_rx.clone(),
+                })
+            }
+            request => panic!("unexpected mining state request: {request:?}"),
+        }))
     });
     let (tip, sender) = MockChainTip::new();
     sender.send_best_tip_height(tip_height);
@@ -3718,6 +3709,7 @@ async fn getblocktemplate_clock_rollback_serves_valid_work() {
         MockService::build().for_unit_tests(),
         read_state,
         MockService::build().for_unit_tests(),
+        Height(0),
         sync,
         tip,
         MockAddressBookPeers::default(),
@@ -3845,17 +3837,27 @@ async fn getblocktemplate_long_poll_expires_once() {
             chain_value_pools: Default::default(),
         };
         let (chain_info_tx, chain_info_rx) = tokio::sync::watch::channel(chain_info.clone());
+        let (mining_tip_tx, mining_tip_rx) =
+            tokio::sync::watch::channel(Some((tip_height, tip_hash)));
+
         let state_reads = Arc::new(AtomicUsize::new(0));
         let read_state = tower::service_fn({
             let state_reads = state_reads.clone();
             move |request| {
                 state_reads.fetch_add(1, Ordering::SeqCst);
                 let chain_info = chain_info_rx.borrow().clone();
+                let mining_tip_rx = mining_tip_rx.clone();
                 async move {
                     Ok::<_, BoxError>(match request {
-                        ReadRequest::Tip => {
+                        ReadRequest::MiningTip => {
                             ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
                         }
+                        ReadRequest::MiningTipChange => {
+                            ReadResponse::MiningTipChange(zebra_state::MiningTipChange {
+                                receiver: mining_tip_rx,
+                            })
+                        }
+
                         other => panic!("unexpected state request: {other:?}"),
                     })
                 }
@@ -3885,6 +3887,7 @@ async fn getblocktemplate_long_poll_expires_once() {
             MockService::build().for_unit_tests(),
             read_state,
             MockService::build().for_unit_tests(),
+            zebra_chain::block::Height(0),
             sync,
             mock_tip,
             MockAddressBookPeers::default(),
@@ -3922,6 +3925,61 @@ async fn getblocktemplate_long_poll_expires_once() {
                 ..Default::default()
             })
         };
+
+        // A refresh can extend the clock bound while the miner's current-parent work remains
+        // valid. It must not wake the miner early or move the deadline of its outstanding poll.
+        {
+            let waiting = rpc.get_block_template(parameters());
+            tokio::pin!(waiting);
+            assert!(futures::poll!(&mut waiting).is_pending());
+            let mut extended_info = chain_info.clone();
+            extended_info.max_time = max_time.saturating_add(Duration32::from_seconds(30));
+            let extended = make_template(&extended_info);
+            assert_ne!(extended.long_poll_id, template.long_poll_id);
+            templates.send_replace(Some(Arc::new(extended.clone())));
+            assert!(
+                futures::poll!(&mut waiting).is_pending(),
+                "extending the deadline does not invalidate the miner's work",
+            );
+            clock.store(max_time.timestamp(), Ordering::SeqCst);
+            tokio::time::advance(Duration::from_secs(11)).await;
+            assert!(
+                futures::poll!(&mut waiting).is_pending(),
+                "the miner's original max_time is inclusive after a refresh",
+            );
+            clock.store(max_time.timestamp() + 1, Ordering::SeqCst);
+            templates.send_replace(Some(Arc::new(extended.clone())));
+            let expired = tokio::time::timeout(Duration::from_secs(1), waiting)
+                .await
+                .expect("an extended publication must not postpone the original deadline")
+                .expect("fresh work replaces the expired template")
+                .try_into_template()
+                .expect("template-mode response");
+            assert_eq!(expired.long_poll_id, extended.long_poll_id);
+            assert_eq!(expired.submit_old, Some(false));
+        }
+        clock.store(now.timestamp(), Ordering::SeqCst);
+        templates.send_replace(Some(Arc::new(template.clone())));
+        // A reduced range, including a return to standard difficulty after clock rollback,
+        // cannot preserve every timestamp advertised to the miner and must release immediately.
+        {
+            let waiting = rpc.get_block_template(parameters());
+            tokio::pin!(waiting);
+            assert!(futures::poll!(&mut waiting).is_pending());
+            let mut reduced_info = chain_info.clone();
+            reduced_info.max_time = DateTime32::from(max_time.timestamp() - 1);
+            let reduced = make_template(&reduced_info);
+            templates.send_replace(Some(Arc::new(reduced.clone())));
+            let response = tokio::time::timeout(Duration::from_secs(1), waiting)
+                .await
+                .expect("a reduced time range must end the long poll promptly")
+                .expect("reduced-range publication is valid")
+                .try_into_template()
+                .expect("template-mode response");
+            assert_eq!(response.long_poll_id, reduced.long_poll_id);
+            assert_eq!(response.submit_old, Some(false));
+        }
+        templates.send_replace(Some(Arc::new(template.clone())));
 
         let waiting = rpc.get_block_template(parameters());
         tokio::pin!(waiting);
@@ -3985,6 +4043,10 @@ async fn getblocktemplate_long_poll_expires_once() {
         let replacement = make_template(&replacement_info);
         mock_tip_sender.send_best_tip_height(replacement_info.tip_height);
         mock_tip_sender.send_best_tip_hash(replacement_info.tip_hash);
+        mining_tip_tx.send_replace(Some((
+            replacement_info.tip_height,
+            replacement_info.tip_hash,
+        )));
         chain_info_tx.send_replace(replacement_info);
         templates.send_replace(Some(Arc::new(replacement.clone())));
         let response = tokio::time::timeout(Duration::from_secs(1), waiting)
@@ -4003,8 +4065,8 @@ async fn getblocktemplate_long_poll_expires_once() {
 /// already committed, even while the chain tip channel still names that block's parent.
 ///
 /// The state's write task publishes a committed block to the read state before it updates the chain
-/// tip channel (`update_latest_chain_channels()`), so there is an interval where `ReadRequest::Tip`
-/// and `ReadRequest::ChainInfo` report the new tip and `latest_chain_tip` still reports the old one.
+/// tip channel (`update_latest_chain_channels()`), so there is an interval where mining reads
+/// report the new tip and `latest_chain_tip` still reports the old one.
 /// A precomputed template for the old tip is stale work in that interval: the node has extended the
 /// chain itself, and every share a miner computes on it is wasted.
 ///
@@ -4053,7 +4115,6 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     mock_tip_sender.send_best_tip_height(tip_height);
     mock_tip_sender.send_best_tip_hash(tip_hash);
     mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
-
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         net.clone(),
@@ -4064,7 +4125,8 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
+        reject_synthetic_template_proposal(),
+        zebra_chain::block::Height(0),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -4082,7 +4144,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     tokio::select! {
         biased;
         _ = &mut waiting => panic!("the published work is for a superseded tip"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
+        request = read_state.expect_request(ReadRequest::MiningTip) => {
             request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
         }
     }
@@ -4094,7 +4156,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     ))));
     let (served, ()) = tokio::join!(waiting, async {
         read_state
-            .expect_request(ReadRequest::Tip)
+            .expect_request(ReadRequest::MiningTip)
             .await
             .respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
     });
@@ -4106,6 +4168,7 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_submitblock_errors() {
     let _init_guard = zebra_test::init();
+    let _submission_guard = SUBMISSION_TEST_LOCK.lock().await;
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -4118,7 +4181,7 @@ async fn rpc_submitblock_errors() {
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks, &Mainnet).await;
 
     // Init RPCs
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, max_checkpoint_height) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
@@ -4137,6 +4200,7 @@ async fn rpc_submitblock_errors() {
         state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        max_checkpoint_height,
         MockSyncStatus::default(),
         tip.clone(),
         MockAddressBookPeers::default(),
@@ -4187,6 +4251,7 @@ async fn rpc_validateaddress() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -4273,6 +4338,7 @@ async fn rpc_validateaddress_regtest() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -4332,6 +4398,7 @@ async fn rpc_z_validateaddress() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -4441,6 +4508,7 @@ async fn rpc_z_validateaddress_regtest() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -4542,6 +4610,7 @@ async fn rpc_getdifficulty() {
         MockService::build().for_unit_tests(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -4666,6 +4735,7 @@ async fn rpc_z_listunifiedreceivers() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -4746,6 +4816,7 @@ async fn rpc_z_listunifiedreceivers_rejects_bad_shielded_receivers() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -4782,7 +4853,7 @@ async fn rpc_addnode() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, max_checkpoint_height) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
@@ -4805,6 +4876,7 @@ async fn rpc_addnode() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        max_checkpoint_height,
         MockSyncStatus::default(),
         tip.clone(),
         mock_address_book,
@@ -4873,6 +4945,7 @@ async fn rpc_gettxout() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -4964,6 +5037,7 @@ async fn rpc_get_standard_fee() {
             Buffer::new(state.clone(), 1),
             Buffer::new(read_state.clone(), 1),
             MockService::build().for_unit_tests(),
+            zebra_chain::block::Height(0),
             MockSyncStatus::default(),
             tip,
             MockAddressBookPeers::default(),
@@ -5014,6 +5088,7 @@ async fn rpc_getblocksubsidy_major_grants_metadata_across_nu6_boundary() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -5111,6 +5186,7 @@ async fn rpc_getblocksubsidy_nsm() {
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -5215,6 +5291,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
         state.clone(),
         read_state.clone(),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -5235,7 +5312,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     tokio::select! {
         biased;
         _ = &mut waiting => panic!("the cache doesn't contain a template for the tip yet"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
+        request = read_state.expect_request(ReadRequest::MiningTip) => {
             request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
         }
     }
@@ -5249,7 +5326,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
     tokio::select! {
         biased;
         _ = &mut waiting => panic!("a template for the superseded tip must not be served"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
+        request = read_state.expect_request(ReadRequest::MiningTip) => {
             request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
         }
     }
@@ -5263,7 +5340,7 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
 
     let (served, ()) = tokio::join!(waiting, async {
         read_state
-            .expect_request(ReadRequest::Tip)
+            .expect_request(ReadRequest::MiningTip)
             .await
             .respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
     },);
@@ -5338,6 +5415,7 @@ async fn generate_overrides_do_not_change_default_templates() {
         state,
         read_state.clone(),
         verifier.clone(),
+        Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -5408,7 +5486,7 @@ async fn generate_overrides_do_not_change_default_templates() {
 
     let (served, ()) = tokio::join!(rpc.get_block_template(None), async {
         read_state
-            .expect_request(ReadRequest::Tip)
+            .expect_request(ReadRequest::MiningTip)
             .await
             .respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
     });
@@ -5457,4 +5535,452 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
         vec![],
         None,
     )
+}
+
+/// Synthetic mining parents are not committed to the mocked state.
+fn reject_synthetic_template_proposal() -> impl tower::Service<
+    zebra_consensus::Request,
+    Response = Hash,
+    Error = BoxError,
+    Future: Send + 'static,
+> + Send
+       + Clone
+       + 'static {
+    tower::service_fn(|request| async move {
+        match request {
+            zebra_consensus::Request::CheckProposal(_) => {
+                Err::<Hash, BoxError>("synthetic mining parent is absent from state".into())
+            }
+            request => panic!("template preparation must not commit blocks: {request:?}"),
+        }
+    })
+}
+
+/// Speculative mining parents and rejected-parent fallback do not change the validated tip.
+#[tokio::test(flavor = "multi_thread")]
+async fn getblocktemplate_speculative_parent_and_rejected_fallback() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let net = Network::Mainnet;
+        let validated_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+        let validated_hash = Hash([1; 32]);
+        let speculative_height = validated_height.next().unwrap();
+        let speculative_hash = Hash([2; 32]);
+        let (mining_tip_tx, mining_tip_rx) =
+            watch::channel(Some((speculative_height, speculative_hash)));
+        let read_state = tower::service_fn(move |request| {
+            std::future::ready(Ok::<_, BoxError>(match request {
+                ReadRequest::MiningTip => ReadResponse::Tip(*mining_tip_rx.borrow()),
+                ReadRequest::MiningTipChange => {
+                    ReadResponse::MiningTipChange(zebra_state::MiningTipChange {
+                        receiver: mining_tip_rx.clone(),
+                    })
+                }
+                request => panic!("unexpected mining state request: {request:?}"),
+            }))
+        });
+        let (validated_tip, validated_tip_tx) = MockChainTip::new();
+        validated_tip_tx.send_best_tip_height(validated_height);
+        validated_tip_tx.send_best_tip_hash(validated_hash);
+        validated_tip_tx.send_best_tip_block_time(chrono::Utc::now());
+        let unchanged_tip = validated_tip.clone();
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let (_logs, logs) = watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            net.clone(),
+            mining::Config {
+                miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                    NetworkType::Main,
+                    [0x7e; 20],
+                )),
+                ..Default::default()
+            },
+            false,
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            read_state,
+            reject_synthetic_template_proposal(),
+            Height(0),
+            sync,
+            validated_tip,
+            MockAddressBookPeers::default(),
+            logs,
+            None,
+        );
+        let (templates, receiver) = watch::channel(Some(Arc::new(template_extending(
+            &net,
+            speculative_height,
+            speculative_hash,
+        ))));
+        let (requests, _overrides) = mpsc::channel(1);
+        let rpc = rpc.with_block_templates(receiver, requests);
+        let template = rpc
+            .get_block_template(None)
+            .await
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        assert_eq!(template.previous_block_hash, speculative_hash);
+        assert_eq!(template.height, speculative_height.0 + 1);
+        assert!(template.transactions.is_empty());
+        assert_eq!(unchanged_tip.best_tip_hash(), Some(validated_hash));
+        assert_eq!(unchanged_tip.best_tip_height(), Some(validated_height));
+        let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+            long_poll_id: Some(template.long_poll_id),
+            ..Default::default()
+        }));
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+        mining_tip_tx.send_replace(Some((validated_height, validated_hash)));
+        templates.send_replace(Some(Arc::new(template_extending(
+            &net,
+            validated_height,
+            validated_hash,
+        ))));
+        let fallback = tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .expect("rejected-parent fallback must wake long polling")
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        assert_eq!(fallback.previous_block_hash, validated_hash);
+        assert_eq!(fallback.height, validated_height.0 + 1);
+        assert_eq!(fallback.submit_old, Some(false));
+        assert_ne!(fallback.long_poll_id, template.long_poll_id);
+        assert_eq!(unchanged_tip.best_tip_hash(), Some(validated_hash));
+        assert_eq!(unchanged_tip.best_tip_height(), Some(validated_height));
+        queue.abort();
+    })
+    .await
+    .expect("controlled mining watch test must finish");
+}
+
+/// Detached submissions retain admission and relay ownership after their RPC callers disconnect.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_submitblock_cancellation_retains_bounded_jobs_and_relay() {
+    let _init_guard = zebra_test::init();
+    let _submission_guard = SUBMISSION_TEST_LOCK.lock().await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let block_bytes = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .nth(1)
+            .unwrap()
+            .to_vec();
+        let block: Arc<Block> = block_bytes.as_slice().zcash_deserialize_into().unwrap();
+        let hash = block.hash();
+        let height = block.coinbase_height().unwrap();
+        let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (mined_sender, mut mined_blocks) = tokio::sync::mpsc::channel(9);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            false,
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            verifier.clone(),
+            zebra_chain::block::Height(0),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            Some(mined_sender),
+        );
+        let mut jobs = Vec::new();
+        for _ in 0..8 {
+            let caller = tokio::spawn({
+                let rpc = rpc.clone();
+                let bytes = block_bytes.clone();
+                async move { rpc.submit_block(HexData(bytes), None).await }
+            });
+            jobs.push(
+                verifier
+                    .expect_request(zebra_consensus::Request::Commit(block.clone()))
+                    .await,
+            );
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+        }
+
+        // Disconnecting eight callers must not free admission while their verifiers still wait.
+        let excess = tokio::time::timeout(
+            Duration::from_secs(1),
+            rpc.submit_block(HexData(block_bytes.clone()), None),
+        )
+        .await
+        .expect("an exhausted submission queue must reject excess work immediately")
+        .unwrap();
+        assert_eq!(excess, SubmitBlockErrorResponse::Inconclusive.into());
+        assert!(mined_blocks.try_recv().is_err());
+
+        // Verification completes after the original caller has gone, but the relay still runs.
+        jobs.remove(0).respond(hash);
+        assert_eq!(mined_blocks.recv().await, Some((hash, height)));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(permit) = rpc.gbt.submission_permit() {
+                    drop(permit);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a completed detached submission must release its admission slot");
+
+        let next_caller = tokio::spawn({
+            let rpc = rpc.clone();
+            async move { rpc.submit_block(HexData(block_bytes), None).await }
+        });
+        verifier
+            .expect_request(zebra_consensus::Request::Commit(block))
+            .await
+            .respond(hash);
+        assert_eq!(
+            next_caller.await.unwrap().unwrap(),
+            SubmitBlockResponse::Accepted
+        );
+        assert_eq!(mined_blocks.recv().await, Some((hash, height)));
+
+        for job in jobs {
+            job.respond(hash);
+            assert_eq!(mined_blocks.recv().await, Some((hash, height)));
+        }
+        // Wait until every detached completion has relinquished its permit before releasing
+        // test isolation, so another submission test cannot inherit this test's occupied queue.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let permits: Vec<_> = (0..8).filter_map(|_| rpc.gbt.submission_permit()).collect();
+                if permits.len() == 8 {
+                    break;
+                }
+                drop(permits);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("all completed jobs must release admission");
+        queue.abort();
+    })
+    .await
+    .expect("bounded detached submission test must finish");
+}
+
+/// Checkpoint assembly must progress even when all semantic submissions await their parents.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_submitblock_checkpoint_range_does_not_hold_semantic_admission() {
+    let _init_guard = zebra_test::init();
+    let _submission_guard = SUBMISSION_TEST_LOCK.lock().await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let checkpoint = blocks[1].clone();
+        let semantic = blocks[2].clone();
+        let checkpoint_bytes = checkpoint.zcash_serialize_to_vec().unwrap();
+        let semantic_bytes = semantic.zcash_serialize_to_vec().unwrap();
+        let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (mined_sender, mut mined_blocks) = tokio::sync::mpsc::channel(17);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            false,
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            verifier.clone(),
+            Height(1),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            Some(mined_sender),
+        );
+
+        // Cancellation while waiting for bounded decoding must not leave a detached waiter.
+        let mut decode_permits = Vec::new();
+        for _ in 0..8 {
+            decode_permits.push(rpc.gbt.deserialization_permit().await);
+        }
+        assert!(tokio::time::timeout(
+            Duration::from_millis(10),
+            rpc.submit_block(HexData(checkpoint_bytes.clone()), None),
+        )
+        .await
+        .is_err());
+        drop(decode_permits);
+        verifier.expect_no_requests().await;
+
+        let mut semantic_jobs = Vec::new();
+        for _ in 0..8 {
+            let caller = tokio::spawn({
+                let rpc = rpc.clone();
+                let bytes = semantic_bytes.clone();
+                async move { rpc.submit_block(HexData(bytes), None).await }
+            });
+            semantic_jobs.push(
+                verifier
+                    .expect_request(zebra_consensus::Request::Commit(semantic.clone()))
+                    .await,
+            );
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+        }
+        assert_eq!(
+            rpc.submit_block(HexData(semantic_bytes), None)
+                .await
+                .unwrap(),
+            SubmitBlockErrorResponse::Inconclusive.into(),
+            "the effective cutoff must not bypass full-verification admission"
+        );
+
+        // Hold more than eight checkpoint responses, just like an incomplete checkpoint range.
+        let mut checkpoint_jobs = Vec::new();
+        let mut checkpoint_callers = Vec::new();
+        for _ in 0..9 {
+            checkpoint_callers.push(tokio::spawn({
+                let rpc = rpc.clone();
+                let bytes = checkpoint_bytes.clone();
+                async move { rpc.submit_block(HexData(bytes), None).await }
+            }));
+            checkpoint_jobs.push(
+                verifier
+                    .expect_request(zebra_consensus::Request::Commit(checkpoint.clone()))
+                    .await,
+            );
+        }
+        for job in checkpoint_jobs {
+            job.respond(checkpoint.hash());
+        }
+        for caller in checkpoint_callers {
+            assert_eq!(
+                caller.await.unwrap().unwrap(),
+                SubmitBlockResponse::Accepted
+            );
+        }
+        for job in semantic_jobs {
+            job.respond(semantic.hash());
+        }
+        for _ in 0..17 {
+            mined_blocks
+                .recv()
+                .await
+                .expect("each commit must be relayed");
+        }
+        loop {
+            let permits: Vec<_> = (0..8).filter_map(|_| rpc.gbt.submission_permit()).collect();
+            if permits.len() == 8 {
+                break;
+            }
+            drop(permits);
+            tokio::task::yield_now().await;
+        }
+        queue.abort();
+    })
+    .await
+    .expect("checkpoint admission regression must finish");
+}
+
+/// Native checkpoint range verification can commit while semantic admission is saturated.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_submitblock_native_checkpoint_range_with_saturated_semantic_admission() {
+    let _init_guard = zebra_test::init();
+    let _submission_guard = SUBMISSION_TEST_LOCK.lock().await;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let network = Parameters::build()
+            .with_genesis_hash(blocks[0].hash())
+            .unwrap()
+            .with_checkpoints(testnet::ConfiguredCheckpoints::HeightsAndHashes(vec![
+                (Height(0), blocks[0].hash()),
+                (Height(3), blocks[3].hash()),
+            ]))
+            .unwrap()
+            // All fixture blocks are Sprout blocks. Put Canopy immediately after their range,
+            // making height three the mandatory checkpoint without changing those blocks' rules.
+            .with_activation_heights(testnet::ConfiguredActivationHeights {
+                canopy: Some(4),
+                ..Default::default()
+            })
+            .unwrap()
+            // Early Blossom leaves slow-start issuance unchanged, so shorten the later halving
+            // interval to keep total issuance within MAX_MONEY. Blocks 0–3 retain their original
+            // slow-start subsidy; public Testnet's later funding schedules are not used here.
+            .clear_funding_streams()
+            .with_lockbox_disbursements(Vec::new())
+            .with_halving_interval(830_000)
+            .unwrap()
+            .to_network()
+            .unwrap();
+        let (state, read_state, tip, _) = zebra_state::init_test_services(&network).await;
+        let (router, _, _tasks, cutoff) = zebra_consensus::router::init_test(
+            zebra_consensus::Config::default(),
+            &network,
+            state.clone(),
+        )
+        .await;
+        assert_eq!(cutoff, Height(3));
+        let (mined_sender, mut mined_blocks) = tokio::sync::mpsc::channel(4);
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            network,
+            Default::default(),
+            false,
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            state,
+            read_state,
+            router,
+            cutoff,
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            Some(mined_sender),
+        );
+        // This is exactly the admission state of eight semantic jobs waiting on ancestors.
+        let _semantic_permits: Vec<_> = (0..8)
+            .map(|_| {
+                rpc.gbt
+                    .submission_permit()
+                    .expect("all eight slots are available")
+            })
+            .collect();
+        assert!(rpc.gbt.submission_permit().is_none());
+        let submissions = blocks
+            .iter()
+            .map(|block| rpc.submit_block(HexData(block.zcash_serialize_to_vec().unwrap()), None));
+        for result in futures::future::join_all(submissions).await {
+            assert_eq!(result.unwrap(), SubmitBlockResponse::Accepted);
+        }
+        assert_eq!(
+            rpc.get_block_hash(3).await.unwrap().hash(),
+            blocks[3].hash()
+        );
+        for _ in 0..4 {
+            mined_blocks
+                .recv()
+                .await
+                .expect("each native commit must be relayed");
+        }
+        queue.abort();
+    })
+    .await
+    .expect("native checkpoint range must commit despite semantic admission saturation");
 }

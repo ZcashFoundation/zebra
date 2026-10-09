@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`proposal_key` ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.827228321+02:00

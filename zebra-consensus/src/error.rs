@@ -459,6 +459,9 @@ pub enum BlockError {
     #[error("block has no transactions")]
     NoTransactions,
 
+    #[error("serialized block size {size} exceeds the consensus block size limit")]
+    BlockTooLarge { size: usize },
+
     #[error("block has mismatched merkle root")]
     BadMerkleRoot {
         actual: zebra_chain::block::merkle::Root,
@@ -566,6 +569,7 @@ impl BlockError {
             | TargetDifficultyLimit(_, _, _, _, _)
             | DifficultyFilter(_, _, _, _)
             | NoTransactions
+            | BlockTooLarge { .. }
             | BadMerkleRoot { .. }
             | WrongTransactionConsensusBranchId
             | TooManyTransparentSignatureOperations { .. }

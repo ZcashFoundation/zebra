@@ -1001,6 +1001,7 @@ where
         Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         chain_tip,
         MockAddressBookPeers::default(),

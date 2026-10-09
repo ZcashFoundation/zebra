@@ -1311,18 +1311,22 @@ async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit(
 
     mempool.enable(&mut recent_syncs).await;
 
-    let tx = super::admission::candidate().transaction;
+    let verified = super::admission::candidate();
+    let tx = verified.transaction.clone();
+    assert!(!tx.transaction.is_coinbase());
 
     // The queue checker holds the only handle that will call the mempool from here on, so nothing
     // else can drain the verification result on its behalf.
     let background_work = mempool.background_work();
     let latest_chain_tip = mempool.latest_chain_tip.clone();
+    let mining_tip_change = mempool.block_templates.mining_tip_change();
     let mempool = Buffer::new(BoxService::new(mempool), 1);
     let queue_checker = QueueChecker::spawn(
         mempool.clone(),
         transaction_verified,
         background_work,
         latest_chain_tip,
+        mining_tip_change,
     );
 
     let mut queueing_mempool = mempool.clone();
@@ -1341,30 +1345,20 @@ async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit(
         });
 
     let (queued, ()) = futures::join!(queued, download);
-    assert!(matches!(
-        queued.expect("queue request succeeds"),
-        Response::Queued(_)
-    ));
+    let Response::Queued(mut queued) = queued.expect("queue request succeeds") else {
+        panic!("queue request returns a Queued response");
+    };
+    assert_eq!(queued.len(), 1);
+    let accepted = queued.remove(0).expect("the transaction is queued");
 
     // Everything up to here polled the mempool, so measure from the point where only the queue
     // checker is left to notice the verification.
     let queued_at = time::Instant::now();
 
     tx_verifier
-        .expect_request_that(|_| true)
+        .expect_request_that(|request| request.transaction.id == tx.id)
         .map(|responder| {
-            let transaction = responder.request().clone().transaction;
-
-            responder.respond(transaction::MempoolResponse::from(
-                VerifiedUnminedTx::new(
-                    transaction,
-                    Amount::try_from(1_000_000).expect("valid fee"),
-                    0,
-                    0,
-                    Arc::new(vec![]),
-                )
-                .expect("transaction passes ZIP-317 checks"),
-            ));
+            responder.respond(transaction::MempoolResponse::from(verified));
         })
         .await;
 
@@ -1388,6 +1382,24 @@ async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit(
          rate limit, but it took {:?}",
         queued_at.elapsed(),
     );
+
+    timeout(Duration::from_secs(1), accepted)
+        .await
+        .expect("announced transaction has completed admission")
+        .expect("admission preserves its response channel")
+        .expect("the non-coinbase transaction is accepted");
+    let Response::Transactions(stored) = queueing_mempool
+        .ready()
+        .await
+        .expect("mempool is ready")
+        .call(Request::TransactionsById([tx.id].into_iter().collect()))
+        .await
+        .expect("stored transaction lookup succeeds")
+    else {
+        panic!("transaction lookup returns a Transactions response");
+    };
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].id, tx.id);
 
     queue_checker.abort();
 
@@ -2494,7 +2506,7 @@ async fn setup_with_mempool_config(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_state, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
@@ -2502,6 +2514,13 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let zebra_state::ReadResponse::MiningTipChange(mining_tip_change) = read_state
+        .oneshot(zebra_state::ReadRequest::MiningTipChange)
+        .await
+        .expect("real state provides mining-tip notifications")
+    else {
+        panic!("MiningTipChange response expected")
+    };
     let (
         mempool,
         mempool_transaction_subscriber,
@@ -2529,6 +2548,7 @@ async fn setup_with_mempool_config(
             1,
         ),
         None,
+        mining_tip_change,
     );
 
     // Keep the change feed drained in the background so tests that ignore it

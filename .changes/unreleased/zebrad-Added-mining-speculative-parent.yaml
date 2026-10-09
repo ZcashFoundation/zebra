@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Mine on one private contextual child while its transaction verification finishes; withdraw it on rejection, cancellation, expiry, or competing state changes. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.766593651+02:00

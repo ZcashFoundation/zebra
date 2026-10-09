@@ -144,6 +144,9 @@ impl Solution {
     /// The returned header contains a valid `nonce` and `solution`.
     ///
     /// If `cancel_fn()` returns an error, returns early with `Err(SolverCancelled)`.
+    /// Cancellation and shutdown are checked before solving and between nonce attempts, not between
+    /// digit rounds. An in-progress nonce attempt must finish before its solutions are discarded.
+    /// Cancellation is checked again before returning solved headers.
     ///
     /// The `nonce` in the header template is taken as the starting nonce. If you are running multiple
     /// solvers at the same time, start them with different nonces.
@@ -174,9 +177,10 @@ impl Solution {
             // Don't run the solver if we'd just cancel it anyway.
             cancel_fn()?;
 
+            let mut cancelled = false;
             let solutions = equihash::tromp::solve_200_9(input, || {
-                // Cancel the solver if we have a new template.
-                if cancel_fn().is_err() {
+                if is_shutting_down() || cancel_fn().is_err() {
+                    cancelled = true;
                     return None;
                 }
 
@@ -184,6 +188,14 @@ impl Solution {
                 Self::next_nonce(&mut header.nonce);
                 Some(*header.nonce)
             });
+
+            // The stock solver returns an empty vector when its nonce callback cancels. Remember
+            // that cancellation even if cancel_fn would subsequently return Ok.
+            if cancelled || is_shutting_down() {
+                return Err(SolverCancelled);
+            }
+            // A successful nonce attempt can finish without requesting another nonce.
+            cancel_fn()?;
 
             let mut valid_solutions = Vec::new();
 
@@ -203,7 +215,13 @@ impl Solution {
             }
 
             match valid_solutions.try_into() {
-                Ok(at_least_one_solution) => return Ok(at_least_one_solution),
+                Ok(at_least_one_solution) => {
+                    if is_shutting_down() {
+                        return Err(SolverCancelled);
+                    }
+                    cancel_fn()?;
+                    return Ok(at_least_one_solution);
+                }
                 Err(_is_empty_error) => debug!(
                     solutions = ?solutions.len(),
                     "found valid solutions which did not pass the validity or difficulty checks"

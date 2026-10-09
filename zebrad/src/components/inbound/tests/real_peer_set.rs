@@ -706,6 +706,14 @@ async fn setup(
     // Mempool
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
+    let zebra_state::ReadResponse::MiningTipChange(mining_tip_change) = read_only_state_service
+        .clone()
+        .oneshot(zebra_state::ReadRequest::MiningTipChange)
+        .await
+        .unwrap()
+    else {
+        panic!("state returns the requested mining tip subscription");
+    };
     let (
         mut mempool_service,
         transaction_subscriber,
@@ -729,6 +737,7 @@ async fn setup(
             .buffer(1)
             .service(BoxService::new(buffered_block_verifier.clone())),
         None,
+        mining_tip_change,
     );
 
     // Enable the mempool

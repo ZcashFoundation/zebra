@@ -1,0 +1,7 @@
+project: zebra-rpc
+kind: Added
+body: >-
+  Add `methods::RpcImpl::mining_tip_change`, `CoinbaseCache::proof_permit` for serialized proof
+  construction, and `fetch_mining_chain_info` for private mining-parent snapshots.
+  ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.815503753+02:00

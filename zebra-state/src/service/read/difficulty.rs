@@ -264,14 +264,8 @@ fn difficulty_time_and_history_tree(
         return Err("median-time-past is too far ahead of the local clock".into());
     }
 
-    // Match zcashd's Regtest behavior by advancing time minimally rather than jumping
-    // from the historical genesis timestamp to the wall clock. This keeps mined
-    // timestamps tightly clustered just above the median-time-past.
-    let cur_time = if network.is_regtest() {
-        min_time
-    } else {
-        now.clamp(min_time, max_time)
-    };
+    // Match zcashd's clock-based candidate time, within both consensus timestamp bounds.
+    let cur_time = now.clamp(min_time, max_time);
 
     // Now that we have a valid time, get the difficulty for that time.
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(

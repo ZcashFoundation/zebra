@@ -1,7 +1,8 @@
 //! Mempool-owned mining templates and per-request payout overrides.
 //!
-//! All inputs come from verified storage snapshots. The retained build and look-ahead coinbase
-//! finish even when their parent changes, so tip churn cannot detach CPU-heavy proof work.
+//! Transactions come only from verified storage snapshots matching the private mining parent.
+//! The retained build and look-ahead coinbase finish even when their parent changes, so tip churn
+//! cannot detach CPU-heavy proof work.
 
 use std::{
     future::Future,
@@ -28,7 +29,7 @@ use zebra_chain::{
 };
 use zebra_node_services::mempool::TransactionDependencies;
 use zebra_rpc::{
-    fetch_chain_info, nsm_value_balance_for_next_block, proposal_block_from_template,
+    fetch_mining_chain_info, nsm_value_balance_for_next_block, proposal_block_from_template,
     select_mempool_transactions, BlockTemplateRequest, BlockTemplateResponse, CoinbaseCache,
     LongPollInput, MinerParams, TransactionTemplate, MEMPOOL_LONG_POLL_INTERVAL,
 };
@@ -48,7 +49,7 @@ pub(super) type BlockVerifier =
 type CoinbaseTask = (Height, JoinHandle<TransactionTemplate<NegativeOrZero>>);
 type Snapshot = (block::Hash, Vec<VerifiedUnminedTx>, TransactionDependencies);
 
-/// Delay after a transient state/consensus error or a superseded parent.
+/// Delay after a transient state or consensus error in the current mining context.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Coalesce a burst without allowing continuous changes to postpone publication.
 const CHANGE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -64,6 +65,7 @@ struct Build {
     request: Option<BlockTemplateRequest>,
     coinbase_only: bool,
     observed_tip: Option<block::Hash>,
+    observed_generation: u64,
 }
 
 /// The only owner of template publication and its bounded proof work.
@@ -73,6 +75,8 @@ pub(super) struct BlockTemplates {
     read_state: ReadState,
     verifier: BlockVerifier,
     coinbase_cache: CoinbaseCache,
+    mining_tip_change: zebra_state::MiningTipChange,
+    mining_generation: u64,
     published: watch::Sender<Option<Arc<BlockTemplateResponse>>>,
     published_for_tip: Option<block::Hash>,
     requests: mpsc::Receiver<BlockTemplateRequest>,
@@ -92,6 +96,7 @@ impl BlockTemplates {
         miner_params: Option<MinerParams>,
         read_state: ReadState,
         verifier: BlockVerifier,
+        mining_tip_change: zebra_state::MiningTipChange,
     ) -> (
         Self,
         watch::Receiver<Option<Arc<BlockTemplateResponse>>>,
@@ -105,6 +110,8 @@ impl BlockTemplates {
                 miner_params,
                 read_state,
                 verifier,
+                mining_tip_change,
+                mining_generation: 0,
                 coinbase_cache: CoinbaseCache::default(),
                 published,
                 published_for_tip: None,
@@ -123,6 +130,11 @@ impl BlockTemplates {
         )
     }
 
+    #[cfg(test)]
+    pub(super) fn mining_tip_change(&self) -> zebra_state::MiningTipChange {
+        self.mining_tip_change.clone()
+    }
+
     pub(super) fn mark_changed(&mut self) {
         if !self.dirty {
             self.debounce
@@ -137,8 +149,20 @@ impl BlockTemplates {
         &mut self,
         cx: &mut Context<'_>,
         storage: Option<(&Storage, block::Hash)>,
-        tip: Option<block::Hash>,
     ) -> Poll<Result<(), BoxError>> {
+        if self.mining_tip_change.receiver.has_changed()? {
+            // Forced equal-value notifications invalidate preparation too, including validation
+            // completion and operator mutation. Never publish an older in-flight verdict.
+            self.mining_generation = self.mining_generation.wrapping_add(1);
+            self.mark_changed();
+            // An error for the previous context must not delay work for the new parent.
+            self.refresh.as_mut().reset(Instant::now());
+        }
+        let tip = self
+            .mining_tip_change
+            .receiver
+            .borrow_and_update()
+            .map(|(_, hash)| hash);
         if let Some(build) = &mut self.build {
             let Poll::Ready((mut result, next_coinbase)) = build.future.poll_unpin(cx) else {
                 return Poll::Ready(Ok(()));
@@ -148,16 +172,10 @@ impl BlockTemplates {
                 .take()
                 .expect("the completed build is still owned");
             self.next_coinbase = next_coinbase;
-            if result
-                .as_ref()
-                .ok()
-                .and_then(Option::as_ref)
-                .is_some_and(|template| {
-                    tip != build.observed_tip
-                        && tip.is_some_and(|tip| template.previous_block_hash() != tip)
-                })
-            {
-                // The committed-tip check completed before this poll observed a newer parent.
+            let superseded =
+                self.mining_generation != build.observed_generation || tip != build.observed_tip;
+            if superseded {
+                // Discard errors as well as successful verdicts for an obsolete mining context.
                 result = Ok(None);
             }
 
@@ -189,9 +207,7 @@ impl BlockTemplates {
                     // A superseded snapshot is retryable work, not an RPC failure.
                     Ok(None) => {
                         self.deferred_request = Some(request);
-                        self.override_retry
-                            .as_mut()
-                            .reset(Instant::now() + RETRY_DELAY);
+                        self.override_retry.as_mut().reset(Instant::now());
                     }
                     Err(error) => {
                         let _ = request.response.send(Err(error));
@@ -233,6 +249,12 @@ impl BlockTemplates {
                         }
                     }
                     result => {
+                        // Superseded snapshots need fresh work, not transient-error backoff.
+                        let retry_delay = if result.is_ok() {
+                            Duration::ZERO
+                        } else {
+                            RETRY_DELAY
+                        };
                         if let Err(error) = result {
                             if self.was_failing {
                                 tracing::debug!(?error, "failed to build a block template");
@@ -244,8 +266,8 @@ impl BlockTemplates {
                                 self.was_failing = true;
                             }
                         }
-                        self.dirty = false;
-                        self.refresh.as_mut().reset(Instant::now() + RETRY_DELAY);
+                        self.dirty = self.mining_generation != build.observed_generation;
+                        self.refresh.as_mut().reset(Instant::now() + retry_delay);
                     }
                 }
             }
@@ -335,6 +357,7 @@ impl BlockTemplates {
             request,
             coinbase_only,
             observed_tip: tip,
+            observed_generation: self.mining_generation,
         });
         if !is_override {
             self.dirty = fill_after_coinbase;
@@ -365,8 +388,11 @@ where
     Verifier: zebra_consensus::router::service_trait::BlockVerifierService,
 {
     let result = async {
-        let chain_info =
-            timeout(BLOCK_VERIFY_TIMEOUT, fetch_chain_info(read_state.clone())).await??;
+        let chain_info = timeout(
+            BLOCK_VERIFY_TIMEOUT,
+            fetch_mining_chain_info(read_state.clone()),
+        )
+        .await??;
         let height = chain_info.tip_height.next()?;
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(&network, &chain_info);
         coinbase_cache.select(height, parent_nsm_value_balance);
@@ -380,12 +406,9 @@ where
             Some((tip, transactions, dependencies)) if tip == chain_info.tip_hash => {
                 (transactions, dependencies)
             }
-            Some(_) => return Ok(None),
-            None => Default::default(),
+            // Verified storage belongs to the ordinary chain, never a speculative parent.
+            Some(_) | None => Default::default(),
         };
-        if use_precomputed_coinbase && parent_nsm_value_balance.is_none() {
-            store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
-        }
         let long_poll_id = LongPollInput::new(
             chain_info.tip_height,
             chain_info.tip_hash,
@@ -393,41 +416,54 @@ where
             transactions.iter().map(|tx| tx.transaction.id),
         )
         .generate_id();
+        if mining_tip_hash(read_state.clone()).await? != Some(chain_info.tip_hash) {
+            return Ok(None);
+        }
+        // Selection measures coinbase resources without proving. Only queue the actual fee-paying
+        // coinbase below, and bypass the blocking selection task for empty work.
+        let (network, miner_params, selected, fees) = if transactions.is_empty() {
+            (network, miner_params, Vec::new(), Amount::zero())
+        } else {
+            tokio::task::spawn_blocking(move || -> Result<_, BoxError> {
+                let selected = select_mempool_transactions(
+                    &network,
+                    height,
+                    &miner_params,
+                    transactions,
+                    dependencies,
+                    parent_nsm_value_balance,
+                );
+                let fees = selected
+                    .iter()
+                    .map(|tx| tx.miner_fee)
+                    .sum::<zebra_chain::amount::Result<Amount<NonNegative>>>()?;
+                Ok((network, miner_params, selected, fees))
+            })
+            .await??
+        };
+        if use_precomputed_coinbase
+            && parent_nsm_value_balance.is_none()
+            && fees == Amount::<NonNegative>::zero()
+        {
+            store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
+        }
+        let permit = if miner_params.has_shielded_component()
+            && coinbase_cache
+                .get(height, fees, parent_nsm_value_balance)
+                .is_none()
+        {
+            Some(coinbase_cache.proof_permit().await)
+        } else {
+            None
+        };
+        if mining_tip_hash(read_state.clone()).await? != Some(chain_info.tip_hash) {
+            return Ok(None);
+        }
 
         // Await the blocking task even across tip changes; dropping it cannot cancel proving.
         let (template, proposal) = tokio::task::spawn_blocking(move || {
-            // Prepare coinbases fallibly before calling the synchronous selection/response
-            // helpers, whose cached path assumes valid payout and monetary-range inputs.
-            if coinbase_cache
-                .get(height, Amount::zero(), parent_nsm_value_balance)
-                .is_none()
-            {
-                coinbase_cache.store(
-                    height,
-                    Amount::zero(),
-                    parent_nsm_value_balance,
-                    TransactionTemplate::new_coinbase_with_parent_pools(
-                        &network,
-                        height,
-                        &miner_params,
-                        Amount::zero(),
-                        parent_nsm_value_balance,
-                    )?,
-                );
-            }
-            let selected = select_mempool_transactions(
-                &network,
-                height,
-                &miner_params,
-                transactions,
-                dependencies,
-                Some(&coinbase_cache),
-                parent_nsm_value_balance,
-            );
-            let fees = selected
-                .iter()
-                .map(|tx| tx.miner_fee)
-                .sum::<zebra_chain::amount::Result<Amount<NonNegative>>>()?;
+            let _permit = permit;
+            // Prepare the actual coinbase fallibly before the response helper's cached path.
             if coinbase_cache
                 .get(height, fees, parent_nsm_value_balance)
                 .is_none()
@@ -445,7 +481,7 @@ where
                     )?,
                 );
             }
-            let template = BlockTemplateResponse::from_transactions(
+            let mut template = BlockTemplateResponse::from_transactions(
                 &network,
                 &coinbase_cache,
                 &miner_params,
@@ -455,11 +491,14 @@ where
                 None,
             );
             let mut proposal = proposal_block_from_template(&template, None, &network)?;
-            // A preflight must not reuse the exact hash of a previously mined or invalidated block.
+            // Preflight the PoW-agnostic family, not the deterministic helper's zero-nonce
+            // final hash, which might already be committed or locally invalidated.
+            // The normalized work ID still binds every other header and body byte.
             Arc::make_mut(&mut proposal.header).nonce = rand::random::<[u8; 32]>().into();
             if u64::try_from(proposal.zcash_serialized_size())? > MAX_BLOCK_BYTES {
                 return Err::<_, BoxError>("block template exceeds the block size limit".into());
             }
+            template.set_work_id(zebra_state::proposal_key(&proposal));
             Ok((template, Arc::new(proposal)))
         })
         .await??;
@@ -479,12 +518,7 @@ where
                 Err(error.into())
             }
         };
-        let ReadResponse::Tip(tip) =
-            timeout(BLOCK_VERIFY_TIMEOUT, read_state.oneshot(ReadRequest::Tip)).await??
-        else {
-            unreachable!("state service returned the wrong response to a Tip request");
-        };
-        if tip.map(|(_, hash)| hash) != Some(template.previous_block_hash()) {
+        if mining_tip_hash(read_state).await? != Some(template.previous_block_hash()) {
             return Ok(None);
         }
         validity?;
@@ -492,6 +526,21 @@ where
     }
     .await;
     (result, next_coinbase)
+}
+
+/// Use the private mining parent only for mining work, never transaction admission.
+async fn mining_tip_hash<State: zebra_state::ReadState>(
+    read_state: State,
+) -> Result<Option<block::Hash>, BoxError> {
+    let ReadResponse::Tip(tip) = timeout(
+        BLOCK_VERIFY_TIMEOUT,
+        read_state.oneshot(ReadRequest::MiningTip),
+    )
+    .await??
+    else {
+        unreachable!("state service returned the wrong response to a MiningTip request");
+    };
+    Ok(tip.map(|(_, hash)| hash))
 }
 
 /// Retain an unfinished proof even when a reorg changes the desired height.
@@ -517,9 +566,21 @@ fn start_precomputing_coinbase(
     let (network, miner_params) = (network.clone(), miner_params.clone());
     *next_coinbase = Some((
         height,
-        tokio::task::spawn_blocking(move || {
-            TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
-                .expect("configured miner parameters and the next height produce a valid coinbase")
+        tokio::spawn(async move {
+            let permit = if miner_params.has_shielded_component() {
+                Some(CoinbaseCache::default().proof_permit().await)
+            } else {
+                None
+            };
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
+                    .expect(
+                        "configured miner parameters and the next height produce a valid coinbase",
+                    )
+            })
+            .await
+            .expect("the retained coinbase builder completes without panicking")
         }),
     ));
 }

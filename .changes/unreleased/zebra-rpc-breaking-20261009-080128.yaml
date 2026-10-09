@@ -1,0 +1,7 @@
+project: zebra-rpc
+kind: breaking
+body: |-
+    The `methods::RpcImpl::new` constructor requires `max_checkpoint_height: Height` immediately
+    after `block_verifier_router`. Pass the effective consensus-router cutoff, not the network
+    checkpoint maximum. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-09T08:01:28.134374488+02:00

@@ -41,7 +41,6 @@ fn excludes_tx_with_unselected_dependencies() {
             vec![unmined_tx],
             mempool_tx_deps,
             None,
-            None,
         ),
         vec![],
         "should not select any transactions when dependencies are unavailable"
@@ -82,7 +81,6 @@ fn includes_tx_with_selected_dependencies() {
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
         None,
-        None,
     );
 
     assert_eq!(
@@ -109,11 +107,9 @@ fn reserves_space_for_block_header_and_transaction_count() {
         MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
 
     let coinbase_tx_size =
-        TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
-            .expect("valid coinbase transaction template")
-            .data
-            .as_ref()
-            .len();
+        TransactionTemplate::coinbase_resource_usage(&network, height, &miner_params, None)
+            .expect("valid coinbase resource usage")
+            .max_serialized_size;
 
     let safe_budget = usize::try_from(MAX_BLOCK_BYTES).expect("fits in memory")
         - Header::serialized_size(&network)
@@ -135,7 +131,6 @@ fn reserves_space_for_block_header_and_transaction_count() {
             vec![unmined_tx.clone()],
             TransactionDependencies::default(),
             None,
-            None,
         )
         .len(),
         1,
@@ -152,7 +147,6 @@ fn reserves_space_for_block_header_and_transaction_count() {
             vec![unmined_tx],
             TransactionDependencies::default(),
             None,
-            None,
         ),
         vec![],
         "should not select a transaction one byte over the safe block budget"
@@ -162,12 +156,11 @@ fn reserves_space_for_block_header_and_transaction_count() {
 /// Orchard and Ironwood candidates must share the ZIP-218 budget with the Sapling coinbase.
 #[test]
 fn reserves_shielded_budget_for_sapling_coinbase() {
-    use super::super::CoinbaseCache;
     use crate::config::mining::{default_miner_address, MinerAddressType};
     use std::sync::Arc;
     use zebra_chain::{
         parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
-        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        serialization::ZcashDeserializeInto,
         transaction::{
             arbitrary::{fake_bundle_for_branch, fake_v6_transaction},
             Transaction, VerifiedUnminedTx,
@@ -197,19 +190,15 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         )
         .unwrap(),
     );
-    let cache = CoinbaseCache::default();
-    let sizing = TransactionTemplate::new_coinbase_with_parent_pools(
+    let resources = TransactionTemplate::coinbase_resource_usage(
         &network,
         height,
         &miner,
-        Amount::zero(),
         Some(Amount::zero()),
     )
     .unwrap();
-    let sizing_tx: Transaction = sizing.data.as_ref().zcash_deserialize_into().unwrap();
-    let coinbase_counts = ShieldedActionCounts::from_transaction(&sizing_tx);
-    assert!(sizing_tx.sapling_outputs().count() > 0);
-    cache.store(height, Amount::zero(), Some(Amount::zero()), sizing);
+    let coinbase_counts = resources.shielded_action_counts;
+    assert_eq!(coinbase_counts.sapling_io, 1);
 
     let transaction = fake_v6_transaction(
         NetworkUpgrade::Nu7,
@@ -250,7 +239,6 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         &miner,
         candidates,
         TransactionDependencies::default(),
-        Some(&cache),
         Some(Amount::zero()),
     );
     assert_eq!(
@@ -287,8 +275,5 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         ShieldedActionCounts::from_transaction(&actual_tx),
         coinbase_counts
     );
-    assert_eq!(
-        actual.data.as_ref().len(),
-        sizing_tx.zcash_serialized_size()
-    );
+    assert!(actual.data.as_ref().len() <= resources.max_serialized_size);
 }

@@ -885,6 +885,14 @@ pub enum Request {
     /// [0]: (crate::error::CommitSemanticallyVerifiedError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
+    /// Reserve a completed exact proposal candidate on the serialized writer's private fork.
+    ///
+    /// The trusted consensus caller must freshly verify PoW, time, and header checks first.
+    /// The writer rechecks completed cache bytes, parent and generation, then contextual effects.
+    /// Returns `Response::MiningStaged`: a guard keeping the private mining parent alive.
+    /// Cache/context/reservation misses do not reject the block; commit must still run normally.
+    AdmitPreparedMiningBlock(Arc<Block>),
+
     /// Commit a checkpointed block to the state, skipping most but not all
     /// contextual validation.
     ///
@@ -1143,8 +1151,30 @@ pub enum Request {
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
-    /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
+    /// After checkpoint sync, the serialized writer records completed context for at most eight
+    /// exact normalized proposals on the validated best parent. Any contextual mutation retires
+    /// these records. Oversized normalized candidates are validated normally but not cached.
+    /// See [`ReadRequest::CheckBlockProposalValidity`] for the semantic-validation contract.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Return a completed proposal's semantic result for this exact normalized block and best parent.
+    /// Nonce and solution are excluded; the caller must always verify proof of work.
+    /// The serialized commit writer independently checks exact bytes, parent and mutation epoch
+    /// before reusing context-independent results; all ordinary state updates still run.
+    ReusableBlockProposal(Arc<Block>),
+
+    /// Look up a supplied proposal key, then compare every normalized serialized byte.
+    /// A wrong hint returns a miss, never an authorization to skip verification.
+    ReusableBlockProposalWithWorkId {
+        /// The submitted block, including its final nonce and solution.
+        block: Arc<Block>,
+        /// The miner's normalized proposal key hint.
+        work_id: [u8; 32],
+    },
+
+    /// Apply contextual effects on a private fork for mining only, before transaction proof checks.
+    /// Returns an optional cancellation guard; never changes validated state.
+    StageMiningBlock(SemanticallyVerifiedBlock),
 }
 
 impl Request {
@@ -1175,6 +1205,12 @@ impl Request {
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::ReusableBlockProposal(_) => "reusable_block_proposal",
+            Request::ReusableBlockProposalWithWorkId { .. } => {
+                "reusable_block_proposal_with_work_id"
+            }
+            Request::StageMiningBlock(_) => "stage_mining_block",
+            Request::AdmitPreparedMiningBlock(_) => "admit_prepared_mining_block",
         }
     }
 
@@ -1200,6 +1236,16 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
     Tip,
+
+    /// Returns the mining parent in `ReadResponse::Tip`, optionally one speculative direct child.
+    /// Ordinary `Tip` and all other validated queries exclude speculative data.
+    MiningTip,
+
+    /// Returns `ReadResponse::MiningTipChange`, a bounded watch subscription that also signals
+    /// rejection, cancellation, expiry, operator invalidation, and validated tip changes.
+    /// Also wakes when a speculative parent becomes validated without changing height/hash, or a
+    /// mutation invalidates preparation without changing the best parent.
+    MiningTipChange,
 
     /// Returns [`ReadResponse::TipPoolValues(Option<(Height, block::Hash, ValueBalance)>)`](ReadResponse::TipPoolValues)
     /// with the pool values of the current best chain tip.
@@ -1611,6 +1657,9 @@ pub enum ReadRequest {
     /// best chain state information.
     ChainInfo,
 
+    /// Returns mining-only `ReadResponse::ChainInfo`, using the private speculative fork if fresh.
+    MiningChainInfo,
+
     /// Get the average solution rate in the best chain.
     ///
     /// Returns [`ReadResponse::SolutionRate`]
@@ -1630,7 +1679,23 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
     /// the block fails contextual validation.
+    /// This read-only form never stamps a reusable writer result; use the read-write
+    /// [`Request::CheckBlockProposalValidity`] after semantic verification to prepare submission.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// See `Request::ReusableBlockProposal`.
+    ReusableBlockProposal(Arc<Block>),
+
+    /// See `Request::ReusableBlockProposalWithWorkId`.
+    ReusableBlockProposalWithWorkId {
+        /// The submitted block.
+        block: Arc<Block>,
+        /// The normalized proposal key hint.
+        work_id: [u8; 32],
+    },
+
+    /// See `Request::StageMiningBlock`.
+    StageMiningBlock(SemanticallyVerifiedBlock),
 
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
@@ -1659,6 +1724,8 @@ impl ReadRequest {
         match self {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
+            ReadRequest::MiningTip => "mining_tip",
+            ReadRequest::MiningTipChange => "mining_tip_change",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::BlockInfo(_) => "block_info",
             ReadRequest::Depth(_) => "depth",
@@ -1697,6 +1764,12 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
+            ReadRequest::MiningChainInfo => "mining_chain_info",
+            ReadRequest::ReusableBlockProposal(_) => "reusable_block_proposal",
+            ReadRequest::ReusableBlockProposalWithWorkId { .. } => {
+                "reusable_block_proposal_with_work_id"
+            }
+            ReadRequest::StageMiningBlock(_) => "stage_mining_block",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
@@ -1725,6 +1798,11 @@ impl TryFrom<Request> for ReadRequest {
     fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
         match request {
             Request::Tip => Ok(ReadRequest::Tip),
+            Request::ReusableBlockProposal(block) => Ok(ReadRequest::ReusableBlockProposal(block)),
+            Request::ReusableBlockProposalWithWorkId { block, work_id } => {
+                Ok(ReadRequest::ReusableBlockProposalWithWorkId { block, work_id })
+            }
+            Request::StageMiningBlock(block) => Ok(ReadRequest::StageMiningBlock(block)),
             Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
             Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
@@ -1755,6 +1833,7 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::CommitSemanticallyVerifiedBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
+            | Request::AdmitPreparedMiningBlock(_)
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 

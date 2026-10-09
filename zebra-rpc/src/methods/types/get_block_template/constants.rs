@@ -7,11 +7,8 @@ use zebra_chain::parameters::subsidy::FundingStreamReceiver::{self, *};
 /// The backstop interval for template refreshes and RPC sync/committed-tip checks, in seconds.
 pub const MEMPOOL_LONG_POLL_INTERVAL: u64 = 5;
 
-/// How long an RPC waits for the mempool to publish work for the committed tip.
-pub(crate) const NEW_TIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// Allow a shielded coinbase proof to finish before reporting unavailable mining work.
-pub(crate) const SHIELDED_NEW_TIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Bounds publication readiness while allowing retained verification and transient recovery.
+pub(crate) const NEW_TIP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// A range of valid block template nonces, that goes from `u32::MIN` to `u32::MAX` as a string.
 pub const NONCE_RANGE_FIELD: &str = "00000000ffffffff";

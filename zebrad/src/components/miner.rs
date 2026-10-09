@@ -41,6 +41,57 @@ use zebra_state::WatchReceiver;
 
 use crate::components::metrics::Config;
 
+#[cfg(test)]
+mod tests;
+
+/// Keeps useful solver work across mempool-only updates.
+fn should_replace_mining_template(
+    current_header: Option<block::Header>,
+    new_header: block::Header,
+    submit_old: Option<bool>,
+) -> bool {
+    current_header != Some(new_header) && (current_header.is_none() || submit_old != Some(true))
+}
+
+/// Checks both the published work and its parent, including after the solver returns.
+fn cancel_if_mining_template_changed(
+    template_receiver: &WatchReceiver<Option<Arc<Block>>>,
+    mining_tip: &watch::Receiver<Option<(block::Height, block::Hash)>>,
+    old_header: block::Header,
+) -> Result<(), SolverCancelled> {
+    if template_receiver.has_changed().is_err()
+        || mining_tip.has_changed().is_err()
+        || template_receiver.cloned_watch_data().map(|b| *b.header) != Some(old_header)
+        || mining_tip.borrow().map(|(_, hash)| hash) != Some(old_header.previous_block_hash)
+    {
+        Err(SolverCancelled)
+    } else {
+        Ok(())
+    }
+}
+
+/// Bounds retries without delaying new work or shutdown.
+async fn wait_for_mining_tip_change(
+    mining_tip: &mut watch::Receiver<Option<(block::Height, block::Hash)>>,
+    delay: Duration,
+) -> Result<bool, watch::error::RecvError> {
+    tokio::select! {
+        biased;
+        result = mining_tip.changed() => result.map(|()| true),
+        _ = sleep(delay) => Ok(false),
+    }
+}
+
+/// Parks an idle solver until a template arrives, periodically checking shutdown.
+async fn wait_for_mining_template_change(
+    template_receiver: &mut WatchReceiver<Option<Arc<Block>>>,
+) {
+    tokio::select! {
+        _ = template_receiver.changed() => {},
+        _ = sleep(BLOCK_TEMPLATE_WAIT_TIME) => {},
+    }
+}
+
 /// The amount of time we wait between block template retries.
 pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
 
@@ -276,13 +327,16 @@ where
     // Pass the correct arguments, even if Zebra currently ignores them.
     let mut parameters =
         GetBlockTemplateParameters::new(Template, None, vec![LongPoll, CoinbaseTxn], None, None);
+    let mut mining_tip = rpc.mining_tip_change().await?.receiver;
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
+        mining_tip.borrow_and_update();
         let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
+            template_sender.send_if_modified(|template| template.take().is_some());
             warn!(
                 ?BLOCK_TEMPLATE_WAIT_TIME,
                 ?template,
@@ -291,7 +345,7 @@ where
 
             // Skip the wait if we got an error because we are shutting down.
             if !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+                wait_for_mining_tip_change(&mut mining_tip, BLOCK_TEMPLATE_WAIT_TIME).await?;
             }
 
             continue;
@@ -301,6 +355,7 @@ where
         let template = template
             .try_into_template()
             .expect("invalid RPC response: proposal in response to a template request");
+        let submit_old = template.submit_old();
 
         info!(
             height = ?template.height(),
@@ -325,17 +380,33 @@ where
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {
-            if old_block.as_ref().map(|b| *b.header) == Some(*block.header) {
+            if !should_replace_mining_template(
+                old_block.as_ref().map(|b| *b.header),
+                *block.header,
+                submit_old,
+            ) {
                 return false;
             }
             *old_block = Some(Arc::new(block));
             true
         });
 
-        // If the blockchain is changing rapidly, limit how often we'll update the template.
-        // But if we're shutting down, do that immediately.
-        if !template_sender.is_closed() && !is_shutting_down() {
-            sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+        // Mempool-only refreshes stay rate-limited; parent changes interrupt the cooldown.
+        if !template_sender.is_closed()
+            && !is_shutting_down()
+            && wait_for_mining_tip_change(&mut mining_tip, BLOCK_TEMPLATE_REFRESH_LIMIT).await?
+        {
+            let parent = mining_tip.borrow().map(|(_, hash)| hash);
+            template_sender.send_if_modified(|template| {
+                if template
+                    .as_ref()
+                    .map(|block| block.header.previous_block_hash)
+                    == parent
+                {
+                    return false;
+                }
+                template.take().is_some()
+            });
         }
     }
 
@@ -400,6 +471,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
+    let mining_tip = rpc.mining_tip_change().await?.receiver;
     // Shut down the task when the template sender is dropped, or Zebra shuts down.
     while template_receiver.has_changed().is_ok() && !is_shutting_down() {
         // Get the latest block template, and mark the current value as seen.
@@ -424,7 +496,7 @@ where
 
             // Skip the wait if we didn't get a template because we are shutting down.
             if !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+                wait_for_mining_template_change(&mut template_receiver).await;
             }
 
             continue;
@@ -433,28 +505,11 @@ where
         let height = template.coinbase_height().expect("template is valid");
 
         // Set up the cancellation conditions for the miner.
-        let mut cancel_receiver = template_receiver.clone();
+        let cancel_receiver = template_receiver.clone();
+        let cancel_tip = mining_tip.clone();
         let old_header = *template.header;
-        let cancel_fn = move || match cancel_receiver.has_changed() {
-            // Guard against get_block_template() providing an identical header. This could happen
-            // if something irrelevant to the block data changes, the time was within 1 second, or
-            // there is a spurious channel change.
-            Ok(has_changed) => {
-                cancel_receiver.mark_as_seen();
-
-                // We only need to check header equality, because the block data is bound to the
-                // header.
-                if has_changed
-                    && Some(old_header) != cancel_receiver.cloned_watch_data().map(|b| *b.header)
-                {
-                    Err(SolverCancelled)
-                } else {
-                    Ok(())
-                }
-            }
-            // If the sender was dropped, we're likely shutting down, so cancel the solver.
-            Err(_sender_dropped) => Err(SolverCancelled),
-        };
+        let cancel_fn =
+            move || cancel_if_mining_template_changed(&cancel_receiver, &cancel_tip, old_header);
 
         // Mine at least one block using the equihash solver.
         let Ok(blocks) = mine_a_block(solver_id, template, cancel_fn).await else {
@@ -476,23 +531,25 @@ where
                     "solver cancelled: getting a new block template or shutting down"
                 );
             }
-
-            // If the blockchain is changing rapidly, limit how often we'll update the template.
-            // But if we're shutting down, do that immediately.
-            if template_receiver.has_changed().is_ok() && !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+            // A parent change can cancel before replacement work is published.
+            // Park rather than repeatedly spawning already-cancelled solver threads.
+            if matches!(template_receiver.has_changed(), Ok(false)) && !is_shutting_down() {
+                wait_for_mining_template_change(&mut template_receiver).await;
             }
 
             continue;
         };
 
-        // Submit the newly mined blocks to the verifiers.
-        //
-        // TODO: if there is a new template (`cancel_fn().is_err()`), and
-        //       GetBlockTemplate.submit_old is false, return immediately, and skip submitting the
-        //       blocks.
+        // Recheck after solving: a parent/template can change after the solver's last cancellation
+        // check. Check each solution, since submitting the previous one can also change the tip.
         let mut any_success = false;
         for block in blocks {
+            if cancel_if_mining_template_changed(&template_receiver, &mining_tip, old_header)
+                .is_err()
+                || is_shutting_down()
+            {
+                break;
+            }
             let data = block
                 .zcash_serialize_to_vec()
                 .expect("serializing to Vec never fails");
@@ -521,10 +578,11 @@ where
         // Start re-mining quickly after a failed solution.
         // If there's a new template, we'll use it, otherwise the existing one is ok.
         if !any_success {
-            // If the blockchain is changing rapidly, limit how often we'll update the template.
-            // But if we're shutting down, do that immediately.
-            if template_receiver.has_changed().is_ok() && !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+            if matches!(template_receiver.has_changed(), Ok(false)) && !is_shutting_down() {
+                tokio::select! {
+                    _ = template_receiver.changed() => {},
+                    _ = sleep(BLOCK_TEMPLATE_REFRESH_LIMIT) => {},
+                }
             }
             continue;
         }

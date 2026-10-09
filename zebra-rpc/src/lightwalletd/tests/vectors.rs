@@ -416,6 +416,7 @@ async fn start_server_and_get_client() -> Result<(
         Buffer::new(state, 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
+        zebra_chain::block::Height(0),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),

@@ -1,0 +1,10 @@
+project: zebra-state
+kind: breaking
+body: |-
+    Add mining/cache variants to `Request`, `ReadRequest`, `Response` and `ReadResponse`; update
+    exhaustive matches. The request variants are `AdmitPreparedMiningBlock` (writer only),
+    `ReusableBlockProposal`, `ReusableBlockProposalWithWorkId { block, work_id }`, `StageMiningBlock`,
+    and read-only `MiningChainInfo`, `MiningTip`, `MiningTipChange`. Responses add `MiningStaged`,
+    `ReusableBlockProposal`, and read-only `MiningTipChange`. Ordinary queries remain committed-only.
+    ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-09T07:58:07.689987975+02:00

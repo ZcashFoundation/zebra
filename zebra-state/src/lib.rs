@@ -58,6 +58,7 @@ pub use response::{
     AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, NonFinalizedBlocksListener,
     ReadResponse, Response,
 };
+pub use service::mining::{proposal_key, MiningStageGuard, MiningTipChange};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,

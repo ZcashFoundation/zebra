@@ -115,7 +115,7 @@ use types::{
     get_block_template::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL, NEW_TIP_TIMEOUT,
-            SHIELDED_NEW_TIP_TIMEOUT, ZCASHD_FUNDING_STREAM_ORDER,
+            ZCASHD_FUNDING_STREAM_ORDER,
         },
         proposal::proposal_block_from_template,
         BlockTemplateRequest, BlockTemplateResponse, BlockTemplateTimeSource,
@@ -156,8 +156,6 @@ pub(super) const PARAM__ALLOW_HIGH_FEES_DESC: &str = "Whether to allow high fees
 pub(super) const PARAM_NUM_BLOCKS_DESC: &str = "The number of blocks to return.";
 pub(super) const PARAM_HEIGHT_DESC: &str = "The height of the block to return.";
 pub(super) const PARAM_COMMAND_DESC: &str = "The command to execute.";
-#[allow(non_upper_case_globals)]
-pub(super) const PARAM__PARAMETERS_DESC: &str = "The parameters for the command.";
 pub(super) const PARAM_BLOCK_HASH_DESC: &str = "The hash of the block to return.";
 pub(super) const PARAM_ADDRESS_DESC: &str = "The address to return.";
 pub(super) const PARAM_ADDRESS_STRINGS_DESC: &str = "The addresses to return.";
@@ -541,7 +539,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `jsonrequestobject`: (string, optional) A JSON object containing arguments.
+    /// - `jsonrequestobject`: (object, optional) Template mode, proposal data, or a long-poll identifier.
     ///
     /// zcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)
     /// method: post
@@ -549,15 +547,12 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Arguments to this RPC are currently ignored.
-    /// Long polling, block proposals, server lists, and work IDs are not supported.
+    /// Template responses include a normalized candidate work identifier. Exact candidates can
+    /// reuse completed proposal verification after changing only the nonce and Equihash solution.
+    /// Changed candidates and cache misses use ordinary verification.
     ///
-    /// Miners can make arbitrary changes to blocks, as long as:
-    /// - the data sent to `submitblock` is a valid Zcash block, and
-    /// - the parent block is a valid block that Zebra already has, or will receive soon.
-    ///
-    /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
-    /// so moving between chains and forking chains is very cheap.
+    /// Mining templates can use a private, pending direct child of the validated tip. Ordinary
+    /// state queries remain validated-only; rejection or withdrawal restores validated-parent work.
     #[method(name = "getblocktemplate")]
     async fn get_block_template(
         &self,
@@ -574,16 +569,20 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hexdata`: (string, required)
-    /// - `jsonparametersobject`: (string, optional) - currently ignored
+    /// - `jsonparametersobject`: (object, optional) A normalized candidate `workid` lookup hint.
     ///
     /// # Notes
     ///
-    ///  - `jsonparametersobject` holds a single field, workid, that must be included in submissions if provided by the server.
+    /// A work identifier does not establish validity. Exact completed candidates still require
+    /// fresh solved-header checks and current writer admission. Missing or malformed identifiers
+    /// allow content-derived lookup; an incorrect well-formed identifier causes a cache miss.
+    /// Saturated admission or a verification deadline returns `inconclusive`; admitted work can
+    /// finish after the RPC caller disconnects.
     #[method(name = "submitblock")]
     async fn submit_block(
         &self,
         hex_data: HexData,
-        _parameters: Option<SubmitBlockParameters>,
+        parameters: Option<SubmitBlockParameters>,
     ) -> Result<SubmitBlockResponse>;
 
     /// Returns mining-related information.
@@ -950,6 +949,9 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
+    ///
+    /// `max_checkpoint_height` must be the effective cutoff returned by consensus router
+    /// initialization, not the network checkpoint list's maximum height.
     //
     // TODO:
     // - put some of the configs or services in their own struct?
@@ -964,6 +966,7 @@ where
         state: State,
         read_state: ReadState,
         block_verifier_router: BlockVerifierRouter,
+        max_checkpoint_height: Height,
         sync_status: SyncStatus,
         latest_chain_tip: Tip,
         address_book: AddressBook,
@@ -988,6 +991,7 @@ where
             &network,
             mining_config.clone(),
             block_verifier_router,
+            max_checkpoint_height,
             sync_status,
             mined_block_sender,
         );
@@ -1045,6 +1049,8 @@ where
     }
 
     /// Waits for valid mempool-published work using one long-poll identity source.
+    ///
+    /// Deadline-only extensions preserve outstanding work until its original inclusive deadline.
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
@@ -1058,6 +1064,7 @@ where
             .ok_or_misc_error("block template provider is not attached")?;
         let mut tip_change = self.latest_chain_tip.clone();
         tip_change.mark_best_tip_seen();
+        let mut mining_changes = None;
 
         loop {
             types::get_block_template::check_synced_to_tip(
@@ -1072,28 +1079,47 @@ where
             if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
                 Arc::make_mut(&mut template).clamp_time_range(now)?;
             }
-            let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
-            let max_time_reached =
-                long_poll_started <= template.max_time && now > template.max_time;
+            let max_time = client_long_poll_id
+                .map(|id| DateTime32::from(id.max_timestamp))
+                .unwrap_or(template.max_time);
+            let is_client_template = client_long_poll_id.is_some_and(|old_id| {
+                old_id == template.long_poll_id
+                    || (now <= max_time
+                        && template.long_poll_id.submit_old(&old_id)
+                        && old_id.mempool_transaction_count
+                            == template.long_poll_id.mempool_transaction_count
+                        && old_id.mempool_transaction_content_checksum
+                            == template.long_poll_id.mempool_transaction_content_checksum)
+            });
+            let max_time_reached = long_poll_started <= max_time && now > max_time;
 
             if !is_client_template || max_time_reached {
                 let mut template = Arc::unwrap_or_clone(template);
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
-                    now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
+                    now <= max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
 
                 return Ok(template);
             }
+            let Some(mining_changes) = mining_changes.as_mut() else {
+                mining_changes = Some(self.mining_tip_change().await?.receiver);
+                // Re-read after subscribing so a parent change cannot be marked seen and missed.
+                continue;
+            };
 
             // The inclusive boundary must be crossed on wall time. An expired range seen at the
             // start of this request waits for changed work rather than repeatedly waking miners.
-            let max_time = template.max_time;
+            // Use the deadline the miner actually received, even after a publication extends it.
             let duration_until_max_time = max_time.saturating_duration_since(now);
             let wait_for_max_time =
                 tokio::time::sleep(duration_until_max_time.to_std() + Duration::from_secs(1));
 
             tokio::select! {
                 biased;
+                changed = mining_changes.changed() => {
+                    changed.map_misc_error()?;
+                    mining_changes.borrow_and_update();
+                }
                 changed = tip_change.best_tip_changed() => {
                     changed.map_misc_error()?;
                 }
@@ -1104,45 +1130,36 @@ where
                 }
                 // Recheck wall time after waking: a monotonic timer cannot detect clock changes.
                 () = wait_for_max_time, if long_poll_started <= max_time => {}
-                // Recheck sync status and committed state when a notification is delayed.
+                // Recheck sync status and mining state when a notification is delayed.
                 _ = tokio::time::sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
             }
         }
     }
 
-    /// Waits briefly for current work, rereading the committed tip after every publication.
+    /// Waits briefly for current work, rereading the mining parent after every publication.
     async fn precomputed_template_for_state_tip(
         &self,
         templates: &mut watch::Receiver<Option<Arc<BlockTemplateResponse>>>,
     ) -> Result<Arc<BlockTemplateResponse>> {
-        let timeout = if self
-            .gbt
-            .miner_params()
-            .is_some_and(MinerParams::has_shielded_component)
-        {
-            SHIELDED_NEW_TIP_TIMEOUT
-        } else {
-            NEW_TIP_TIMEOUT
-        };
-        tokio::time::timeout(timeout, async {
+        tokio::time::timeout(NEW_TIP_TIMEOUT, async {
             loop {
                 templates.has_changed().map_err(|_| {
                     ErrorObject::owned(0, "block template provider has stopped", None::<()>)
                 })?;
                 // A publication during the state read must remain unseen if this snapshot is stale.
                 let template = templates.borrow_and_update().clone();
-                // State commits before updating its tip watch. Never trust just that watch or
-                // a tip captured before waiting for a publication.
+                // The writer can change the mining parent before a notification is observed.
+                // Never trust a tip captured before waiting for a publication.
                 let ReadResponse::Tip(Some((_, tip_hash))) = self
                     .read_state
                     .clone()
-                    .oneshot(ReadRequest::Tip)
+                    .oneshot(ReadRequest::MiningTip)
                     .await
                     .map_misc_error()?
                 else {
                     return Err(ErrorObject::owned(
                         0,
-                        "no committed chain tip available for mining",
+                        "no chain tip available for mining",
                         None::<()>,
                     ));
                 };
@@ -1173,7 +1190,7 @@ where
         .map_err(|_| {
             ErrorObject::owned(
                 0,
-                "block template provider is not ready for the committed tip",
+                "block template provider is not ready for the mining parent",
                 None::<()>,
             )
         })?
@@ -1219,6 +1236,20 @@ where
             .map_misc_error()?;
         template.clamp_time_range(self.template_clock_now())?;
         Ok(template)
+    }
+
+    /// Subscribes to validated, speculative, and fallback mining-parent changes.
+    pub async fn mining_tip_change(&self) -> Result<zebra_state::MiningTipChange> {
+        match self
+            .read_state
+            .clone()
+            .oneshot(ReadRequest::MiningTipChange)
+            .await
+            .map_misc_error()?
+        {
+            ReadResponse::MiningTipChange(changes) => Ok(changes),
+            _ => unreachable!("state must return mining tip notifications"),
+        }
     }
 
     /// Returns a reference to the configured network.
@@ -2715,95 +2746,99 @@ where
     async fn submit_block(
         &self,
         HexData(block_bytes): HexData,
-        _parameters: Option<SubmitBlockParameters>,
+        parameters: Option<SubmitBlockParameters>,
     ) -> Result<SubmitBlockResponse> {
-        let mut block_verifier_router = self.gbt.block_verifier_router();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        // Queue only HTTP-owned callers, never detached tasks waiting for decode admission.
+        let decode_permit =
+            match tokio::time::timeout_at(deadline, self.gbt.deserialization_permit()).await {
+                Ok(permit) => permit,
+                Err(_) => return Ok(SubmitBlockErrorResponse::Inconclusive.into()),
+            };
+        let gbt = self.gbt.clone();
+        let work_id = parameters
+            .and_then(|parameters| parameters.work_id)
+            .and_then(|value| {
+                let mut bytes = [0; 32];
+                hex::decode_to_slice(value, &mut bytes).ok().map(|()| bytes)
+            });
 
-        let block: Block = match block_bytes.zcash_deserialize_into() {
-            Ok(block_bytes) => block_bytes,
-            Err(error) => {
-                tracing::info!(
-                    ?error,
-                    "submit block failed: block bytes could not be deserialized into a structurally valid block"
-                );
-
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
-            }
-        };
-
-        let height = block
-            .coinbase_height()
-            .ok_or_error(0, "coinbase height not found")?;
-        let block_hash = block.hash();
-
-        let block_verifier_router_response = block_verifier_router
-            .ready()
+        // The job owns verification admission and relay even if the HTTP caller disconnects.
+        let submission = tokio::spawn(async move {
+            let block: Block = match tokio::task::spawn_blocking(move || {
+                // Blocking work retains its bound even if the async job is cancelled.
+                let _permit = decode_permit;
+                block_bytes.zcash_deserialize_into()
+            })
             .await
-            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::Commit(Arc::new(block)))
+            .map_misc_error()?
+            {
+                Ok(block) => block,
+                Err(error) => {
+                    tracing::info!(?error, "submitted block is structurally invalid");
+                    return Ok(SubmitBlockErrorResponse::Rejected.into());
+                }
+            };
+            let height = block
+                .coinbase_height()
+                .ok_or_error(0, "coinbase height not found")?;
+            // Checkpoints wait for a whole range. Holding full-verification admission here
+            // would prevent the remaining range (or a missing ancestor) from being submitted.
+            // The checkpoint verifier already bounds queued blocks per height and cutoff.
+            let _permit = if gbt.uses_checkpoint_verifier(height) {
+                None
+            } else {
+                let Some(permit) = gbt.submission_permit() else {
+                    return Ok(SubmitBlockErrorResponse::Inconclusive.into());
+                };
+                Some(permit)
+            };
+            let block_hash = block.hash();
+            let block = Arc::new(block);
+            let request = match work_id {
+                Some(work_id) => zebra_consensus::Request::CommitWithWorkId { block, work_id },
+                None => zebra_consensus::Request::Commit(block),
+            };
+            let verified = tokio::time::timeout(
+                Duration::from_secs(90),
+                gbt.block_verifier_router().oneshot(request),
+            )
             .await;
-
-        let chain_error = match block_verifier_router_response {
-            // Currently, this match arm returns `null` (Accepted) for blocks committed
-            // to any chain, but Accepted is only for blocks in the best chain.
-            //
-            // TODO (#5487):
-            // - Inconclusive: check if the block is on a side-chain
-            // The difference is important to miners, because they want to mine on the best chain.
-            Ok(hash) => {
-                tracing::info!(?hash, ?height, "submit block accepted");
-
-                self.gbt
-                    .advertise_mined_block(hash, height)
-                    .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
-
-                return Ok(SubmitBlockResponse::Accepted);
+            match verified {
+                Ok(Ok(hash)) => {
+                    tracing::info!(?hash, ?height, "submit block accepted");
+                    gbt.advertise_mined_block(hash, height)
+                        .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
+                    Ok(SubmitBlockResponse::Accepted)
+                }
+                Ok(Err(error)) => {
+                    let error = error.downcast::<RouterError>();
+                    tracing::info!(
+                        ?error,
+                        ?block_hash,
+                        ?height,
+                        "submit block failed verification"
+                    );
+                    if error.is_ok_and(|error| error.is_duplicate_request()) {
+                        Ok(SubmitBlockErrorResponse::Duplicate.into())
+                    } else {
+                        Ok(SubmitBlockErrorResponse::Rejected.into())
+                    }
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        ?block_hash,
+                        ?height,
+                        "submitted block verification timed out"
+                    );
+                    Ok(SubmitBlockErrorResponse::Inconclusive.into())
+                }
             }
-
-            // Turns BoxError into Result<VerifyChainError, BoxError>,
-            // by downcasting from Any to VerifyChainError.
-            Err(box_error) => {
-                let error = box_error
-                    .downcast::<RouterError>()
-                    .map(|boxed_chain_error| *boxed_chain_error);
-
-                tracing::info!(
-                    ?error,
-                    ?block_hash,
-                    ?height,
-                    "submit block failed verification"
-                );
-
-                error
-            }
-        };
-
-        let response = match chain_error {
-            Ok(source) if source.is_duplicate_request() => SubmitBlockErrorResponse::Duplicate,
-
-            // Currently, these match arms return Reject for the older duplicate in a queue,
-            // but queued duplicates should be DuplicateInconclusive.
-            //
-            // Optional TODO (#5487):
-            // - DuplicateInconclusive: turn these non-finalized state duplicate block errors
-            //   into BlockError enum variants, and handle them as DuplicateInconclusive:
-            //   - "block already sent to be committed to the state"
-            //   - "replaced by newer request"
-            // - keep the older request in the queue,
-            //   and return a duplicate error for the newer request immediately.
-            //   This improves the speed of the RPC response.
-            //
-            // Checking the download queues and BlockVerifierRouter buffer for duplicates
-            // might require architectural changes to Zebra, so we should only do it
-            // if mining pools really need it.
-            Ok(_verify_chain_error) => SubmitBlockErrorResponse::Rejected,
-
-            // This match arm is currently unreachable, but if future changes add extra error types,
-            // we want to turn them into `Rejected`.
-            Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
-        };
-
-        Ok(response.into())
+        });
+        match tokio::time::timeout_at(deadline, submission).await {
+            Ok(result) => result.map_misc_error()?,
+            Err(_) => Ok(SubmitBlockErrorResponse::Inconclusive.into()),
+        }
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {

@@ -1,0 +1,7 @@
+project: zebra-state
+kind: Added
+body: |-
+    Add state-owned prepared-proposal lookup and private mining-parent requests, with explicit
+    work-identifier lookup and cancelable staging responses.
+    ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-09T07:58:07.692779774+02:00

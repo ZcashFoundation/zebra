@@ -110,6 +110,10 @@ async fn verify(
     let state = service_fn(|request| async move {
         Ok::<_, BoxError>(match request {
             zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
+            zebra_state::Request::ReusableBlockProposal(_) => {
+                zebra_state::Response::ReusableBlockProposal(None)
+            }
+            zebra_state::Request::StageMiningBlock(_) => zebra_state::Response::MiningStaged(None),
             zebra_state::Request::AwaitUtxo(requested) => {
                 assert_eq!(requested, outpoint());
                 zebra_state::Response::Utxo(

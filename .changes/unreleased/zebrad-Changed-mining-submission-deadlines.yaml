@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`submitblock` now queues block parsing within the RPC deadline and bounds full verification separately. Checkpoint-range submissions can still arrive while earlier blocks wait for missing ancestors. Return `inconclusive` when full-verification admission is saturated or the RPC deadline expires; started submission jobs continue after client disconnection, subject to their own verification deadline. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:36:05.486022072+02:00

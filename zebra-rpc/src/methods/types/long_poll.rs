@@ -26,7 +26,8 @@ pub const LONG_POLL_ID_LENGTH: usize = 46;
 
 /// The inputs to the long polling check.
 ///
-/// If these inputs change, Zebra should return a response to any open long polls.
+/// Tip or mempool changes, a reduced time range, or the miner's original deadline end a long poll.
+/// Extending that deadline alone does not invalidate the miner's outstanding work.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LongPollInput {
     // Fields that invalidate old work:
@@ -199,19 +200,23 @@ pub struct LongPollId {
 }
 
 impl LongPollId {
-    /// Returns `true` if shares using `old_long_poll_id` can be submitted in response to the
-    /// template for `self`:
+    /// Returns `true` if the template for `self` preserves the parent and time range of
+    /// `old_long_poll_id`, so its shares may still be submitted:
     /// <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
     ///
     /// Old shares may be valid if only the mempool transactions have changed,
     /// because newer transactions don't have to be included in the old shares.
     ///
-    /// But if the chain tip has changed, the block header has changed, so old shares are invalid.
-    /// (And if the max time has changed on testnet, the block header has changed.)
+    /// A changed parent or reduced maximum timestamp invalidates old work. A deadline extension
+    /// preserves it, including on Testnet: standard-difficulty work's original maximum timestamp
+    /// still excludes minimum-difficulty timestamps.
+    ///
+    /// The caller must separately check that the miner's original inclusive deadline has not
+    /// expired; a moving deadline must not postpone an outstanding long poll's expiry.
     pub fn submit_old(&self, old_long_poll_id: &LongPollId) -> bool {
         self.tip_height == old_long_poll_id.tip_height
             && self.tip_hash_checksum == old_long_poll_id.tip_hash_checksum
-            && self.max_timestamp == old_long_poll_id.max_timestamp
+            && self.max_timestamp >= old_long_poll_id.max_timestamp
     }
 }
 

@@ -27,6 +27,7 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+mod mining;
 mod nu7;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
@@ -1116,6 +1117,15 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .expect_request(zs::Request::KnownBlock(hash))
             .await
             .respond(zs::Response::KnownBlock(None));
+
+        state
+            .expect_request_that(|request| matches!(request, zs::Request::ReusableBlockProposal(_)))
+            .await
+            .respond(zs::Response::ReusableBlockProposal(None));
+        state
+            .expect_request_that(|request| matches!(request, zs::Request::StageMiningBlock(_)))
+            .await
+            .respond(zs::Response::MiningStaged(None));
 
         transaction_verifier
             .expect_request_that(|_| true)

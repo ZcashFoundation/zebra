@@ -68,6 +68,7 @@ pub mod watch_receiver;
 pub mod check;
 
 pub(crate) mod finalized_state;
+pub(crate) mod mining;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
@@ -120,6 +121,8 @@ pub(crate) struct StateService {
     /// so the full verifier can verify UTXO spends from those blocks,
     /// even if they haven't been committed to the finalized state yet.
     full_verifier_utxo_lookahead: block::Height,
+    /// Final configured checkpoint; mining proposals must not stop checkpoint sync early.
+    max_checkpoint_height: block::Height,
 
     // Queued Blocks
     //
@@ -217,6 +220,15 @@ pub struct ReadStateService {
     /// This state is only updated between requests,
     /// so it might include some block data that is also on `disk`.
     non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+
+    /// Mining-only speculative fork and bounded completed proposal cache.
+    mining_state: tokio::sync::watch::Sender<mining::MiningState>,
+    /// Bounded mining-parent notifications, separate from the validated chain-tip channels.
+    mining_tip: tokio::sync::watch::Sender<Option<(block::Height, block::Hash)>>,
+    /// Bound queued and in-flight writer admission work to one candidate.
+    mining_admission_slot: Arc<tokio::sync::Semaphore>,
+    /// Bound completed semantic proposals waiting for the serialized contextual writer.
+    mining_proposal_slots: Arc<tokio::sync::Semaphore>,
 
     /// The shared inner on-disk database for the finalized state.
     ///
@@ -395,6 +407,8 @@ impl StateService {
 
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
+        let mining_channels =
+            mining::MiningChannels::new(read::best_tip(&non_finalized_state, &finalized_state.db));
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
         let (
             block_write_sender,
@@ -408,12 +422,14 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
+            mining_channels.clone(),
         );
 
         let read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
+            Some(mining_channels),
         );
 
         let full_verifier_utxo_lookahead = max_checkpoint_height
@@ -432,6 +448,7 @@ impl StateService {
         let state = Self {
             network: network.clone(),
             full_verifier_utxo_lookahead,
+            max_checkpoint_height,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
@@ -799,21 +816,7 @@ impl StateService {
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
         {
-            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
-            // and move on to committing semantically verified blocks to the non-finalized state.
-            std::mem::drop(self.block_write_sender.finalized.take());
-            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
-            self.non_finalized_block_write_sent_hashes = SentHashes::default();
-            // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
-            self.non_finalized_block_write_sent_hashes
-                .can_fork_chain_at_hashes = true;
-            // Send blocks from non-finalized queue
-            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
-            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
-                None,
-                KnownBlock::Finalized,
-            ));
+            self.finish_checkpoint_writes();
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
         } else if self.block_write_sender.finalized.is_none() {
@@ -832,6 +835,21 @@ impl StateService {
         }
 
         rsp_rx
+    }
+
+    /// Complete the existing checkpoint-to-contextual-writer cutover.
+    fn finish_checkpoint_writes(&mut self) {
+        if self.block_write_sender.finalized.take().is_none() {
+            return;
+        }
+        self.non_finalized_block_write_sent_hashes = SentHashes::default();
+        self.non_finalized_block_write_sent_hashes
+            .can_fork_chain_at_hashes = true;
+        self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
+        self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+            None,
+            KnownBlock::Finalized,
+        ));
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
@@ -969,16 +987,52 @@ impl ReadStateService {
     ///
     /// Returns the newly created service,
     /// and a watch channel for updating the shared recent non-finalized chain.
-    pub(crate) fn new(
+    fn new(
         finalized_state: &FinalizedState,
         block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
         non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+        mining_channels: Option<mining::MiningChannels>,
     ) -> Self {
+        let mining::MiningChannels {
+            state: mining_state,
+            tip: mining_tip,
+        } = mining_channels.unwrap_or_else(|| {
+            mining::MiningChannels::new(read::best_tip(
+                &non_finalized_state_receiver.cloned_watch_data(),
+                &finalized_state.db,
+            ))
+        });
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let mut receiver = non_finalized_state_receiver.clone();
+            let mining_state = mining_state.clone();
+            let mining_tip = mining_tip.clone();
+            let db = finalized_state.db.clone();
+            runtime.spawn(async move {
+                while receiver.changed().await.is_ok() {
+                    let validated_tip = read::best_tip(&receiver.cloned_watch_data(), &db);
+                    mining_state.send_if_modified(|state| {
+                        if state.validated_tip == validated_tip {
+                            return false;
+                        }
+                        state.validated_tip = validated_tip;
+                        state.staged = None;
+                        state.generation = state.generation.wrapping_add(1);
+                        state.proposals.clear();
+                        let _ = mining_tip.send_replace(validated_tip);
+                        true
+                    });
+                }
+            });
+        }
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
             non_finalized_state_receiver,
             block_write_task,
+            mining_state,
+            mining_tip,
+            mining_admission_slot: Arc::new(tokio::sync::Semaphore::new(1)),
+            mining_proposal_slots: Arc::new(tokio::sync::Semaphore::new(mining::MAX_PROPOSALS)),
         };
 
         tracing::debug!("created new read-only state service");
@@ -991,6 +1045,26 @@ impl ReadStateService {
         read::best_tip(&self.latest_non_finalized_state(), &self.db)
     }
 
+    /// Invalidate mining-only work without exposing its private fork to ordinary reads.
+    fn clear_mining_work(&self) {
+        let tip = self.best_tip();
+        self.mining_state.send_modify(|state| {
+            state.generation = state.generation.wrapping_add(1);
+            state.validated_tip = tip;
+            state.staged = None;
+            state.proposals.clear();
+            let _ = self.mining_tip.send_replace(tip);
+        });
+    }
+
+    /// Snapshot a fresh mining-only fork; a raced validated-tip change always falls back.
+    fn mining_fork(&self) -> Option<NonFinalizedState> {
+        let validated_tip = self.best_tip();
+        let staged = self.mining_state.borrow().staged.clone();
+        staged
+            .filter(|s| s.expires > Instant::now() && validated_tip.map(|t| t.1) == Some(s.parent))
+            .map(|s| s.state.clone())
+    }
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
@@ -1059,8 +1133,83 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         req.count_metric();
         let span = Span::current();
+        if matches!(
+            &req,
+            Request::InvalidateBlock(_) | Request::ReconsiderBlock(_)
+        ) {
+            self.read_service.clear_mining_work();
+        }
 
         match req {
+            Request::CheckBlockProposalValidity(prepared) => {
+                // Switch writers only after the checkpoint prefix is committed and this
+                // proposal extends a tip at the configured final checkpoint or above.
+                let tip = self.read_service.best_tip();
+                if tip.is_some_and(|(height, hash)| {
+                    height >= self.max_checkpoint_height
+                        && hash == prepared.block.header.previous_block_hash
+                }) && self.read_service.db.finalized_tip_hash()
+                    == self.finalized_block_write_last_sent_hash
+                {
+                    self.finish_checkpoint_writes();
+                }
+                if self.block_write_sender.finalized.is_some() {
+                    let read_service = self.read_service.clone();
+                    return async move {
+                        read_service
+                            .oneshot(ReadRequest::CheckBlockProposalValidity(prepared))
+                            .await?;
+                        Ok(Response::ValidBlockProposal)
+                    }
+                    .boxed();
+                }
+                let slots = self.read_service.mining_proposal_slots.clone();
+                let sender = self.block_write_sender.non_finalized.clone();
+                async move {
+                    let permit = slots.acquire_owned().await?;
+                    let (response, receiver) = oneshot::channel();
+                    if let Some(sender) = sender {
+                        let _ = sender.send(NonFinalizedWriteMessage::ValidateProposal(
+                            mining::ProposalValidation {
+                                prepared,
+                                response,
+                                _permit: permit,
+                            },
+                        ));
+                    }
+                    receiver
+                        .await
+                        .map_err(|_| BoxError::from("proposal writer stopped"))??;
+                    Ok(Response::ValidBlockProposal)
+                }
+                .boxed()
+            }
+            Request::AdmitPreparedMiningBlock(block) => {
+                if self.block_write_sender.finalized.is_some() {
+                    return async { Ok(Response::MiningStaged(None)) }.boxed();
+                }
+                let Ok(permit) = self
+                    .read_service
+                    .mining_admission_slot
+                    .clone()
+                    .try_acquire_owned()
+                else {
+                    return async { Ok(Response::MiningStaged(None)) }.boxed();
+                };
+                let (response, receiver) = oneshot::channel();
+                let admission = mining::PreparedAdmission {
+                    block,
+                    state: self.read_service.mining_state.clone(),
+                    tip: self.read_service.mining_tip.clone(),
+                    runtime: tokio::runtime::Handle::current(),
+                    permit,
+                    response,
+                };
+                if let Some(sender) = &self.block_write_sender.non_finalized {
+                    let _ = sender.send(write::NonFinalizedWriteMessage::AdmitPrepared(admission));
+                }
+                async move { Ok(Response::MiningStaged(receiver.await.unwrap_or(None))) }.boxed()
+            }
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             //
@@ -1101,12 +1250,13 @@ impl Service<Request> for StateService {
                 // Then flatten the nested Result and convert any errors to a BoxError.
                 let span = Span::current();
                 async move {
-                    rsp_rx
+                    let result = rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
                         .and_then(|result| result)
                         .map_err(BoxError::from)
-                        .map(Response::Committed)
+                        .map(Response::Committed);
+                    result
                 }
                 .instrument(span)
                 .boxed()
@@ -1118,6 +1268,7 @@ impl Service<Request> for StateService {
             // The expected error type for this request is `CommitCheckpointVerifiedError`.
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 let timer = CodeTimer::start();
+                let read_service = self.read_service.clone();
                 // # Consensus
                 //
                 // A semantic block verification could have called AwaitUtxo
@@ -1151,12 +1302,14 @@ impl Service<Request> for StateService {
                 // `CommitCheckpointVerifiedError::WriteTaskExited`.
                 // Then flatten the nested Result and convert any errors to a BoxError.
                 async move {
-                    rsp_rx
+                    let result = rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
                         .and_then(|result| result)
                         .map_err(BoxError::from)
-                        .map(Response::Committed)
+                        .map(Response::Committed);
+                    read_service.clear_mining_work();
+                    result
                 }
                 .instrument(span)
                 .boxed()
@@ -1340,7 +1493,9 @@ impl Service<Request> for StateService {
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
             | Request::CheckBestChainTipNullifiersAndAnchors(_)
-            | Request::CheckBlockProposalValidity(_) => {
+            | Request::ReusableBlockProposal(_)
+            | Request::ReusableBlockProposalWithWorkId { .. }
+            | Request::StageMiningBlock(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1398,6 +1553,23 @@ impl Service<ReadRequest> for ReadStateService {
         let span = Span::current();
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
+        let (req, work_id) = match req {
+            ReadRequest::ReusableBlockProposalWithWorkId { block, work_id } => {
+                (ReadRequest::ReusableBlockProposal(block), Some(work_id))
+            }
+            req => (req, None),
+        };
+
+        // Bound speculative fork validation before spawning blocking work. Reuse the admission
+        // slot so at most one private-stage construction is queued or running.
+        let stage_permit = if matches!(&req, ReadRequest::StageMiningBlock(_)) {
+            let Ok(permit) = self.mining_admission_slot.clone().try_acquire_owned() else {
+                return async { Ok(ReadResponse::MiningStaged(None)) }.boxed();
+            };
+            Some(permit)
+        } else {
+            None
+        };
 
         if let ReadRequest::NonFinalizedBlocksListener { known_chain_tips } = req {
             // The non-finalized blocks listener is used to notify the state service
@@ -1418,12 +1590,98 @@ impl Service<ReadRequest> for ReadStateService {
         let request_handler = move || match req {
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
+            ReadRequest::ReusableBlockProposalWithWorkId { .. } => {
+                unreachable!("work-id lookups are normalized before dispatch")
+            }
 
             // Used by the StateService.
             ReadRequest::Tip => Ok(ReadResponse::Tip(read::tip(
                 state.latest_best_chain(),
                 &state.db,
             ))),
+
+            ReadRequest::MiningTip => Ok(ReadResponse::Tip(
+                state
+                    .mining_fork()
+                    .and_then(|fork| fork.best_tip())
+                    .or_else(|| state.best_tip()),
+            )),
+            ReadRequest::MiningTipChange => {
+                Ok(ReadResponse::MiningTipChange(crate::MiningTipChange {
+                    receiver: state.mining_tip.subscribe(),
+                }))
+            }
+            ReadRequest::ReusableBlockProposal(block) => {
+                let parent = block.header.previous_block_hash;
+                let key = work_id.unwrap_or_else(|| mining::proposal_key(&block));
+                let (generation, proposal) = {
+                    let mining = state.mining_state.borrow();
+                    (
+                        mining.generation,
+                        mining
+                            .proposals
+                            .iter()
+                            .find(|p| p.parent == parent && p.key == key)
+                            .cloned(),
+                    )
+                };
+                let proposal = proposal.filter(|p| p.generation == generation && p.matches(&block));
+                let mut prepared = proposal
+                    .filter(|_| state.best_tip().map(|t| t.1) == Some(parent))
+                    .map(|p| SemanticallyVerifiedBlock::from(p.contextual.as_ref().clone()));
+                if let Some(prepared) = prepared.as_mut() {
+                    // Transaction IDs and outpoints depend only on the unchanged body, not the header.
+                    // All final-block-hash keyed indexes and ZIP-221 leaves are rebuilt at commit.
+                    prepared.hash = block.hash();
+                    prepared.block = block;
+                }
+                Ok(ReadResponse::ReusableBlockProposal(prepared))
+            }
+            ReadRequest::StageMiningBlock(prepared) => {
+                let _stage_permit = stage_permit;
+                let parent = prepared.block.header.previous_block_hash;
+                if state.best_tip().map(|t| t.1) != Some(parent)
+                    || state.mining_state.borrow().staged.is_some()
+                {
+                    return Ok(ReadResponse::MiningStaged(None));
+                }
+                let generation = state.mining_state.borrow().generation;
+                let mut fork = state.latest_non_finalized_state();
+                fork.disable_metrics();
+                if write::validate_and_commit_non_finalized(&state.db, &mut fork, prepared).is_err()
+                {
+                    // Staging is an optimization, not a substitute for full semantic validation.
+                    return Ok(ReadResponse::MiningStaged(None));
+                }
+                let expires = Instant::now() + mining::SPECULATIVE_LIFETIME;
+                let staged = Arc::new(mining::Staged {
+                    parent,
+                    expires,
+                    state: fork,
+                });
+                let mut installed = false;
+                state.mining_state.send_if_modified(|mining| {
+                    if mining.staged.is_none()
+                        && mining.generation == generation
+                        && state.best_tip().map(|t| t.1) == Some(parent)
+                    {
+                        mining.validated_tip = state.best_tip();
+                        mining.staged = Some(staged);
+                        let _ = state.mining_tip.send_replace(mining.tip());
+                        installed = true;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                Ok(ReadResponse::MiningStaged(installed.then(|| {
+                    mining::guard(
+                        state.mining_state.clone(),
+                        state.mining_tip.clone(),
+                        expires,
+                    )
+                })))
+            }
 
             // Used by `getblockchaininfo` RPC method.
             ReadRequest::TipPoolValues => {
@@ -1781,6 +2039,13 @@ impl Service<ReadRequest> for ReadStateService {
                 )
                 .map(ReadResponse::ChainInfo)
             }
+            ReadRequest::MiningChainInfo => {
+                let fork = state
+                    .mining_fork()
+                    .unwrap_or_else(|| state.latest_non_finalized_state());
+                read::difficulty::get_block_template_chain_info(&fork, &state.db, &state.network)
+                    .map(ReadResponse::ChainInfo)
+            }
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
             ReadRequest::SolutionRate { num_blocks, height } => {
@@ -1974,6 +2239,7 @@ pub fn init_read_only(
             &finalized_state,
             None,
             WatchReceiver::new(non_finalized_state_receiver),
+            None,
         ),
         finalized_state.db.clone(),
         non_finalized_state_sender,

@@ -229,3 +229,28 @@ Just point your mining pool software to the Zebra RPC endpoint (127.0.0.1:8232).
 If you want to run an experimental `s-nomp` mining pool with Zebra on testnet, please refer to [this document](mining-testnet-s-nomp.md) for a very detailed guide. `s-nomp` is not compatible with NU5, so some mining functions are disabled.
 
 If your mining pool software needs additional support, or if you as a miner need additional RPC methods, then please open a ticket in the [Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new).
+
+### Prepared block submissions
+
+The `getblocktemplate` response includes a `workid`. Zebra validates generated candidates in the
+background and retains completed proposal checks in a bounded cache.
+
+If the pool changes a candidate's coinbase, transaction set, authorizing data, timestamp, or other
+header fields, call `getblocktemplate` with `mode` set to `"proposal"` and `data` set to the full
+serialized candidate in hexadecimal before solving it. A `null` result means the proposal passed;
+it does not establish valid proof of work.
+
+For an unchanged template, pass its `workid` in the optional second argument to `submitblock`, as an
+object with a `workid` field. For a modified candidate validated in proposal mode, omit that argument:
+Zebra looks up completed checks from the submitted bytes. The original template's identifier does
+not identify a modified candidate and forces a cache miss if supplied.
+
+Only the nonce and Equihash solution may change without repeating proposal verification. A cache
+hit still checks proof of work, time, actual block size, and invalidation status, then applies all
+state updates using the solved block's final hash. Changed candidates, stale entries, and cache
+evictions fall back to full verification. A work identifier never overrides block validation.
+
+Long-poll responses may temporarily name a solved parent whose transaction verification is still
+running. Ordinary block and state queries expose only validated blocks. If verification fails or
+the private parent expires, another long-poll response withdraws that parent; restart mining on the
+new response rather than treating the speculative parent as committed.

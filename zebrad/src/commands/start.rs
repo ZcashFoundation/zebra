@@ -431,6 +431,14 @@ impl StartCmd {
                 zebra_rpc::MinerParams::new(&config.network.network, config.mining.clone()).ok()
             })
             .flatten();
+        let zebra_state::ReadResponse::MiningTipChange(mining_tip_change) = read_only_state_service
+            .clone()
+            .oneshot(zebra_state::ReadRequest::MiningTipChange)
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("state returns the requested mining tip subscription");
+        };
 
         info!("initializing mempool");
         let (
@@ -456,6 +464,7 @@ impl StartCmd {
                 .buffer(1)
                 .service(BoxService::new(block_verifier_router.clone())),
             miner_params,
+            mining_tip_change.clone(),
         );
         let mempool_background_work = mempool.background_work();
 
@@ -502,6 +511,7 @@ impl StartCmd {
             state.clone(),
             read_only_state_service.clone(),
             block_verifier_router.clone(),
+            max_checkpoint_height,
             sync_status.clone(),
             latest_chain_tip.clone(),
             address_book.clone(),
@@ -633,6 +643,7 @@ impl StartCmd {
             mempool_transaction_verified,
             mempool_background_work,
             latest_chain_tip.clone(),
+            mining_tip_change,
         );
 
         info!("spawning mempool transaction gossip task");

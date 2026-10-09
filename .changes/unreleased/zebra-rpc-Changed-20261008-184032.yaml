@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Allow `LongPollId::submit_old` when the maximum timestamp extends without changing the parent. Callers must still enforce the original work's expiry. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-08T18:40:32.332126276+02:00

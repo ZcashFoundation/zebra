@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Use bounded local-clock timestamps for Regtest block templates rather than a fixed median-derived timestamp. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-08T18:40:32.337427259+02:00

@@ -1,0 +1,9 @@
+project: zebrad
+kind: Added
+body: >-
+  Return `workid` in `getblocktemplate` and honor it as a cache hint in `submitblock`.
+  Wait for work matching the current mining parent without delaying recovery for obsolete outcomes.
+  Reuse completed proposal checks only for exact candidates with changes limited to the nonce and
+  Equihash solution; changed or stale candidates still undergo full verification.
+  ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.760761814+02:00

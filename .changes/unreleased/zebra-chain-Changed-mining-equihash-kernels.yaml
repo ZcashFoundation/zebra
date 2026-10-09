@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Discard internal solver solutions on cancellation or shutdown between nonce attempts and before returning solved headers. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.788453914+02:00

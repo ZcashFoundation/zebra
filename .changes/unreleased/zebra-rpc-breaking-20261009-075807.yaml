@@ -1,0 +1,7 @@
+project: zebra-rpc
+kind: breaking
+body: |-
+    Remove the `coinbase_cache` argument from `select_mempool_transactions`; pass the parent NSM
+    balance immediately after transaction dependencies. Selection reserves coinbase resources
+    without constructing a proof. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-09T07:58:07.708569441+02:00

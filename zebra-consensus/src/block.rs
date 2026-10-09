@@ -25,6 +25,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network},
+    serialization::ZcashSerialize,
     transparent,
     work::equihash,
 };
@@ -37,11 +38,21 @@ pub mod request;
 
 pub use request::Request;
 
+/// Apply the wire size bound to blocks constructed directly by callers.
+fn block_size_is_valid(block: &block::Block) -> Result<(), BlockError> {
+    let size = block.zcash_serialized_size();
+    if !u64::try_from(size).is_ok_and(|size| size <= block::MAX_BLOCK_BYTES) {
+        Err(BlockError::BlockTooLarge { size })
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests;
 
 /// Asynchronous semantic block verification.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SemanticBlockVerifier<S, V> {
     /// The network to be verified.
     network: Network,
@@ -380,6 +391,64 @@ where
                 check::equihash_solution_is_valid(&block.header)?;
             }
 
+            if !request.is_proposal() {
+                let cached = state_service
+                    .ready()
+                    .await
+                    .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                    .call(match request.work_id() {
+                        Some(work_id) => zs::Request::ReusableBlockProposalWithWorkId {
+                            block: block.clone(),
+                            work_id,
+                        },
+                        None => zs::Request::ReusableBlockProposal(block.clone()),
+                    })
+                    .await
+                    .map_err(|source| VerifyBlockError::StateService { source, hash })?;
+                if let zs::Response::ReusableBlockProposal(Some(mut prepared)) = cached {
+                    // Wall-clock time can move backwards; do not reuse the future-time check.
+                    check::time_is_valid_at(&block.header, Utc::now(), &height, &hash)
+                        .map_err(VerifyBlockError::Time)?;
+                    prepared.received_time = Some(received_time);
+                    // Only completed exact cache hits may reserve early relay on the serialized
+                    // writer. This guard keeps admission alive while ordinary commit is pending.
+                    let _admitted_mining_stage = if network.disable_pow() {
+                        None
+                    } else {
+                        match state_service.ready().await {
+                            Ok(service) => match service
+                                .call(zs::Request::AdmitPreparedMiningBlock(block.clone()))
+                                .await
+                            {
+                                Ok(zs::Response::MiningStaged(guard)) => guard,
+                                _ => None,
+                            },
+                            Err(_) => None,
+                        }
+                    };
+                    // The writer may reuse the stamped exact contextual result; normal state
+                    // application always rebuilds hash-keyed indexes/history with the final hash.
+                    return match state_service
+                        .ready()
+                        .await
+                        .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                        .call(zs::Request::CommitSemanticallyVerifiedBlock(prepared))
+                        .await
+                    {
+                        Ok(zs::Response::Committed(committed_hash)) => {
+                            assert_eq!(committed_hash, hash, "state must commit correct hash");
+                            Ok(hash)
+                        }
+                        Err(source) => Err(map_commit_error(source, hash)),
+                        _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
+                    };
+                }
+            }
+
+            // Generated/in-memory blocks do not pass the bounded wire deserializer. Cached
+            // candidates are bounded using the largest solution encoding when they are stamped.
+            block_size_is_valid(&block)?;
+
             // Next, check the Merkle root validity, to ensure that
             // the header binds to the transactions in the blocks.
 
@@ -422,6 +491,34 @@ where
             // Bound shielded work before output recovery or proof verification.
             check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
 
+            let known_utxos = Arc::new(transparent::new_ordered_outputs(
+                &block,
+                &transaction_hashes,
+            ));
+            // Contextual effects and body commitments must pass on a private fork before mining
+            // can build a child. The guard restores validated-tip work on rejection or cancellation.
+            let _mining_stage = if !request.is_proposal() {
+                let prepared = zs::SemanticallyVerifiedBlock {
+                    block: block.clone(),
+                    hash,
+                    height,
+                    new_outputs: known_utxos.clone(),
+                    transaction_hashes: transaction_hashes.clone(),
+                    received_time: Some(received_time),
+                };
+                match state_service.ready().await {
+                    Ok(service) => {
+                        match service.call(zs::Request::StageMiningBlock(prepared)).await {
+                            Ok(zs::Response::MiningStaged(guard)) => guard,
+                            _ => None,
+                        }
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
             // Now do the slower checks
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
@@ -429,11 +526,6 @@ where
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
-
-            let known_utxos = Arc::new(transparent::new_ordered_outputs(
-                &block,
-                &transaction_hashes,
-            ));
             let _block_batch_flush = crate::primitives::register_block_verifier_batch_flush(
                 &known_utxos,
                 block.transactions.len(),

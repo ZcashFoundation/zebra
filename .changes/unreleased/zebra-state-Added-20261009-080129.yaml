@@ -1,0 +1,7 @@
+project: zebra-state
+kind: Added
+body: |-
+    Add `MiningStageGuard` and `MiningTipChange::receiver` for bounded private-parent work.
+    Dropping the final guard cancels staging; the coalescing watch does not expose uncommitted
+    bodies through ordinary state queries. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-09T08:01:29.238984553+02:00

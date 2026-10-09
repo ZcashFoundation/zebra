@@ -383,6 +383,7 @@ impl Mempool {
         read_state: block_template::ReadState,
         block_verifier: block_template::BlockVerifier,
         miner_params: Option<MinerParams>,
+        mining_tip_change: zs::MiningTipChange,
     ) -> (
         Self,
         MempoolTxSubscriber,
@@ -406,6 +407,7 @@ impl Mempool {
                 miner_params,
                 read_state,
                 block_verifier,
+                mining_tip_change,
             );
 
         let mut service = Mempool {
@@ -680,10 +682,7 @@ impl Mempool {
                 ..
             } => Some((storage, *last_seen_tip_hash)),
         };
-        if let Poll::Ready(Err(error)) =
-            self.block_templates
-                .poll(cx, storage, self.latest_chain_tip.best_tip_hash())
-        {
+        if let Poll::Ready(Err(error)) = self.block_templates.poll(cx, storage) {
             return Err(error);
         }
         Ok(())

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Add `BlockError::BlockTooLarge { size }` for actual serialized-size rejection. Update exhaustive error matches for the new variant. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-07T15:08:22.794791453+02:00

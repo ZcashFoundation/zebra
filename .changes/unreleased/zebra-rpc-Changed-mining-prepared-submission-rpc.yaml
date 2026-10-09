@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Honor `submitblock` work identifiers as cache hints. Bound deserialization and full-verification admission separately, retaining consensus-native checkpoint-range admission so missing ancestors can still be submitted. Deserialization admission waits remain caller-owned; started submission jobs continue after caller cancellation, subject to a verification deadline. Return `inconclusive` when full-verification admission is saturated or the RPC deadline expires before completion. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.818448371+02:00

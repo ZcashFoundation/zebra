@@ -155,6 +155,7 @@ async fn test_z_get_treestate() {
         state,
         read_state,
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -260,6 +261,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         state,
         read_state,
         block_verifier_router,
+        Height(0),
         MockSyncStatus::default(),
         tip,
         MockAddressBookPeers::default(),
@@ -646,6 +648,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         state.clone(),
         read_state.clone(),
         MockService::build().for_unit_tests(),
+        Height(0),
         MockSyncStatus::default(),
         latest_chain_tip,
         MockAddressBookPeers::default(),
@@ -884,9 +887,33 @@ fn snapshot_rpc_getblocktemplate(
     block_template: GetBlockTemplateResponse,
     coinbase_tx: Option<Transaction>,
     settings: &insta::Settings,
+    network: &Network,
 ) {
+    if let GetBlockTemplateResponse::TemplateMode(template) = &block_template {
+        let proposal = types::get_block_template::proposal::proposal_block_from_template(
+            template,
+            BlockTemplateTimeSource::CurTime,
+            network,
+        )
+        .expect("a generated template must reconstruct its proposal");
+        assert_eq!(
+            template.work_id.as_deref(),
+            Some(hex::encode(zebra_state::proposal_key(&proposal)).as_str()),
+            "workid must identify the exact template proposal",
+        );
+    }
     settings.bind(|| {
-        insta::assert_json_snapshot!(format!("get_block_template_{variant}"), block_template)
+        insta::assert_json_snapshot!(format!("get_block_template_{variant}"), block_template, {
+            ".workid" => dynamic_redaction(|value, _path| {
+                assert_eq!(
+                    hex::decode(value.as_str().expect("workid must be a string"))
+                        .expect("workid must be hex")
+                        .len(),
+                    32,
+                );
+                "[WorkId]"
+            }),
+        })
     });
 
     if let Some(coinbase_tx) = coinbase_tx {
@@ -1123,6 +1150,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         state,
         read_state,
         block_verifier_router,
+        Height(0),
         mock_sync_status.clone(),
         mock_tip.clone(),
         mock_address_book,
@@ -1247,7 +1275,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         chain_history_root: fake_history_tree(network).hash(),
         chain_value_pools: Default::default(),
     };
-    let template = BlockTemplateResponse::from_transactions(
+    let mut template = BlockTemplateResponse::from_transactions(
         network,
         &CoinbaseCache::default(),
         &MinerParams::new(network, mining_conf.clone()).unwrap(),
@@ -1256,11 +1284,19 @@ pub async fn test_mining_rpcs<State, ReadState>(
         vec![],
         None,
     );
+    let proposal = types::get_block_template::proposal::proposal_block_from_template(
+        &template,
+        BlockTemplateTimeSource::CurTime,
+        network,
+    )
+    .expect("the published fixture must reconstruct its proposal");
+    template.set_work_id(zebra_state::proposal_key(&proposal));
     let make_mock_read_state_request_handler = || {
         let mut read_state = read_state.clone();
+
         async move {
             read_state
-                .expect_request(ReadRequest::Tip)
+                .expect_request(ReadRequest::MiningTip)
                 .await
                 .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
         }
@@ -1280,6 +1316,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         state.clone(),
         read_state.clone(),
         mock_block_verifier_router.clone(),
+        Height(0),
         mock_sync_status,
         mock_tip,
         MockAddressBookPeers::default(),
@@ -1320,6 +1357,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         (*get_block_template).into(),
         Some(coinbase_tx),
         &settings,
+        network,
     );
 
     // long polling feature with submit old field
@@ -1363,6 +1401,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         (*get_block_template).into(),
         Some(coinbase_tx),
         &settings,
+        network,
     );
 
     // `getblocktemplate` proposal mode variant
@@ -1377,9 +1416,16 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .await
         .expect("unexpected error in getblocktemplate RPC call");
 
-    snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
+    snapshot_rpc_getblocktemplate(
+        "invalid-proposal",
+        get_block_template,
+        None,
+        &settings,
+        network,
+    );
 
-    // Scheduled reissuance requires a current-parent preflight, even before activation.
+    // Networks without scheduled reissuance delegate parsed proposals directly to the verifier.
+    // Scheduled reissuance requires the live parent even before NU7; block 1 is stale here.
     let proposal = network.blockchain_map()[&1].to_vec();
     let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
         mode: GetBlockTemplateRequestMode::Proposal,
@@ -1422,10 +1468,12 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     // `submitblock`
 
+    let admission_guard = super::vectors::SUBMISSION_TEST_LOCK.lock().await;
     let submit_block = rpc
         .submit_block(HexData("".into()), None)
         .await
         .expect("unexpected error in submitblock RPC call");
+    drop(admission_guard);
 
     snapshot_rpc_submit_block_invalid(submit_block, &settings);
 

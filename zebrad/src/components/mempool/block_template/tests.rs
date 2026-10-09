@@ -119,6 +119,8 @@ struct Scheduler {
     requests: mpsc::Sender<BlockTemplateRequest>,
     verifier: ProposalVerifier,
     chain_info: watch::Sender<GetBlockTemplateChainInfo>,
+    mining_tip: watch::Sender<Option<(Height, block::Hash)>>,
+    validated_tip: Option<block::Hash>,
     storage: Storage,
     checked: Vec<Arc<block::Block>>,
 }
@@ -142,22 +144,33 @@ impl Scheduler {
             max_time: DateTime32::from(1_654_008_719),
             chain_value_pools: Default::default(),
         });
+        let (mining_tip, mining_tip_receiver) = watch::channel(Some((
+            chain_info.borrow().tip_height,
+            chain_info.borrow().tip_hash,
+        )));
         let state = tower::service_fn(move |request| {
             let info = state_info.borrow().clone();
             async move {
                 Ok::<_, BoxError>(match request {
-                    ReadRequest::ChainInfo => ReadResponse::ChainInfo(info),
-                    ReadRequest::Tip => ReadResponse::Tip(Some((info.tip_height, info.tip_hash))),
+                    ReadRequest::MiningChainInfo => ReadResponse::ChainInfo(info),
+                    ReadRequest::MiningTip => {
+                        ReadResponse::Tip(Some((info.tip_height, info.tip_hash)))
+                    }
                     _ => panic!("unexpected template state request"),
                 })
             }
         });
-        let verifier = MockService::build().for_unit_tests();
+        let verifier = MockService::build()
+            .with_max_request_delay(RETRY_DELAY + Duration::from_secs(1))
+            .for_unit_tests();
         let (templates, published, requests) = BlockTemplates::new(
             network,
             Some(miner_params),
             Buffer::new(BoxService::new(state), 1),
             Buffer::new(BoxService::new(verifier.clone()), 1),
+            zebra_state::MiningTipChange {
+                receiver: mining_tip_receiver,
+            },
         );
         Self {
             templates,
@@ -165,6 +178,8 @@ impl Scheduler {
             requests,
             verifier,
             chain_info,
+            mining_tip,
+            validated_tip: None,
             storage: Storage::new(&super::super::Config {
                 tx_cost_limit: u64::MAX,
                 ..Default::default()
@@ -173,13 +188,23 @@ impl Scheduler {
         }
     }
 
+    fn sync_mining_tip(&self) {
+        let info = self.chain_info.borrow();
+        let tip = Some((info.tip_height, info.tip_hash));
+        if *self.mining_tip.borrow() != tip {
+            self.mining_tip.send_replace(tip);
+        }
+    }
+
     fn poll(&mut self) {
-        let tip = self.chain_info.borrow().tip_hash;
+        self.sync_mining_tip();
+        let tip = self
+            .validated_tip
+            .unwrap_or(self.chain_info.borrow().tip_hash);
         assert!(matches!(
             self.templates.poll(
                 &mut Context::from_waker(futures::task::noop_waker_ref()),
                 Some((&self.storage, tip)),
-                Some(tip),
             ),
             Poll::Ready(Ok(()))
         ));
@@ -209,7 +234,10 @@ impl Scheduler {
     }
 
     async fn proposal(&mut self) -> Proposal {
-        let tip = self.chain_info.borrow().tip_hash;
+        self.sync_mining_tip();
+        let tip = self
+            .validated_tip
+            .unwrap_or(self.chain_info.borrow().tip_hash);
         drive(
             &mut self.templates,
             &self.storage,
@@ -248,7 +276,6 @@ async fn drive<F: Future>(
             templates.poll(
                 &mut Context::from_waker(futures::task::noop_waker_ref()),
                 Some((storage, tip)),
-                Some(tip),
             ),
             Poll::Ready(Ok(()))
         ));
@@ -425,6 +452,41 @@ async fn default_recovery_wins_over_continuous_overrides_after_backoff() {
     );
     assert!(scheduler.published.borrow().is_some());
     scheduler.idle().await;
+}
+
+/// A commit racing proposal rejection must not impose the old parent's failure backoff.
+#[tokio::test(start_paused = true)]
+async fn superseded_proposal_errors_rebuild_without_backoff() {
+    let _init_guard = zebra_test::init();
+    let mut scheduler = Scheduler::new(Network::Mainnet);
+    let old = scheduler.proposal().await;
+    let changed_at = Instant::now();
+    let new_parent = block::Hash([0xcd; 32]);
+    scheduler.chain_info.send_modify(|info| {
+        info.tip_height = info.tip_height.next().unwrap();
+        info.tip_hash = new_parent;
+    });
+    old.respond_error("proposal was already committed before verification completed".into());
+
+    let replacement = scheduler.proposal().await;
+    assert_eq!(Instant::now(), changed_at);
+    assert!(scheduler.published.borrow().is_none());
+    let zebra_consensus::Request::CheckProposal(block) = replacement.request() else {
+        unreachable!()
+    };
+    assert_eq!(block.header.previous_block_hash, new_parent);
+    let expected_key = zebra_state::proposal_key(block);
+    replacement.respond(block::Hash([0; 32]));
+    scheduler.idle().await;
+    let published = scheduler.published.borrow();
+    let template = published.as_ref().unwrap();
+    assert_eq!(template.previous_block_hash(), new_parent);
+    assert_eq!(
+        zebra_state::proposal_key(
+            &proposal_block_from_template(template, None, &Network::Mainnet).unwrap(),
+        ),
+        expected_key,
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -687,14 +749,12 @@ async fn committed_parent_ahead_of_notification_does_not_loop_rebuilding() {
         published.borrow().as_ref().unwrap().previous_block_hash(),
         scheduler.chain_info.borrow().tip_hash
     );
-    assert!(
-        scheduler.templates.build.is_none(),
-        "a lagging notification is not a new parent"
-    );
     scheduler.poll();
-    assert!(
-        scheduler.templates.build.is_none(),
-        "catching up to the committed parent needs no duplicate build"
+    scheduler.idle().await;
+    assert_eq!(
+        scheduler.checked.len(),
+        1,
+        "the caught-up context must be prepared again"
     );
 }
 
@@ -746,5 +806,219 @@ async fn removing_unselected_membership_refreshes_the_long_poll_id() {
         before.long_poll_id(),
         after.long_poll_id(),
         "long polling covers all verified membership, not just selection"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn published_work_id_matches_the_one_verified_candidate() {
+    let _init_guard = zebra_test::init();
+    let mut scheduler = Scheduler::new(Network::Mainnet);
+    let proposal = scheduler.proposal().await;
+    assert!(
+        scheduler.published.borrow().is_none(),
+        "preflight precedes publication"
+    );
+    let zebra_consensus::Request::CheckProposal(block) = proposal.request() else {
+        unreachable!()
+    };
+    let key = zebra_state::proposal_key(block);
+    proposal.respond(block::Hash([0; 32]));
+    scheduler.idle().await;
+    let template = scheduler.published.borrow().clone().unwrap();
+    let json = serde_json::to_value(template.as_ref()).unwrap();
+    assert_eq!(json["workid"], hex::encode(key));
+    let assembled = proposal_block_from_template(&template, None, &Network::Mainnet).unwrap();
+    assert_eq!(zebra_state::proposal_key(&assembled), key);
+    assert!(
+        scheduler.checked.is_empty(),
+        "the one candidate is preflighted only once"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn equal_parent_invalidation_discards_in_flight_preflight_without_detaching_it() {
+    let _init_guard = zebra_test::init();
+    let mut scheduler = Scheduler::new(Network::Mainnet);
+    scheduler.idle().await;
+    let published = scheduler.published.borrow().clone().unwrap();
+    let tip = *scheduler.mining_tip.borrow();
+    scheduler.mining_tip.send_replace(tip);
+    scheduler.poll();
+    tokio::time::advance(CHANGE_DEBOUNCE).await;
+    let stale = scheduler.proposal().await;
+    scheduler.mining_tip.send_replace(tip);
+    scheduler.poll();
+    assert!(
+        scheduler.templates.build.is_some(),
+        "invalidated verification remains owned"
+    );
+    assert!(scheduler
+        .verifier
+        .try_next_request()
+        .now_or_never()
+        .is_none());
+    stale.respond(block::Hash([0; 32]));
+    let replacement = scheduler.proposal().await;
+    assert!(
+        Arc::ptr_eq(scheduler.published.borrow().as_ref().unwrap(), &published),
+        "a stale same-parent verdict cannot publish"
+    );
+    replacement.respond(block::Hash([0; 32]));
+    scheduler.idle().await;
+    assert!(!Arc::ptr_eq(
+        scheduler.published.borrow().as_ref().unwrap(),
+        &published
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn private_parent_uses_coinbase_only_until_equal_value_validation_notification() {
+    let _init_guard = zebra_test::init();
+    let mut scheduler = Scheduler::new(Network::Mainnet);
+    let mut tx = super::super::tests::admission::candidate();
+    tx.miner_fee = tx.transaction.conventional_fee;
+    tx.fee_weight_ratio = 1.0;
+    tx.unpaid_actions = 0;
+    let id = tx.transaction.id;
+    scheduler.storage.insert(tx, vec![], None).unwrap();
+    scheduler.idle().await;
+    assert_eq!(
+        scheduler
+            .published
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .transactions()
+            .len(),
+        1
+    );
+    scheduler.validated_tip = Some(scheduler.chain_info.borrow().tip_hash);
+    scheduler.chain_info.send_modify(|info| {
+        info.tip_height = info.tip_height.next().unwrap();
+        info.tip_hash = block::Hash([0xcd; 32]);
+    });
+    scheduler.idle().await;
+    let private = scheduler.published.borrow().clone().unwrap();
+    assert!(private.transactions().is_empty());
+    assert_eq!(
+        private.previous_block_hash(),
+        scheduler.chain_info.borrow().tip_hash
+    );
+    assert!(
+        scheduler
+            .storage
+            .transactions()
+            .contains_key(&id.mined_id()),
+        "private state does not remove or readmit verified transactions"
+    );
+    scheduler.validated_tip = Some(scheduler.chain_info.borrow().tip_hash);
+    let tip = *scheduler.mining_tip.borrow();
+    scheduler.mining_tip.send_replace(tip);
+    scheduler.poll();
+    tokio::time::advance(CHANGE_DEBOUNCE).await;
+    scheduler.idle().await;
+    assert_eq!(
+        scheduler
+            .published
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .transactions()
+            .len(),
+        1
+    );
+    assert!(scheduler
+        .storage
+        .transactions()
+        .contains_key(&id.mined_id()));
+}
+
+/// A solved hash can be invalidated without invalidating its nonce-independent work family.
+#[tokio::test]
+async fn rollback_repreflights_the_same_family_and_idle_retry_wakes_without_clock_refresh() {
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(zebra_chain::parameters::testnet::RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu7: Some(105),
+            ..Default::default()
+        },
+        nsm_reissuance_height: Some(Height(106)),
+        ..Default::default()
+    });
+    let mut scheduler = Scheduler::new(network.clone());
+    scheduler.chain_info.send_modify(|info| {
+        info.tip_height = Height(105);
+        // Even a single valid timestamp must permit other nonce/solution combinations.
+        info.min_time = info.cur_time;
+        info.max_time = info.cur_time;
+    });
+    scheduler.idle().await;
+    let original_template = scheduler.published.borrow().clone().unwrap();
+    let original = proposal_block_from_template(&original_template, None, &network).unwrap();
+    let invalidated_hash = original.hash();
+    let work_id = zebra_state::proposal_key(&original);
+    let parent = scheduler.chain_info.borrow().clone();
+
+    scheduler.chain_info.send_modify(|info| {
+        info.tip_height = Height(106);
+        info.tip_hash = invalidated_hash;
+    });
+    let obsolete = scheduler.proposal().await;
+    scheduler.chain_info.send_replace(parent.clone());
+    scheduler.sync_mining_tip();
+    obsolete
+        .respond_error("the solved block was invalidated while its child was preflighting".into());
+
+    let mut publications = scheduler.published.clone();
+    publications.borrow_and_update();
+    let changed = publications.changed();
+    tokio::pin!(changed);
+    let mut verifier = scheduler.verifier.clone();
+    let retry_started = Instant::now();
+    let drive_owner = futures::future::poll_fn(|cx| {
+        assert!(matches!(
+            scheduler
+                .templates
+                .poll(cx, Some((&scheduler.storage, parent.tip_hash))),
+            Poll::Ready(Ok(()))
+        ));
+        changed.as_mut().poll(cx)
+    });
+    let validate = async {
+        let first = verifier.expect_request_that(|_| true).await;
+        first
+            .respond_error("a concurrent solved submission won the first current preflight".into());
+        // Unlike Scheduler::drive, the owner above only polls on actual registered wakeups.
+        // This request therefore also proves the idle error-backoff timer resumes production.
+        let retry = verifier.expect_request_that(|_| true).await;
+        let zebra_consensus::Request::CheckProposal(block) = retry.request() else {
+            unreachable!()
+        };
+        assert_eq!(block.header.previous_block_hash, parent.tip_hash);
+        assert_eq!(block.header.time, original.header.time);
+        assert_eq!(zebra_state::proposal_key(block), work_id);
+        assert_ne!(
+            block.hash(),
+            invalidated_hash,
+            "a fresh family verdict must not recheck the invalidated solved hash",
+        );
+        assert!(Instant::now() >= retry_started + RETRY_DELAY);
+        let hash = block.hash();
+        retry.respond(hash);
+    };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (published, ()) = tokio::join!(drive_owner, validate);
+        published.unwrap();
+    })
+    .await
+    .expect("rollback recovery must progress from real future and timer wakeups");
+
+    let published = scheduler.published.borrow();
+    let restored = published.as_ref().unwrap();
+    assert!(!Arc::ptr_eq(restored, &original_template));
+    assert_eq!(
+        zebra_state::proposal_key(&proposal_block_from_template(restored, None, &network).unwrap(),),
+        work_id,
+        "rollback preserves cached coinbase/body work rather than mutating the family",
     );
 }

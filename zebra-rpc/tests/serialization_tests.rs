@@ -1155,6 +1155,7 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
         transactions,
         coinbase_txn,
         long_poll_id,
+        None,
         ExpandedDifficulty::from_bytes_in_display_order(&target),
         min_time.into(),
         mutable,

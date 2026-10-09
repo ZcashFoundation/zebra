@@ -28,6 +28,7 @@ expression: block_template
     "required": true
   },
   "longpollid": "00016871043eab7f731654008728000000000000000000",
+  "workid": "[WorkId]",
   "target": "0005555400000000000000000000000000000000000000000000000000000000",
   "mintime": 1654008606,
   "mutable": [

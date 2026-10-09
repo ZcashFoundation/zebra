@@ -157,7 +157,6 @@ fn template_reports_selected_transaction_dependencies() {
         &miner_params,
         vec![child, unrelated, parent],
         dependencies,
-        None,
         Some(Amount::zero()),
     );
     let chain_info = GetBlockTemplateChainInfo {
@@ -202,6 +201,24 @@ fn template_reports_selected_transaction_dependencies() {
     assert_eq!(
         json["transactions"][child_index]["depends"],
         serde_json::json!([parent_index + 1])
+    );
+
+    assert!(json.get("workid").is_none());
+    let mut identified = template.clone();
+    identified.work_id = Some("exact-candidate-fingerprint".to_string());
+    let identified_json = serde_json::to_value(&identified).unwrap();
+    assert_eq!(identified_json["workid"], "exact-candidate-fingerprint");
+    assert_eq!(
+        serde_json::from_value::<BlockTemplateResponse>(identified_json)
+            .unwrap()
+            .work_id,
+        identified.work_id,
+    );
+    assert_eq!(
+        serde_json::from_value::<BlockTemplateResponse>(json)
+            .unwrap()
+            .work_id,
+        None,
     );
 }
 
@@ -254,21 +271,41 @@ fn coinbase() -> anyhow::Result<()> {
         for nu in NetworkUpgrade::iter().filter(|nu| nu >= &NetworkUpgrade::Sapling) {
             if let Some(height) = nu.activation_height(&net) {
                 for addr_type in MinerAddressType::iter() {
-                    TransactionTemplate::new_coinbase_with_parent_pools(
+                    let miner_params = MinerParams::from(
+                        Address::decode(&net, default_miner_address(net.kind(), &addr_type))
+                            .ok_or(anyhow!("hard-coded addr must be valid"))?,
+                    );
+                    let template = TransactionTemplate::new_coinbase_with_parent_pools(
                         &net,
                         height,
-                        &MinerParams::from(
-                            Address::decode(&net, default_miner_address(net.kind(), &addr_type))
-                                .ok_or(anyhow!("hard-coded addr must be valid"))?,
-                        ),
+                        &miner_params,
                         Amount::zero(),
                         Some(Amount::zero()),
-                    )?
-                    .data()
-                    .as_ref()
-                    // Deserialization contains checks for elementary consensus rules, which must
-                    // pass.
-                    .zcash_deserialize_into::<Transaction>()?;
+                    )?;
+                    let coinbase = template
+                        .data()
+                        .as_ref()
+                        // Deserialization checks elementary consensus rules.
+                        .zcash_deserialize_into::<Transaction>()?;
+                    let resources = TransactionTemplate::coinbase_resource_usage(
+                        &net,
+                        height,
+                        &miner_params,
+                        Some(Amount::zero()),
+                    )?;
+                    let script_len = coinbase.inputs()[0].coinbase_script().unwrap().len();
+                    assert_eq!(
+                        resources.max_serialized_size,
+                        template.data().as_ref().len()
+                            + zcash_transparent::coinbase::MAX_COINBASE_SCRIPT_LEN
+                            - script_len,
+                        "proof-free sizing must reserve exactly the unused input script bytes",
+                    );
+                    assert_eq!(resources.sigops, template.sigops);
+                    assert_eq!(
+                        resources.shielded_action_counts,
+                        zebra_consensus::ShieldedActionCounts::from_transaction(&coinbase),
+                    );
                 }
             }
         }
@@ -384,11 +421,10 @@ fn coinbase_cache_reuses_built_coinbase() {
     );
 }
 
-/// Verifies the fix for #10907: the multi-entry coinbase cache retains both the zero-fee fake
-/// coinbase (used for ZIP-317 weight sizing) and the real-fee coinbase simultaneously, so
-/// `getblocktemplate` doesn't rebuild shielded proofs on every short-poll.
+/// The cache retains both the empty-template and fee-bearing coinbases, so switching between
+/// them does not rebuild shielded proofs on every short-poll.
 #[test]
-fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
+fn coinbase_cache_retains_empty_and_fee_bearing_entries() {
     use super::CoinbaseCache;
 
     let height = Height(1_000_000);
@@ -398,8 +434,7 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
 
     let cache = CoinbaseCache::default();
 
-    // Simulate what getblocktemplate does: store a fake coinbase at zero fee (ZIP-317 sizing),
-    // then store the real coinbase at the actual fee.
+    // Store the empty-template coinbase and then the full template's fee-bearing coinbase.
     let fake_coinbase = TransactionTemplate::new_coinbase(
         &Network::Mainnet,
         height,
@@ -437,11 +472,11 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
     cache.store(height, zero_fee, None, fake_coinbase.clone());
     cache.store(height, real_fee, None, real_coinbase.clone());
 
-    // Both entries coexist — the zero-fee sizing coinbase survives the real-fee store.
+    // Both entries coexist: the empty-template coinbase survives the fee-bearing store.
     assert_eq!(
         cache.get(height, zero_fee, None),
         Some(fake_coinbase),
-        "zero-fee fake coinbase should still be cached after storing real-fee coinbase"
+        "empty-template coinbase should remain cached after storing a fee-bearing coinbase"
     );
     assert_eq!(
         cache.get(height, real_fee, None),
@@ -533,8 +568,7 @@ fn coinbase_cache_discards_late_old_parent_builds() {
 }
 
 /// Verifies that fee churn beyond the cache cap (4 entries) evicts stale nonzero-fee entries
-/// while preserving the zero-fee sizing coinbase. Without this, the cap would clear the
-/// entire map — including the zero-fee entry — recreating the original #10907 churn.
+/// while preserving the empty-template coinbase for new-tip responses.
 #[test]
 fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     use super::CoinbaseCache;
@@ -581,7 +615,7 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     assert_eq!(
         cache.get(height, zero_fee, None),
         Some(fake_coinbase.clone()),
-        "zero-fee sizing coinbase must survive fee churn at capacity"
+        "empty-template coinbase must survive fee churn at capacity"
     );
 
     // Updating an existing key at capacity should not trigger eviction.
@@ -959,6 +993,26 @@ fn clock_rollback_invalidates_cached_timestamp_range() {
     }
 }
 
+#[test]
+fn timestamp_clamping_clears_only_changed_candidate_work_ids() {
+    use zebra_chain::serialization::{DateTime32, Duration32};
+
+    let _init_guard = zebra_test::init();
+    let maximum = DateTime32::from(1654008719);
+    let narrowed = maximum.saturating_sub(Duration32::from_seconds(1));
+    let now = narrowed.saturating_sub(Duration32::from_hours(2));
+
+    for (candidate_time, retains_key) in [(maximum, false), (narrowed, true)] {
+        let mut template = template_with_max_time(&Network::Mainnet, maximum);
+        template.cur_time = candidate_time;
+        template.set_work_id([0x42; 32]);
+        let expected_key = retains_key.then(|| template.work_id.clone()).flatten();
+
+        template.clamp_time_range(now).unwrap();
+        assert_eq!(template.work_id, expected_key);
+    }
+}
+
 /// Serialized dependencies identify direct in-template parents once, preserving selection order.
 #[test]
 fn template_serializes_direct_transaction_dependencies() {
@@ -1062,4 +1116,117 @@ fn template_serializes_direct_transaction_dependencies() {
         assert_eq!(tx["hash"], expected_hash);
         assert_eq!(tx["depends"], serde_json::json!(dependencies));
     }
+}
+
+/// Cancelling a caller cannot admit another proof before its blocking proof finishes.
+#[tokio::test]
+async fn coinbase_proof_queue_survives_caller_cancellation() {
+    use super::CoinbaseCache;
+    use tokio::sync::oneshot;
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let cache = CoinbaseCache::default();
+        let independent_cache = CoinbaseCache::default();
+        let permit = cache.proof_permit().await;
+        let (started_sender, started) = oneshot::channel();
+        let (finish_sender, finish) = oneshot::channel();
+        let caller = tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                started_sender.send(()).unwrap();
+                finish.blocking_recv().unwrap();
+            })
+            .await
+            .unwrap();
+        });
+        started.await.unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+
+        {
+            let waiting = independent_cache.proof_permit();
+            tokio::pin!(waiting);
+            tokio::select! {
+                biased;
+                _ = &mut waiting => panic!("the detached proof must retain its slot"),
+                _ = std::future::ready(()) => {}
+            }
+        }
+        finish_sender.send(()).unwrap();
+        drop(independent_cache.proof_permit().await);
+        drop(cache.proof_permit().await);
+    })
+    .await
+    .expect("proof queue cancellation test must finish");
+}
+
+/// Proof-free reservation matches real outputs across transaction versions and payout types.
+#[test]
+fn coinbase_resources_match_real_proofs_and_maximum_script() {
+    use zcash_transparent::{address::TransparentAddress, coinbase::MAX_COINBASE_SCRIPT_LEN};
+    use zebra_chain::parameters::NetworkKind;
+    use zebra_consensus::ShieldedActionCounts;
+
+    let _init_guard = zebra_test::init();
+    let net = Network::new_regtest(
+        ConfiguredActivationHeights {
+            sapling: Some(1),
+            nu5: Some(2),
+            nu6_3: Some(3),
+            nu7: Some(4),
+            ..Default::default()
+        }
+        .into(),
+    );
+    for (height, addr_type) in [
+        (Height(1), MinerAddressType::Transparent),
+        (Height(1), MinerAddressType::Sapling),
+        (Height(2), MinerAddressType::Transparent),
+        (Height(2), MinerAddressType::Sapling),
+        (Height(2), MinerAddressType::Unified),
+        (Height(3), MinerAddressType::Transparent),
+        (Height(3), MinerAddressType::Sapling),
+        (Height(3), MinerAddressType::Unified),
+    ] {
+        let miner = MinerParams::from(
+            Address::decode(
+                &net,
+                default_miner_address(NetworkKind::Regtest, &addr_type),
+            )
+            .unwrap(),
+        );
+        let resources =
+            TransactionTemplate::coinbase_resource_usage(&net, height, &miner, None).unwrap();
+        let actual = TransactionTemplate::new_coinbase(
+            &net,
+            height,
+            &miner,
+            Amount::try_from(20_002u64).unwrap(),
+        )
+        .unwrap();
+        let tx: Transaction = actual.data.as_ref().zcash_deserialize_into().unwrap();
+        let script_len = tx.inputs()[0].coinbase_script().unwrap().len();
+        assert_eq!(
+            resources.max_serialized_size,
+            actual.data.as_ref().len() + MAX_COINBASE_SCRIPT_LEN - script_len,
+        );
+        assert_eq!(resources.sigops, actual.sigops);
+        assert_eq!(
+            resources.shielded_action_counts,
+            ShieldedActionCounts::from_transaction(&tx),
+        );
+    }
+
+    let miner = MinerParams::from(Address::from(TransparentAddress::ScriptHash([0x7e; 20])));
+    let resources =
+        TransactionTemplate::coinbase_resource_usage(&net, Height(3), &miner, None).unwrap();
+    let actual =
+        TransactionTemplate::new_coinbase(&net, Height(3), &miner, Amount::zero()).unwrap();
+    let tx: Transaction = actual.data.as_ref().zcash_deserialize_into().unwrap();
+    assert_eq!(
+        resources.max_serialized_size,
+        actual.data.as_ref().len() + MAX_COINBASE_SCRIPT_LEN
+            - tx.inputs()[0].coinbase_script().unwrap().len(),
+    );
+    assert_eq!(resources.sigops, actual.sigops);
 }

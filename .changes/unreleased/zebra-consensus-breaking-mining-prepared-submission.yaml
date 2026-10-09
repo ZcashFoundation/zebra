@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: 'Add `Request::CommitWithWorkId { block, work_id }` and `Request::work_id` for prepared submissions using a proposal-cache hint, without bypassing verification. Update exhaustive request matches for the new variant. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.79144541+02:00

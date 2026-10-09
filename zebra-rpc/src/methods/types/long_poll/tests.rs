@@ -119,13 +119,9 @@ fn submit_old_is_true_for_an_unchanged_id() {
     );
 }
 
-/// Check that any change to the block header invalidates old work.
-///
-/// `tip_height`, `tip_hash_checksum` and `max_timestamp` all feed into the block header, so a
-/// change to any of them means every queued share is mining on a header that can no longer be
-/// part of the best chain.
+/// A changed parent makes queued work stale, regardless of its advertised deadline.
 #[test]
-fn submit_old_is_false_when_a_header_field_changes() {
+fn submit_old_is_false_when_the_parent_changes() {
     let old = old_long_poll_id();
 
     let changed_tip_height = LongPollId {
@@ -145,15 +141,22 @@ fn submit_old_is_false_when_a_header_field_changes() {
         !changed_tip_hash_checksum.submit_old(&old),
         "a changed tip hash checksum must invalidate old work",
     );
+}
 
-    let changed_max_timestamp = LongPollId {
+/// Extending a deadline preserves the miner's time range; reducing it invalidates that range.
+#[test]
+fn submit_old_preserves_extended_but_not_reduced_time_ranges() {
+    let old = old_long_poll_id();
+    let extended = LongPollId {
         max_timestamp: old.max_timestamp + 1,
         ..old
     };
-    assert!(
-        !changed_max_timestamp.submit_old(&old),
-        "a changed max timestamp must invalidate old work",
-    );
+    assert!(extended.submit_old(&old));
+    let reduced = LongPollId {
+        max_timestamp: old.max_timestamp - 1,
+        ..old
+    };
+    assert!(!reduced.submit_old(&old));
 }
 
 /// Check that mempool-only changes keep old work submittable.

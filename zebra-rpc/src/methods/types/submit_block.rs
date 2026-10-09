@@ -13,7 +13,7 @@ use crate::methods::GetBlockTemplateHandler;
 /// See the notes for the [`submit_block`](crate::methods::RpcServer::submit_block) RPC.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 pub struct SubmitBlockParameters {
-    /// The workid for the block template. Currently unused.
+    /// The template's normalized candidate identifier, used only as a cache lookup hint.
     ///
     /// > If the server provided a workid, it MUST be included with submissions,
     ///
@@ -26,7 +26,7 @@ pub struct SubmitBlockParameters {
     ///
     /// <https://en.bitcoin.it/wiki/BIP_0022#Rationale>
     #[serde(rename = "workid")]
-    pub _work_id: Option<String>,
+    pub work_id: Option<String>,
 }
 
 /// Response to a `submitblock` RPC request.
@@ -39,7 +39,7 @@ pub enum SubmitBlockErrorResponse {
     Duplicate,
     /// Block was already added to the state queue or channel, but not yet committed to the non-finalized state
     DuplicateInconclusive,
-    /// Block was already committed to the non-finalized state, but not on the best chain
+    /// The block is not on the best chain, admission is saturated, or verification is still running.
     Inconclusive,
     /// Block rejected as invalid
     Rejected,

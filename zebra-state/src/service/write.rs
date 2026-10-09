@@ -95,16 +95,17 @@ fn update_latest_chain_channels(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
-) -> block::Height {
-    let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
-
-    let tip_block = best_chain
-        .tip_block()
-        .expect("unexpected empty chain: must commit at least one block before updating channels")
-        .clone();
-    let tip_block = ChainTipBlock::from(tip_block);
-
-    let tip_block_height = tip_block.height;
+    mining_channels: &super::mining::MiningChannels,
+    db: &ZebraDb,
+) -> Option<block::Height> {
+    let tip_block = non_finalized_state.best_chain().map(|best_chain| {
+        let tip_block = best_chain
+            .tip_block()
+            .expect("each non-finalized chain contains at least one block")
+            .clone();
+        ChainTipBlock::from(tip_block)
+    });
+    let tip_block_height = tip_block.as_ref().map(|tip| tip.height);
 
     if let Some(backup_dir_path) = backup_dir_path {
         non_finalized_state.write_to_backup(backup_dir_path);
@@ -114,6 +115,7 @@ fn update_latest_chain_channels(
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
     chain_tip_sender.set_best_non_finalized_tip(tip_block);
+    mining_channels.publish_validated_tip(super::read::best_tip(non_finalized_state, db));
 
     tip_block_height
 }
@@ -139,10 +141,11 @@ struct WriteBlockWorkerTask {
     /// If `Some`, the non-finalized state is written to this backup directory
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
+    mining_channels: super::mining::MiningChannels,
 }
 
 /// The message type for the non-finalized block write task channel.
-pub enum NonFinalizedWriteMessage {
+pub(super) enum NonFinalizedWriteMessage {
     /// A newly downloaded and semantically verified block prepared for
     /// contextual validation and insertion into the non-finalized state.
     Commit(QueuedSemanticallyVerified),
@@ -158,6 +161,10 @@ pub enum NonFinalizedWriteMessage {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     },
+    /// A bounded completed-proposal reservation, linearized with contextual writes.
+    AdmitPrepared(super::mining::PreparedAdmission),
+    /// Validate a proposal privately and stamp reusable context at this writer position.
+    ValidateProposal(super::mining::ProposalValidation),
 }
 
 impl From<QueuedSemanticallyVerified> for NonFinalizedWriteMessage {
@@ -199,6 +206,7 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
+        mining_channels: super::mining::MiningChannels,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
@@ -229,6 +237,7 @@ impl BlockWriteSender {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
+                    mining_channels,
                 }
                 .run()
             })
@@ -269,6 +278,7 @@ impl WriteBlockWorkerTask {
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
+            mining_channels,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -309,6 +319,7 @@ impl WriteBlockWorkerTask {
                 continue;
             }
 
+            mining_channels.invalidate(None);
             // Try committing the block
             match finalized_state
                 .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
@@ -317,6 +328,7 @@ impl WriteBlockWorkerTask {
                     let tip_block = ChainTipBlock::from(finalized);
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
+                    mining_channels.publish_validated_tip(finalized_state.db.tip());
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
@@ -357,12 +369,24 @@ impl WriteBlockWorkerTask {
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
+                NonFinalizedWriteMessage::AdmitPrepared(admission) => {
+                    // Fresh PoW was checked by consensus; the writer rechecks the exact record.
+                    admission.admit(non_finalized_state, &finalized_state.db);
+                    // Do not publish the private fork to validated state channels.
+                    continue;
+                }
+                NonFinalizedWriteMessage::ValidateProposal(proposal) => {
+                    proposal.validate(mining_channels, non_finalized_state, &finalized_state.db);
+                    continue;
+                }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
+                    mining_channels.invalidate(None);
                     tracing::info!(?hash, "invalidating a block in the non-finalized state");
                     let _ = rsp_tx.send(non_finalized_state.invalidate_block(hash));
                     None
                 }
                 NonFinalizedWriteMessage::Reconsider { hash, rsp_tx } => {
+                    mining_channels.invalidate(None);
                     tracing::info!(?hash, "reconsidering a block in the non-finalized state");
                     let _ = rsp_tx
                         .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
@@ -371,11 +395,13 @@ impl WriteBlockWorkerTask {
             };
 
             let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
-                update_latest_chain_channels(
+                let _ = update_latest_chain_channels(
                     non_finalized_state,
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path.as_deref(),
+                    mining_channels,
+                    &finalized_state.db,
                 );
                 continue;
             };
@@ -383,6 +409,12 @@ impl WriteBlockWorkerTask {
             let child_hash = queued_child.hash;
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
+            // Retire cache generation atomically at the mutation boundary, not at enqueue time.
+            let cached = mining_channels.take_for_commit(
+                &queued_child.block,
+                super::read::best_tip(non_finalized_state, &finalized_state.db),
+                queued_child.hash,
+            );
 
             // If the parent block was marked as rejected, also reject all its children.
             //
@@ -395,8 +427,20 @@ impl WriteBlockWorkerTask {
             // parent's misbehaviour score.
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
+            } else if let Some(proposal) = cached {
+                let contextual = proposal.rebind(queued_child.block, queued_child.received_time);
+                let result = non_finalized_state
+                    .commit_prevalidated_contextual(contextual, &finalized_state.db);
+                #[cfg(test)]
+                if result.is_ok() {
+                    mining_channels
+                        .state
+                        .send_modify(|state| state.contextual_commit_hits += 1);
+                }
+                result
             } else {
-                tracing::trace!(?child_hash, "validating queued child");
+                #[cfg(test)]
+                mining_channels.note_full_contextual_check();
                 validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,
@@ -409,6 +453,10 @@ impl WriteBlockWorkerTask {
             //       and send the result on rsp_tx here
 
             if let Err(ref error) = result {
+                mining_channels.publish_validated_tip(super::read::best_tip(
+                    non_finalized_state,
+                    &finalized_state.db,
+                ));
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
 
@@ -451,7 +499,10 @@ impl WriteBlockWorkerTask {
                 chain_tip_sender,
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
-            );
+                mining_channels,
+                &finalized_state.db,
+            )
+            .expect("a successful non-finalized commit leaves a nonempty best chain");
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));

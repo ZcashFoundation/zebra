@@ -116,6 +116,12 @@ pub enum Response {
 
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
+
+    /// A completed, exact proposal match with block hash rebound to the submitted header.
+    ReusableBlockProposal(Option<crate::SemanticallyVerifiedBlock>),
+
+    /// A guard cancelling mining speculation when dropped, or `None` if no child was staged.
+    MiningStaged(Option<crate::service::mining::MiningStageGuard>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -544,6 +550,15 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
 
+    /// See `Response::ReusableBlockProposal`.
+    ReusableBlockProposal(Option<crate::SemanticallyVerifiedBlock>),
+
+    /// See `Response::MiningStaged`.
+    MiningStaged(Option<crate::service::mining::MiningStageGuard>),
+
+    /// A bounded mining-parent change subscription.
+    MiningTipChange(crate::service::mining::MiningTipChange),
+
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 
@@ -667,6 +682,9 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
+            ReadResponse::ReusableBlockProposal(block) => Ok(Response::ReusableBlockProposal(block)),
+            ReadResponse::MiningStaged(guard) => Ok(Response::MiningStaged(guard)),
+            ReadResponse::MiningTipChange(_) => Err("mining subscriptions are read-only"),
 
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")

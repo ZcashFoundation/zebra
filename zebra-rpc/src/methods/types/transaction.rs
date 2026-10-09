@@ -13,9 +13,16 @@ use zcash_script::script::Asm;
 use zcash_keys::address::Address;
 use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder},
+    components::{orchard::ACTION_SIZE, GROTH_PROOF_SIZE},
     fees::fixed::FeeRule,
+    TxVersion,
 };
-use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::ZatBalance, value::Zatoshis};
+use zcash_protocol::{
+    consensus::{BlockHeight, BranchId},
+    memo::MemoBytes,
+    value::{ZatBalance, Zatoshis},
+};
+use zcash_transparent::{address::TransparentAddress, coinbase::MAX_COINBASE_SCRIPT_LEN};
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
@@ -28,11 +35,11 @@ use zebra_chain::{
     },
     primitives::ed25519,
     sapling::ValueCommitment,
-    serialization::ZcashSerialize,
+    serialization::{CompactSizeMessage, ZcashSerialize},
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::{OutPoint, Script, Utxo},
 };
-use zebra_consensus::error::TransactionError;
+use zebra_consensus::{error::TransactionError, ShieldedActionCounts};
 use zebra_script::Sigops;
 
 use super::zec::Zec;
@@ -123,7 +130,238 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
     }
 }
 
+/// Fee-independent resources reserved for a coinbase, including the largest valid input script.
+#[derive(Clone, Copy)]
+pub(super) struct CoinbaseResourceUsage {
+    pub(super) max_serialized_size: usize,
+    pub(super) sigops: u32,
+    pub(super) shielded_action_counts: ShieldedActionCounts,
+}
+
+#[derive(Clone, Copy)]
+enum MinerRewardAddress {
+    Orchard(::orchard::Address),
+    Ironwood(::orchard::Address),
+    Sapling(sapling_crypto::PaymentAddress),
+    Transparent(TransparentAddress),
+}
+
+/// The output policy shared by proof-free sizing and the actual coinbase builder.
+struct CoinbasePlan {
+    block_subsidy: Amount<NonNegative>,
+    miner_reward_address: MinerRewardAddress,
+    funding_stream_outputs: Vec<(Zatoshis, TransparentAddress)>,
+}
+
+impl CoinbasePlan {
+    fn new(
+        net: &Network,
+        height: Height,
+        miner_params: &MinerParams,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> Result<Self, TransactionError> {
+        let block_subsidy = match parent_nsm_value_balance {
+            Some(balance) => {
+                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
+                    height, net, balance,
+                )?
+            }
+            None => block_subsidy(height, net)?,
+        };
+        let upgrade = NetworkUpgrade::current(net, height);
+        let miner_reward_address = match miner_params.addr() {
+            Address::Unified(addr) => {
+                let fallback = || {
+                    addr.sapling()
+                        .filter(|_| upgrade >= NetworkUpgrade::Sapling)
+                        .map(|addr| MinerRewardAddress::Sapling(*addr))
+                        .or_else(|| {
+                            addr.transparent()
+                                .map(|addr| MinerRewardAddress::Transparent(*addr))
+                        })
+                };
+                let reward_address = if upgrade >= NetworkUpgrade::Nu5 {
+                    addr.orchard()
+                        .map(|addr| {
+                            if upgrade < NetworkUpgrade::Nu6_3 {
+                                MinerRewardAddress::Orchard(*addr)
+                            } else {
+                                MinerRewardAddress::Ironwood(*addr)
+                            }
+                        })
+                        .or_else(fallback)
+                } else {
+                    fallback()
+                };
+                reward_address.ok_or_else(|| {
+                    TransactionError::CoinbaseConstruction(
+                        "Could not construct miner reward output".to_string(),
+                    )
+                })?
+            }
+            Address::Sapling(addr) => MinerRewardAddress::Sapling(**addr),
+            Address::Transparent(addr) => MinerRewardAddress::Transparent(*addr),
+            _ => {
+                return Err(TransactionError::CoinbaseConstruction(
+                    "Address not supported for miner rewards".to_string(),
+                ));
+            }
+        };
+
+        let mut funding_stream_outputs = funding_stream_values(height, net, block_subsidy)?
+            .into_iter()
+            .filter_map(|(receiver, amount)| {
+                Some((*funding_stream_address(height, net, receiver)?, amount))
+            })
+            .chain(net.lockbox_disbursements(height))
+            .filter_map(|(addr, amount)| {
+                Some((Zatoshis::try_from(amount).ok()?, addr.try_into().ok()?))
+            })
+            .collect::<Vec<_>>();
+        funding_stream_outputs.sort();
+
+        Ok(Self {
+            block_subsidy,
+            miner_reward_address,
+            funding_stream_outputs,
+        })
+    }
+
+    /// Counts fixed-width fields and bundles without allocating scripts or proof bytes.
+    #[allow(clippy::unwrap_in_result)]
+    fn resource_usage(
+        &self,
+        version: TxVersion,
+    ) -> Result<CoinbaseResourceUsage, TransactionError> {
+        let compact_size_bytes = |value| {
+            CompactSizeMessage::try_from(value)
+                .expect("coinbase component length fits in a network message")
+                .zcash_serialized_size()
+        };
+        let transparent_miner = match self.miner_reward_address {
+            MinerRewardAddress::Transparent(addr) => Some(addr),
+            _ => None,
+        };
+        let transparent_outputs = self
+            .funding_stream_outputs
+            .iter()
+            .map(|(_, addr)| *addr)
+            .chain(transparent_miner);
+        let mut output_bytes = 0;
+        let mut sigops = 0;
+        for addr in transparent_outputs {
+            // Standard P2PKH/P2SH scripts are 25/23 bytes, and only P2PKH contains CHECKSIG.
+            let script_bytes = match addr {
+                TransparentAddress::PublicKeyHash(_) => {
+                    sigops += 1;
+                    25
+                }
+                TransparentAddress::ScriptHash(_) => 23,
+            };
+            output_bytes += 8 + compact_size_bytes(script_bytes) + script_bytes;
+        }
+        let output_count =
+            self.funding_stream_outputs.len() + usize::from(transparent_miner.is_some());
+        let transparent_bytes = compact_size_bytes(1)
+            + 36
+            + compact_size_bytes(MAX_COINBASE_SCRIPT_LEN)
+            + MAX_COINBASE_SCRIPT_LEN
+            + 4
+            + compact_size_bytes(output_count)
+            + output_bytes;
+
+        let orchard_proof_bytes = ::orchard::Proof::expected_proof_size(1);
+        let orchard_bundle_bytes = compact_size_bytes(1)
+            + ACTION_SIZE
+            + 1
+            + 8
+            + 32
+            + compact_size_bytes(orchard_proof_bytes)
+            + orchard_proof_bytes
+            + 64
+            + 64;
+        let sapling_output_bytes = 756 + GROTH_PROOF_SIZE;
+        let sapling_bundle_bytes =
+            compact_size_bytes(0) + compact_size_bytes(1) + 8 + sapling_output_bytes + 64;
+        let empty_sapling = compact_size_bytes(0) + compact_size_bytes(0);
+        let sapling = matches!(self.miner_reward_address, MinerRewardAddress::Sapling(_));
+        let orchard = matches!(self.miner_reward_address, MinerRewardAddress::Orchard(_));
+        let ironwood = matches!(self.miner_reward_address, MinerRewardAddress::Ironwood(_));
+        let (fixed_bytes, shielded_bytes) = match version {
+            TxVersion::Sprout(2) => (8, compact_size_bytes(0)),
+            TxVersion::V3 => (16, compact_size_bytes(0)),
+            TxVersion::V6 => {
+                let sapling_bytes = if sapling {
+                    sapling_bundle_bytes
+                } else {
+                    empty_sapling
+                };
+                let ironwood_bytes = if ironwood {
+                    orchard_bundle_bytes
+                } else {
+                    compact_size_bytes(0)
+                };
+                (20, sapling_bytes + compact_size_bytes(0) + ironwood_bytes)
+            }
+            TxVersion::V5 => {
+                let sapling_bytes = if sapling {
+                    sapling_bundle_bytes
+                } else {
+                    empty_sapling
+                };
+                let orchard_bytes = if orchard {
+                    orchard_bundle_bytes
+                } else {
+                    compact_size_bytes(0)
+                };
+                (20, sapling_bytes + orchard_bytes)
+            }
+            TxVersion::V4 => {
+                let output_bytes = if sapling {
+                    sapling_output_bytes + 64
+                } else {
+                    0
+                };
+                (
+                    16,
+                    8 + compact_size_bytes(0)
+                        + compact_size_bytes(usize::from(sapling))
+                        + output_bytes
+                        + compact_size_bytes(0),
+                )
+            }
+            _ => {
+                return Err(TransactionError::CoinbaseConstruction(format!(
+                    "Block production does not support the {version:?} transaction format"
+                )));
+            }
+        };
+        Ok(CoinbaseResourceUsage {
+            max_serialized_size: fixed_bytes + transparent_bytes + shielded_bytes,
+            sigops,
+            shielded_action_counts: ShieldedActionCounts {
+                sapling_io: usize::from(sapling),
+                orchard_actions: usize::from(orchard),
+                ironwood_actions: usize::from(ironwood),
+                ..Default::default()
+            },
+        })
+    }
+}
+
 impl TransactionTemplate<NegativeOrZero> {
+    /// Calculates coinbase limits without generating a zero-fee shielded proof.
+    pub(super) fn coinbase_resource_usage(
+        net: &Network,
+        height: Height,
+        miner_params: &MinerParams,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> Result<CoinbaseResourceUsage, TransactionError> {
+        let plan = CoinbasePlan::new(net, height, miner_params, parent_nsm_value_balance)?;
+        let branch = BranchId::for_height(net, BlockHeight::from(height));
+        plan.resource_usage(TxVersion::suggested_for_branch(branch))
+    }
+
     /// Constructs a transaction template for a coinbase without parent-dependent reissuance.
     ///
     /// `txs_fee` is the gross transaction fee total. The payout and the template's negative
@@ -150,16 +388,8 @@ impl TransactionTemplate<NegativeOrZero> {
         txs_fee: Amount<NonNegative>,
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Result<Self, TransactionError> {
-        let block_subsidy = match parent_nsm_value_balance {
-            Some(parent_nsm_value_balance) => {
-                zebra_chain::parameters::subsidy::block_subsidy_with_parent_nsm_value_balance(
-                    height,
-                    net,
-                    parent_nsm_value_balance,
-                )?
-            }
-            None => block_subsidy(height, net)?,
-        };
+        let plan = CoinbasePlan::new(net, height, miner_params, parent_nsm_value_balance)?;
+        let block_subsidy = plan.block_subsidy;
         // From NU7 activation, the coinbase can't claim the fees ZIP 235 removes from circulation.
         let miner_fees = (txs_fee - nsm_fee_contribution(height, net, txs_fee))?;
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fees;
@@ -176,97 +406,49 @@ impl TransactionTemplate<NegativeOrZero> {
         let default_memo = MemoBytes::empty();
         let memo = miner_params.memo().unwrap_or(&default_memo);
 
-        // ZIP-233 was dropped from the v6 transaction format, so no burn amount is set here. The
-        // fees ZIP 235 removes from circulation are left out of the miner reward above, and need
-        // no transaction field.
-
-        macro_rules! trace_err {
-            ($res:expr, $type:expr) => {
-                $res.map_err(|err| tracing::error!("Failed to add {} output: {err}", $type))
-                    .ok()
-            };
-        }
-
-        // On NU6.3 onward the coinbase MUST have an empty Orchard component, and newly shielded
-        // coinbase value is routed to the Ironwood pool instead (see the Ironwood pool spec and
-        // `coinbase_orchard_component_empty` in zebra-consensus). Ironwood outputs use the same
-        // Orchard-shaped `orchard::Address` as their recipient, so a unified miner address with an
-        // Orchard receiver just gets routed to the Ironwood output builder from NU6.3 onward.
-        let use_ironwood = NetworkUpgrade::current(net, height) >= NetworkUpgrade::Nu6_3;
-
-        let add_shielded_reward = |builder: &mut Builder<_, _>, addr: &_| {
-            let ovk = Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32]));
-            if use_ironwood {
-                trace_err!(
-                    builder.add_ironwood_output::<String>(ovk, *addr, miner_reward, memo.clone()),
-                    "Ironwood"
-                )
-            } else {
-                trace_err!(
-                    builder.add_orchard_output::<String>(ovk, *addr, miner_reward, memo.clone()),
-                    "Orchard"
-                )
-            }
-        };
-
-        let add_sapling_reward = |builder: &mut Builder<_, _>, addr: &_| {
-            trace_err!(
-                builder.add_sapling_output::<String>(
-                    Some(sapling_crypto::keys::OutgoingViewingKey([0u8; 32])),
-                    *addr,
+        match plan.miner_reward_address {
+            MinerRewardAddress::Orchard(addr) => builder
+                .add_orchard_output::<String>(
+                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
+                    addr,
                     miner_reward,
                     memo.clone(),
-                ),
-                "Sapling"
-            )
-        };
-
-        let add_transparent_reward = |builder: &mut Builder<_, _>, addr| {
-            trace_err!(
-                builder.add_transparent_output(addr, miner_reward),
-                "transparent"
-            )
-        };
-
-        match miner_params.addr() {
-            Address::Unified(addr) => addr
-                .orchard()
-                .and_then(|addr| add_shielded_reward(&mut builder, addr))
-                .or_else(|| {
-                    addr.sapling()
-                        .and_then(|addr| add_sapling_reward(&mut builder, addr))
-                })
-                .or_else(|| {
-                    addr.transparent()
-                        .and_then(|addr| add_transparent_reward(&mut builder, addr))
-                }),
-
-            Address::Sapling(addr) => add_sapling_reward(&mut builder, addr),
-
-            Address::Transparent(addr) => add_transparent_reward(&mut builder, addr),
-
-            _ => Err(TransactionError::CoinbaseConstruction(
-                "Address not supported for miner rewards".to_string(),
-            ))?,
+                )
+                .map_err(|error| {
+                    TransactionError::CoinbaseConstruction(format!(
+                        "Failed to add Orchard output: {error}"
+                    ))
+                })?,
+            MinerRewardAddress::Ironwood(addr) => builder
+                .add_ironwood_output::<String>(
+                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
+                    addr,
+                    miner_reward,
+                    memo.clone(),
+                )
+                .map_err(|error| {
+                    TransactionError::CoinbaseConstruction(format!(
+                        "Failed to add Ironwood output: {error}"
+                    ))
+                })?,
+            MinerRewardAddress::Sapling(addr) => builder
+                .add_sapling_output::<String>(
+                    Some(sapling_crypto::keys::OutgoingViewingKey([0u8; 32])),
+                    addr,
+                    miner_reward,
+                    memo.clone(),
+                )
+                .map_err(|error| {
+                    TransactionError::CoinbaseConstruction(format!(
+                        "Failed to add Sapling output: {error}"
+                    ))
+                })?,
+            MinerRewardAddress::Transparent(addr) => {
+                builder.add_transparent_output(&addr, miner_reward)?;
+            }
         }
-        .ok_or(TransactionError::CoinbaseConstruction(
-            "Could not construct output with miner reward".to_string(),
-        ))?;
 
-        let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
-            .into_iter()
-            .filter_map(|(receiver, amount)| {
-                Some((*funding_stream_address(height, net, receiver)?, amount))
-            })
-            .chain(net.lockbox_disbursements(height))
-            .filter_map(|(addr, amount)| {
-                Some((Zatoshis::try_from(amount).ok()?, addr.try_into().ok()?))
-            })
-            .collect::<Vec<_>>();
-
-        funding_streams.sort();
-
-        for (fs_amount, fs_addr) in funding_streams {
+        for (fs_amount, fs_addr) in plan.funding_stream_outputs {
             builder.add_transparent_output(&fs_addr, fs_amount)?;
         }
 

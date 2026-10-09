@@ -1048,10 +1048,18 @@ async fn setup(
     // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let zebra_state::ReadResponse::MiningTipChange(mining_tip_change) = _read_only_state_service
+        .clone()
+        .oneshot(zebra_state::ReadRequest::MiningTipChange)
+        .await
+        .unwrap()
+    else {
+        panic!("state returns the requested mining tip subscription");
+    };
     let (
         mut mempool_service,
         transaction_subscriber,
-        transaction_verified,
+        _transaction_verified,
         _templates,
         _template_requests,
     ) = Mempool::new(
@@ -1075,6 +1083,7 @@ async fn setup(
             1,
         ),
         None,
+        mining_tip_change.clone(),
     );
 
     // Pretend we're close to tip
@@ -1127,9 +1136,10 @@ async fn setup(
     let mempool_service = ServiceBuilder::new().buffer(1).service(mempool_service);
     let _queue_checker = crate::components::mempool::QueueChecker::spawn(
         mempool_service.clone(),
-        transaction_verified,
+        _transaction_verified,
         background_work,
         latest_chain_tip.clone(),
+        mining_tip_change,
     );
 
     let (setup_tx, setup_rx) = oneshot::channel();

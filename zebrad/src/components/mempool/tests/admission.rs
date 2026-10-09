@@ -44,9 +44,17 @@ pub(super) fn mock_proposals(mempool: &mut Mempool) -> ProposalVerifier {
 
 fn mock_proposals_with_width(mempool: &mut Mempool, split_width: usize) -> ProposalVerifier {
     let verifier = MockService::build().for_unit_tests();
+    let read_state = admission_read_state(mempool.state.clone(), &mempool.network);
+    let validated_state = tower::service_fn(move |request| {
+        assert!(
+            matches!(request, ReadRequest::ChainInfo | ReadRequest::Tip),
+            "admission must never query private mining context"
+        );
+        read_state.clone().oneshot(request)
+    });
     mempool.admission = Admission::new(
         mempool.network.clone(),
-        admission_read_state(mempool.state.clone(), &mempool.network),
+        Buffer::new(BoxService::new(validated_state), 1),
         Buffer::new(BoxService::new(verifier.clone()), 1),
         split_width,
     );
@@ -84,6 +92,7 @@ fn mock_templates(
         Some(miner_params),
         admission_read_state(mempool.state.clone(), &mempool.network),
         Buffer::new(BoxService::new(verifier.clone()), 1),
+        mempool.block_templates.mining_tip_change(),
     );
     mempool.block_templates = templates;
 
@@ -110,17 +119,19 @@ async fn read_admission_state<State: zebra_state::State>(
         unreachable!("Tip response expected")
     };
     Ok(match request {
-        ReadRequest::Tip => ReadResponse::Tip(tip),
-        ReadRequest::ChainInfo => ReadResponse::ChainInfo(zebra_state::GetBlockTemplateChainInfo {
-            tip_height: height,
-            tip_hash: tip.expect("fixture committed genesis").1,
-            chain_history_root: Some([0; 32].into()),
-            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
-            cur_time: DateTime32::from(1_654_008_617),
-            min_time: DateTime32::from(1_654_003_320),
-            max_time: DateTime32::from(1_654_008_719),
-            chain_value_pools: Default::default(),
-        }),
+        ReadRequest::Tip | ReadRequest::MiningTip => ReadResponse::Tip(tip),
+        ReadRequest::ChainInfo | ReadRequest::MiningChainInfo => {
+            ReadResponse::ChainInfo(zebra_state::GetBlockTemplateChainInfo {
+                tip_height: height,
+                tip_hash: tip.expect("fixture committed genesis").1,
+                chain_history_root: Some([0; 32].into()),
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                cur_time: DateTime32::from(1_654_008_617),
+                min_time: DateTime32::from(1_654_003_320),
+                max_time: DateTime32::from(1_654_008_719),
+                chain_value_pools: Default::default(),
+            })
+        }
         _ => panic!("unexpected admission state request"),
     })
 }

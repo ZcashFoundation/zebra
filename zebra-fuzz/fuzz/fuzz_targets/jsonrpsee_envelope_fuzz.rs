@@ -380,6 +380,7 @@ fn make_rpc(network: Network) -> FuzzRpcImpl {
         state,
         read_state,
         block_verifier_router,
+        zebra_chain::block::Height(0),
         AlwaysSynced::default(),
         NoChainTip,
         EmptyAddressBook::default(),

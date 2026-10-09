@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: '`Clone` for `block::SemanticBlockVerifier<S, V>` ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))'
+time: 2026-10-07T15:08:22.797797837+02:00

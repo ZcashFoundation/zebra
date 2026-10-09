@@ -216,9 +216,6 @@ fn template_max_time_respects_network_height_gate() {
         }
         assert!(result.min_time <= result.cur_time);
         assert!(result.cur_time <= result.max_time);
-        if network.is_regtest() {
-            assert_eq!(result.cur_time, result.min_time);
-        }
     }
 }
 

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Keep `getblocktemplate` long polls waiting through deadline-only extensions, retaining the miner's original expiry and parent, mempool, and reduced-range invalidation. ([#11613](https://github.com/ZcashFoundation/zebra/pull/11613))
+time: 2026-10-08T18:49:22.948189924+02:00

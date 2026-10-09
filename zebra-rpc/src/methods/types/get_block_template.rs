@@ -11,7 +11,7 @@ mod tests;
 use std::{
     collections::HashMap,
     fmt::{self},
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use derive_getters::Getters;
@@ -21,7 +21,7 @@ use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use tokio::sync::{
     mpsc::{self, error::TrySendError},
-    oneshot, watch,
+    oneshot, watch, OwnedSemaphorePermit, Semaphore,
 };
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
@@ -146,6 +146,13 @@ pub struct BlockTemplateResponse {
     #[serde(rename = "longpollid")]
     #[getter(copy)]
     pub(crate) long_poll_id: LongPollId,
+
+    /// The normalized proposal fingerprint for this exact transaction candidate.
+    ///
+    /// Unlike `longpollid`, this binds the selected transaction data and authorizing data.
+    /// Miners may echo it on submission, but it is never sufficient to skip validation.
+    #[serde(rename = "workid", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) work_id: Option<String>,
 
     /// The expected difficulty for the new block displayed in expanded form.
     #[serde(with = "hex")]
@@ -296,7 +303,7 @@ pub(crate) fn clamp_template_time_range(
 impl BlockTemplateResponse {
     /// Narrows the timestamp range after construction without changing its difficulty family.
     ///
-    /// A changed maximum changes work identity and invalidates retention of the old range.
+    /// A changed maximum changes long-poll identity and invalidates retention of the old range.
     pub(crate) fn clamp_time_range(&mut self, now: DateTime32) -> RpcResult<()> {
         let (cur_time, max_time) =
             clamp_template_time_range(self.min_time, self.cur_time, self.max_time, now)?;
@@ -304,9 +311,19 @@ impl BlockTemplateResponse {
             self.long_poll_id.max_timestamp = max_time.timestamp();
             self.submit_old = self.submit_old.map(|_| false);
         }
+        if cur_time != self.cur_time {
+            self.work_id = None;
+        }
         self.cur_time = cur_time;
         self.max_time = max_time;
         Ok(())
+    }
+
+    /// Sets the normalized proposal key advertised as the miner's cache lookup hint.
+    ///
+    /// The key does not authorize validation reuse; submitted bytes and context remain checked.
+    pub fn set_work_id(&mut self, work_id: [u8; 32]) {
+        self.work_id = Some(hex::encode(work_id));
     }
 
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
@@ -445,6 +462,7 @@ impl BlockTemplateResponse {
             coinbase_txn,
 
             long_poll_id,
+            work_id: None,
 
             target,
 
@@ -474,7 +492,7 @@ impl BlockTemplateResponse {
     ///
     /// Rechecks the advertised timestamp range against the local clock, including clock rollback,
     /// and expires standard-difficulty Testnet work after an abbreviated difficulty boundary.
-    /// Historical Regtest timestamps and an enforced median-time cap do not expire the template.
+    /// An enforced median-time cap does not expire the template.
     /// The producer must still verify the proposal before publishing it.
     pub fn is_valid_for_tip(
         &self,
@@ -492,7 +510,7 @@ impl BlockTemplateResponse {
         }
 
         // Only an abbreviated standard-difficulty Testnet range can become unprofitable.
-        // The full median-time cap cannot be extended by rebuilding. Regtest uses chain time.
+        // The full median-time cap cannot be extended by rebuilding.
         !(now > self.max_time
             && !network.is_regtest()
             && NetworkUpgrade::minimum_difficulty_spacing_for_height(
@@ -678,7 +696,7 @@ pub fn nsm_value_balance_for_next_block(
 
 /// Caches coinbases by height, parent NSM balance, and gross transaction fees.
 ///
-/// Shielded coinbases require expensive proofs. Keep zero-fee sizing and real-fee coinbases for
+/// Shielded coinbases require expensive proofs. Keep empty and fee-bearing coinbases for
 /// the selected context, discarding old proof completions rather than evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
 ///
@@ -694,7 +712,31 @@ struct CachedCoinbases {
     transactions: HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
 }
 
+/// Serializes proof-capable coinbase builds across independently configured RPC handlers.
+static COINBASE_PROOF_QUEUE: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(1)));
+
+/// Bounds concurrent block deserialization independently of verification waiting on ancestors.
+static BLOCK_DESERIALIZATION_QUEUE: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(8)));
+
+/// Bounds detached full-verification and commit tasks across RPC handlers.
+static MINED_BLOCK_SUBMISSION_QUEUE: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(8)));
+
 impl CoinbaseCache {
+    /// Waits for the shared coinbase prover without blocking an async runtime thread.
+    ///
+    /// Move the permit into the blocking build closure so cancellation cannot release its slot
+    /// while the proof still runs. Cached empty templates do not need a permit.
+    pub async fn proof_permit(&self) -> OwnedSemaphorePermit {
+        COINBASE_PROOF_QUEUE
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the global coinbase proof semaphore is never closed")
+    }
+
     /// Selects the height and parent balance before constructing either coinbase.
     ///
     /// Clear superseded work before starting a proof so late completions cannot replace it.
@@ -750,7 +792,7 @@ impl CoinbaseCache {
             return;
         }
         let map = &mut cache.transactions;
-        // Fee churn must not evict the zero-fee sizing coinbase or grow the cache without bound.
+        // Fee churn must not evict the empty-template coinbase or grow the cache without bound.
         if !map.contains_key(&fee) && map.len() >= 4 {
             let evict_key = map
                 .keys()
@@ -777,6 +819,9 @@ where
     /// The chain verifier, used for submitting blocks.
     block_verifier_router: BlockVerifierRouter,
 
+    /// The exact checkpoint/full-verification boundary selected by the consensus router.
+    max_checkpoint_height: block::Height,
+
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
 
@@ -797,16 +842,21 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Creates a new [`GetBlockTemplateHandler`].
+    ///
+    /// `max_checkpoint_height` must match the effective cutoff returned when initializing
+    /// `block_verifier_router`, including the checkpoint-sync configuration.
     pub fn new(
         net: &Network,
         conf: config::mining::Config,
         block_verifier_router: BlockVerifierRouter,
+        max_checkpoint_height: block::Height,
         sync_status: SyncStatus,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         Self {
             miner_params: MinerParams::new(net, conf).ok(),
             block_verifier_router,
+            max_checkpoint_height,
             sync_status,
             mined_block_sender: mined_block_sender
                 .unwrap_or(SubmitBlockChannel::default().sender()),
@@ -828,6 +878,31 @@ where
         self.miner_params = Some(miner_params);
     }
 
+    /// Waits for bounded deserialization admission while the HTTP caller still owns the wait.
+    pub(crate) async fn deserialization_permit(&self) -> OwnedSemaphorePermit {
+        BLOCK_DESERIALIZATION_QUEUE
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the process-wide block deserialization semaphore is never closed")
+    }
+
+    /// Returns whether this height is routed to checkpoint verification.
+    pub(crate) fn uses_checkpoint_verifier(&self, height: block::Height) -> bool {
+        height <= self.max_checkpoint_height
+    }
+
+    /// Reserves a detached full-verification slot, rejecting excess work instead of queuing it.
+    ///
+    /// Checkpoint requests must not retain these slots while waiting for the rest of their range.
+    /// Keep the permit in semantic verification/commit tasks even if the RPC caller disconnects.
+    pub(crate) fn submission_permit(&self) -> Option<OwnedSemaphorePermit> {
+        MINED_BLOCK_SUBMISSION_QUEUE
+            .clone()
+            .try_acquire_owned()
+            .ok()
+    }
+
     /// Returns the sync status.
     pub fn sync_status(&self) -> SyncStatus {
         self.sync_status.clone()
@@ -838,7 +913,7 @@ where
         self.block_verifier_router.clone()
     }
 
-    /// Advertises the mined block.
+    /// Advertises a committed mined block whose body is publicly readable.
     pub fn advertise_mined_block(
         &self,
         block: block::Hash,
@@ -1103,4 +1178,31 @@ where
     };
 
     Ok(chain_info)
+}
+
+/// Returns template-only state data without proposal-validation work.
+///
+/// Call `check_synced_to_tip()` first. Proposal and integration callers must continue using
+/// [`fetch_chain_info`], which requests the ordinary chain information.
+pub async fn fetch_mining_chain_info<State>(state: State) -> RpcResult<GetBlockTemplateChainInfo>
+where
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let request = zebra_state::ReadRequest::MiningChainInfo;
+    let response = state
+        .oneshot(request.clone())
+        .await
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+
+    match response {
+        zebra_state::ReadResponse::ChainInfo(chain_info) => Ok(chain_info),
+        _ => unreachable!("incorrect response to {request:?}"),
+    }
 }
