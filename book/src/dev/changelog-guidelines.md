@@ -28,7 +28,10 @@ changie new -j zebra-chain -j zebra-state -k breaking -b "Renamed ..."
 
 Kinds are `breaking` (rendered as `Breaking Changes`), `Added`, `Changed`,
 `Deprecated`, `Removed`, `Fixed` and `Security`; `-j` takes a project key, which
-is `zebrad` or a crate directory name. Running `changie new` with no flags
+is `zebrad` or a crate directory name. A release that activates a network upgrade
+also takes one `zebrad` fragment of kind `network-upgrade` (rendered as `Network
+Upgrade`). It is the only kind that gives `zebrad` a new major version, only
+`zebrad` may use it, and like `breaking` it needs a `!` in the PR title. Running `changie new` with no flags
 prompts for all of them. Fragments land in `.changes/unreleased/` and are
 committed with the PR.
 
@@ -107,7 +110,7 @@ Bad, multiple PRs on one line:
 ### Section order
 
 Sections appear in the order the `kinds` are listed in `.changie.yaml`: Zebra's
-own `breaking` kind first, then [Keep a
+own `network-upgrade` and `breaking` kinds first, then [Keep a
 Changelog](https://keepachangelog.com/en/1.0.0/) order:
 
 ```text
@@ -115,6 +118,7 @@ Changelog](https://keepachangelog.com/en/1.0.0/) order:
 
 [2-4 sentence summary]
 
+### Network Upgrade
 ### Breaking Changes
 ### Added
 ### Changed

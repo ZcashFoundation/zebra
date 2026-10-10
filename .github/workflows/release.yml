@@ -105,8 +105,8 @@ jobs:
       # Changie owns every changelog, so the versioned entries for this release
       # are generated here instead of by release-plz: the fragments that source
       # PRs committed are batched into the versions release-plz picked, and every
-      # changelog is regenerated from `.changes/`. release-plz stays the only
-      # thing that decides versions.
+      # changelog is regenerated from `.changes/`. Release readiness fails when
+      # those versions differ from the plan the fragments give.
       - name: Plan changelog batching
         id: batch-plan
         env:
@@ -200,6 +200,7 @@ jobs:
       group: release-target-${{ github.event.pull_request.number || inputs.release_pr_number }}
       cancel-in-progress: false
     outputs:
+      base_ref: ${{ steps.release-target.outputs.base_ref }}
       base_sha: ${{ steps.release-target.outputs.base_sha }}
       operation: ${{ steps.release-target.outputs.operation }}
       pr_number: ${{ steps.release-target.outputs.pr_number }}
@@ -282,6 +283,7 @@ jobs:
               }
             }
 
+            core.setOutput("base_ref", pr.baseRefName);
             core.setOutput("base_sha", baseSha);
             core.setOutput("operation", requestedOperation);
             core.setOutput("pr_number", String(prNumber));
@@ -291,86 +293,15 @@ jobs:
     name: Check release without publishing
     needs: release-target
     if: needs.release-target.outputs.operation == 'check'
-    runs-on: ubuntu-latest-xl
-    timeout-minutes: 90
     permissions:
       contents: read
     concurrency:
       group: release-check-${{ needs.release-target.outputs.pr_number }}
       cancel-in-progress: true
-    steps:
-      - name: Check out immutable release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
-        with:
-          fetch-depth: 0
-          path: release-source
-          persist-credentials: false
-          ref: ${{ needs.release-target.outputs.target_sha }}
-      - name: Validate release changelogs
-        id: changelogs
-        continue-on-error: true
-        working-directory: release-source
-        env:
-          BASE_SHA: ${{ needs.release-target.outputs.base_sha }}
-          TARGET_SHA: ${{ needs.release-target.outputs.target_sha }}
-        run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
-      - name: Install Cargo 1.91
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
-        with:
-          toolchain: 1.91.0
-          cache-workspaces: release-source -> target
-          cache-on-failure: true
-      - name: Install libclang for librocksdb-sys bindgen
-        working-directory: release-source
-        run: .github/scripts/apt-install.sh libclang-dev
-      - name: Check desired release state
-        id: cargo-release
-        continue-on-error: true
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e #v0.1.0
-        with:
-          phase: check
-          source-directory: release-source
-          base-sha: ${{ needs.release-target.outputs.base_sha }}
-          target-sha: ${{ needs.release-target.outputs.target_sha }}
-          config-path: release-source/.github/cargo-release.yml
-          github-token: ${{ github.token }}
-      - name: Summarize release check
-        if: always()
-        env:
-          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
-          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
-          PLAN: ${{ steps.cargo-release.outputs.plan }}
-          REPORT: ${{ steps.cargo-release.outputs.report }}
-        run: |
-          {
-            echo "## Cargo Release check"
-            echo "| Validation | Result |"
-            echo "| --- | --- |"
-            echo "| Changelogs | \`${CHANGELOG_RESULT}\` |"
-            echo "| Cargo release | \`${CARGO_RELEASE_RESULT}\` |"
-            if [[ -n "${PLAN}" ]]; then
-              echo '### Plan'
-              echo '```json'
-              jq . <<< "${PLAN}" || printf '%s\n' "${PLAN}"
-              echo '```'
-            fi
-            if [[ -n "${REPORT}" ]]; then
-              echo '### Report'
-              echo '```json'
-              jq . <<< "${REPORT}" || printf '%s\n' "${REPORT}"
-              echo '```'
-            fi
-          } >> "${GITHUB_STEP_SUMMARY}"
-      - name: Require successful release checks
-        if: always()
-        env:
-          CARGO_RELEASE_RESULT: ${{ steps.cargo-release.outcome }}
-          CHANGELOG_RESULT: ${{ steps.changelogs.outcome }}
-        run: |
-          if [[ "${CHANGELOG_RESULT}" != "success" || "${CARGO_RELEASE_RESULT}" != "success" ]]; then
-            echo "::error title=Release check failed::Review each failed validation step and the job summary."
-            exit 1
-          fi
+    uses: ./.github/workflows/release-readiness.yml
+    with:
+      base-ref: ${{ needs.release-target.outputs.base_ref }}
+      target-sha: ${{ needs.release-target.outputs.target_sha }}
 
   release:
     name: Publish crates and GitHub Release
