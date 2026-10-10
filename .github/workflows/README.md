@@ -403,7 +403,3 @@ docker run --rm zebra-tests
 - This covers the repository-owned checks (`lint`, `unit-tests`, `test-crates`,
   `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
   `mergefreeze` status on the merge group
-
-It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
-`pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
-manually with the PR number.
