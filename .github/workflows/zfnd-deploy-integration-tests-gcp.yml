@@ -134,7 +134,7 @@ jobs:
   #     decimal run id satisfies that, but anything appended after it would not, and
   #     the resources would leak.
   #   - The two names must DIFFER. GCE names an instance's boot disk after the
-  #     instance when none is given, and `create-with-container` gives none, so an
+  #     instance when none is given, and `instances create` gives none, so an
   #     identical data-disk name collides with the boot disk and creation fails.
   #
   # Neither the branch nor the commit is part of the name: both are carried on the
@@ -288,10 +288,10 @@ jobs:
 
       # Disk Mounting Logic Explanation:
       #
-      # The following step creates a GCP instance using create-with-container.
-      # The $CONTAINER_MOUNT_DISKS variable, constructed within the run script,
-      # defines how the created persistent disk (specified in $DISK_PARAMS)
-      # is mounted into the test container using --container-mount-disk.
+      # The following step creates a GCP instance whose container is launched by
+      # cloud-init (see scripts/gcp-container-cloud-init.sh). $MOUNT_PATHS lists the
+      # container paths the persistent disk (specified in $DISK_PARAMS) is
+      # bind-mounted at, from a single host mount of the disk.
       #
       # If the test needs Lightwalletd state (inputs.needs_lwd_state is true or test_id is lwd-sync-full),
       # the same persistent disk is mounted to both the Zebra state path (inputs.zebra_state_dir)
@@ -323,13 +323,17 @@ jobs:
           # 5-day timeout - see DELETE_LONG_TEST_INSTANCE_DAYS in
           # zfnd-delete-gcp-resources.yml.
           IS_LONG_TEST: ${{ inputs.is_long_test }}
+          ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
+          LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
+          NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
+          CI_IMAGE_NAME: ${{ vars.CI_IMAGE_NAME }}
         run: |
 
-          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
+          MOUNT_PATHS="${ZEBRA_STATE_DIR}"
 
           # Mount the same disk to the lwd path if needed
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
+          if [[ "${NEEDS_LWD_STATE}" == "true" || "${TEST_ID}" == "lwd-sync-full" ]]; then
+            MOUNT_PATHS+=" ${LWD_STATE_DIR}"
           fi
 
           # Environment variables for the container
@@ -347,6 +351,17 @@ jobs:
           for z in us-east1-b us-east1-c us-east1-d; do
             [ "${z}" = "${PRIMARY_ZONE}" ] || ORDERED_ZONES="${ORDERED_ZONES} ${z}"
           done
+
+          # konlet is deprecated, so the container runs from a cloud-init systemd
+          # unit. Restart=no matches konlet's --container-restart-policy=never and
+          # leaves the exited container for the log-reading steps below.
+          CONTAINER_IMAGE="${GAR_BASE_TRIMMED}/${CI_IMAGE_NAME}:sha-${GITHUB_SHA_SHORT}" \
+          CONTAINER_NAME=zebrad-test \
+          CONTAINER_ENV="${CONTAINER_ENV}" \
+          DISK_DEVICE_NAME="${NAME}" \
+          MOUNT_PATHS="${MOUNT_PATHS}" \
+          RESTART_POLICY=no \
+            .github/workflows/scripts/gcp-container-cloud-init.sh > /tmp/cloud-init.yaml
 
           # Creates the data disk (when using a cached image) and the instance in one
           # zone. Returns non-zero if either call fails, leaving the caller to inspect
@@ -368,27 +383,21 @@ jobs:
               DISK_ATTACH_PARAMS="--create-disk=size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
             fi
 
-            # DISK_ATTACH_PARAMS and CONTAINER_MOUNT_DISKS each expand to one or more
-            # separate gcloud arguments, so they are deliberately left unquoted.
+            # DISK_ATTACH_PARAMS expands to one or more separate gcloud arguments, so
+            # it is deliberately left unquoted.
             # shellcheck disable=SC2086
-            gcloud compute instances create-with-container "${INSTANCE_NAME}" \
+            gcloud compute instances create "${INSTANCE_NAME}" \
             --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
             --boot-disk-size=50GB \
             --boot-disk-type=pd-ssd \
             --image-project=cos-cloud \
             --image-family=cos-stable \
             ${DISK_ATTACH_PARAMS} \
-            ${CONTAINER_MOUNT_DISKS} \
-            --container-stdin \
-            --container-tty \
-            --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
-            --container-env="${CONTAINER_ENV}" \
-            --container-restart-policy=never \
             --subnet=${{ vars.GCP_SUBNETWORK }} \
             --scopes cloud-platform \
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
-            --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
+            --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh,user-data=/tmp/cloud-init.yaml \
             --labels="app=${APP_NAME},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${GITHUB_REF_SLUG_URL},test=${TEST_ID},commit=${GITHUB_SHA_SHORT},long-test=${IS_LONG_TEST}" \
             --tags ${{ inputs.app_name }} \
             --zone "${zone}"
@@ -432,7 +441,8 @@ jobs:
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
-          CONTAINER_PREFIX="klt-${INSTANCE_NAME}"
+          # cloud-init names the container deterministically; konlet used klt-<instance>.
+          CONTAINER_PREFIX="zebrad-test"
 
           echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
 
