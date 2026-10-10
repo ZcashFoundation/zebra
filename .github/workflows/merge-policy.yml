@@ -1,4 +1,4 @@
-# Fast required check for repository-owned merge holds.
+# Fast required check for repository-owned merge holds and Release PR freshness in the queue.
 name: Merge Policy
 
 on:
@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       pull-requests: read # reads the labels of the pull requests in a merge group
+      contents: read # compares a queued Release PR with the queue base
     steps:
       - name: Enforce do-not-merge
         if: github.event_name == 'pull_request'
@@ -43,6 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           # refs/heads/gh-readonly-queue/<base>/pr-<number>-<sha>, one `pr-` segment
           # per entry in the group.
@@ -56,17 +58,32 @@ jobs:
           held=0
 
           while read -r number; do
-            # Fail closed: a group whose labels cannot be read is held, not let through.
-            if ! labels="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}" --jq '.labels[].name')"; then
-              echo "::error title=Cannot read pull request #${number}::Reading its labels failed, so this check cannot tell whether a hold applies."
+            # Fail closed: a group whose pull requests cannot be read is held, not let through.
+            if ! pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}" --jq '[.head.ref, .head.sha, (.labels | map(.name) | join(","))] | @tsv')"; then
+              echo "::error title=Cannot read pull request #${number}::Reading it failed, so this check cannot tell whether a hold applies."
               exit 1
             fi
 
-            if grep -qxF 'do-not-merge' <<<"${labels}"; then
+            IFS=$'\t' read -r head_ref head_sha labels <<<"${pr}"
+
+            if [[ ",${labels}," == *,do-not-merge,* ]]; then
               echo "::error title=Held by do-not-merge::Pull request #${number} in this merge group carries \`do-not-merge\`."
               held=1
             else
               echo "Pull request #${number}: no repository-owned merge hold is active."
+            fi
+
+            if [[ "${head_ref}" == release-plz-* && ",${labels}," == *,release,* ]]; then
+              # Fail closed: a Release PR that cannot be compared with the queue base is held.
+              if ! behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${head_sha}" --jq .behind_by)"; then
+                echo "::error title=Cannot compare Release PR #${number}::Comparing ${head_sha} with the queue base ${BASE_SHA} failed, so this check cannot tell whether the Release PR is behind."
+                exit 1
+              fi
+
+              if [[ "${behind}" != "0" ]]; then
+                echo "::error title=Release PR is behind the queue::Release PR #${number} (${head_sha}) is ${behind} commit(s) behind the queue base ${BASE_SHA}, so its release plan does not cover everything being merged. Wait for release-plz to update it."
+                held=1
+              fi
             fi
           done <<<"${numbers}"
 
