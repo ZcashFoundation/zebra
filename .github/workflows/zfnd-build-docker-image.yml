@@ -171,11 +171,12 @@ jobs:
           # Docker Hub publishing requires ALL conditions to be true:
           # - inputs.publish_to_dockerhub must be explicitly set to true (defaults to false)
           # - Event must be a release (not a pre-release)
+          # - The workflow must be running in ZcashFoundation/zebra
           # This prevents duplicate publishing when both release-binaries.yml and deploy-nodes.yml run
           # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease }}
+            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease && github.repository == 'ZcashFoundation/zebra' }}
           labels: |
             org.opencontainers.image.revision=${{ inputs.source_sha }}
           # generate Docker tags based on the following events/attributes
@@ -190,8 +191,8 @@ jobs:
             # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
             # - `edge`: Tags the latest build on the default branch (e.g., `main`), used in CI to represent the cutting-edge version for testing.
             # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
-            type=ref,event=pr
-            type=ref,event=branch
+            type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
+            type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=edge,enable={{is_default_branch}}
             type=schedule
             # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
@@ -235,10 +236,10 @@ jobs:
 
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
-      # With provenance and SBOM (ZcashFoundation repository only)
+      # With provenance and SBOM (ZcashFoundation/zebra only)
       - name: Build & push (with attestations)
         id: docker_build
-        if: github.repository_owner == 'ZcashFoundation'
+        if: github.repository == 'ZcashFoundation/zebra'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
           platforms: ${{ matrix.platform }}
@@ -261,11 +262,11 @@ jobs:
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
 
-      # Build and push image by digest without attestations (contributor forks)
+      # Build and push image by digest without attestations (repository copies)
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
       - name: Build & push (without attestations)
         id: docker_build_no_attestations
-        if: github.repository_owner != 'ZcashFoundation'
+        if: github.repository != 'ZcashFoundation/zebra'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
           platforms: ${{ matrix.platform }}
@@ -333,11 +334,11 @@ jobs:
         with:
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease }}
+            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease && github.repository == 'ZcashFoundation/zebra' }}
           tags: |
             type=semver,pattern={{version}}
-            type=ref,event=pr
-            type=ref,event=branch
+            type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
+            type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=edge,enable={{is_default_branch}}
             type=schedule
             type=sha,event=pr
@@ -359,11 +360,11 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      # Login to DockerHub when:
+      # Login to DockerHub in ZcashFoundation/zebra, when:
       # 1. Publishing images for a release (not prerelease), OR
       # 2. Running Docker Scout on release PRs (requires DockerHub authentication)
       - name: Login to DockerHub
-        if: (inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease) || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v'))
+        if: github.repository == 'ZcashFoundation/zebra' && ((inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease) || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v')))
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -394,7 +395,7 @@ jobs:
 
       # Sign + attest the released image
       - name: Attest build provenance
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: docker.io/zfnd/${{ inputs.image_name }}
@@ -402,11 +403,11 @@ jobs:
           push-to-registry: true
 
       - name: Install Cosign
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign images with Cosign
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
         env:
           DIGEST: ${{ steps.create.outputs.digest }}
           GAR_IMAGE: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
@@ -416,7 +417,7 @@ jobs:
           cosign sign --yes "${HUB_IMAGE}@${DIGEST}"
 
       - name: Generate SBOM
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: docker.io/zfnd/${{ inputs.image_name }}@${{ steps.create.outputs.digest }}
@@ -425,7 +426,7 @@ jobs:
           upload-artifact: false
 
       - name: Attest SBOM
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: docker.io/zfnd/${{ inputs.image_name }}
@@ -435,7 +436,7 @@ jobs:
 
       # Fail the release if the signature or attestations don't verify.
       - name: Verify release signatures
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: github.repository == 'ZcashFoundation/zebra' && inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
         env:
           DIGEST: ${{ steps.create.outputs.digest }}
           HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
