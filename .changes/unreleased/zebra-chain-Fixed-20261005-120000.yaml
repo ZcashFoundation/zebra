@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: With the `proptest-impl` feature, `Transaction::with_transparent_inputs` no longer leaves an empty transparent bundle when a transaction ends up with no transparent inputs or outputs. An empty bundle hashes differently from an absent one but serializes to the same bytes, which parse as absent, so the txid of a v5 or v6 transaction did not match its serialized form, including in transactions from `fix_generated_transaction` and `Block::partial_chain_strategy`.
+time: 2026-10-05T12:00:00.000000+00:00

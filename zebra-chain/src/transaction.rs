@@ -1411,8 +1411,13 @@ impl Transaction {
     }
 
     /// Rebuild this transaction with new transparent inputs.
+    ///
+    /// Drops the transparent bundle if it ends up with no inputs and no outputs, because
+    /// librustzcash hashes an empty bundle differently from an absent one, and the
+    /// serialized transaction always parses as absent. This keeps the v5 and v6 txid
+    /// matching the one parsed from the serialized transaction.
     pub fn with_transparent_inputs(self, inputs: Vec<transparent::Input>) -> Self {
-        let vin = inputs
+        let vin: Vec<_> = inputs
             .iter()
             .map(crate::transaction::compat::input_to_txin)
             .collect();
@@ -1421,11 +1426,12 @@ impl Transaction {
             .transparent_bundle()
             .map(|b| b.vout.clone())
             .unwrap_or_default();
-        let transparent_bundle = Some(zcash_transparent::bundle::Bundle {
-            vin,
-            vout,
-            authorization: zcash_transparent::bundle::Authorized,
-        });
+        let transparent_bundle =
+            (!vin.is_empty() || !vout.is_empty()).then_some(zcash_transparent::bundle::Bundle {
+                vin,
+                vout,
+                authorization: zcash_transparent::bundle::Authorized,
+            });
         self.rebuild_with_transparent(transparent_bundle)
     }
 

@@ -1817,3 +1817,41 @@ fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
     assert!(!tx.is_coinbase());
     assert!(tx.is_valid_non_coinbase());
 }
+
+/// Tests that dropping every transparent input from a transaction with no transparent
+/// outputs leaves no transparent bundle, so its txid matches its serialized form.
+///
+/// ZIP-244 defines a single transparent digest for a transaction with no transparent
+/// inputs or outputs, but librustzcash only produces it for an absent bundle: a present
+/// bundle with empty `vin` and `vout` hashes differently. Both serialize to the same
+/// bytes, which always parse as absent.
+#[test]
+fn with_transparent_inputs_drops_empty_bundle() {
+    let _test_guard = zebra_test::init();
+
+    let orchard = fake_orchard_bundle(
+        Flags::ENABLED,
+        ZatBalance::from_i64(0).expect("zero is a valid balance"),
+        1,
+        1,
+        BundleVersion::orchard_insecure_v1(),
+    );
+    let transaction = Transaction::test_v5_with_orchard(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+        block::Height(0),
+        Some(orchard),
+    )
+    .with_transparent_inputs(Vec::new());
+
+    assert!(transaction.transparent_bundle().is_none());
+
+    let deserialized_transaction: Transaction = transaction
+        .zcash_serialize_to_vec()
+        .expect("the fixture serializes")
+        .zcash_deserialize_into()
+        .expect("the serialized fixture parses");
+    assert_eq!(deserialized_transaction.hash(), transaction.hash());
+}
