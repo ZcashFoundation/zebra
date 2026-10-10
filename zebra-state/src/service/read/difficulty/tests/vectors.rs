@@ -11,6 +11,58 @@ use zebra_chain::{
 
 use super::*;
 
+/// The Blossom candidate uses a 450-second minimum-difficulty gap, not its parent's 900 seconds.
+#[test]
+fn spacing_uses_candidate_height_across_nu_boundary() {
+    // A candidate height well above the minimum-difficulty start height (299188).
+    let previous_block_height = Height(1_000_000);
+    let candidate_block_height = Height(1_000_001);
+
+    let network = Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            sapling: Some(2),
+            blossom: Some(candidate_block_height.0),
+            // Canopy must be set for `to_network` (it defines the mandatory checkpoint); put
+            // it just above the boundary so it doesn't affect the two heights under test.
+            heartwood: Some(candidate_block_height.0 + 1),
+            canopy: Some(candidate_block_height.0 + 2),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("configured testnet is valid");
+
+    // The boundary this test depends on: the spacing changes between the two heights.
+    assert_eq!(
+        NetworkUpgrade::current(&network, previous_block_height),
+        NetworkUpgrade::Sapling
+    );
+    assert_eq!(
+        NetworkUpgrade::current(&network, candidate_block_height),
+        NetworkUpgrade::Blossom
+    );
+
+    // Past the candidate's 450 s gap, but within the previous block's stale 900 s gap.
+    let cur = PREV + 500;
+    let mut result = chain_info(cur);
+
+    adjust_difficulty_and_time_for_testnet(
+        &mut result,
+        &network,
+        previous_block_height,
+        recent_block_data(&network),
+    );
+
+    // The old spacing leaves the sentinel difficulty and minimum time unchanged.
+    assert_eq!(
+        result.expected_difficulty,
+        network.target_difficulty_limit().to_compact()
+    );
+    assert_eq!(result.min_time, DateTime32::from(PREV + 6 * 75 + 1));
+}
+
 /// Header-only queries must retain genesis and follow the best fork's timestamps.
 #[test]
 fn header_context_queries_preserve_genesis_and_fork_ancestry() {
