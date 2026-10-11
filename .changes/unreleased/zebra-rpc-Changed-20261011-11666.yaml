@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The exported HTTP compatibility middleware now upgrades homogeneous versionless and JSON-RPC 1.0 batches with non-null IDs, returning responses in the same version. Other batches pass through unchanged.'
+time: 2026-10-11T00:00:00Z
