@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Exposed `difficulty_is_valid`, `equihash_solution_is_valid`, and `merkle_root_validity` for checking block difficulty, proof of work, and commitments before relay.
+time: 2026-10-11T12:00:00.000000000+00:00

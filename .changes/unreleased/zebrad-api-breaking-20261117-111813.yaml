@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: '`components::sync::gossip_best_tip_block_hashes` takes a `zebra_rpc::SubmittedBlockCache` whose validated pending submissions it advertises before commit; pass the cache shared with `RpcImpl::with_submitted_blocks`, or `SubmittedBlockCache::default()` to advertise only committed blocks ([#11670](https://github.com/ZcashFoundation/zebra/pull/11670)).'
+time: 2026-11-17T11:18:13.891278432+01:00
