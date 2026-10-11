@@ -723,6 +723,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                         Request::Tip => Response::Tip(Some(parent)),
                         Request::BestChainBlockHash(_) => Response::BlockHash(None),
                         Request::KnownBlock(_) => Response::KnownBlock(None),
+                        Request::MiningCandidate(_) => Response::MiningCandidate(None),
                         Request::AwaitUtxo(requested) => {
                             assert_eq!(requested, outpoint);
                             Response::Utxo(utxo.utxo)
