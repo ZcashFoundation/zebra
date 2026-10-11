@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Mining work can extend newly received blocks before transaction and contextual validation finish. Early work is coinbase-only, expires after 30 seconds, and is disabled once NSM reissuance activates.'
+time: 2026-10-11T00:00:00Z

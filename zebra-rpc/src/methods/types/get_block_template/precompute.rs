@@ -3,12 +3,12 @@
 //! Miners call `getblocktemplate` far more often than the chain tip or the mempool change, and
 //! building a template needs a state read, a mempool read, ZIP-317 transaction selection, and a
 //! coinbase transaction, which re-runs a shielded proof when the miner address has a shielded
-//! component. So [`run()`] keeps a template for the current chain tip ready in a [`TemplateCache`],
-//! and the RPC only has to check that the template still extends the tip.
+//! component. So [`run()`] keeps current work ready in a [`TemplateCache`], and the RPC checks
+//! that its parent is still the tip or the current proof-of-work checked candidate.
 //!
 //! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
-//! ignores a template whose previous block hash isn't the current tip, and [`run()`] publishes a
-//! coinbase-only template for a new tip as soon as it sees one.
+//! only serves the current tip or a proof-of-work checked parent under verification. Early work
+//! is coinbase-only and withdrawn when verification ends or times out.
 
 use std::{
     collections::HashSet,
@@ -39,7 +39,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{router::service_trait::BlockVerifierService, Request as VerifyRequest};
 use zebra_node_services::mempool::{self, MempoolChange, MempoolService};
-use zebra_state::{ReadRequest, ReadResponse, ReadState};
+use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, ReadState};
 
 use crate::{
     methods::types::{long_poll::LongPollInput, transaction::TransactionTemplate},
@@ -93,6 +93,8 @@ const BUILD_STARTED: u8 = 2;
 
 /// A block template for the block after the current chain tip, shared between [`run()`] and the
 /// `getblocktemplate` RPC.
+///
+/// No updater work yet is `None`; invalidated work awaiting a rebuild is `Some(None)`.
 #[derive(Clone)]
 pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<AtomicBool>);
 
@@ -168,9 +170,18 @@ impl TemplateCache {
             .is_some_and(|template| template.previous_block_hash == tip_hash)
     }
 
-    /// Returns `true` if no [`run()`] task has published a template yet.
-    pub(crate) fn is_empty(&self) -> bool {
+    /// Returns `true` if the updater has not initialized the cache.
+    pub(crate) fn is_uninitialized(&self) -> bool {
         self.0.borrow().is_none()
+    }
+
+    /// Returns `true` if no template is currently available.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0
+            .borrow()
+            .as_ref()
+            .is_none_or(|state| state.template.is_none())
     }
 
     /// Unowned work must be refreshed at the normal mempool polling interval.
@@ -245,6 +256,15 @@ impl TemplateCache {
         }));
     }
 
+    /// Withdraws cached work and wakes long polls.
+    pub(crate) fn clear(&self) {
+        self.0.send_replace(Some(TemplateState {
+            template: None,
+            published_at: Instant::now(),
+            error: None,
+        }));
+    }
+
     /// Returns a template for `tip_hash`, narrowing its timestamp range to the local-clock bound.
     /// Rejects empty ranges and Testnet work whose time-dependent difficulty may have become easier.
     pub(crate) fn template_for_tip(
@@ -278,12 +298,13 @@ impl TemplateCache {
     }
 }
 
-/// Keeps `cache` filled with a block template for the current chain tip.
+/// Keeps `cache` filled with a block template for the current mining parent.
 ///
 /// Publishes a coinbase-only template as soon as the chain tip changes, then replaces it with a
 /// template that contains mempool transactions. Rebuilds after throttled mempool changes, with a
 /// backstop for missed events and clock changes after at least [`MEMPOOL_LONG_POLL_INTERVAL`]
-/// seconds. Both waits respect the previous build's duration.
+/// seconds. Both waits respect the previous build's duration. A candidate under verification
+/// takes priority and receives only coinbase-only work.
 ///
 /// Runs until the task is aborted.
 #[allow(clippy::too_many_arguments)]
@@ -316,12 +337,22 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         network.clone(),
         verifier,
     ));
+    let Ok(ReadResponse::MiningCandidateChanges(mut candidate_changes)) = read_state
+        .clone()
+        .oneshot(ReadRequest::MiningCandidateChanges)
+        .await
+    else {
+        return;
+    };
+
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
     let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
+    // Retain interrupted builds rather than detaching their CPU-heavy coinbase proofs.
+    let mut full_build = None;
 
     loop {
         // `getblocktemplate` returns an error until Zebra is synced to the tip, so there's nothing
@@ -342,6 +373,34 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         latest_chain_tip.mark_best_tip_seen();
         // The next snapshot includes earlier events; retain events arriving during the build.
         mempool_changes = mempool_changes.resubscribe();
+        candidate_changes.mark_seen();
+
+        if let Some(info) = mining_candidate(read_state.clone()).await {
+            // ponytail: Testnet may use tip work for 30s; refresh context at difficulty boundaries.
+            if let Ok(height) = info.tip_height.next() {
+                store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
+            }
+            if let Ok(Some(template)) = build(
+                &network,
+                &miner_params,
+                &coinbase_cache,
+                read_state.clone(),
+                None::<Mempool>,
+                Some(info),
+                None,
+            )
+            .await
+            {
+                cache.publish(template);
+            }
+            let mut tip_change = latest_chain_tip.clone();
+            tokio::select! {
+                _ = candidate_changes.changed() => {}
+                result = tip_change.best_tip_changed() => if result.is_err() { return; }
+            }
+            cache.clear();
+            continue;
+        }
 
         // If we have no template for the current tip, publish a coinbase-only one immediately, so
         // miners extend the new tip instead of wasting work on a shorter chain while we select
@@ -359,6 +418,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     read_state.clone(),
                     None::<Mempool>,
                     None,
+                    None,
                 )
                 .await
                 {
@@ -375,26 +435,22 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         }
 
         let build_started = Instant::now();
-        // Cancel obsolete snapshots, but retain the owner of every dispatched proof.
-        let build_phase = AtomicU8::new(BUILD_FETCHING);
-        let mut full_build = Box::pin(build(
-            &network,
-            &miner_params,
-            &coinbase_cache,
-            read_state.clone(),
-            Some(mempool.clone()),
-            Some(&build_phase),
-        ));
-        let mut tip_change = latest_chain_tip.clone();
+        let building = full_build.get_or_insert_with(|| {
+            Box::pin(build(
+                &network,
+                &miner_params,
+                &coinbase_cache,
+                read_state.clone(),
+                Some(mempool.clone()),
+                None,
+                None,
+            ))
+        });
         let built = tokio::select! {
-            built = &mut full_build => built,
-            _ = tip_change.best_tip_changed() => {
-                if build_phase.load(Ordering::Acquire) != BUILD_STARTED {
-                    continue;
-                }
-                full_build.await
-            }
+            built = building => built,
+            _ = candidate_changes.changed() => continue,
         };
+        full_build = None;
         let built = match built {
             Ok(Some((template, mempool_tx_ids))) => {
                 match state_tip_hash(read_state.clone()).await {
@@ -470,6 +526,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         let mut tip_change = latest_chain_tip.clone();
         tokio::select! {
             biased;
+            _ = candidate_changes.changed() => {}
             tip_changed = tip_change.best_tip_changed() => {
                 if tip_changed.is_err() {
                     return;
@@ -576,6 +633,16 @@ async fn validate_templates(
     }
 }
 
+/// Reads the current early child context.
+pub(crate) async fn mining_candidate(
+    read_state: impl ReadState,
+) -> Option<Arc<GetBlockTemplateChainInfo>> {
+    match read_state.oneshot(ReadRequest::MiningCandidate).await {
+        Ok(ReadResponse::MiningCandidate(info)) => info,
+        _ => None,
+    }
+}
+
 /// Returns the hash of the chain tip the state has committed, if any.
 pub(crate) async fn state_tip_hash<ReadStateService>(
     read_state: ReadStateService,
@@ -594,7 +661,7 @@ where
     Ok(tip.map(|(_, tip_hash)| tip_hash))
 }
 
-/// Builds a block template for the block after the current chain tip.
+/// Builds a block template for the supplied candidate or the current chain tip.
 ///
 /// Selects mempool transactions if `mempool` is `Some`, and builds a coinbase-only template
 /// otherwise. Returns `None` if the state and the mempool disagree about the chain tip.
@@ -604,6 +671,7 @@ async fn build<Mempool, ReadStateService>(
     coinbase_cache: &CoinbaseCache,
     read_state: ReadStateService,
     mempool: Option<Mempool>,
+    candidate: Option<Arc<GetBlockTemplateChainInfo>>,
     phase: Option<&AtomicU8>,
 ) -> Result<
     Option<(BlockTemplateResponse, HashSet<UnminedTxId>)>,
@@ -615,7 +683,10 @@ where
 {
     let mut error_tip = None;
     let snapshot = tokio::time::timeout(SNAPSHOT_TIMEOUT, async {
-        let chain_info = fetch_chain_info(read_state).await?;
+        let chain_info = match candidate {
+            Some(info) => Arc::unwrap_or_clone(info),
+            None => fetch_chain_info(read_state).await?,
+        };
         error_tip = Some(chain_info.tip_hash);
         let (mempool_txs, mempool_tx_deps) = match mempool {
             Some(mempool) => {
