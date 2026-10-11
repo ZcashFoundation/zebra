@@ -489,9 +489,38 @@ where
             } else {
                 None
             };
+
+            // Cache hits already bind the Merkle root through the verified proposal key.
+            // On misses, bind the body before announcing early work and reuse these hashes below.
+            let transaction_hashes = if cached.is_none() {
+                let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
+                check::merkle_root_validity(&network, &block, &hashes)?;
+                Some(hashes)
+            } else {
+                None
+            };
+
+            let now = Utc::now();
+            check::time_is_valid_at(&block.header, now, &height, &hash)
+                .map_err(VerifyBlockError::Time)?;
+
+            // Quick structure checks reject an invalid body before it is announced as early work
+            // or its transactions are verified.
+            let coinbase_tx = check::coinbase_is_first(&block)?;
+            check::no_duplicate_transparent_spends(&block)?;
+
+            // Keep early work alive while the remaining checks and state commit run.
+            let _mining_candidate = if request.is_proposal() {
+                None
+            } else {
+                state_service
+                    .clone()
+                    .oneshot(zs::Request::MiningCandidate(block.clone()))
+                    .await
+                    .ok()
+            };
+
             if let Some(cached) = cached {
-                check::time_is_valid_at(&block.header, Utc::now(), &height, &hash)
-                    .map_err(VerifyBlockError::Time)?;
                 let mut contextual = (*cached).clone();
                 contextual.rebind(block, received_time);
                 return match state_service
@@ -509,36 +538,8 @@ where
                 };
             }
 
-            // Next, check the Merkle root validity, to ensure that
-            // the header binds to the transactions in the blocks.
-
-            // Precomputing this avoids duplicating transaction hash computations.
-            let transaction_hashes: Arc<[_]> =
-                block.transactions.iter().map(|t| t.hash()).collect();
-
-            check::merkle_root_validity(&network, &block, &transaction_hashes)?;
-
-            let now = Utc::now();
-            check::time_is_valid_at(&block.header, now, &height, &hash)
-                .map_err(VerifyBlockError::Time)?;
-
-            // Keep early work alive while the remaining checks and state commit run.
-            let _mining_candidate = if request.is_proposal() {
-                None
-            } else {
-                state_service
-                    .clone()
-                    .oneshot(zs::Request::MiningCandidate(block.clone()))
-                    .await
-                    .ok()
-            };
-
-            // Since errors cause an early exit, try to do the
-            // quick checks first.
-
-            // Quick field validity and structure checks
-            let coinbase_tx = check::coinbase_is_first(&block)?;
-            check::no_duplicate_transparent_spends(&block)?;
+            let transaction_hashes =
+                transaction_hashes.expect("cache hits return after committing the block");
 
             // From the NSM reissuance height, the block subsidy depends on the
             // NSM value balance after the parent block, which is not committed yet while
