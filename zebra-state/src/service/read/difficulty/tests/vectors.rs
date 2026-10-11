@@ -1,4 +1,4 @@
-//! Template timestamp bounds and Testnet minimum-difficulty intervals.
+//! Template timestamp bounds, minimum difficulty, and early mining candidate context.
 
 use zebra_chain::{
     block::Block,
@@ -74,6 +74,281 @@ fn header_context_queries_preserve_genesis_and_fork_ancestry() {
         read::next_median_time_past(&non_finalized_state, db).unwrap(),
         expected_median
     );
+}
+
+/// Early child context must match the normal checkpoint commit's tree and header updates.
+#[test]
+fn mining_candidate_matches_committed_block() {
+    use std::collections::HashMap;
+
+    use crate::{
+        arbitrary::Prepare, service::finalized_state::DiskWriteBatch, CheckpointVerifiedBlock,
+        OutputLocation, TransactionLocation, WriteDisk,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    for (parent_bytes, candidate_bytes) in [
+        (
+            &zebra_test::vectors::BLOCK_MAINNET_902999_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_903000_BYTES[..],
+        ),
+        (
+            &zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES[..],
+        ),
+    ] {
+        let parent = parent_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap();
+        let candidate = candidate_bytes
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (mut finalized, non_finalized, candidate) =
+            mining_candidate_parent_state(&parent, candidate);
+        let orchard_root = finalized.db.note_commitment_trees_for_tip().orchard.root();
+        let has_orchard = candidate.orchard_note_commitments().next().is_some();
+        assert_eq!(
+            has_orchard,
+            candidate.coinbase_height() == Some(Height(1_687_107))
+        );
+        assert_eq!(candidate.header.previous_block_hash, parent.hash());
+        let early =
+            mining_candidate_chain_info(&non_finalized, &finalized.db, &network, candidate.clone())
+                .expect("the real block body extends the seeded parent");
+        assert_eq!(
+            read::best_tip(&non_finalized, &finalized.db),
+            Some((parent.coinbase_height().unwrap(), parent.hash())),
+            "computing early context must not commit the candidate",
+        );
+        assert_eq!(early.tip_hash, candidate.hash());
+        assert_eq!(early.tip_height, candidate.coinbase_height().unwrap());
+        assert!(early.chain_history_root.is_some());
+        assert_ne!(
+            early.expected_difficulty,
+            network.target_difficulty_limit().to_compact(),
+            "the seeded header window must exercise retargeting, not the short-chain fallback",
+        );
+
+        // Reuse the sparse-state fixture's zero-valued spent outputs. Checkpoint commits do not
+        // revalidate fees or anchors, but still run the production note/history-tree updates.
+        let mut batch = DiskWriteBatch::new();
+        let mut locations = HashMap::new();
+        let prepared = candidate.clone().prepare();
+        for (index, (outpoint, utxo)) in prepared
+            .test_with_zero_spent_utxos()
+            .spent_outputs
+            .into_iter()
+            .filter(|(outpoint, _)| !prepared.new_outputs.contains_key(outpoint))
+            .enumerate()
+        {
+            let location = *locations
+                .entry(outpoint.hash)
+                .or_insert_with(|| TransactionLocation::from_usize(Height(1), index + 1));
+            batch.zs_insert(
+                &finalized.db.db().cf_handle("tx_loc_by_hash").unwrap(),
+                outpoint.hash,
+                location,
+            );
+            batch.zs_insert(
+                &finalized.db.db().cf_handle("utxo_by_out_loc").unwrap(),
+                OutputLocation::from_outpoint(location, &outpoint),
+                utxo.utxo.output,
+            );
+        }
+        finalized.db.write_batch(batch).unwrap();
+        finalized
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(candidate.clone()).into(),
+                None,
+                "mining candidate equivalence",
+            )
+            .expect("the real block commits against the sparse checkpoint state");
+        if has_orchard {
+            assert_ne!(
+                finalized.db.note_commitment_trees_for_tip().orchard.root(),
+                orchard_root
+            );
+        }
+
+        let committed =
+            get_block_template_chain_info(&non_finalized, &finalized.db, &network).unwrap();
+        assert_eq!(early.tip_hash, committed.tip_hash);
+        assert_eq!(early.tip_height, committed.tip_height);
+        assert_eq!(early.expected_difficulty, committed.expected_difficulty);
+        assert_eq!(early.min_time, committed.min_time);
+        assert_eq!(early.max_time, committed.max_time);
+        assert_eq!(early.cur_time, committed.cur_time);
+        // Historical Mainnet timestamps clamp to MTP's upper bound, independent of wall-clock
+        // seconds crossed between the early calculation and the disk commit.
+        assert_eq!(early.cur_time, early.max_time);
+        assert_eq!(
+            early.max_time,
+            early
+                .min_time
+                .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN - 1))
+                .unwrap(),
+        );
+        // This is the child header commitment before NU5, and its history component from NU5.
+        assert_eq!(early.chain_history_root, committed.chain_history_root);
+    }
+}
+
+/// Candidate admission must reject stale parents, forged NU5 authorizing data, and bad work.
+#[test]
+fn mining_candidate_rejects_invalid_parent_auth_data_and_work() {
+    use crate::tests::FakeChainHelper;
+    use zebra_chain::{serialization::ZcashSerialize, transaction::Transaction};
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let candidate = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let (finalized, non_finalized, candidate) = mining_candidate_parent_state(&parent, candidate);
+    let db = &finalized.db;
+
+    assert!(
+        mining_candidate_chain_info(&non_finalized, db, &network, candidate.clone()).is_some(),
+        "the unmodified transaction bodies must pass before testing rejection",
+    );
+
+    let mut wrong_parent = candidate.clone();
+    Arc::make_mut(&mut Arc::make_mut(&mut wrong_parent).header).previous_block_hash =
+        db.hash(Height(0)).unwrap();
+    assert!(mining_candidate_chain_info(&non_finalized, db, &network, wrong_parent).is_none());
+
+    let mut extreme_work = candidate.clone();
+    let threshold = CompactDifficulty::from_bytes_in_display_order(&0x0101_0000_u32.to_be_bytes())
+        .expect("target one has a valid compact encoding");
+    assert!(threshold.to_expanded().is_some());
+    assert!(threshold.to_work().is_none());
+    Arc::make_mut(&mut Arc::make_mut(&mut extreme_work).header).difficulty_threshold = threshold;
+    assert!(mining_candidate_chain_info(&non_finalized, db, &network, extreme_work).is_none());
+
+    let mut forged = candidate.clone();
+    let tx = Arc::make_mut(&mut forged)
+        .transactions
+        .iter_mut()
+        .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+        .expect("the NU5 vector contains a shielded V5 transaction");
+    let mut bytes = tx.zcash_serialize_to_vec().unwrap();
+    // Without Orchard, its zero action count follows the Sapling binding signature.
+    let signature_byte = bytes.len() - 1 - usize::from(tx.orchard_bundle().is_none());
+    bytes[signature_byte] ^= 1;
+    *tx = bytes.zcash_deserialize_into::<Arc<Transaction>>().unwrap();
+    assert_eq!(forged.hash(), candidate.hash());
+    assert_eq!(forged.header.merkle_root, candidate.header.merkle_root);
+    assert!(
+        forged
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .eq(candidate.transactions.iter().map(|tx| tx.hash())),
+        "only authorizing data changed, not transaction IDs",
+    );
+    assert_ne!(forged.auth_data_root(), candidate.auth_data_root());
+    assert!(mining_candidate_chain_info(&non_finalized, db, &network, forged).is_none());
+
+    // At Sapling activation the full Sapling frontier really is empty, so this pair
+    // additionally exercises the pre-Heartwood final-root check without a synthetic root.
+    let parent = zebra_test::vectors::BLOCK_MAINNET_419199_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let candidate = zebra_test::vectors::BLOCK_MAINNET_419200_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let (finalized, non_finalized, candidate) = mining_candidate_parent_state(&parent, candidate);
+    assert!(mining_candidate_chain_info(
+        &non_finalized,
+        &finalized.db,
+        &network,
+        candidate.clone(),
+    )
+    .is_some());
+    assert_ne!(*candidate.header.commitment_bytes, [0; 32]);
+    let invalid_root = candidate.set_block_commitment([0; 32]);
+    assert!(
+        mining_candidate_chain_info(&non_finalized, &finalized.db, &network, invalid_root,)
+            .is_none()
+    );
+}
+
+/// Seed a real finalized parent with empty note trees and a full synthetic header window.
+fn mining_candidate_parent_state(
+    parent: &Arc<Block>,
+    mut candidate: Arc<Block>,
+) -> (
+    crate::service::finalized_state::FinalizedState,
+    NonFinalizedState,
+    Arc<Block>,
+) {
+    use crate::{
+        service::finalized_state::DiskWriteBatch,
+        tests::{setup::new_state_with_mainnet_genesis, FakeChainHelper},
+        WriteDisk,
+    };
+    use zebra_chain::{
+        block::ChainHistoryBlockTxAuthCommitmentHash,
+        primitives::zcash_history::BlockCommitmentTreeRoots,
+    };
+
+    let (finalized, non_finalized, _) = new_state_with_mainnet_genesis();
+    let db = &finalized.db;
+    let height = parent.coinbase_height().unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_insert(
+        &db.db().cf_handle("hash_by_height").unwrap(),
+        height,
+        parent.hash(),
+    );
+    batch.zs_insert(
+        &db.db().cf_handle("height_by_hash").unwrap(),
+        parent.hash(),
+        height,
+    );
+    // Missing historical headers would force powLimit and hide retargeting regressions.
+    // Only older context is synthesized; the parent and candidate headers stay unchanged.
+    for index in 0..MAX_POW_ADJUSTMENT_BLOCK_SPAN {
+        let mut header = *parent.header;
+        header.time -= chrono::Duration::seconds(i64::try_from(index).unwrap() * 75);
+        batch.zs_insert(
+            &db.db().cf_handle("block_header_by_height").unwrap(),
+            (height - i64::try_from(index).unwrap()).unwrap(),
+            header,
+        );
+    }
+    db.write_batch(batch).unwrap();
+    db.set_finalized_value_pool(zebra_chain::value_balance::ValueBalance::fake_populated_pool());
+    if height
+        >= NetworkUpgrade::Nu5
+            .activation_height(&Network::Mainnet)
+            .unwrap()
+    {
+        // NU5 vectors lack activation history peaks and full Sapling frontiers.
+        // Bind the real transaction bodies to this sparse parent history.
+        let trees = db.note_commitment_trees_for_tip();
+        let history = HistoryTree::from_block(
+            &Network::Mainnet,
+            parent.clone(),
+            BlockCommitmentTreeRoots {
+                sapling: &trees.sapling.root(),
+                orchard: &trees.orchard.root(),
+                ironwood: &trees.ironwood.root(),
+            },
+        )
+        .unwrap();
+        let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            &history.hash().unwrap(),
+            &candidate.auth_data_root(),
+        );
+        candidate = candidate.set_block_commitment(commitment.into());
+        let mut batch = DiskWriteBatch::new();
+        batch.update_history_tree(db, &history);
+        db.write_batch(batch).unwrap();
+    }
+    (finalized, non_finalized, candidate)
 }
 
 #[test]

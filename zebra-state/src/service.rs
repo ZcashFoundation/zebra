@@ -24,7 +24,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch, Semaphore};
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -60,6 +60,13 @@ use crate::{
     KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
     StateInitError,
 };
+
+pub(crate) type MiningCandidate = (
+    block::Hash,
+    Arc<crate::GetBlockTemplateChainInfo>,
+    watch::Receiver<()>,
+    tokio::time::Instant,
+);
 
 pub mod block_iter;
 pub mod chain_tip;
@@ -182,6 +189,9 @@ pub(crate) struct StateService {
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
 
+    /// Bounds uncancellable early-work computations, including ones whose guards were dropped.
+    mining_candidate_slot: Arc<Semaphore>,
+
     // Metrics
     //
     /// A metric tracking the maximum height that's currently in `finalized_state_queued_blocks`
@@ -217,6 +227,9 @@ pub struct ReadStateService {
     /// This state is only updated between requests,
     /// so it might include some block data that is also on `disk`.
     non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+
+    /// At most one early mining parent, separate from committed state.
+    mining_candidate: watch::Sender<Option<MiningCandidate>>,
 
     /// The shared inner on-disk database for the finalized state.
     ///
@@ -442,6 +455,7 @@ impl StateService {
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
+            mining_candidate_slot: Arc::new(Semaphore::new(1)),
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -979,6 +993,7 @@ impl ReadStateService {
             db: finalized_state.db.clone(),
             non_finalized_state_receiver,
             block_write_task,
+            mining_candidate: watch::Sender::new(None),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1061,6 +1076,66 @@ impl Service<Request> for StateService {
         let span = Span::current();
 
         match req {
+            Request::MiningCandidate(block) => {
+                if self.read_service.mining_candidate.receiver_count() == 0 {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
+                let Ok(permit) = self.mining_candidate_slot.clone().try_acquire_owned() else {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                };
+                let state = self.read_service.clone();
+                let (guard, mut cancelled) = watch::channel(());
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                tokio::spawn(async move {
+                    let compute_state = state.clone();
+                    let parent = block.header.previous_block_hash;
+                    let compute = tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        read::difficulty::mining_candidate_chain_info(
+                            &compute_state.latest_non_finalized_state(),
+                            &compute_state.db,
+                            &compute_state.network,
+                            block,
+                        )
+                    });
+                    let info = tokio::select! {
+                        biased;
+                        _ = cancelled.changed() => return,
+                        _ = tokio::time::sleep_until(deadline) => return,
+                        result = compute => match result {
+                            Ok(Some(info)) => Arc::new(info),
+                            _ => return,
+                        },
+                    };
+                    state.mining_candidate.send_replace(Some((
+                        parent,
+                        info.clone(),
+                        cancelled.clone(),
+                        deadline,
+                    )));
+                    tokio::select! {
+                        _ = cancelled.changed() => {}
+                        _ = tokio::time::sleep_until(deadline) => {}
+                    }
+                    state.mining_candidate.send_if_modified(|candidate| {
+                        if candidate
+                            .as_ref()
+                            .is_some_and(|(_, current, _, _)| Arc::ptr_eq(current, &info))
+                        {
+                            *candidate = None;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                });
+                async move {
+                    Ok(Response::MiningCandidate(Some(
+                        crate::MiningCandidateGuard(guard),
+                    )))
+                }
+                .boxed()
+            }
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             //
@@ -1399,6 +1474,11 @@ impl Service<ReadRequest> for ReadStateService {
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
 
+        if let ReadRequest::MiningCandidateChanges = req {
+            let changes = crate::MiningCandidateChanges(self.mining_candidate.subscribe());
+            return async move { Ok(ReadResponse::MiningCandidateChanges(changes)) }.boxed();
+        }
+
         if let ReadRequest::NonFinalizedBlocksListener { known_chain_tips } = req {
             // The non-finalized blocks listener is used to notify the state service
             // about new blocks that have been added to the non-finalized state.
@@ -1416,6 +1496,17 @@ impl Service<ReadRequest> for ReadStateService {
         };
 
         let request_handler = move || match req {
+            ReadRequest::MiningCandidate => {
+                let candidate = state.mining_candidate.borrow().clone();
+                Ok(ReadResponse::MiningCandidate(candidate.and_then(
+                    |(parent, info, cancelled, deadline)| {
+                        (cancelled.has_changed().is_ok()
+                            && tokio::time::Instant::now() < deadline
+                            && state.best_tip().map(|(_, hash)| hash) == Some(parent))
+                        .then_some(info)
+                    },
+                )))
+            }
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
 
@@ -1883,7 +1974,8 @@ impl Service<ReadRequest> for ReadStateService {
                 ))
             }
 
-            ReadRequest::NonFinalizedBlocksListener { .. } => {
+            ReadRequest::NonFinalizedBlocksListener { .. }
+            | ReadRequest::MiningCandidateChanges => {
                 unreachable!("should return early");
             }
 

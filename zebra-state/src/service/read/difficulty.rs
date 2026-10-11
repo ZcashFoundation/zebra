@@ -84,6 +84,84 @@ pub fn get_block_template_chain_info(
     )
 }
 
+/// Computes child context without committing or contextually validating the candidate.
+pub(crate) fn mining_candidate_chain_info(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    block: Arc<block::Block>,
+) -> Option<GetBlockTemplateChainInfo> {
+    let (tip_height, tip_hash) = read::best_tip(non_finalized_state, db)?;
+    let height = tip_height.next().ok()?;
+    let child_height = height.next().ok()?;
+    // ponytail: NSM needs validated value pools; use committed work once reissuance activates.
+    if block.header.previous_block_hash != tip_hash
+        || block.coinbase_height() != Some(height)
+        || zebra_chain::parameters::subsidy::nsm_reissuance_is_active(child_height, network)
+    {
+        return None;
+    }
+    block.header.difficulty_threshold.to_work()?;
+    DateTime32::try_from(block.header.time).ok()?;
+    let chain = non_finalized_state.best_chain();
+    let mut history = history_tree(chain, db, tip_hash.into())?;
+    crate::service::check::block_commitment_is_valid_for_chain_history(
+        block.clone(),
+        network,
+        &history,
+    )
+    .ok()?;
+    let mut sapling = read::tree::sapling_tree(chain, db, tip_hash.into())?;
+    let mut orchard = read::tree::orchard_tree(chain, db, tip_hash.into())?;
+    let mut ironwood = read::tree::ironwood_tree(chain, db, tip_hash.into())?;
+    for commitment in block.sapling_note_commitments() {
+        Arc::make_mut(&mut sapling).append(commitment).ok()?;
+    }
+    for commitment in block.orchard_note_commitments() {
+        Arc::make_mut(&mut orchard).append(commitment).ok()?;
+    }
+    for commitment in block.ironwood_note_commitments() {
+        Arc::make_mut(&mut ironwood).append(commitment).ok()?;
+    }
+    let sapling_root = sapling.root();
+    if let block::Commitment::FinalSaplingRoot(root) = block.commitment(network).ok()? {
+        if root != sapling_root {
+            return None;
+        }
+    }
+    Arc::make_mut(&mut history)
+        .push(
+            network,
+            block.clone(),
+            zebra_chain::primitives::zcash_history::BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard.root(),
+                ironwood: &ironwood.root(),
+            },
+        )
+        .ok()?;
+    let relevant_data = std::iter::once((block.header.difficulty_threshold, block.header.time))
+        .chain(
+            any_chain_ancestor_iter::<block::Header>(non_finalized_state, db, tip_hash)
+                .map(|header| (header.difficulty_threshold, header.time)),
+        )
+        .take(pow_adjustment_block_span(network, child_height))
+        .collect();
+    if read::best_tip(non_finalized_state, db) != Some((tip_height, tip_hash)) {
+        return None;
+    }
+    difficulty_time_and_history_tree(
+        relevant_data,
+        height,
+        block.hash(),
+        network,
+        history,
+        Default::default(),
+        DateTime32::now(),
+    )
+    .ok()
+}
+
 /// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
 ///
 /// Iterates over up to the last `num_blocks` blocks, summing up their total work.

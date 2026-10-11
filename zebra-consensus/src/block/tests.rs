@@ -1116,6 +1116,10 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .expect_request(zs::Request::KnownBlock(hash))
             .await
             .respond(zs::Response::KnownBlock(None));
+        state
+            .expect_request(zs::Request::MiningCandidate(block.clone()))
+            .await
+            .respond_error("early mining is disabled in this fixture".into());
 
         transaction_verifier
             .expect_request_that(|_| true)
