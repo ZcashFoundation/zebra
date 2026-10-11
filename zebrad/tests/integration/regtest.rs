@@ -1345,3 +1345,218 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(feature = "internal-miner")]
+#[tokio::test(start_paused = true)]
+async fn internal_miner_discards_stale_solution() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_rpc::methods::RpcImpl;
+    use zebra_test::mock_service::MockService;
+    use zebrad::components::miner::{submit_mined_block, BLOCK_TEMPLATE_WAIT_TIME};
+
+    let block = regtest_genesis_block();
+    let (_template_sender, template_receiver) = tokio::sync::watch::channel(Some(block.clone()));
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_hash(block.header.previous_block_hash);
+    let mut verifier = MockService::build().for_unit_tests();
+    let mut read_state = MockService::build().for_unit_tests();
+    let mut sync_status = MockSyncStatus::default();
+    let mut peers = MockAddressBookPeers::default();
+    peers.add_peer("127.0.0.1:8233".parse().unwrap());
+    let (_log_sender, log_receiver) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Network::Mainnet,
+        Default::default(),
+        false,
+        "0.0.1",
+        "Zebra tests",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        read_state.clone(),
+        verifier.clone(),
+        sync_status.clone(),
+        tip,
+        peers,
+        log_receiver,
+        None,
+    );
+
+    // Neither notification changes: reject an advanced state tip, lost sync, or a timed-out read.
+    for (state_tip, lose_sync) in [
+        (Some(block.hash()), false),
+        (Some(block.header.previous_block_hash), true),
+        (None, false),
+    ] {
+        sync_status.set_is_close_to_tip(true);
+        let rpc = rpc.clone();
+        let old_template = template_receiver.borrow().clone().unwrap();
+        let submission = tokio::spawn(async move { submit_mined_block(&old_template, &rpc).await });
+        let request = read_state
+            .expect_request(zebra_state::ReadRequest::Tip)
+            .await;
+        if lose_sync {
+            sync_status.set_is_close_to_tip(false);
+        }
+        if let Some(hash) = state_tip {
+            request.respond(zebra_state::ReadResponse::Tip(Some((Height(1), hash))));
+        } else {
+            tokio::time::advance(BLOCK_TEMPLATE_WAIT_TIME).await;
+            tokio::task::yield_now().await;
+            drop(request);
+        }
+        verifier.expect_no_requests().await;
+        assert!(tokio::time::timeout(Duration::from_secs(1), submission)
+            .await
+            .expect("ineligible work must be discarded without waiting for verification")
+            .unwrap()
+            .unwrap()
+            .is_none());
+    }
+    queue.abort();
+}
+
+#[cfg(feature = "internal-miner")]
+#[tokio::test(start_paused = true)]
+async fn internal_miner_withdraws_work_while_public_sync_is_behind() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_rpc::methods::RpcImpl;
+    use zebra_test::mock_service::MockService;
+    use zebrad::components::miner::generate_block_templates;
+
+    let configured_testnet = zebra_chain::parameters::testnet::Parameters::build()
+        .with_network_name("MinerTest")
+        .unwrap()
+        .to_network()
+        .unwrap();
+    for (network, close_to_tip, has_peers, should_pause) in [
+        (Network::Mainnet, false, true, true),
+        (Network::new_default_testnet(), false, true, true),
+        (Network::Mainnet, true, false, true),
+        (Network::new_default_testnet(), true, false, true),
+        (
+            Network::new_regtest(Default::default()),
+            false,
+            false,
+            false,
+        ),
+        (configured_testnet, true, false, false),
+    ] {
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(Height(1));
+        tip_sender.send_best_tip_hash(network.genesis_hash());
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut peers = MockAddressBookPeers::default();
+        if has_peers {
+            peers.add_peer("127.0.0.1:8233".parse().unwrap());
+        }
+        let mut sync_status = MockSyncStatus::default();
+        sync_status.set_is_close_to_tip(close_to_tip);
+        let mut mempool = MockService::build().for_unit_tests();
+        let mut read_state = MockService::build().for_unit_tests();
+        let (_log_sender, log_receiver) = tokio::sync::watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            network.clone(),
+            default_test_config(&network).mining,
+            false,
+            "0.0.1",
+            "Zebra tests",
+            mempool.clone(),
+            MockService::build().for_unit_tests(),
+            read_state.clone(),
+            MockService::build().for_unit_tests(),
+            sync_status,
+            tip,
+            peers,
+            log_receiver,
+            None,
+        );
+        let (sender, mut receiver) = tokio::sync::watch::channel(Some(regtest_genesis_block()));
+        let generator = tokio::spawn(generate_block_templates(rpc, sender));
+
+        if should_pause {
+            tokio::time::timeout(Duration::from_secs(1), receiver.changed())
+                .await
+                .expect("ineligible public mining must withdraw work")
+                .unwrap();
+            assert!(receiver.borrow().is_none());
+            mempool.expect_no_requests().await;
+            read_state.expect_no_requests().await;
+        } else {
+            let request = read_state
+                .expect_request(zebra_state::ReadRequest::ChainInfo)
+                .await;
+            drop(request);
+        }
+        generator.abort();
+        queue.abort();
+    }
+}
+
+#[cfg(feature = "internal-miner")]
+#[tokio::test(start_paused = true)]
+async fn internal_miner_retries_timed_out_tip_then_waits_for_committed_parent() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_rpc::methods::RpcImpl;
+    use zebra_test::mock_service::MockService;
+    use zebrad::components::miner::{
+        run_mining_solver, BLOCK_TEMPLATE_REFRESH_LIMIT, BLOCK_TEMPLATE_WAIT_TIME,
+    };
+
+    let block = regtest_genesis_block();
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_hash(block.header.previous_block_hash);
+    let mut read_state = MockService::build().for_unit_tests();
+    let (_log_sender, log_receiver) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Network::new_regtest(Default::default()),
+        Default::default(),
+        false,
+        "0.0.1",
+        "Zebra tests",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        read_state.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        log_receiver,
+        None,
+    );
+    let (_template_sender, template_receiver) = tokio::sync::watch::channel(Some(block.clone()));
+    let solver = tokio::spawn(run_mining_solver(
+        0,
+        zebra_state::WatchReceiver::new(template_receiver),
+        rpc,
+    ));
+    let stalled = read_state
+        .expect_request(zebra_state::ReadRequest::Tip)
+        .await;
+    tokio::time::advance(BLOCK_TEMPLATE_WAIT_TIME).await;
+    tokio::task::yield_now().await;
+    assert!(
+        !solver.is_finished(),
+        "a tip-read timeout must not stop the miner"
+    );
+    drop(stalled);
+    tokio::time::advance(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+    read_state
+        .expect_request(zebra_state::ReadRequest::Tip)
+        .await
+        .respond(zebra_state::ReadResponse::Tip(Some((
+            Height(1),
+            block.hash(),
+        ))));
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(60)).await;
+    read_state.expect_no_requests().await;
+    assert!(
+        !solver.is_finished(),
+        "wait for a new template, without retrying"
+    );
+    solver.abort();
+    queue.abort();
+}

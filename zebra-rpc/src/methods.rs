@@ -35,6 +35,7 @@ use std::{
     cmp,
     collections::{HashMap, HashSet},
     fmt,
+    future::Future,
     ops::RangeInclusive,
     sync::Arc,
     time::Duration,
@@ -1195,6 +1196,38 @@ where
     /// Returns a reference to the configured network.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+
+    /// Returns whether synchronization and peers permit internal mining.
+    ///
+    /// Public networks require recently live peers. Regtest and configured Testnet may mine
+    /// without peers; networks with Proof-of-Work enabled still require synchronization.
+    pub fn internal_mining_is_enabled(&self) -> bool {
+        (self.network.disable_pow() || self.gbt.sync_status().is_close_to_tip())
+            && ((!matches!(self.network, Network::Mainnet) && !self.network.is_default_testnet())
+                || !self
+                    .address_book
+                    .recently_live_peers(chrono::Utc::now())
+                    .is_empty())
+    }
+
+    /// Reads the committed best tip directly from state, before any lagging tip notification.
+    ///
+    /// Callers must bound this state read with their request deadline.
+    pub fn read_committed_tip(
+        &self,
+    ) -> impl Future<Output = Result<Option<block::Hash>>> + Send + 'static {
+        let read_state = self.read_state.clone();
+        async move {
+            let response = read_state
+                .oneshot(ReadRequest::Tip)
+                .await
+                .map_error(server::error::LegacyCode::default())?;
+            let ReadResponse::Tip(tip) = response else {
+                unreachable!("unmatched response to a tip request");
+            };
+            Ok(tip.map(|(_, hash)| hash))
+        }
     }
 
     /// Sets the estimated end of support height reported by the `getdeprecationinfo` RPC.
