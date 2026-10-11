@@ -121,7 +121,7 @@ pub enum Response {
     KnownBlocks(Vec<Option<KnownBlock>>),
 
     /// Response to [`Request::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -542,7 +542,7 @@ pub enum ReadResponse {
     SolutionRate(Option<u128>),
 
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
 
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
@@ -666,7 +666,7 @@ impl TryFrom<ReadResponse> for Response {
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
+            ReadResponse::ValidBlockProposal(block) => Ok(Response::ValidBlockProposal(block)),
 
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
