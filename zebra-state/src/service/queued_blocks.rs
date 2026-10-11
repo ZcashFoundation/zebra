@@ -12,8 +12,8 @@ use zebra_chain::{block, transparent};
 
 use crate::{
     error::{CommitBlockError, CommitCheckpointVerifiedError},
-    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
-    SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
+    KnownBlock, NonFinalizedState, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -29,6 +29,8 @@ pub type QueuedCheckpointVerified = (
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
+    // During queueing, the first field owns the cached result's new outputs.
+    Option<Box<ContextuallyVerifiedBlock>>,
 );
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
@@ -154,7 +156,7 @@ impl QueuedBlocks {
         mem::swap(&mut self.by_height, &mut by_height);
 
         for hash in by_height.into_values().flatten() {
-            let (expired_block, expired_sender) =
+            let (expired_block, expired_sender, _) =
                 self.blocks.remove(&hash).expect("block is present");
             let parent_hash = &expired_block.block.header.previous_block_hash;
 

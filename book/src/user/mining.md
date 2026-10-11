@@ -121,6 +121,15 @@ Wait until Zebra is in sync. You will see the sync at 100% when this happens:
 INFO zebrad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(...) network_upgrade=Nu6 remaining_sync_blocks=1 time_since_last_state_block=0s
 ```
 
+## Reusing proposal validation
+
+Zebra validates transaction-bearing templates in the background. If you change the coinbase,
+transactions, timestamp or another header field, submit the modified block with
+`getblocktemplate` parameters `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it.
+A successful proposal lets a later `submitblock` reuse verification when only the nonce and
+Equihash solution differ. Proof of work, current time, size and state application are still checked.
+The cache holds eight recent successful proposals; an evicted or changed proposal is verified normally.
+
 ## Testing the setup
 
 [#testing-the-setup]: #testing-the-setup

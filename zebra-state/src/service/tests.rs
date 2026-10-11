@@ -455,7 +455,7 @@ proptest! {
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 
-            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone(), None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
@@ -545,7 +545,7 @@ proptest! {
             // reset: they all grow.
             let expected_action = TipAction::grow_with(expected_block.clone().into());
 
-            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
+            let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block, None);
             let result = result_receiver.blocking_recv();
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);

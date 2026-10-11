@@ -370,7 +370,7 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+            let Some((queued_child, rsp_tx, contextual)) = queued_child_and_rsp_tx else {
                 update_latest_chain_channels(
                     non_finalized_state,
                     chain_tip_sender,
@@ -395,6 +395,9 @@ impl WriteBlockWorkerTask {
             // parent's misbehaviour score.
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
+            } else if let Some(mut contextual) = contextual {
+                contextual.new_outputs = queued_child.new_outputs;
+                non_finalized_state.commit_prevalidated_contextual(*contextual, &finalized_state.db)
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
                 validate_and_commit_non_finalized(

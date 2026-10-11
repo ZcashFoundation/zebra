@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Proposal responses now carry a contextual result; request matches must handle `CommitContextuallyVerifiedBlock`. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z

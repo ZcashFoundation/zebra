@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'Reuse successful exact proposals when verifying solved blocks, while rechecking proof of work, time and size. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z

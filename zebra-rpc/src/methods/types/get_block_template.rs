@@ -882,6 +882,10 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 /// Returns a [`GetBlockTemplateResponse`], rejecting invalid proposals before verification
 /// when their mandatory payouts do not match the current parent's contextual subsidy.
 ///
+/// Miners modifying templates should submit a proposal before mining. Successful results are
+/// cached for submissions differing only in nonce and Equihash solution; other changes, including
+/// coinbase data and timestamp changes, require full verification.
+///
 /// # Errors
 ///
 /// Returns an RPC error if Zebra is not synced, the contextual state query fails or times out,

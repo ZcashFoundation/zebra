@@ -510,6 +510,16 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Rebind a successfully validated proposal to its solved block.
+    ///
+    /// The caller must verify proof of work and ensure every serialized byte except nonce and
+    /// solution matches the proposal. Receipt time tracks the solved block, not the proposal.
+    pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        self.hash = block.hash();
+        self.block = block;
+        self.received_time = Some(received_time);
+    }
+
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
@@ -1131,6 +1141,12 @@ pub enum Request {
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Commit a successful proposal result rebound to a solved block, without contextual rechecks.
+    ///
+    /// The caller must check proof of work, current time and serialized size after rebinding.
+    /// Returns [`Response::Committed`], with the same queue semantics as a semantic commit.
+    CommitContextuallyVerifiedBlock(Box<ContextuallyVerifiedBlock>),
 }
 
 impl Request {
@@ -1138,6 +1154,7 @@ impl Request {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
@@ -1740,6 +1757,7 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitContextuallyVerifiedBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),

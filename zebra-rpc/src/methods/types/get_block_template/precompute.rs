@@ -27,6 +27,7 @@ use zebra_chain::{
     serialization::{DateTime32, Duration32},
     work::difficulty::ParameterDifficulty,
 };
+use zebra_consensus::{router::service_trait::BlockVerifierService, Request as VerifyRequest};
 use zebra_node_services::mempool::MempoolService;
 use zebra_state::{ReadRequest, ReadResponse, ReadState};
 
@@ -38,7 +39,8 @@ use crate::{
 use super::{
     check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
     fetch_mempool_transactions, nsm_value_balance_for_next_block,
-    zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
+    proposal::proposal_block_from_template, zip317::select_mempool_transactions,
+    BlockTemplateResponse, BlockTemplateTimeSource, CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
@@ -190,7 +192,7 @@ impl TemplateCache {
 ///
 /// Runs until the task is aborted.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
+pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
     network: Network,
     miner_params: MinerParams,
     coinbase_cache: CoinbaseCache,
@@ -199,12 +201,21 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     read_state: ReadStateService,
     mut latest_chain_tip: Tip,
     sync_status: SyncStatus,
+    verifier: Verifier,
 ) where
     Mempool: MempoolService,
     ReadStateService: ReadState,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    Verifier: BlockVerifierService,
 {
+    // Dropping the updater also cancels its single validation worker.
+    let mut validation = tokio::task::JoinSet::new();
+    validation.spawn(validate_templates(
+        cache.subscribe(),
+        network.clone(),
+        verifier,
+    ));
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
     let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
@@ -342,6 +353,39 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 }
             }
             _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
+        }
+    }
+}
+
+/// Validate one template at a time, coalescing publications while the verifier is busy.
+async fn validate_templates(
+    mut templates: TemplateChanges,
+    network: Network,
+    verifier: impl BlockVerifierService,
+) {
+    loop {
+        templates.changed().await;
+        let template = templates.0.borrow_and_update().clone();
+        let Some(template) = template.filter(|template| !template.transactions.is_empty()) else {
+            continue;
+        };
+        let network = network.clone();
+        let proposal = tokio::task::spawn_blocking(move || {
+            proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+        })
+        .await
+        .expect("template conversion task must not panic");
+        let result = match proposal {
+            Ok(block) => {
+                verifier
+                    .clone()
+                    .oneshot(VerifyRequest::CheckProposal(Arc::new(block)))
+                    .await
+            }
+            Err(error) => Err(error.into()),
+        };
+        if let Err(error) = result {
+            tracing::debug!(?error, "background block proposal validation failed");
         }
     }
 }
