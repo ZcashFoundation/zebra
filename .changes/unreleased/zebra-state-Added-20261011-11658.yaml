@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added `ContextuallyVerifiedBlock::rebind` for exact proposal reuse and `retained_bytes` for bounding cached block and output data. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z

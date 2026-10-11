@@ -759,7 +759,7 @@ impl StateService {
         queued: QueuedSemanticallyVerified,
         error: impl Into<CommitSemanticallyVerifiedError>,
     ) {
-        let (finalized, rsp_tx) = queued;
+        let (finalized, rsp_tx, _) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
@@ -774,10 +774,11 @@ impl StateService {
     /// in RFC0005.
     ///
     /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
-    #[instrument(level = "debug", skip(self, semantically_verified))]
+    #[instrument(level = "debug", skip(self, semantically_verified, contextual))]
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
         semantically_verified: SemanticallyVerifiedBlock,
+        contextual: Option<Box<crate::ContextuallyVerifiedBlock>>,
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
@@ -818,7 +819,7 @@ impl StateService {
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
         // it with the newer request.
-        let rsp_rx = if let Some((_, old_rsp_tx)) = self
+        let rsp_rx = if let Some((_, old_rsp_tx, _)) = self
             .non_finalized_state_queued_blocks
             .get_mut(&semantically_verified.hash)
         {
@@ -833,8 +834,11 @@ impl StateService {
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            self.non_finalized_state_queued_blocks
-                .queue((semantically_verified, rsp_tx));
+            self.non_finalized_state_queued_blocks.queue((
+                semantically_verified,
+                rsp_tx,
+                contextual,
+            ));
             rsp_rx
         };
 
@@ -920,7 +924,7 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in queued_children {
-                    let (SemanticallyVerifiedBlock { hash, .. }, _) = queued_child;
+                    let (SemanticallyVerifiedBlock { hash, .. }, _, _) = queued_child;
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
@@ -1113,6 +1117,24 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         req.count_metric();
         let span = Span::current();
+        let (req, contextual) = match req {
+            Request::CommitContextuallyVerifiedBlock(mut contextual) => {
+                // Move the output map into the queue's shared semantic metadata, without copying it.
+                let prepared = SemanticallyVerifiedBlock {
+                    block: contextual.block.clone(),
+                    hash: contextual.hash,
+                    height: contextual.height,
+                    new_outputs: std::mem::take(&mut contextual.new_outputs),
+                    transaction_hashes: contextual.transaction_hashes.clone(),
+                    received_time: contextual.received_time,
+                };
+                (
+                    Request::CommitSemanticallyVerifiedBlock(prepared),
+                    Some(contextual),
+                )
+            }
+            req => (req, None),
+        };
 
         match req {
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
@@ -1139,7 +1161,10 @@ impl Service<Request> for StateService {
 
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| {
-                        self.queue_and_commit_to_non_finalized_state(semantically_verified)
+                        self.queue_and_commit_to_non_finalized_state(
+                            semantically_verified,
+                            contextual,
+                        )
                     })
                 });
 
@@ -1165,6 +1190,7 @@ impl Service<Request> for StateService {
                 .instrument(span)
                 .boxed()
             }
+            Request::CommitContextuallyVerifiedBlock(_) => unreachable!("normalized above"),
 
             // Uses finalized_state_queued_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
@@ -1913,13 +1939,20 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
+                let hash = semantically_verified.hash;
                 write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
                 )?;
 
-                Ok(ReadResponse::ValidBlockProposal)
+                let contextual = latest_non_finalized_state
+                    .find_chain(|chain| chain.contains_block_hash(hash))
+                    .expect("successful proposal validation inserted its block")
+                    .block(hash.into())
+                    .expect("the selected chain contains the proposal")
+                    .clone();
+                Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 
             ReadRequest::TipBlockSize => {
