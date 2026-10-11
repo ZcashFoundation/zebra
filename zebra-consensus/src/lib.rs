@@ -50,7 +50,7 @@ pub mod router;
 pub mod transaction;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use block::check::difficulty_is_valid;
+pub use block::{check::difficulty_is_valid, SemanticBlockVerifier};
 
 pub use block::{Request, ShieldedActionCounts, VerifyBlockError, MAX_BLOCK_SIGOPS};
 pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
