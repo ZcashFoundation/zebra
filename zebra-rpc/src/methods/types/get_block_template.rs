@@ -726,6 +726,12 @@ where
     /// This is `None` on handlers whose miner parameters were overridden after cloning, because the
     /// precomputed template pays the configured miner address.
     template_cache: Option<precompute::TemplateCache>,
+
+    /// Pending bodies shared with inbound peers.
+    pub(crate) submitted_blocks: crate::SubmittedBlockCache,
+
+    /// Checkpoint requests can replace duplicates, so only fully verified heights relay early.
+    pub(crate) max_checkpoint_height: block::Height,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -749,6 +755,8 @@ where
                 .unwrap_or(SubmitBlockChannel::default().sender()),
             coinbase_cache: CoinbaseCache::default(),
             template_cache: Some(precompute::TemplateCache::default()),
+            submitted_blocks: Default::default(),
+            max_checkpoint_height: net.checkpoint_list().max_height(),
         }
     }
 

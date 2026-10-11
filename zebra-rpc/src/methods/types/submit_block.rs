@@ -1,8 +1,13 @@
 //! Parameter and response types for the `submitblock` RPC.
 
-use tokio::sync::mpsc;
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
-use zebra_chain::block;
+use tokio::{
+    sync::{mpsc, watch},
+    time::Instant,
+};
+
+use zebra_chain::block::{self, Block};
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
@@ -66,6 +71,75 @@ impl Default for SubmitBlockResponse {
 impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
     fn from(error_response: SubmitBlockErrorResponse) -> Self {
         Self::ErrorResponse(error_response)
+    }
+}
+
+/// Up to four authenticated pending submissions, available to inbound peers for 90 seconds.
+#[derive(Clone, Debug)]
+pub struct SubmittedBlockCache {
+    entries: Arc<watch::Sender<VecDeque<(block::Hash, Arc<Block>, Instant)>>>,
+    pending: Arc<watch::Sender<Option<(block::Hash, block::Height)>>>,
+}
+
+impl Default for SubmittedBlockCache {
+    fn default() -> Self {
+        Self {
+            entries: Arc::new(watch::Sender::new(VecDeque::new())),
+            pending: Arc::new(watch::Sender::new(None)),
+        }
+    }
+}
+
+impl SubmittedBlockCache {
+    /// Returns an unexpired body unless verification definitively rejected it.
+    pub fn get(&self, hash: &block::Hash) -> Option<Arc<Block>> {
+        let now = Instant::now();
+        self.entries
+            .borrow()
+            .iter()
+            .find(|(key, _, expires)| key == hash && *expires > now)
+            .map(|(_, block, _)| block.clone())
+    }
+
+    /// Subscribes to pending advertisements, including the current one.
+    pub fn subscribe(&self) -> watch::Receiver<Option<(block::Hash, block::Height)>> {
+        let mut receiver = self.pending.subscribe();
+        receiver.mark_changed();
+        receiver
+    }
+
+    pub(crate) fn insert(&self, hash: block::Hash, height: block::Height, block: Arc<Block>) {
+        // ponytail: scan four bodies in the shared snapshot; index only if the bound grows.
+        let inserted = self.entries.send_if_modified(|entries| {
+            let now = Instant::now();
+            entries.retain(|(_, _, expires)| *expires > now);
+            if entries.iter().any(|(key, _, _)| *key == hash) {
+                return false;
+            }
+            if entries.len() == 4 {
+                entries.pop_front();
+            }
+            entries.push_back((hash, block, now + Duration::from_secs(90)));
+            true
+        });
+        if inserted {
+            self.pending.send_replace(Some((hash, height)));
+        }
+    }
+
+    /// Withdraws a definitively rejected body, without coupling its lifetime to any RPC caller.
+    pub(crate) fn remove(&self, hash: block::Hash) {
+        self.entries.send_modify(|entries| {
+            entries.retain(|(key, _, _)| *key != hash);
+        });
+        self.pending.send_if_modified(|pending| {
+            if pending.is_some_and(|(key, _)| key == hash) {
+                *pending = None;
+                true
+            } else {
+                false
+            }
+        });
     }
 }
 

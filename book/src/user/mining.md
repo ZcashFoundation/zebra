@@ -103,6 +103,12 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 listen_addr = "127.0.0.1:8232"
 ```
 
+Submitted blocks extending the current precomputed template's parent are advertised after proof of
+work and body authentication, without waiting for full verification. This is automatic, with no
+configuration switch. Checkpoint-era blocks wait for commit. The RPC response still waits for full
+verification and commit. Definitively rejected early submissions are withdrawn from peer serving and
+logged as warnings; duplicates and cancelled calls retain the bounded cache. Restrict RPC to trusted miners.
+
 ## Running zebra
 
 [#running-zebra]: #running-zebra

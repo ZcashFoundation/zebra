@@ -119,6 +119,18 @@ impl TemplateCache {
         self.0.borrow().is_none()
     }
 
+    /// Returns the published parent's history root for authenticating a submitted body.
+    pub(crate) fn chain_history_root(
+        &self,
+        parent: block::Hash,
+    ) -> Option<block::ChainHistoryMmrRootHash> {
+        self.0
+            .borrow()
+            .as_ref()
+            .filter(|template| template.previous_block_hash == parent)
+            .map(|template| template.default_roots.chain_history_root)
+    }
+
     /// Subscribes to the templates [`run()`] publishes from now on.
     ///
     /// Subscribe before reading the cache, and keep the subscription across the wait:
