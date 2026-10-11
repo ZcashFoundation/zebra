@@ -1608,10 +1608,11 @@ async fn verified_proposal() -> (
     ProposalTestState,
     Arc<Block>,
     Arc<std::sync::atomic::AtomicUsize>,
+    zs::ReadStateService,
 ) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let network = Network::Mainnet;
-    let (state, _, _, _) = zs::init(zs::Config::ephemeral(), &network, Height(8), 0).await;
+    let (state, read_state, _, _) = zs::init(zs::Config::ephemeral(), &network, Height(8), 0).await;
     let state = Buffer::new(state, 10);
     for (_, bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.range(..=8) {
         let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
@@ -1656,7 +1657,7 @@ async fn verified_proposal() -> (
         .await
         .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
-    (verifier, state, solved, calls)
+    (verifier, state, solved, calls, read_state)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1781,11 +1782,83 @@ async fn exact_proposal_commits_without_transaction_verification() {
     .expect("proposal reuse must not stall");
 }
 
+/// Cached solves publish early work while committing, then release the candidate guard.
+#[tokio::test(flavor = "multi_thread")]
+async fn cached_proposal_announces_candidate_until_commit_finishes() {
+    let _init_guard = zebra_test::init();
+    // Stay below the candidate lifetime so expiry cannot imitate guard release.
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        let (mut verifier, state, solved, calls, read_state) = verified_proposal().await;
+        let zs::ReadResponse::MiningCandidateChanges(mut candidates) = read_state
+            .clone()
+            .oneshot(zs::ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return a candidate subscription");
+        };
+        let mut requests: zebra_test::mock_service::MockService<
+            zs::Request,
+            zs::Response,
+            _,
+            BoxError,
+        > = zebra_test::mock_service::MockService::build().for_unit_tests();
+        verifier.state_service = Buffer::new(BoxService::new(requests.clone()), 10);
+        calls.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+        let verification = tokio::spawn(verifier.oneshot(Request::Commit(solved.clone())));
+        requests
+            .expect_request(zs::Request::KnownBlock(solved.hash()))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+        let announcement = requests
+            .expect_request(zs::Request::MiningCandidate(solved.clone()))
+            .await;
+        announcement.respond(
+            state
+                .clone()
+                .oneshot(zs::Request::MiningCandidate(solved.clone()))
+                .await
+                .unwrap(),
+        );
+        let commit = requests
+            .expect_request_that(|request| {
+                matches!(request, zs::Request::CommitContextuallyVerifiedBlock(_))
+            })
+            .await;
+        candidates.changed().await;
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(zs::ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            zs::ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == solved.hash()
+        ));
+        assert!(
+            !verification.is_finished(),
+            "the cached commit is still held"
+        );
+        candidates.mark_seen();
+        commit.respond(zs::Response::Committed(solved.hash()));
+        assert_eq!(verification.await.unwrap().unwrap(), solved.hash());
+        candidates.changed().await;
+        assert!(matches!(
+            read_state
+                .oneshot(zs::ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            zs::ReadResponse::MiningCandidate(None)
+        ));
+    })
+    .await
+    .expect("cached candidate publication and guard release must precede candidate expiry");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cached_proposal_still_requires_proof_of_work() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        let (verifier, _, solved, calls) = verified_proposal().await;
+        let (verifier, _, solved, calls, _) = verified_proposal().await;
         calls.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
         let mut invalid = (*solved).clone();
         Arc::make_mut(&mut invalid.header).solution = equihash::Solution::for_proposal();
@@ -1815,7 +1888,7 @@ async fn changed_proposals_require_transaction_verification() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let _init_guard = zebra_test::init();
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        let (cached, _, _, _) = verified_proposal().await;
+        let (cached, _, _, _, _) = verified_proposal().await;
         let contextual = cached.proposals.borrow().front().unwrap().2.clone();
         let network = zebra_chain::parameters::testnet::Parameters::build()
             .with_disable_pow(true)
