@@ -1890,6 +1890,7 @@ async fn changed_proposals_require_transaction_verification() {
             let state = tower::service_fn(|request| async move {
                 match request {
                     zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
+                    zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
                     zs::Request::CommitSemanticallyVerifiedBlock(_) => {
                         Err::<_, BoxError>("fully verified".into())
                     }
