@@ -72,8 +72,7 @@ use zebra_chain::{
         ConsensusBranchId, Network, NetworkUpgrade,
     },
     serialization::{
-        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -1240,7 +1239,7 @@ where
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
-                let mut template = (*template).clone();
+                let mut template = Arc::unwrap_or_clone(template);
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
@@ -3022,13 +3021,10 @@ where
                 }
                 check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
                 let now = self.template_clock_now();
-                if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
-                    return Err(ErrorObject::owned(
-                        server::error::LegacyCode::Misc.into(),
+                (template.cur_time, template.max_time) =
+                    template.clamped_time_range(now).ok_or_misc_error(
                         "local clock moved backwards while building the block template",
-                        None::<()>,
-                    ));
-                }
+                    )?;
                 template.submit_old = client_long_poll_id.as_ref().map(|old_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_id)
                 });
