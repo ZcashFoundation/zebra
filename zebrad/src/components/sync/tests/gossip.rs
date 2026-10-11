@@ -459,6 +459,10 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
                 Ok::<_, BoxError>(match request {
                     ReadRequest::Tip => ReadResponse::Tip(Some((info.tip_height, info.tip_hash))),
                     ReadRequest::ChainInfo => ReadResponse::ChainInfo(info),
+                    ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                    ReadRequest::MiningCandidateChanges => {
+                        ReadResponse::MiningCandidateChanges(Default::default())
+                    }
                     other => panic!("unexpected state request: {other:?}"),
                 })
             }
@@ -501,7 +505,11 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
         );
         queue.abort();
         let rpc = rpc.with_submitted_blocks(cache.clone(), Height(0));
-        let updater = rpc.spawn_block_template_updater().unwrap();
+        let updater = rpc
+            .spawn_block_template_updater(&mempool::MempoolTxSubscriber::new(
+                tokio::sync::broadcast::channel(1).0,
+            ))
+            .unwrap();
         // The full build reads the mempool only after publishing the coinbase-only template.
         let full_build = mempool
             .expect_request(mempool::Request::FullTransactions)
