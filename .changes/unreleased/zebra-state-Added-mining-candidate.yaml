@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`Request::MiningCandidate`, `ReadRequest::{MiningCandidate, MiningCandidateChanges}`, their responses, `MiningCandidateGuard` and `MiningCandidateChanges` for publishing mining work on a block before its verification finishes.'
+time: 2026-10-11T00:00:00Z

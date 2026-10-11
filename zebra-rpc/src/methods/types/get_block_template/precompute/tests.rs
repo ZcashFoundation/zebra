@@ -420,3 +420,177 @@ fn shielded_miner_addresses_wait_longer_for_a_template() {
         );
     }
 }
+
+/// Pending transaction verification permits early work; rejection restores the committed parent.
+#[tokio::test]
+async fn pending_verification_publishes_early_work_and_failure_restores_the_tip() {
+    use zebra_chain::{block::genesis::regtest_genesis_block, chain_sync_status::MockSyncStatus};
+    use zebra_consensus::{error::TransactionError, SemanticBlockVerifier, VerifyBlockError};
+    use zebra_node_services::mempool;
+    use zebra_test::mock_service::MockService;
+
+    use crate::methods::types::get_block_template::proposal::proposal_block_from_template;
+
+    let _init_guard = zebra_test::init();
+
+    // Stay below the candidate's 30-second lifetime: expiry must not imitate failure withdrawal.
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let network = Network::new_regtest(Default::default());
+        let genesis = regtest_genesis_block();
+        let tip_hash = genesis.hash();
+        let (state, read_state, tip, _tip_changes) =
+            zebra_state::populated_state([genesis], &network).await;
+        let miner_params = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .expect("hard-coded transparent address is valid"),
+        );
+        let mut mempool: MockService<_, _, _, zebra_state::BoxError> = MockService::build()
+            .with_max_request_delay(Duration::from_secs(10))
+            .for_unit_tests();
+        let mut transactions: MockService<_, _, _, zebra_state::BoxError> = MockService::build()
+            .with_max_request_delay(Duration::from_secs(10))
+            .for_unit_tests();
+        let cache = TemplateCache::default();
+        let mut changes = cache.subscribe();
+        let updater = tokio::spawn(run(
+            network.clone(),
+            miner_params,
+            CoinbaseCache::default(),
+            cache.clone(),
+            mempool.clone(),
+            read_state.clone(),
+            tip.clone(),
+            MockSyncStatus::default(),
+        ));
+
+        let original = loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &network, DateTime32::now()) {
+                break template;
+            }
+            changes.changed().await;
+        };
+        assert_eq!(original.height, 1);
+
+        // Keep the full build pending too, so the candidate must interrupt an active updater.
+        let mempool_response = mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await;
+        let candidate = Arc::new(
+            proposal_block_from_template(&original, None, &network)
+                .expect("the real Regtest template produces a candidate"),
+        );
+        assert_eq!(candidate.transactions.len(), 1);
+        let candidate_hash = candidate.hash();
+        let ReadResponse::MiningCandidateChanges(mut candidates) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .expect("candidate changes are readable")
+        else {
+            panic!("state must return a candidate subscription");
+        };
+        let verification = tokio::spawn(
+            SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
+                .oneshot(zebra_consensus::Request::Commit(candidate.clone())),
+        );
+        let transaction_response = transactions
+            .expect_request_that(|request| {
+                request.transaction == candidate.transactions[0] && request.height == Height(1)
+            })
+            .await;
+
+        let info = loop {
+            if let ReadResponse::MiningCandidate(Some(info)) = read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .expect("the candidate notification is readable")
+            {
+                break info;
+            }
+            candidates.changed().await;
+        };
+        assert_eq!(info.tip_hash, candidate_hash);
+        assert_eq!(info.tip_height, Height(1));
+
+        let early = loop {
+            if let Some(template) =
+                cache.template_for_tip(candidate_hash, &network, DateTime32::now())
+            {
+                break template;
+            }
+            changes.changed().await;
+        };
+        assert!(
+            !verification.is_finished(),
+            "no transaction response has been sent"
+        );
+        assert_eq!(early.previous_block_hash, candidate_hash);
+        assert_eq!(early.height, 2);
+        assert!(
+            early.transactions.is_empty(),
+            "early work must be coinbase-only"
+        );
+        assert_eq!(early.bits, info.expected_difficulty);
+        assert_eq!(early.min_time, info.min_time);
+        assert_eq!(early.max_time, info.max_time);
+        let early_block = proposal_block_from_template(&early, None, &network)
+            .expect("early work must contain a usable coinbase transaction");
+        assert_eq!(early_block.transactions.len(), 1);
+        assert_eq!(early_block.coinbase_height(), Some(Height(2)));
+        assert_eq!(tip.best_tip_height_and_hash(), Some((Height(0), tip_hash)));
+
+        mempool_response.respond(mempool::Response::FullTransactions {
+            transactions: Vec::new(),
+            transaction_dependencies: Default::default(),
+            last_seen_tip_hash: tip_hash,
+        });
+        transaction_response.respond_error(TransactionError::CoinbasePosition.into());
+        assert!(matches!(
+            verification
+                .await
+                .expect("the verifier task must not panic"),
+            Err(VerifyBlockError::Transaction(
+                TransactionError::CoinbasePosition
+            ))
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .expect("candidate withdrawal is readable"),
+            ReadResponse::MiningCandidate(None)
+        ));
+
+        let restored = loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &network, DateTime32::now()) {
+                break template;
+            }
+            changes.changed().await;
+        };
+        assert_eq!(restored.height, original.height);
+        assert_eq!(restored.previous_block_hash, tip_hash);
+        assert!(cache
+            .template_for_tip(candidate_hash, &network, DateTime32::now())
+            .is_none());
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::Tip)
+                .await
+                .expect("the committed tip is readable"),
+            ReadResponse::Tip(Some((Height(0), hash))) if hash == tip_hash
+        ));
+
+        updater.abort();
+        assert!(updater
+            .await
+            .expect_err("the updater runs until aborted")
+            .is_cancelled());
+    })
+    .await
+    .expect("candidate publication and rejection rollback must finish before candidate expiry");
+}
