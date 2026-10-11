@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added mining-candidate request and response variants, with a verification-lifetime guard and bounded early child-template context. Exhaustive enum matches must handle the new variants.'
+time: 2026-10-11T00:00:00Z

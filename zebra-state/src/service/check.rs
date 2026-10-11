@@ -264,7 +264,7 @@ fn height_one_more_than_parent_height(
 ///
 /// These checks are performed together, because the time field is used to
 /// calculate the expected difficulty adjustment.
-fn difficulty_threshold_and_time_are_valid(
+pub(crate) fn difficulty_threshold_and_time_are_valid(
     difficulty_threshold: CompactDifficulty,
     difficulty_adjustment: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
