@@ -5,7 +5,10 @@
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use tokio::time::{self, timeout};
+use tokio::{
+    sync::Notify,
+    time::{self, timeout},
+};
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
@@ -25,7 +28,7 @@ use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::{
-    mempool::{self, *},
+    mempool::{self, queue_checker::RATE_LIMIT_DELAY, *},
     sync::{RecentSyncLengths, SyncStatus},
 };
 
@@ -1214,6 +1217,61 @@ async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), 
     Ok(())
 }
 
+/// Verification wakes the idle mempool before the queue checker's backstop fires.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit() {
+    let network = Network::Mainnet;
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        mut changes,
+    ) = setup_with_mempool_config(&network, mempool::Config::default(), true, false).await;
+    mempool.enable(&mut recent_syncs).await;
+
+    let tx = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("mainnet test vectors contain transactions")
+        .transaction;
+    let queued = mempool
+        .ready()
+        .await
+        .expect("the enabled mempool is ready")
+        .call(Request::Queue(vec![tx.clone().into()]))
+        .await
+        .expect("the mempool accepts queue requests");
+    assert!(matches!(queued, Response::Queued(_)));
+    let verification = tx_verifier.expect_request_that(|_| true).await;
+
+    // Start the backstop only after setup, so paused time cannot consume part of its delay.
+    // From here until the announcement, only the queue checker can poll the mempool.
+    let transaction_verified = mempool.transaction_verified.clone();
+    let mempool = Buffer::new(BoxService::new(mempool), 1);
+    let queue_checker = QueueChecker::spawn(mempool, transaction_verified);
+    verification.respond(transaction::MempoolResponse::from(
+        VerifiedUnminedTx::new(
+            tx.clone(),
+            Amount::try_from(1_000_000).expect("valid fee"),
+            0,
+            0,
+            Arc::new(vec![]),
+        )
+        .expect("transaction passes ZIP-317 checks"),
+    ));
+
+    // Storage insertion publishes to this same channel for gossip and mining subscribers.
+    let change = timeout(RATE_LIMIT_DELAY / 2, changes.recv())
+        .await
+        .expect("verification must wake the queue checker before its backstop")
+        .expect("the mempool keeps the change channel open");
+    assert_eq!(change, MempoolChange::added([tx.id].into_iter().collect()));
+    queue_checker.abort();
+}
+
 /// Check if a transaction that fails download is _not_ rejected.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
@@ -2269,7 +2327,7 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _transaction_verified) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
@@ -2354,6 +2412,7 @@ async fn cancel_handles_drained_after_verification_timeout() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
@@ -2442,6 +2501,7 @@ async fn verification_timeout_releases_peer_slot() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let source: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");
@@ -2520,6 +2580,7 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
