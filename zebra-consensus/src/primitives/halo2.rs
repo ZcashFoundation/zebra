@@ -295,6 +295,7 @@ fn batch_verifier(vk: &'static ItemVerifyingKey) -> VerifierService {
             HALO2_MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
+            super::MAX_BATCH_IDLE,
         ),
         OrchardFallback { vk },
     )
