@@ -16,8 +16,8 @@ use crate::{
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
     request::new_outputs_retained_bytes,
-    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
-    SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
+    KnownBlock, NonFinalizedState, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -33,6 +33,8 @@ pub type QueuedCheckpointVerified = (
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
+    // During queueing, the first field owns the cached result's new outputs.
+    Option<Box<ContextuallyVerifiedBlock>>,
 );
 
 /// The maximum number of blocks in a [`QueuedBlocks`].
@@ -154,7 +156,7 @@ impl QueuedBlocks {
                 })
                 .or_else(|| self.by_height.values().next_back()?.iter().next())
                 .expect("a queue over its limits has blocks");
-            let (_block, rsp_tx) = self.remove(&hash);
+            let (_block, rsp_tx, _) = self.remove(&hash);
 
             // The caller might have stopped waiting for the block.
             let _ = rsp_tx.send(Err(CommitBlockError::OrphanQueueFull.into()));
@@ -243,7 +245,7 @@ impl QueuedBlocks {
             }
 
             for hash in lowest.remove() {
-                let (expired_block, expired_sender) = self.remove(&hash);
+                let (expired_block, expired_sender, _) = self.remove(&hash);
 
                 // we don't care if the receiver was dropped
                 let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(

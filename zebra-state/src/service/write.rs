@@ -505,7 +505,7 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+            let Some((queued_child, rsp_tx, contextual)) = queued_child_and_rsp_tx else {
                 forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
                 update_latest_chain_channels(
                     non_finalized_state,
@@ -532,6 +532,10 @@ impl WriteBlockWorkerTask {
             // parent's misbehaviour score.
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
+            } else if let Some(mut contextual) = contextual {
+                // A replaced identical body keeps its first receipt time.
+                contextual.received_time = queued_child.received_time;
+                non_finalized_state.commit_prevalidated_contextual(*contextual, &finalized_state.db)
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
                 validate_and_commit_non_finalized(

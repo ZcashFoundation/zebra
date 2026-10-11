@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: '`VerifyBlockError::OversizedBlock` for solved blocks that exceed the maximum size when reusing a validated proposal. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z

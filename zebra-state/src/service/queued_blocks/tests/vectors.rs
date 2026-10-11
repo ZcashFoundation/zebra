@@ -29,7 +29,7 @@ trait IntoQueued {
 impl IntoQueued for Arc<Block> {
     fn into_queued(self) -> QueuedSemanticallyVerified {
         let (rsp_tx, _) = oneshot::channel();
-        (self.prepare(), rsp_tx)
+        (self.prepare(), rsp_tx, None)
     }
 }
 
@@ -92,10 +92,10 @@ fn dequeue_gives_right_children() -> Result<()> {
     assert_eq!(2, children.len());
     assert!(children
         .iter()
-        .any(|(block, _)| block.hash == child1.hash()));
+        .any(|(block, _, _)| block.hash == child1.hash()));
     assert!(children
         .iter()
-        .any(|(block, _)| block.hash == child2.hash()));
+        .any(|(block, _, _)| block.hash == child2.hash()));
     assert_eq!(0, queue.blocks.len());
     assert_eq!(0, queue.by_parent.len());
     assert_eq!(0, queue.by_height.len());
@@ -442,7 +442,7 @@ fn full_queue_fails_highest_blocks() -> Result<()> {
     let mut receivers = Vec::new();
     for _ in 0..=MAX_QUEUED_BLOCKS {
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        queue.queue((block.clone().prepare(), rsp_tx));
+        queue.queue((block.clone().prepare(), rsp_tx, None));
         receivers.push(rsp_rx);
         block = block.make_fake_child();
     }
@@ -498,7 +498,7 @@ fn queue_limits_memory_of_blocks_with_many_small_outputs() -> Result<()> {
     let mut receivers = Vec::new();
     while queue.queued_bytes <= MAX_QUEUED_BYTES {
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        queue.queue((block.clone().prepare(), rsp_tx));
+        queue.queue((block.clone().prepare(), rsp_tx, None));
         receivers.push(rsp_rx);
         block = block.make_fake_child();
     }
@@ -538,10 +538,10 @@ fn drain_releases_accounting_and_allows_requeue() -> Result<()> {
     let child = block.make_fake_child();
     let mut queue = QueuedBlocks::default();
     let (cancelled_tx, cancelled_rx) = oneshot::channel();
-    queue.queue((block.clone().prepare(), cancelled_tx));
+    queue.queue((block.clone().prepare(), cancelled_tx, None));
     drop(cancelled_rx);
     let (response_tx, mut response_rx) = oneshot::channel();
-    queue.queue((child.clone().prepare(), response_tx));
+    queue.queue((child.clone().prepare(), response_tx, None));
     assert!(queue.queued_bytes > 0);
 
     let drained = queue.drain().collect::<Vec<_>>();
@@ -551,7 +551,7 @@ fn drain_releases_accounting_and_allows_requeue() -> Result<()> {
     assert!(queue.by_height.is_empty());
     assert_eq!(queue.known_utxos.len(), 0);
     assert_eq!(queue.queued_bytes, 0);
-    for (_, (_, response)) in drained {
+    for (_, (_, response, _)) in drained {
         let _ = response.send(Err(CommitBlockError::OrphanQueueFull.into()));
     }
     assert_eq!(
@@ -590,13 +590,13 @@ fn full_queue_fails_abandoned_leaves_first() -> Result<()> {
         parent[..8].copy_from_slice(&(i as u64).to_le_bytes());
         Arc::make_mut(&mut leaf.header).previous_block_hash = block::Hash(parent);
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        queue.queue((Arc::new(leaf).prepare(), rsp_tx));
+        queue.queue((Arc::new(leaf).prepare(), rsp_tx, None));
         drop(rsp_rx);
     }
 
     // A higher block that a caller is still waiting for.
     let (live_tx, mut live_rx) = oneshot::channel();
-    queue.queue((block.make_fake_child().prepare(), live_tx));
+    queue.queue((block.make_fake_child().prepare(), live_tx, None));
 
     queue.prune_overflow();
 

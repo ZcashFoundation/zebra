@@ -388,6 +388,7 @@ fn commit_response_precedes_the_replaced_snapshot_drop() {
         .send(NonFinalizedWriteMessage::Commit((
             child.clone().prepare(),
             rsp_tx,
+            None,
         )))
         .unwrap();
     drop(queued);
