@@ -1,0 +1,8 @@
+project: zebrad
+kind: Changed
+body: >-
+  Mining templates rebuild immediately after isolated verified mempool changes,
+  waking long polls on publication. Bursts coalesce within a 100 ms throttle window;
+  the five-second refresh remains a backstop
+  ([#11374](https://github.com/ZcashFoundation/zebra/pull/11374)).
+time: 2026-10-11T00:00:00Z
