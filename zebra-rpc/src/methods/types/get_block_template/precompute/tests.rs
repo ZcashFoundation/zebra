@@ -990,7 +990,7 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
             .for_unit_tests();
         let verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
             MockService::build().for_unit_tests();
-        let (_mempool_changes, mempool_changes) = broadcast::channel(1);
+        let (mempool_events, mempool_changes) = broadcast::channel(1);
         let cache = TemplateCache::default();
         let mut changes = cache.subscribe();
         let updater = tokio::spawn(run(
@@ -1084,6 +1084,10 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
         assert_eq!(early_block.coinbase_height(), Some(Height(2)));
         assert_eq!(tip.best_tip_height_and_hash(), Some((Height(0), tip_hash)));
 
+        let added_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([3; 32]));
+        mempool_events
+            .send(MempoolChange::added([added_id].into_iter().collect()))
+            .unwrap();
         mempool_response.respond(mempool::Response::FullTransactions {
             transactions: Vec::new(),
             transaction_dependencies: Default::default(),
@@ -1125,6 +1129,25 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
                 .expect("the committed tip is readable"),
             ReadResponse::Tip(Some((Height(0), hash))) if hash == tip_hash
         ));
+        // Resuming the old build must not lose a mempool change received during early work.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            mempool
+                .expect_request(mempool::Request::TransactionIds)
+                .await
+                .respond(mempool::Response::TransactionIds(
+                    [added_id].into_iter().collect(),
+                ));
+            mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await
+                .respond(mempool::Response::FullTransactions {
+                    transactions: Vec::new(),
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                });
+        })
+        .await
+        .expect("a retained build must process mempool changes before the periodic backstop");
 
         updater.abort();
         assert!(updater
