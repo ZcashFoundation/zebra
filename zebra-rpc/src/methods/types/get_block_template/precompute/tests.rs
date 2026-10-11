@@ -886,6 +886,21 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 .is_none(),
             "coinbase-only templates must not reach the verifier"
         );
+        cache.clear();
+        tokio::time::pause();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::resume();
+        assert!(
+            tasks.try_join_next().is_none(),
+            "withdrawal must leave the validator running"
+        );
+        assert!(
+            verifier_requests
+                .try_next_request()
+                .now_or_never()
+                .is_none(),
+            "withdrawn templates must not reach the verifier"
+        );
         let expected =
             proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap();
@@ -973,6 +988,9 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
         let mut transactions: MockService<_, _, _, zebra_state::BoxError> = MockService::build()
             .with_max_request_delay(Duration::from_secs(10))
             .for_unit_tests();
+        let verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build().for_unit_tests();
+        let (_mempool_changes, mempool_changes) = broadcast::channel(1);
         let cache = TemplateCache::default();
         let mut changes = cache.subscribe();
         let updater = tokio::spawn(run(
@@ -981,9 +999,11 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
             CoinbaseCache::default(),
             cache.clone(),
             mempool.clone(),
+            mempool_changes,
             read_state.clone(),
             tip.clone(),
             MockSyncStatus::default(),
+            verifier,
         ));
 
         let original = loop {
@@ -999,7 +1019,7 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
             .expect_request(mempool::Request::FullTransactions)
             .await;
         let candidate = Arc::new(
-            proposal_block_from_template(&original, None, &network)
+            proposal_block_from_template(&original, BlockTemplateTimeSource::CurTime, &network)
                 .expect("the real Regtest template produces a candidate"),
         );
         assert_eq!(candidate.transactions.len(), 1);
@@ -1057,8 +1077,9 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
         assert_eq!(early.bits, info.expected_difficulty);
         assert_eq!(early.min_time, info.min_time);
         assert_eq!(early.max_time, info.max_time);
-        let early_block = proposal_block_from_template(&early, None, &network)
-            .expect("early work must contain a usable coinbase transaction");
+        let early_block =
+            proposal_block_from_template(&early, BlockTemplateTimeSource::CurTime, &network)
+                .expect("early work must contain a usable coinbase transaction");
         assert_eq!(early_block.transactions.len(), 1);
         assert_eq!(early_block.coinbase_height(), Some(Height(2)));
         assert_eq!(tip.best_tip_height_and_hash(), Some((Height(0), tip_hash)));
