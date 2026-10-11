@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The `submitblock` RPC accepts any JSON value for its optional ignored argument and retains only a string `workid` from objects.'
+time: 2026-10-11T00:00:00Z

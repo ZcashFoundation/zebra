@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'The submitblock RPC now accepts any JSON value for its ignored second argument, matching zcashd and allowing mining pools to submit blocks with a string argument.'
+time: 2026-10-11T00:00:00Z
