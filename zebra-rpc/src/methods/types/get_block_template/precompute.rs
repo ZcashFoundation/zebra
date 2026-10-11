@@ -6,15 +6,18 @@
 //! component. So [`run()`] keeps a template for the current chain tip ready in a [`TemplateCache`],
 //! and the RPC only has to check that the template still extends the tip.
 //!
-//! The precomputed template can be a few seconds behind the mempool, which costs the miner the fees
-//! of the transactions that arrived in the meantime, until the next refresh. But it is never behind
-//! the chain: the RPC ignores a template whose previous block hash isn't the current tip, and
-//! [`run()`] publishes a coinbase-only template for a new tip as soon as it sees one.
+//! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
+//! ignores a template whose previous block hash isn't the current tip, and [`run()`] publishes a
+//! coinbase-only template for a new tip as soon as it sees one.
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use jsonrpsee::core::RpcResult;
-use tokio::{sync::watch, task::JoinHandle, time::sleep};
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinHandle,
+    time::{sleep, sleep_until, Instant},
+};
 
 use tower::ServiceExt;
 
@@ -25,9 +28,10 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
+    transaction::UnminedTxId,
     work::difficulty::ParameterDifficulty,
 };
-use zebra_node_services::mempool::MempoolService;
+use zebra_node_services::mempool::{self, MempoolChange, MempoolService};
 use zebra_state::{ReadRequest, ReadResponse, ReadState};
 
 use crate::{
@@ -75,6 +79,10 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
 /// How long [`run()`] waits before retrying, when Zebra isn't synced to the chain tip, or the state
 /// and the mempool disagree about the tip.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// Minimum spacing between event-driven builds, so idle arrivals start immediately and bursts
+/// coalesce without extending the window. Slow builds already provide their own spacing.
+pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_millis(100);
 
 /// A block template for the block after the current chain tip, shared between [`run()`] and the
 /// `getblocktemplate` RPC.
@@ -184,9 +192,8 @@ impl TemplateCache {
 /// Keeps `cache` filled with a block template for the current chain tip.
 ///
 /// Publishes a coinbase-only template as soon as the chain tip changes, then replaces it with a
-/// template that contains mempool transactions. Refreshes that template every
-/// [`MEMPOOL_LONG_POLL_INTERVAL`] seconds, so it picks up new mempool transactions and a recent
-/// `cur_time`.
+/// template that contains mempool transactions. Rebuilds after throttled mempool changes, with
+/// [`MEMPOOL_LONG_POLL_INTERVAL`] seconds as a backstop for missed events and clock changes.
 ///
 /// Runs until the task is aborted.
 #[allow(clippy::too_many_arguments)]
@@ -196,6 +203,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     coinbase_cache: CoinbaseCache,
     cache: TemplateCache,
     mempool: Mempool,
+    mut mempool_changes: broadcast::Receiver<MempoolChange>,
     read_state: ReadStateService,
     mut latest_chain_tip: Tip,
     sync_status: SyncStatus,
@@ -229,6 +237,8 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         // Mark tip changes up to this point as seen, so a change while we build a template wakes up
         // the wait at the end of this iteration, rather than being missed.
         latest_chain_tip.mark_best_tip_seen();
+        // The next snapshot includes earlier events; retain events arriving during the build.
+        mempool_changes = mempool_changes.resubscribe();
 
         // If we have no template for the current tip, publish a coinbase-only one immediately, so
         // miners extend the new tip instead of wasting work on a shorter chain while we select
@@ -248,7 +258,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 )
                 .await
                 {
-                    Ok(Some(template)) => cache.publish(template),
+                    Ok(Some((template, _))) => cache.publish(template),
                     // A coinbase-only template doesn't read the mempool, so it can't be out of
                     // sync with the state.
                     Ok(None) => {}
@@ -259,6 +269,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             }
         }
 
+        let next_mempool_build = Instant::now() + MEMPOOL_THROTTLE;
         // Await the full build even if the tip changes: dropping it would detach its
         // `spawn_blocking` proof, letting repeated tip changes accumulate CPU-heavy work.
         let built = match build(
@@ -270,29 +281,32 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         )
         .await
         {
-            Ok(Some(template)) => match state_tip_hash(read_state.clone()).await {
-                Ok(tip_hash) if tip_hash == Some(template.previous_block_hash) => {
-                    Ok(Some(template))
+            Ok(Some((template, mempool_tx_ids))) => {
+                match state_tip_hash(read_state.clone()).await {
+                    Ok(tip_hash) if tip_hash == Some(template.previous_block_hash) => {
+                        Ok(Some((template, mempool_tx_ids)))
+                    }
+                    Ok(_) => {
+                        // The state advanced while the template was being built. Retry immediately
+                        // rather than waiting for the chain tip notification to catch up.
+                        tracing::debug!("discarding a template for a superseded chain tip");
+                        continue;
+                    }
+                    Err(error) => Err(error),
                 }
-                Ok(_) => {
-                    // The state advanced while the template was being built. Retry immediately
-                    // rather than waiting for the chain tip notification to catch up.
-                    tracing::debug!("discarding a template for a superseded chain tip");
-                    continue;
-                }
-                Err(error) => Err(error),
-            },
+            }
             result => result,
         };
 
-        match built {
-            Ok(Some(template)) => {
+        let mempool_tx_ids = match built {
+            Ok(Some((template, mempool_tx_ids))) => {
                 if was_failing {
                     tracing::info!("block template builds recovered");
                     was_failing = false;
                 }
 
-                cache.publish(template)
+                cache.publish(template);
+                mempool_tx_ids
             }
             // The state and the mempool disagreed about the tip, so retry with fresh data.
             Ok(None) => {
@@ -318,7 +332,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 sleep(RETRY_DELAY).await;
                 continue;
             }
-        }
+        };
 
         // Build the coinbase transaction for the block after next while we're idle, so the next tip
         // change doesn't have to wait for a shielded coinbase proof.
@@ -330,9 +344,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             start_precomputing_coinbase(&mut next_coinbase, &network, &miner_params, height);
         }
 
-        // Refresh the template when the chain tip changes, or when the mempool has had time to
-        // change. Miners can keep working on an old set of transactions, so they don't need to know
-        // about new mempool transactions immediately.
+        // Keep the tip and backstop live even while the mempool query is pending.
         let mut tip_change = latest_chain_tip.clone();
         tokio::select! {
             biased;
@@ -342,6 +354,61 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 }
             }
             _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
+            _ = wait_for_mempool_change(
+                &mut mempool_changes, mempool.clone(), &mempool_tx_ids, next_mempool_build,
+            ) => {}
+        }
+    }
+}
+
+/// Waits for a changed verified set, not merely a rejected transaction or an overflowed channel.
+async fn wait_for_mempool_change<Mempool: MempoolService>(
+    changes: &mut broadcast::Receiver<MempoolChange>,
+    mempool: Mempool,
+    template_ids: &HashSet<UnminedTxId>,
+    next_build: Instant,
+) {
+    let mut next_check = next_build;
+    loop {
+        let change = changes.recv().await;
+        if matches!(&change, Err(broadcast::error::RecvError::Closed)) {
+            std::future::pending::<()>().await;
+        }
+
+        // Rejection-only reads are bounded separately; an addition bypasses that deadline.
+        if !change.is_ok_and(|change| change.is_added()) {
+            tokio::select! {
+                biased;
+                _ = sleep_until(next_check) => {}
+                _ = async {
+                    loop {
+                        match changes.recv().await {
+                            Ok(change) if change.is_added() => break,
+                            Err(broadcast::error::RecvError::Closed) =>
+                                std::future::pending::<()>().await,
+                            _ => {}
+                        }
+                    }
+                } => {}
+            }
+        }
+
+        // ponytail: at most ten event-driven builds per second; increase the window if sustained
+        // valid traffic makes selection too costly. Shielded builds remain serialized.
+        sleep_until(next_build).await;
+
+        // Discard the whole burst, including lagged notifications, before taking the snapshot.
+        // Comparing all IDs also detects collateral evictions absent from the notification.
+        *changes = changes.resubscribe();
+        next_check = Instant::now() + MEMPOOL_THROTTLE;
+        match mempool
+            .clone()
+            .oneshot(mempool::Request::TransactionIds)
+            .await
+        {
+            Ok(mempool::Response::TransactionIds(ids)) if ids == *template_ids => {}
+            Ok(mempool::Response::TransactionIds(_)) | Err(_) => return,
+            Ok(_) => unreachable!("mempool must return transaction IDs for TransactionIds"),
         }
     }
 }
@@ -374,7 +441,7 @@ async fn build<Mempool, ReadStateService>(
     coinbase_cache: &CoinbaseCache,
     read_state: ReadStateService,
     mempool: Option<Mempool>,
-) -> RpcResult<Option<BlockTemplateResponse>>
+) -> RpcResult<Option<(BlockTemplateResponse, HashSet<UnminedTxId>)>>
 where
     Mempool: MempoolService,
     ReadStateService: ReadState,
@@ -393,6 +460,7 @@ where
         }
         None => Default::default(),
     };
+    let mempool_tx_ids = mempool_txs.iter().map(|tx| tx.transaction.id).collect();
 
     let long_poll_id = LongPollInput::new(
         chain_info.tip_height,
@@ -421,14 +489,17 @@ where
         );
 
         // `submit_old` depends on the long poll ID the client sent, so the RPC sets it.
-        Some(BlockTemplateResponse::new_internal(
-            &network,
-            &coinbase_cache,
-            &miner_params,
-            &chain_info,
-            long_poll_id,
-            mempool_txs,
-            None,
+        Some((
+            BlockTemplateResponse::new_internal(
+                &network,
+                &coinbase_cache,
+                &miner_params,
+                &chain_info,
+                long_poll_id,
+                mempool_txs,
+                None,
+            ),
+            mempool_tx_ids,
         ))
     })
     .await
