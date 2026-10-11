@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: 'Reuse successful exact proposals when verifying solved blocks, while rechecking proof of work, time and size. Retain at most eight proposals within a conservative 576 MiB content charge, including spent-output scripts, rather than measured heap usage. Eight representative full-size proposals of 104-byte one-input/one-P2PKH-output payments fit; smaller valid transactions or large spent-output scripts can cause earlier eviction and normal revalidation. This requires the matching `zebra-state` proposal-response and contextual-commit APIs; upgrade both crates together ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658)).'
+time: 2026-10-11T00:00:00Z

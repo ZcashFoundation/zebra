@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `Request::CommitContextuallyVerifiedBlock` and `ContextuallyVerifiedBlock::{rebind, retained_bytes}` for exact proposal reuse and retained-content accounting ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658)).
+time: 2026-10-11T00:00:00Z
