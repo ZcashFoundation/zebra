@@ -65,12 +65,13 @@ impl MempoolObject {
         transactions_by_id: &HashMap<Hash, &VerifiedUnminedTx>,
         transaction_dependencies: &TransactionDependencies,
     ) -> Self {
-        // Get txids of this transaction's descendants (dependents)
-        let empty_set = HashSet::new();
-        let deps = transaction_dependencies
-            .dependents()
-            .get(&unmined_tx.transaction.id.mined_id())
-            .unwrap_or(&empty_set);
+        // Get the full set of this transaction's in-mempool descendants
+        // (direct and indirect dependents). The `descendant*` fields are
+        // documented as including transitive descendants, so we must traverse
+        // the entire dependency DAG rather than reading only the direct
+        // `dependents` of this transaction.
+        let tx_hash = unmined_tx.transaction.id.mined_id();
+        let deps = transaction_dependencies.all_dependents(&tx_hash);
         let deps_len = deps.len();
 
         // For each dependent: get the tx, then its size and fee; then sum them

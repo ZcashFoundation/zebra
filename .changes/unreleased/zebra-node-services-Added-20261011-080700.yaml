@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: Added
+body: "Added `TransactionDependencies::all_dependents`, a non-destructive method that returns the full set of in-mempool transactions that directly or indirectly depend on a transaction (its transitive descendants in the dependency DAG). It traverses `dependents` with a stack and a `HashSet`, visiting each descendant exactly once even in diamond-shaped graphs."
+time: 2026-10-11T08:07:00.000000000Z
