@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'RPC batches using a single version now accept versionless and JSON-RPC 1.0 calls and return responses in the same format, allowing mining pools such as s-nomp to run their startup checks.'
+time: 2026-10-11T00:00:00Z
