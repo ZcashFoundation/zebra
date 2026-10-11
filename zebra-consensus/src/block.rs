@@ -485,13 +485,25 @@ where
 
             check::merkle_root_validity(&network, &block, &transaction_hashes)?;
 
+            let now = Utc::now();
+            check::time_is_valid_at(&block.header, now, &height, &hash)
+                .map_err(VerifyBlockError::Time)?;
+
+            // Keep early work alive while the remaining checks and state commit run.
+            let _mining_candidate = if request.is_proposal() {
+                None
+            } else {
+                state_service
+                    .clone()
+                    .oneshot(zs::Request::MiningCandidate(block.clone()))
+                    .await
+                    .ok()
+            };
+
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
             // Quick field validity and structure checks
-            let now = Utc::now();
-            check::time_is_valid_at(&block.header, now, &height, &hash)
-                .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
             // From the NSM reissuance height, the block subsidy depends on the
