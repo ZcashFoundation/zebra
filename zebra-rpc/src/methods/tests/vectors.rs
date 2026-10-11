@@ -3026,7 +3026,7 @@ fn getblocktemplate_mutations_preserve_coinbase_balance() {
     assert_eq!(template.mutable, ["time"]);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
 
@@ -3039,7 +3039,9 @@ async fn getblocktemplate() {
         [0x7e; 20],
     );
 
-    gbt_with(net, addr).await;
+    tokio::time::timeout(Duration::from_secs(10), gbt_with(net, addr))
+        .await
+        .expect("template requests finish within the test deadline");
 }
 
 async fn gbt_with(net: Network, addr: ZcashAddress) {
@@ -3079,7 +3081,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
+    let (mut rpc, _) = RpcImpl::new(
         net.clone(),
         mining_conf,
         Default::default(),
@@ -3340,35 +3342,75 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.
     assert!(get_block_template.transactions.is_empty());
 
-    // Simulate a state snapshot captured before a backwards wall-clock adjustment.
-    // Its cur_time still fits, but its advertised maximum no longer does.
-    let mut rollback_state = read_state.clone();
-    let (rollback_result, ..) = tokio::join!(
-        rpc.get_block_template(None),
-        make_mock_mempool_request_handler(vec![], fake_tip_hash),
-        async {
-            rollback_state
-                .expect_request(ReadRequest::ChainInfo)
-                .await
-                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                    expected_difficulty: fake_difficulty,
-                    chain_value_pools: Default::default(),
-                    tip_height: fake_tip_height,
-                    tip_hash: fake_tip_hash,
-                    cur_time: fake_cur_time,
-                    min_time: fake_min_time,
-                    max_time: DateTime32::now()
-                        .saturating_add(zebra_chain::serialization::Duration32::from_hours(3)),
-                    chain_history_root: fake_history_tree(&Mainnet).hash(),
-                }));
-        },
-    );
-    assert_eq!(
-        rollback_result
-            .expect_err("the whole range must fit the current clock bound")
-            .code(),
-        i32::from(server::error::LegacyCode::Misc),
-    );
+    // The state snapshot precedes a backwards clock step during the mempool read.
+    let snapshot_max = fake_cur_time.saturating_add(Duration32::from_hours(2));
+    let clock = Arc::new(AtomicU32::new(fake_cur_time.timestamp()));
+    rpc.template_clock = Some(clock.clone());
+    let expected_id = LongPollInput::new(
+        fake_tip_height,
+        fake_tip_hash,
+        snapshot_max,
+        std::iter::empty(),
+    )
+    .generate_id();
+    for now in [
+        fake_cur_time.saturating_sub(Duration32::from_seconds(2)),
+        fake_cur_time.saturating_sub(Duration32::from_seconds(1)),
+        fake_min_time
+            .saturating_sub(Duration32::from_hours(2))
+            .saturating_sub(Duration32::from_seconds(1)),
+    ] {
+        clock.store(fake_cur_time.timestamp(), Ordering::SeqCst);
+        let mut rollback_state = read_state.clone();
+        let mut rollback_mempool = mempool.clone();
+        let (rollback_result, ..) = tokio::join!(
+            rpc.get_block_template(None),
+            async {
+                let request = rollback_mempool
+                    .expect_request(mempool::Request::FullTransactions)
+                    .await;
+                clock.store(now.timestamp(), Ordering::SeqCst);
+                request.respond(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: fake_tip_hash,
+                });
+            },
+            async {
+                rollback_state
+                    .expect_request(ReadRequest::ChainInfo)
+                    .await
+                    .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                        expected_difficulty: fake_difficulty,
+                        chain_value_pools: Default::default(),
+                        tip_height: fake_tip_height,
+                        tip_hash: fake_tip_hash,
+                        cur_time: fake_cur_time,
+                        min_time: fake_min_time,
+                        max_time: snapshot_max,
+                        chain_history_root: fake_history_tree(&Mainnet).hash(),
+                    }));
+            },
+        );
+        let max_time = now.saturating_add(Duration32::from_hours(2));
+        if max_time < fake_min_time {
+            assert_eq!(
+                rollback_result
+                    .expect_err("an empty range is unusable")
+                    .code(),
+                i32::from(server::error::LegacyCode::Misc),
+            );
+            continue;
+        }
+        let template = rollback_result
+            .expect("a usable range survives clock rollback")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(template.max_time, max_time);
+        assert_eq!(template.cur_time, fake_cur_time);
+        assert_eq!(template.min_time, fake_min_time);
+        assert_eq!(template.long_poll_id, expected_id);
+    }
 
     mempool.expect_no_requests().await;
 }

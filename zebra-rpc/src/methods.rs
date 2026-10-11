@@ -72,8 +72,7 @@ use zebra_chain::{
         ConsensusBranchId, Network, NetworkUpgrade,
     },
     serialization::{
-        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -1111,7 +1110,7 @@ where
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
-                let mut template = (*template).clone();
+                let mut template = Arc::unwrap_or_clone(template);
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
@@ -2905,7 +2904,7 @@ where
 
         // Build from the fetched snapshot, then recheck the local-clock bound before serving.
 
-        let template = BlockTemplateResponse::new_internal(
+        let mut template = BlockTemplateResponse::new_internal(
             &self.network,
             &coinbase_cache,
             miner_params,
@@ -2915,14 +2914,12 @@ where
             submit_old,
         );
 
-        // Coinbase construction can take seconds. Recheck the whole advertised range after it,
-        // just as the cache does, rather than returning timestamps invalidated by clock rollback.
-        (template.max_time
-            <= self
-                .template_clock_now()
-                .saturating_add(Duration32::from_hours(2)))
-        .then(|| template.into())
-        .ok_or_misc_error("local clock moved backwards while building the block template")
+        // Coinbase construction can take seconds. Narrow the range after a clock rollback,
+        // preserving the original difficulty and work identity, just as the cache does.
+        (template.cur_time, template.max_time) = template
+            .clamped_time_range(self.template_clock_now())
+            .ok_or_misc_error("local clock moved backwards while building the block template")?;
+        Ok(template.into())
     }
 
     async fn submit_block(

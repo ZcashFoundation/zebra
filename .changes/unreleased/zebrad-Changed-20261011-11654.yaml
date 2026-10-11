@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Mining templates remain available after backwards clock adjustments when their timestamp range can be narrowed safely ([#11654](https://github.com/ZcashFoundation/zebra/pull/11654)).'
+time: 2026-10-11T00:00:00.000000000Z

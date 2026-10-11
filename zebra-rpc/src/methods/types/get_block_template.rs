@@ -34,7 +34,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, ZcashDeserializeInto},
+    serialization::{DateTime32, Duration32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
@@ -262,6 +262,19 @@ impl fmt::Debug for BlockTemplateResponse {
 }
 
 impl BlockTemplateResponse {
+    /// Returns the current and maximum times narrowed to the local-clock bound, or `None` if
+    /// no valid time remains. The minimum stays fixed to preserve Testnet's difficulty boundary.
+    ///
+    /// Keep the original long-poll ID: narrowing unchanged work must not cancel miners' work
+    /// each time the local-clock bound advances.
+    pub(crate) fn clamped_time_range(&self, now: DateTime32) -> Option<(DateTime32, DateTime32)> {
+        let max_time = self
+            .max_time
+            .min(now.saturating_add(Duration32::from_hours(2)));
+        (self.min_time <= max_time)
+            .then(|| (self.cur_time.clamp(self.min_time, max_time), max_time))
+    }
+
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
     pub fn all_capabilities() -> Vec<String> {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()
