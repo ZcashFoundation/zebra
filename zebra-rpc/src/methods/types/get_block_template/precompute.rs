@@ -371,8 +371,10 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         // Mark tip changes up to this point as seen, so a change while we build a template wakes up
         // the wait at the end of this iteration, rather than being missed.
         latest_chain_tip.mark_best_tip_seen();
-        // The next snapshot includes earlier events; retain events arriving during the build.
-        mempool_changes = mempool_changes.resubscribe();
+        // A retained build can predate these events, so keep them until its snapshot is published.
+        if full_build.is_none() {
+            mempool_changes = mempool_changes.resubscribe();
+        }
         candidate_changes.mark_seen();
 
         if let Some(info) = mining_candidate(read_state.clone()).await {
