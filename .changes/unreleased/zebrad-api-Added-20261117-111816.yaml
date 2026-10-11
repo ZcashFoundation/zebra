@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: Added
+body: 'Added `components::miner::submit_mined_block` with the `internal-miner` feature: it skips solved blocks when internal mining is disabled, their parent is no longer the committed tip, or, on Mainnet and the default Testnet, their parent is the `last_accepted` block it recorded ([#11659](https://github.com/ZcashFoundation/zebra/pull/11659)).'
+time: 2026-11-17T11:18:16.109574924+01:00
