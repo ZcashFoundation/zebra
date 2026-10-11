@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: Added
+body: Added `components::inbound::Inbound::with_submitted_blocks` to answer peer block requests from a shared `zebra_rpc::SubmittedBlockCache` before querying the state ([#11670](https://github.com/ZcashFoundation/zebra/pull/11670)).
+time: 2026-11-17T11:18:15.001088046+01:00
