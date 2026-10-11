@@ -84,6 +84,11 @@ These apply to all Zebra changelogs regardless of audience.
 
 Each distinct user-visible change gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, and do not group multiple PRs in one entry.
 
+Verification-only files and documentation do not need fragments. A lockfile-only
+change needs an operator entry only when it changes the node's production
+dependency graph, including supported non-default features and target-specific
+dependencies. Test-only features and development dependencies are excluded.
+
 Good:
 
 ```text

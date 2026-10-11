@@ -3,10 +3,12 @@
 use std::{
     collections::HashSet,
     convert::Infallible as NoDir,
-    fmt::{self, Debug, Write as _},
-    io::{BufRead, BufReader, ErrorKind, Read, Write as _},
+    fmt::{self, Debug},
+    io::{ErrorKind, Write as _},
     path::Path,
-    process::{Child, Command, ExitStatus, Output, Stdio},
+    process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio},
+    sync::mpsc::{self, Receiver, Sender},
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -18,20 +20,381 @@ use color_eyre::{
     Help, SectionExt,
 };
 use regex::RegexSet;
+#[cfg(unix)]
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tracing::instrument;
 
 #[macro_use]
 mod arguments;
+
+#[cfg(unix)]
+#[path = "command/process_group/unix.rs"]
+mod process_group;
+#[cfg(windows)]
+#[path = "command/process_group/windows.rs"]
+#[allow(unsafe_code)]
+mod process_group;
 
 pub mod to_regex;
 
 pub use self::arguments::Arguments;
 use self::to_regex::{CollectRegexSet, RegexSetExt, ToRegexSet};
 
-/// A super-trait for [`Iterator`] + [`Debug`].
-pub trait IteratorDebug: Iterator + Debug {}
+/// A demand-driven child pipe reader. Idle readers do not consume child output.
+///
+/// Each read runs on an owned thread so synchronous harness methods can also be used inside
+/// async tests. Pipe reads are cancellable, including when a child keeps a partial line
+/// or an inherited pipe open. Dropping the reader stops and joins its thread.
+#[derive(Debug)]
+pub struct ChildOutput {
+    requests: Sender<ReadRequest>,
+    responses: Receiver<ReadResponse>,
+    worker: Option<JoinHandle<()>>,
+    deadline: Option<Instant>,
+    drained: Option<ReadResponse>,
+    cancelled: tokio::sync::watch::Sender<bool>,
+    finished: bool,
+    failure_regexes: RegexSet,
+    ignore_regexes: RegexSet,
+    cmd: String,
+    bypass_test_capture: bool,
+}
 
-impl<T> IteratorDebug for T where T: Iterator + Debug {}
+#[derive(Debug)]
+enum ReadRequest {
+    Line(Option<Instant>),
+    Drain(Option<Instant>),
+    Stop,
+}
+
+#[derive(Debug)]
+struct ReadResponse {
+    bytes: Vec<u8>,
+    error: Option<std::io::Error>,
+}
+
+impl ChildOutput {
+    #[cfg(unix)]
+    fn new<R, P>(reader: R, convert: fn(R) -> std::io::Result<P>) -> Self
+    where
+        R: Send + 'static,
+        P: AsyncRead + Unpin + 'static,
+    {
+        let (requests, receive_requests) = mpsc::channel();
+        let (send_responses, responses) = mpsc::channel();
+        let (cancelled, mut worker_cancelled) = tokio::sync::watch::channel(false);
+        let worker = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build();
+            let mut pipe = runtime
+                .as_ref()
+                .map_err(|error| error.to_string())
+                .and_then(|runtime| {
+                    let _guard = runtime.enter();
+                    convert(reader)
+                        .map(BufReader::new)
+                        .map_err(|error| error.to_string())
+                });
+            let mut pending = Vec::new();
+
+            while let Ok(request) = receive_requests.recv() {
+                let (deadline, drain) = match request {
+                    ReadRequest::Line(deadline) => (deadline, false),
+                    ReadRequest::Drain(deadline) => (deadline, true),
+                    ReadRequest::Stop => break,
+                };
+                let mut bytes = if drain {
+                    std::mem::take(&mut pending)
+                } else {
+                    Vec::new()
+                };
+                let result = match (&runtime, &mut pipe) {
+                    (Ok(runtime), Ok(pipe)) => runtime.block_on(async {
+                        let read = async {
+                            if drain {
+                                let mut chunk = [0; 8192];
+                                loop {
+                                    let count = pipe.read(&mut chunk).await?;
+                                    if count == 0 {
+                                        break Ok(bytes.len());
+                                    }
+                                    bytes.extend_from_slice(&chunk[..count]);
+                                }
+                            } else {
+                                pipe.read_until(b'\n', &mut pending).await
+                            }
+                        };
+                        let read_with_deadline = async {
+                            match deadline {
+                                Some(deadline) if Instant::now() >= deadline => {
+                                    Err(std::io::Error::new(
+                                        ErrorKind::TimedOut,
+                                        "test child output deadline elapsed",
+                                    ))
+                                }
+                                Some(deadline) => tokio::time::timeout_at(deadline.into(), read)
+                                    .await
+                                    .unwrap_or_else(|_| {
+                                        Err(std::io::Error::new(
+                                            ErrorKind::TimedOut,
+                                            "test child output deadline elapsed",
+                                        ))
+                                    }),
+                                None => read.await,
+                            }
+                        };
+                        tokio::select! {
+                            result = read_with_deadline => result,
+                            _ = worker_cancelled.changed() => Err(std::io::Error::new(
+                                ErrorKind::Interrupted, "test child output read cancelled",
+                            )),
+                        }
+                    }),
+                    (_, Err(error)) => Err(std::io::Error::other(error.clone())),
+                    (Err(error), _) => Err(std::io::Error::other(error.to_string())),
+                };
+                if !drain && result.is_ok() {
+                    bytes = std::mem::take(&mut pending);
+                }
+                if send_responses
+                    .send(ReadResponse {
+                        bytes,
+                        error: result.err(),
+                    })
+                    .is_err()
+                    || drain
+                {
+                    break;
+                }
+            }
+        });
+
+        Self {
+            requests,
+            responses,
+            worker: Some(worker),
+            deadline: None,
+            drained: None,
+            cancelled,
+            finished: false,
+            failure_regexes: RegexSet::empty(),
+            ignore_regexes: RegexSet::empty(),
+            cmd: String::new(),
+            bypass_test_capture: false,
+        }
+    }
+
+    #[cfg(windows)]
+    fn new<R>(mut reader: R) -> Self
+    where
+        R: std::io::Read + std::os::windows::io::AsRawHandle + Send + 'static,
+    {
+        let (requests, receive_requests) = mpsc::channel();
+        let (send_responses, responses) = mpsc::channel();
+        let (cancelled, worker_cancelled) = tokio::sync::watch::channel(false);
+        let worker = thread::spawn(move || {
+            let mut pending = Vec::new();
+            while let Ok(request) = receive_requests.recv() {
+                let (deadline, drain) = match request {
+                    ReadRequest::Line(deadline) => (deadline, false),
+                    ReadRequest::Drain(deadline) => (deadline, true),
+                    ReadRequest::Stop => break,
+                };
+                let mut bytes = if drain {
+                    std::mem::take(&mut pending)
+                } else {
+                    Vec::new()
+                };
+                let result = loop {
+                    if *worker_cancelled.borrow() {
+                        break Err(std::io::Error::new(
+                            ErrorKind::Interrupted,
+                            "output read cancelled",
+                        ));
+                    }
+                    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                        break Err(std::io::Error::new(
+                            ErrorKind::TimedOut,
+                            "output deadline elapsed",
+                        ));
+                    }
+                    if !drain {
+                        if let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                            let rest = pending.split_off(end + 1);
+                            bytes = std::mem::replace(&mut pending, rest);
+                            break Ok(());
+                        }
+                    }
+                    match windows_pipe_available(&reader) {
+                        Ok(None) => {
+                            if !drain {
+                                bytes = std::mem::take(&mut pending);
+                            }
+                            break Ok(());
+                        }
+                        Ok(Some(0)) => thread::sleep(Duration::from_millis(10)),
+                        Ok(Some(available)) => {
+                            let mut chunk = [0; 8192];
+                            let count = available.min(chunk.len());
+                            match reader.read(&mut chunk[..count]) {
+                                Ok(0) => break Ok(()),
+                                Ok(count) if drain => bytes.extend_from_slice(&chunk[..count]),
+                                Ok(count) => pending.extend_from_slice(&chunk[..count]),
+                                Err(error) => break Err(error),
+                            }
+                        }
+                        Err(error) => break Err(error),
+                    }
+                };
+                if send_responses
+                    .send(ReadResponse {
+                        bytes,
+                        error: result.err(),
+                    })
+                    .is_err()
+                    || drain
+                {
+                    break;
+                }
+            }
+        });
+        Self {
+            requests,
+            responses,
+            worker: Some(worker),
+            deadline: None,
+            drained: None,
+            cancelled,
+            finished: false,
+            failure_regexes: RegexSet::empty(),
+            ignore_regexes: RegexSet::empty(),
+            cmd: String::new(),
+            bypass_test_capture: false,
+        }
+    }
+
+    fn receive(&self) -> ReadResponse {
+        self.responses.recv().unwrap_or_else(|error| ReadResponse {
+            bytes: Vec::new(),
+            error: Some(std::io::Error::other(error)),
+        })
+    }
+
+    fn start_drain(&self, deadline: Option<Instant>) {
+        let _ = self.requests.send(ReadRequest::Drain(deadline));
+    }
+
+    fn finish_drain(&mut self) -> ReadResponse {
+        let response = self.drained.take().unwrap_or_else(|| self.receive());
+        self.finished = true;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        response
+    }
+
+    fn poll_drain(&mut self) -> std::io::Result<()> {
+        if self.drained.is_none() {
+            match self.responses.try_recv() {
+                Ok(response) => self.drained = Some(response),
+                Err(mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(error) => return Err(std::io::Error::other(error)),
+            }
+        }
+        match self
+            .drained
+            .as_ref()
+            .and_then(|response| response.error.as_ref())
+        {
+            Some(error) => Err(std::io::Error::new(error.kind(), error.to_string())),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Iterator for ChildOutput {
+    type Item = std::io::Result<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        if let Err(error) = self.requests.send(ReadRequest::Line(self.deadline)) {
+            self.finished = true;
+            return Some(Err(std::io::Error::other(error)));
+        }
+        let response = self.receive();
+        if let Some(error) = response.error {
+            self.finished = true;
+            return Some(Err(error));
+        }
+        if response.bytes.is_empty() {
+            self.finished = true;
+            return None;
+        }
+        let mut bytes = response.bytes;
+        if bytes.last() == Some(&b'\n') {
+            bytes.pop();
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+        }
+        Some(check_failure_regexes(
+            String::from_utf8(bytes)
+                .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error)),
+            &self.failure_regexes,
+            &self.ignore_regexes,
+            &self.cmd,
+            self.bypass_test_capture,
+        ))
+    }
+}
+
+impl Drop for ChildOutput {
+    fn drop(&mut self) {
+        let _ = self.cancelled.send(true);
+        let _ = self.requests.send(ReadRequest::Stop);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+/// Poll an owned anonymous pipe without starting an uncancellable Windows blocking read.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_pipe_available(
+    pipe: &impl std::os::windows::io::AsRawHandle,
+) -> std::io::Result<Option<usize>> {
+    use windows_sys::Win32::{Foundation::ERROR_BROKEN_PIPE, System::Pipes::PeekNamedPipe};
+    let mut available = 0;
+    // SAFETY: the pipe is owned by this reader for the whole call. The only non-null output
+    // pointer refers to a live u32, and no read or handle-close can race with this peek.
+    let result = unsafe {
+        PeekNamedPipe(
+            pipe.as_raw_handle(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
+        )
+    };
+    if result != 0 {
+        // Windows pointers are at least 32 bits, so the u32 byte count fits usize.
+        Ok(Some(available as usize))
+    } else {
+        let error = std::io::Error::last_os_error();
+        // The Windows broken-pipe error code (109) fits in an i32.
+        if error.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+            Ok(None)
+        } else {
+            Err(error)
+        }
+    }
+}
 
 /// Runs a command
 pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
@@ -53,8 +416,12 @@ pub trait CommandExt {
     /// reports
     fn output2(&mut self) -> Result<TestOutput<NoDir>, Report>;
 
-    /// wrapper for `spawn` fn on `Command` that constructs informative error
-    /// reports using the original `command_path`
+    /// Spawns a command with informative errors and owned descendant cleanup.
+    ///
+    /// On Unix, children that leave the process group are outside the cleanup boundary.
+    /// Callers must not externally reap the leader or enable SIGCHLD auto-reaping.
+    /// On Windows, creation flags must remain at their default zero; the child starts suspended
+    /// so its job is attached before command execution. Job assignment restrictions cause an error.
     fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report>;
 }
 
@@ -94,9 +461,9 @@ impl CommandExt for Command {
     /// reports using the original `command_path`
     fn spawn2<T>(&mut self, dir: T, command_path: impl ToString) -> Result<TestChild<T>, Report> {
         let command_and_args = format!("{self:?}");
-        let child = self.spawn();
+        let child = process_group::spawn(self);
 
-        let child = child
+        let (child, process_group) = child
             .wrap_err("failed to execute process")
             .with_section(|| command_and_args.clone().header("Command:"))?;
 
@@ -105,6 +472,7 @@ impl CommandExt for Command {
             cmd: command_and_args,
             command_path: command_path.to_string(),
             child: Some(child),
+            process_group,
             stdout: None,
             stderr: None,
             failure_regexes: RegexSet::empty(),
@@ -196,19 +564,17 @@ pub struct TestChild<T> {
     /// The path of the command, as passed to spawn2().
     pub command_path: String,
 
-    /// The child process itself.
-    ///
-    /// `None` when the command has been waited on,
-    /// and its output has been taken.
-    pub child: Option<Child>,
+    /// The process remains private so callers cannot reap it before group cleanup.
+    child: Option<Child>,
 
-    /// The standard output stream of the child process.
-    ///
-    /// TODO: replace with `Option<ChildOutput { stdout, stderr }>.
-    pub stdout: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>> + Send>>,
+    /// The group or job is retired before the leader is reaped.
+    process_group: process_group::ProcessGroup,
 
-    /// The standard error stream of the child process.
-    pub stderr: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>> + Send>>,
+    /// The demand-driven standard output stream of the child process.
+    pub stdout: Option<ChildOutput>,
+
+    /// The demand-driven standard error stream of the child process.
+    pub stderr: Option<ChildOutput>,
 
     /// Command outputs which indicate test failure.
     ///
@@ -227,9 +593,9 @@ pub struct TestChild<T> {
     /// If a line matches any ignore regex, the failure regex check is skipped for that line.
     ignore_regexes: RegexSet,
 
-    /// The deadline for this command to finish.
+    /// The deadline for command output reads and natural process exit.
     ///
-    /// Only checked when the command outputs each new line (#1140).
+    /// Can be reset directly, or through [`Self::with_timeout`].
     pub deadline: Option<Instant>,
 
     /// The timeout for this command to finish.
@@ -341,10 +707,25 @@ where
 pub const NO_MATCHES_REGEX_ITER: &[&str] = &[];
 
 impl<T> TestChild<T> {
+    /// Returns the command's process ID.
+    ///
+    /// A process ID is an observation, not an ownership token for later cleanup.
+    pub fn id(&self) -> u32 {
+        self.child
+            .as_ref()
+            .expect("TestChild owns its process until wait_with_output consumes it")
+            .id()
+    }
+
+    /// Borrows piped standard input without exposing process reaping.
+    ///
+    /// Returns `None` if standard input was not piped.
+    pub fn stdin_mut(&mut self) -> Option<&mut ChildStdin> {
+        self.child.as_mut().and_then(|child| child.stdin.as_mut())
+    }
+
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
-    ///
-    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// To never match any log lines, use `RegexSet::empty()`.
     ///
@@ -374,8 +755,6 @@ impl<T> TestChild<T> {
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
     ///
-    /// The failure regexes are ignored by `wait_with_output`.
-    ///
     /// To never match any log lines, use [`NO_MATCHES_REGEX_ITER`].
     ///
     /// This method is a [`TestChild::with_failure_regexes`] wrapper for
@@ -404,8 +783,6 @@ impl<T> TestChild<T> {
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
     ///
-    /// The failure regexes are ignored by `wait_with_output`.
-    ///
     /// # Panics
     ///
     /// - adds a panic to any method that reads output,
@@ -425,8 +802,6 @@ impl<T> TestChild<T> {
 
     /// Applies the failure and ignore regex sets to command output.
     ///
-    /// The failure regexes are ignored by `wait_with_output`.
-    ///
     /// # Panics
     ///
     /// - adds a panic to any method that reads output,
@@ -437,44 +812,46 @@ impl<T> TestChild<T> {
                 .child
                 .as_mut()
                 .and_then(|child| child.stdout.take())
-                .map(|output| self.map_into_string_lines(output))
+                .map(|pipe| {
+                    #[cfg(unix)]
+                    {
+                        ChildOutput::new(pipe, tokio::process::ChildStdout::from_std)
+                    }
+                    #[cfg(windows)]
+                    {
+                        ChildOutput::new(pipe)
+                    }
+                });
         }
-
         if self.stderr.is_none() {
             self.stderr = self
                 .child
                 .as_mut()
                 .and_then(|child| child.stderr.take())
-                .map(|output| self.map_into_string_lines(output))
+                .map(|pipe| {
+                    #[cfg(unix)]
+                    {
+                        ChildOutput::new(pipe, tokio::process::ChildStderr::from_std)
+                    }
+                    #[cfg(windows)]
+                    {
+                        ChildOutput::new(pipe)
+                    }
+                });
         }
-    }
-
-    /// Maps a reader into a string line iterator,
-    /// and applies the failure and ignore regex sets to it.
-    fn map_into_string_lines<R>(
-        &self,
-        reader: R,
-    ) -> Box<dyn IteratorDebug<Item = std::io::Result<String>> + Send>
-    where
-        R: Read + Debug + Send + 'static,
-    {
-        let failure_regexes = self.failure_regexes.clone();
-        let ignore_regexes = self.ignore_regexes.clone();
-        let cmd = self.cmd.clone();
-        let bypass_test_capture = self.bypass_test_capture;
-
-        let reader = BufReader::new(reader);
-        let lines = BufRead::lines(reader).map(move |line| {
-            check_failure_regexes(
-                line,
-                &failure_regexes,
-                &ignore_regexes,
-                &cmd,
-                bypass_test_capture,
-            )
-        });
-
-        Box::new(lines) as _
+        for output in [&mut self.stdout, &mut self.stderr].into_iter().flatten() {
+            output.deadline = self.deadline;
+            if output.failure_regexes.patterns() != self.failure_regexes.patterns() {
+                output.failure_regexes = self.failure_regexes.clone();
+            }
+            if output.ignore_regexes.patterns() != self.ignore_regexes.patterns() {
+                output.ignore_regexes = self.ignore_regexes.clone();
+            }
+            if output.cmd != self.cmd {
+                output.cmd.clone_from(&self.cmd);
+            }
+            output.bypass_test_capture = self.bypass_test_capture;
+        }
     }
 
     /// Kill the child process.
@@ -510,7 +887,7 @@ impl<T> TestChild<T> {
         };
 
         /// SPANDOC: Killing child process
-        let kill_result = child.kill().or_else(|error| {
+        let kill_result = self.process_group.kill(child).or_else(|error| {
             if ignore_exited && error.kind() == ErrorKind::InvalidInput {
                 Ok(())
             } else {
@@ -530,41 +907,11 @@ impl<T> TestChild<T> {
     ///
     /// Returns the result of the kill.
     pub fn kill_and_consume_output(&mut self, ignore_exited: bool) -> Result<()> {
-        self.apply_failure_regexes_to_outputs();
-
-        // Prevent a hang when consuming output,
-        // by making sure the child's output actually finishes.
-        let kill_result = self.kill(ignore_exited);
-
-        // Read unread child output.
-        //
-        // This checks for failure logs, and prevents some test hangs and deadlocks.
-        //
-        // TODO: this could block if stderr is full and stdout is waiting for stderr to be read.
-        if self.stdout.is_some() {
-            let wrote_lines =
-                self.wait_for_stdout_line(format!("\n{} Child Stdout:", self.command_path));
-
-            while self.wait_for_stdout_line(None) {}
-
-            if wrote_lines {
-                // Write an empty line, to make output more readable
-                Self::write_to_test_logs("", self.bypass_test_capture);
-            }
+        let output = self.kill_and_return_output(ignore_exited)?;
+        if !output.is_empty() {
+            Self::write_to_test_logs(output, self.bypass_test_capture);
         }
-
-        if self.stderr.is_some() {
-            let wrote_lines =
-                self.wait_for_stderr_line(format!("\n{} Child Stderr:", self.command_path));
-
-            while self.wait_for_stderr_line(None) {}
-
-            if wrote_lines {
-                Self::write_to_test_logs("", self.bypass_test_capture);
-            }
-        }
-
-        kill_result
+        Ok(())
     }
 
     /// Kill the process, and return all its remaining standard output and standard error output.
@@ -575,46 +922,70 @@ impl<T> TestChild<T> {
     /// Returns `Ok(output)`, or an error if the kill failed.
     pub fn kill_and_return_output(&mut self, ignore_exited: bool) -> Result<String> {
         self.apply_failure_regexes_to_outputs();
-
-        // Prevent a hang when consuming output,
-        // by making sure the child's output actually finishes.
         let kill_result = self.kill(ignore_exited);
-
-        // Read unread child output.
-        let mut stdout_buf = String::new();
-        let mut stderr_buf = String::new();
-
-        // This also checks for failure logs, and prevents some test hangs and deadlocks.
-        loop {
-            let mut remaining_output = false;
-
-            if let Some(stdout) = self.stdout.as_mut() {
-                if let Some(line) =
-                    Self::wait_and_return_output_line(stdout, self.bypass_test_capture)
-                {
-                    stdout_buf.push_str(&line);
-                    remaining_output = true;
-                }
-            }
-
-            if let Some(stderr) = self.stderr.as_mut() {
-                if let Some(line) =
-                    Self::wait_and_return_output_line(stderr, self.bypass_test_capture)
-                {
-                    stderr_buf.push_str(&line);
-                    remaining_output = true;
-                }
-            }
-
-            if !remaining_output {
-                break;
+        if kill_result.is_ok() {
+            if let Some(child) = self.child.as_mut() {
+                child.wait().wrap_err("reaping test child")?;
             }
         }
+        // A descendant may still hold an inherited pipe. Cleanup must not wait for its EOF.
+        self.start_output_drain(Some(Instant::now() + Duration::from_secs(1)));
+        let (stdout, stderr, error) = self.finish_output_drain();
+        kill_result?;
+        if let Some(error) = error {
+            return Err(error)
+                .section(
+                    String::from_utf8_lossy(&stdout)
+                        .into_owned()
+                        .header("Unread Stdout:"),
+                )
+                .section(
+                    String::from_utf8_lossy(&stderr)
+                        .into_owned()
+                        .header("Unread Stderr:"),
+                );
+        }
+        Ok(format!(
+            "{}{}",
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        ))
+    }
 
-        let mut output = stdout_buf;
-        output.push_str(&stderr_buf);
+    fn start_output_drain(&self, deadline: Option<Instant>) {
+        for output in [&self.stdout, &self.stderr].into_iter().flatten() {
+            output.start_drain(deadline);
+        }
+    }
 
-        kill_result.map(|()| output)
+    fn finish_output_drain(&mut self) -> (Vec<u8>, Vec<u8>, Option<Report>) {
+        let mut error = None;
+        let mut drain = |output: &mut Option<ChildOutput>| {
+            let Some(mut output) = output.take() else {
+                return Vec::new();
+            };
+            let response = output.finish_drain();
+            if !self.failure_regexes.is_empty() || !self.ignore_regexes.is_empty() {
+                for line in String::from_utf8_lossy(&response.bytes).lines() {
+                    if let Err(failure) = check_failure_regexes(
+                        Ok(line.to_owned()),
+                        &self.failure_regexes,
+                        &self.ignore_regexes,
+                        &self.cmd,
+                        self.bypass_test_capture,
+                    ) {
+                        error.get_or_insert_with(|| failure.into());
+                    }
+                }
+            }
+            if let Some(read_error) = response.error {
+                error.get_or_insert_with(|| read_error.into());
+            }
+            response.bytes
+        };
+        let stdout = drain(&mut self.stdout);
+        let stderr = drain(&mut self.stderr);
+        (stdout, stderr, error)
     }
 
     /// Waits until a line of standard output is available, then consumes it.
@@ -683,78 +1054,80 @@ impl<T> TestChild<T> {
         false
     }
 
-    /// Waits until a line of `output` is available, then returns it.
+    /// Waits for natural child exit while draining both remaining output streams.
     ///
-    /// If there is a line, and `write_context` is `Some`, writes the context to the test logs.
-    /// Always writes the line to the test logs.
-    ///
-    /// Returns `true` if a line was available,
-    /// or `false` if the standard output has finished.
-    #[allow(clippy::unwrap_in_result)]
-    fn wait_and_return_output_line(
-        mut output: impl Iterator<Item = std::io::Result<String>>,
-        bypass_test_capture: bool,
-    ) -> Option<String> {
-        if let Some(line_result) = output.next() {
-            let line_result = line_result.expect("failure reading test process logs");
-
-            Self::write_to_test_logs(&line_result, bypass_test_capture);
-
-            return Some(line_result);
-        }
-
-        None
-    }
-
-    /// Waits for the child process to exit, then returns its output.
-    ///
-    /// # Correctness
-    ///
-    /// The other test child output methods take one or both outputs,
-    /// making them unavailable to this method.
-    ///
-    /// Ignores any configured timeouts.
-    ///
-    /// Returns an error if the child has already been taken.
-    /// TODO: return an error if both outputs have already been taken.
+    /// Honors the command deadline, including after earlier log matches. On timeout or
+    /// reader error the owned group is killed and the leader reaped; errors include captured output.
+    /// Output already consumed by matchers is not included.
     #[spandoc::spandoc]
     pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
-        let child = match self.child.take() {
-            Some(child) => child,
-
-            // Also checks the taken child output for failure regexes,
-            // either in `context_from`, or on drop.
-            None => {
-                return Err(eyre!(
-                    "test child was already taken\n\
-                     wait_with_output can only be called once for each child process",
-                ))
-                .context_from(self.as_mut())
+        self.apply_failure_regexes_to_outputs();
+        let Some(mut child) = self.child.take() else {
+            return Err(eyre!("test child was already taken")).context_from(self.as_mut());
+        };
+        // Match std::process::Child::wait_with_output: a piped-input child needs EOF to exit.
+        drop(child.stdin.take());
+        self.start_output_drain(self.deadline);
+        let mut status = loop {
+            let read_error = [&mut self.stdout, &mut self.stderr]
+                .into_iter()
+                .flatten()
+                .find_map(|output| output.poll_drain().err());
+            if let Some(error) = read_error {
+                break Err(Report::from(error));
+            }
+            match self.process_group.try_wait(&mut child) {
+                Ok(Some(status)) => break Ok(status),
+                Err(error) => break Err(Report::from(error)),
+                Ok(None) if self.past_deadline() => {
+                    break Err(eyre!("test child process deadline elapsed"));
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
             }
         };
-
-        // TODO: fix the usage in the zebrad acceptance tests, or fix the bugs in TestChild,
-        //       then re-enable this check
-        /*
-        if child.stdout.is_none() && child.stderr.is_none() {
-            // Also checks the taken child output for failure regexes,
-            // either in `context_from`, or on drop.
-            return Err(eyre!(
-                "child stdout and stderr were already taken.\n\
-                 Hint: choose one of these alternatives:\n\
-                 1. use wait_with_output once on each child process, or\n\
-                 2. replace wait_with_output with the other TestChild output methods"
-            ))
-            .context_from(self.as_mut());
+        if status.is_err() {
+            // Retire group ownership before reaping; never signal a reusable saved PID.
+            let cleanup = self
+                .process_group
+                .kill(&mut child)
+                .and_then(|()| child.wait().map(|_| ()));
+            if let Err(error) = cleanup {
+                status = status.map_err(|cause| cause.wrap_err(error));
+            }
+            for output in [&self.stdout, &self.stderr].into_iter().flatten() {
+                let _ = output.cancelled.send(true);
+            }
+        }
+        let (stdout, stderr, read_error) = self.finish_output_drain();
+        let status = match status {
+            Ok(status) => status,
+            Err(error) => {
+                let error = match read_error {
+                    Some(read_error) => error.wrap_err(read_error),
+                    None => error,
+                };
+                return Err(error
+                    .section(self.cmd.clone().header("Command:"))
+                    .section(
+                        String::from_utf8_lossy(&stdout)
+                            .into_owned()
+                            .header("Stdout:"),
+                    )
+                    .section(
+                        String::from_utf8_lossy(&stderr)
+                            .into_owned()
+                            .header("Stderr:"),
+                    ));
+            }
         };
-         */
-
-        /// SPANDOC: waiting for command to exit
-        let output = child.wait_with_output().with_section({
-            let cmd = self.cmd.clone();
-            || cmd.header("Command:")
-        })?;
-
+        let output = Output {
+            status,
+            stdout,
+            stderr,
+        };
+        if let Some(error) = read_error {
+            return Err(error).context_from(&output);
+        }
         Ok(TestOutput {
             output,
             cmd: self.cmd.clone(),
@@ -762,9 +1135,7 @@ impl<T> TestChild<T> {
         })
     }
 
-    /// Set a timeout for `expect_stdout_line_matches` or `expect_stderr_line_matches`.
-    ///
-    /// Does not apply to `wait_with_output`.
+    /// Sets or resets the deadline for command output reads and natural process exit.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self.deadline = Some(Instant::now() + timeout);
@@ -1049,8 +1420,8 @@ impl<T> TestChild<T> {
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
     ///
-    /// Note: the timeout is only checked after each full line is received from
-    /// the child (#1140).
+    /// Harness-owned output iterators interrupt quiet and partial-line reads at the deadline.
+    /// Arbitrary iterators supplied by callers must provide their own bounded reads.
     #[instrument(skip(self, lines))]
     #[allow(clippy::unwrap_in_result)]
     pub fn expect_line_matching_regexes<L>(
@@ -1167,13 +1538,18 @@ impl<T> TestChild<T> {
     ///
     /// If the child process was already been taken using wait_with_output.
     pub fn is_running(&mut self) -> bool {
-        matches!(
-            self.child
-                .as_mut()
-                .expect("child has not been taken")
-                .try_wait(),
-            Ok(None),
-        )
+        let child = self.child.as_mut().expect("child has not been taken");
+        matches!(self.process_group.try_wait(child), Ok(None))
+    }
+}
+
+#[cfg(windows)]
+impl<T> std::os::windows::io::AsHandle for TestChild<T> {
+    fn as_handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
+        self.child
+            .as_ref()
+            .expect("TestChild owns its process until wait_with_output consumes it")
+            .as_handle()
     }
 }
 
@@ -1193,8 +1569,13 @@ impl<T> Drop for TestChild<T> {
     fn drop(&mut self) {
         // Clean up child processes when the test finishes,
         // and check for failure logs.
-        self.kill_and_consume_output(true)
-            .expect("failure reading test process logs")
+        if let Err(error) = self.kill_and_consume_output(true) {
+            if thread::panicking() {
+                Self::write_to_test_logs(format!("{error:?}"), self.bypass_test_capture);
+            } else {
+                panic!("failure reading test process logs: {error:?}");
+            }
+        }
     }
 }
 
@@ -1507,48 +1888,36 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
         self = self.section(source.cmd.clone().header("Command:"));
 
         if let Some(child) = &mut source.child {
-            if let Ok(Some(status)) = child.try_wait() {
+            if let Ok(Some(status)) = source.process_group.try_wait(child) {
                 self = self.context_from(&status);
             }
         }
 
-        // Reading test child process output could hang if the child process is still running,
-        // so kill it first.
+        source.apply_failure_regexes_to_outputs();
         if let Some(child) = source.child.as_mut() {
-            let _ = child.kill();
-        }
-
-        let mut stdout_buf = String::new();
-        let mut stderr_buf = String::new();
-
-        if let Some(stdout) = &mut source.stdout {
-            for line in stdout {
-                let line = line.unwrap_or_else(|error| {
-                    format!("failure reading test process logs: {error:?}")
-                });
-                let _ = writeln!(&mut stdout_buf, "{line}");
-            }
-        } else if let Some(child) = &mut source.child {
-            if let Some(stdout) = &mut child.stdout {
-                let _ = stdout.read_to_string(&mut stdout_buf);
+            if let Err(error) = source
+                .process_group
+                .kill(child)
+                .and_then(|()| child.wait().map(|_| ()))
+            {
+                self = self.wrap_err(error);
             }
         }
-
-        if let Some(stderr) = &mut source.stderr {
-            for line in stderr {
-                let line = line.unwrap_or_else(|error| {
-                    format!("failure reading test process logs: {error:?}")
-                });
-                let _ = writeln!(&mut stderr_buf, "{line}");
-            }
-        } else if let Some(child) = &mut source.child {
-            if let Some(stderr) = &mut child.stderr {
-                let _ = stderr.read_to_string(&mut stderr_buf);
-            }
+        source.start_output_drain(Some(Instant::now() + Duration::from_secs(1)));
+        let (stdout, stderr, error) = source.finish_output_drain();
+        if let Some(error) = error {
+            self = self.wrap_err(error);
         }
-
-        self.section(stdout_buf.header(format!("{} Unread Stdout:", source.command_path)))
-            .section(stderr_buf.header(format!("{} Unread Stderr:", source.command_path)))
+        self.section(
+            String::from_utf8_lossy(&stdout)
+                .into_owned()
+                .header(format!("{} Unread Stdout:", source.command_path)),
+        )
+        .section(
+            String::from_utf8_lossy(&stderr)
+                .into_owned()
+                .header(format!("{} Unread Stderr:", source.command_path)),
+        )
     }
 }
 

@@ -10,6 +10,7 @@
 [profile.default]
 fail-fast = true
 status-level = "pass"
+slow-timeout = { period = "60s", terminate-after = 3 }
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- CI Profile (PRs) ---
@@ -17,23 +18,19 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=u
 [profile.ci]
 fail-fast = false
 failure-output = "immediate"
-slow-timeout = { period = "5m", terminate-after = 4 }
+slow-timeout = { period = "60s", terminate-after = 3 }
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
-slow-timeout = { period = "5m", terminate-after = 2 }
+slow-timeout = { period = "60s", terminate-after = 3 }
 
-# These tests sync the Mainnet genesis block from a local `GenesisPeer`, and
-# finish in a few seconds. They pass `MempoolBehavior::ShouldNotActivate`, so
-# `sync_until_with_peers` waits for `zebrad` to exit with `wait_with_output`,
-# which `TestChild::with_timeout` does not bound: nextest is the only limit if a
-# sync stalls, so fail fast. No live peers are involved, but `zebrad` never
-# retries an initial peer whose first handshake failed (#11504), so a single
-# failed localhost handshake would stall the test. Retry once for that case;
-# nextest still reports it as FLAKY. Keep this in sync with the
-# 'profile.default' copy below.
+# These tests sync Mainnet genesis from a local `GenesisPeer`. Keep a short
+# process-level backstop in addition to `TestChild`'s I/O deadline. A failed
+# initial localhost handshake is not retried by `zebrad` (#11504), so retry the
+# whole attempt once; nextest still reports it as FLAKY. Keep this in sync with
+# the 'profile.default' copy below.
 [[profile.ci.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
 slow-timeout = { period = "60s", terminate-after = 2 }
@@ -76,9 +73,8 @@ serial-live-testnet = { max-threads = 1 }
 # under a parallel profile invoked with --run-ignored=all.
 serial-zcashd-compat = { max-threads = 1 }
 
-# The coverage workflow runs the default profile, which never terminates slow
-# tests, so bound the local-peer sync tests here as well. See the 'profile.ci'
-# copy above.
+# Keep the shorter local-peer sync backstop in the coverage workflow's default
+# profile as well. See the 'profile.ci' copy above.
 [[profile.default.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
 slow-timeout = { period = "60s", terminate-after = 2 }

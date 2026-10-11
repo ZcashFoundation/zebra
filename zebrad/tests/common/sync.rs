@@ -220,8 +220,8 @@ pub fn sync_until(
 /// depend on live network peers.
 ///
 /// With [`MempoolBehavior::ShouldNotActivate`], `zebrad` has to exit by itself so the test can
-/// collect its whole output. `TestChild::with_timeout` doesn't apply to that wait, so `timeout`
-/// doesn't bound it: the per-test `slow-timeout` in `.config/nextest.toml` does.
+/// collect its whole output. The child deadline bounds this wait; the per-test `slow-timeout` in
+/// `.config/nextest.toml` provides an additional process-level backstop.
 ///
 /// See [`sync_until`] for the other arguments and the return value.
 #[allow(clippy::too_many_arguments)]

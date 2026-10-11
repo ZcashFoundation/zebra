@@ -44,7 +44,7 @@ const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
 ///
 /// This test also makes sure that the syncer downloads blocks in order.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -701,7 +701,7 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 /// with duplicate block hashes.
 ///
 /// This test also makes sure that the syncer downloads blocks in order.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     // Get services
     let (

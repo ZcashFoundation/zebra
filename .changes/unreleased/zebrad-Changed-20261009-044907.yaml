@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Metrics readiness is announced after build information is registered.
+time: 2026-10-09T04:49:07.307469906+02:00
