@@ -3954,6 +3954,10 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         std::future::ready(Ok::<_, BoxError>(match request {
             ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
             ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info.clone()),
+            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+            ReadRequest::MiningCandidateChanges => {
+                ReadResponse::MiningCandidateChanges(Default::default())
+            }
             other => panic!("unexpected state request: {other:?}"),
         }))
     });
@@ -5524,7 +5528,11 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
             );
             let cache = rpc.gbt.template_cache().unwrap();
             let mut templates = cache.subscribe();
-            let updater = rpc.spawn_block_template_updater().unwrap();
+            let updater = rpc
+                .spawn_block_template_updater(&MempoolTxSubscriber::new(
+                    tokio::sync::broadcast::channel(1).0,
+                ))
+                .unwrap();
             while cache.template_for_tip(candidate_hash, &net, now).is_none() {
                 templates.changed().await;
             }
