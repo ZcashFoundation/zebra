@@ -4245,6 +4245,37 @@ async fn rpc_submitblock_errors() {
         Ok(SubmitBlockErrorResponse::Rejected.into())
     );
 
+    let module = rpc.into_rpc();
+    let block = serde_json::json!(hex::encode(
+        &*zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES
+    ));
+    let expected: SubmitBlockResponse = module
+        .call("submitblock", [block.clone()])
+        .await
+        .expect("the one-argument call reaches block validation");
+    for parameters in [
+        serde_json::json!("proposal"),
+        serde_json::json!({"workid": "job"}),
+        serde_json::json!({"workid": 42}),
+        serde_json::json!(null),
+        serde_json::json!(true),
+        serde_json::json!(42),
+        serde_json::json!([]),
+    ] {
+        let response: SubmitBlockResponse = module
+            .call("submitblock", [block.clone(), parameters])
+            .await
+            .expect("the ignored parameter must not prevent block validation");
+        assert_eq!(response, expected);
+    }
+    assert_eq!(
+        SubmitBlockParameters::from(serde_json::json!({"workid": "job"}))._work_id,
+        Some("job".to_owned())
+    );
+    let schema = schemars::schema_for!(SubmitBlockParameters);
+    assert!(schema.get("type").is_none());
+    assert!(schema.get("properties").is_none());
+
     mempool.expect_no_requests().await;
 
     // See zebrad's `integration::regtest::regtest_block_templates_are_valid_block_submissions`

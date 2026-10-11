@@ -575,11 +575,11 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hexdata`: (string, required)
-    /// - `jsonparametersobject`: (string, optional) - currently ignored
+    /// - `jsonparametersobject`: (any JSON value, optional) - currently ignored
     ///
     /// # Notes
     ///
-    ///  - `jsonparametersobject` holds a single field, workid, that must be included in submissions if provided by the server.
+    /// The optional second argument, including any `workid`, is currently ignored.
     #[method(name = "submitblock")]
     async fn submit_block(
         &self,

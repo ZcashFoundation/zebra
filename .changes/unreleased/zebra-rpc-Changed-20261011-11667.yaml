@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The `SubmitBlockParameters` deserializer and JSON schema now accept any JSON value, retaining only a string `workid` from objects. Added conversion from `serde_json::Value`.'
+time: 2026-10-11T00:00:00Z
