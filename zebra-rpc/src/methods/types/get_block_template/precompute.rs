@@ -224,8 +224,8 @@ impl TemplateCache {
         }));
     }
 
-    /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
-    /// bound, unless Testnet's time-dependent difficulty may have become easier since it was built.
+    /// Returns a template for `tip_hash`, narrowing its timestamp range to the local-clock bound.
+    /// Rejects empty ranges and Testnet work whose time-dependent difficulty may have become easier.
     pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
@@ -237,12 +237,6 @@ impl TemplateCache {
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.
         if template.previous_block_hash != tip_hash {
-            return None;
-        }
-
-        // Recheck the whole advertised range: the clock can move backwards between refreshes,
-        // and a failed refresh leaves the previous template cached.
-        if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
             return None;
         }
 
@@ -267,7 +261,16 @@ impl TemplateCache {
             return None;
         }
 
-        Some(Arc::clone(template))
+        let (cur_time, max_time) = template.clamped_time_range(now)?;
+        if max_time == template.max_time {
+            return Some(Arc::clone(template));
+        }
+
+        // Only copy when rollback narrows the response; keep the cached snapshot and work ID.
+        let mut template = (**template).clone();
+        template.cur_time = cur_time;
+        template.max_time = max_time;
+        Some(Arc::new(template))
     }
 }
 
