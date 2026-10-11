@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Block templates remain within consensus time bounds after backward clock changes; impossible time ranges return an error.
+time: 2026-10-09T04:33:32.489858835+02:00
