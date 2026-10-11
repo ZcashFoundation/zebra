@@ -43,6 +43,10 @@ async fn semantic_verification_retains_transaction_request() {
             .expect_request(zebra_state::Request::KnownBlock(hash))
             .await
             .respond(zebra_state::Response::KnownBlock(None));
+        state
+            .expect_request(zebra_state::Request::MiningCandidate(block.clone()))
+            .await
+            .respond(zebra_state::Response::MiningCandidate(None));
 
         let response = transactions.expect_request_that(|_| true).await;
         // Keep the full mock request alive beyond both its response and block verification.

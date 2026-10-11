@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: 'Block verification announces mining candidates after proof-of-work, Merkle-root, and future-time checks, without waiting for transaction verification or full contextual validation.'
+time: 2026-10-11T00:00:00Z

@@ -34,7 +34,10 @@ use crate::{
     arbitrary::Prepare,
     init_test,
     service::{
-        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
+        arbitrary::{
+            populated_state, populated_state_with_debug,
+            populated_state_with_mining_candidate_lifetime, PreparedChain,
+        },
         chain_tip::TipAction,
         StateService,
     },
@@ -604,6 +607,205 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     transcript.check(state).await?;
 
     Ok(())
+}
+
+/// Without a commit, rejection, or tip change, a valid candidate lives until its lifetime ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn mining_candidate_expires_after_its_lifetime() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let lifetime = Duration::from_millis(200);
+        let (state, read_state, _, _) =
+            populated_state_with_mining_candidate_lifetime([genesis], &network, lifetime).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested chain info");
+        };
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let ReadResponse::MiningCandidateChanges(changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested candidate subscription");
+        };
+        let admitted = tokio::time::Instant::now();
+        let Response::MiningCandidate(Some(guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(Arc::new(block)))
+            .await
+            .unwrap()
+        else {
+            panic!("the subscription enables candidate publication");
+        };
+        // Publication ends at the deadline whether or not the computation finished first.
+        guard.0.closed().await;
+        assert!(
+            admitted.elapsed() >= lifetime,
+            "a valid candidate must stay live until its lifetime ends"
+        );
+        assert!(changes.0.borrow().is_none());
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(None)
+        ));
+    })
+    .await
+    .expect("an expired candidate must be withdrawn without a commit or failure");
+}
+
+/// A block that doesn't extend the best tip can't take the single candidate slot.
+#[tokio::test]
+async fn mining_candidate_rejects_orphans_before_reserving_the_slot() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &Network::Mainnet).await;
+        let ReadResponse::MiningCandidateChanges(_changes) = read_state
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested candidate subscription");
+        };
+        let child = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let mut orphan = child.clone();
+        Arc::make_mut(&mut orphan.header).previous_block_hash = child.hash();
+        assert!(matches!(
+            state
+                .clone()
+                .oneshot(Request::MiningCandidate(Arc::new(orphan)))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(Arc::new(child)))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(Some(_))
+        ));
+    })
+    .await
+    .expect("orphan candidates must be rejected without waiting");
+}
+
+/// Cancelling admission must not free capacity while the blocking computation is still queued.
+#[test]
+fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
+    let _init_guard = zebra_test::init();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .expect("the single-threaded test runtime should initialize");
+
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let (state, read_state, _, _) = crate::init_test_services(&Network::Mainnet).await;
+            let ReadResponse::MiningCandidateChanges(subscription) = read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidateChanges)
+                .await
+                .expect("the state should accept a mining subscription")
+            else {
+                panic!("expected a persistent mining subscription");
+            };
+            let block = zebra_test::vectors::BLOCK_MAINNET_419200_BYTES
+                .zcash_deserialize_into::<Arc<Block>>()
+                .expect("the test vector is a valid block");
+
+            let (release_blocker, blocker_released) = tokio::sync::oneshot::channel::<()>();
+            let (blocker_started, started) = tokio::sync::oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                let _ = blocker_started.send(());
+                // Dropping the sender also releases this task if an assertion or timeout fails.
+                let _ = blocker_released.blocking_recv();
+            });
+            started
+                .await
+                .expect("the blocking-pool occupant should start");
+
+            let Response::MiningCandidate(Some(guard)) = state
+                .clone()
+                .oneshot(Request::MiningCandidate(block.clone()))
+                .await
+                .expect("candidate admission should not wait for the blocking pool")
+            else {
+                panic!("the first candidate should reserve the available computation slot");
+            };
+
+            // Signal the same cancellation branch as guard drop, but retain the sender so
+            // its closed notification proves the outer task exited before another admission.
+            guard
+                .0
+                .send(())
+                .expect("the candidate task is still listening");
+            guard.0.closed().await;
+            drop(guard);
+            assert_eq!(
+                Arc::strong_count(&block),
+                2,
+                "the cancelled candidate's blocking closure must still be queued"
+            );
+
+            assert!(
+                matches!(
+                    state
+                        .oneshot(Request::MiningCandidate(block.clone()))
+                        .await
+                        .expect("a busy computation slot should reject admission immediately"),
+                    Response::MiningCandidate(None)
+                ),
+                "cancelling the outer task must not admit another blocking computation"
+            );
+
+            release_blocker
+                .send(())
+                .expect("the blocking-pool occupant is still waiting");
+            blocker
+                .await
+                .expect("the blocking-pool occupant should exit");
+            // This read queues behind the cancelled computation on the single blocking thread.
+            assert!(matches!(
+                read_state
+                    .oneshot(ReadRequest::MiningCandidate)
+                    .await
+                    .expect("the blocking queue should drain after release"),
+                ReadResponse::MiningCandidate(None)
+            ));
+            assert_eq!(
+                Arc::strong_count(&block),
+                1,
+                "the cancelled computation must release its block after the queue drains"
+            );
+            drop(subscription);
+        })
+        .await
+        .expect("candidate admission and cancellation should finish within the timeout");
+    });
 }
 
 #[test]

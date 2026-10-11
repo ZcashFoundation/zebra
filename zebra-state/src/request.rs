@@ -973,6 +973,13 @@ impl MappedRequest for AwaitUtxoRequest {
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
+    /// Announces a block after proof-of-work and transaction Merkle-root checks.
+    ///
+    /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
+    /// without full transaction and contextual validation, and withdrawn on guard drop or after
+    /// 1 second.
+    MiningCandidate(Arc<Block>),
+
     /// Performs contextual validation of the given semantically verified block,
     /// committing it to the state if successful.
     ///
@@ -1313,6 +1320,7 @@ impl Request {
     /// Returns a [`&'static str`](str) name of the variant representing this value.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            Request::MiningCandidate(_) => "mining_candidate",
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
@@ -1360,6 +1368,13 @@ impl Request {
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
+    /// Returns the current early mining context in [`ReadResponse::MiningCandidate`].
+    MiningCandidate,
+
+    /// Subscribes to early mining changes and enables candidate computation while held.
+    /// Returns [`ReadResponse::MiningCandidateChanges`].
+    MiningCandidateChanges,
+
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
     /// with the current disk space usage in bytes.
     UsageInfo,
@@ -1925,6 +1940,8 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
+            ReadRequest::MiningCandidate => "mining_candidate",
+            ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
@@ -1984,6 +2001,7 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::CommitSemanticallyVerifiedBlock(_)
             | Request::CommitContextuallyVerifiedBlock(_)
+            | Request::MiningCandidate(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::PreciousBlock(_)
