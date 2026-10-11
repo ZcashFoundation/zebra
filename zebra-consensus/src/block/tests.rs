@@ -15,7 +15,7 @@ use zebra_chain::{
         Block, Height,
     },
     parameters::NetworkUpgrade,
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
 };
@@ -1552,4 +1552,511 @@ fn shielded_action_counts_limits() {
         "counts must not wrap below a limit",
     );
     assert_eq!(saturated.shielded_cost(), usize::MAX);
+}
+
+type ProposalTestState = Buffer<BoxService<zs::Request, zs::Response, BoxError>, zs::Request>;
+type ProposalTestVerifier = SemanticBlockVerifier<
+    ProposalTestState,
+    tower::util::BoxCloneService<tx::BlockRequest, tx::BlockResponse, BoxError>,
+>;
+
+/// Populate the cache with a historical block, real state and a counted transaction verifier.
+async fn verified_proposal() -> (
+    ProposalTestVerifier,
+    ProposalTestState,
+    Arc<Block>,
+    Arc<std::sync::atomic::AtomicUsize>,
+) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let network = Network::Mainnet;
+    let (state, _, _, _) = zs::init(zs::Config::ephemeral(), &network, Height(8), 0).await;
+    let state = Buffer::new(state, 10);
+    for (_, bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.range(..=8) {
+        let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+        state
+            .clone()
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(block.into()))
+            .await
+            .unwrap();
+    }
+    let solved: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&9]
+        .zcash_deserialize_into()
+        .unwrap();
+    let mut proposal = (*solved).clone();
+    Arc::make_mut(&mut proposal.header).nonce = [0; 32].into();
+    Arc::make_mut(&mut proposal.header).solution = equihash::Solution::for_proposal();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = tower::service_fn({
+        let calls = calls.clone();
+        move |request: tx::BlockRequest| {
+            assert_ne!(
+                calls.fetch_add(1, Ordering::SeqCst),
+                usize::MAX,
+                "a cache hit must not call the transaction verifier"
+            );
+            std::future::ready(Ok::<_, BoxError>(tx::BlockResponse {
+                tx_id: request.transaction.unmined_id(),
+                miner_fee: None,
+                sigops: 0,
+            }))
+        }
+    });
+    let mut verifier = SemanticBlockVerifier::new(
+        &network,
+        state.clone(),
+        tower::util::BoxCloneService::new(counted),
+    );
+    verifier
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::CheckProposal(Arc::new(proposal)))
+        .await
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
+    (verifier, state, solved, calls)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exact_proposal_commits_without_transaction_verification() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let network = Network::new_regtest(Default::default());
+        let (state, read_state, _, _) =
+            zs::init(zs::Config::ephemeral(), &network, Height(0), 0).await;
+        let state = Buffer::new(state, 10);
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .clone()
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
+                genesis.clone().into(),
+            ))
+            .await
+            .unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let transactions = tower::service_fn({
+            let calls = calls.clone();
+            move |request: tx::BlockRequest| {
+                assert_ne!(
+                    calls.fetch_add(1, Ordering::SeqCst),
+                    usize::MAX,
+                    "a cache hit must not call the transaction verifier"
+                );
+                std::future::ready(Ok::<_, BoxError>(tx::BlockResponse {
+                    tx_id: request.transaction.unmined_id(),
+                    miner_fee: None,
+                    sigops: 0,
+                }))
+            }
+        });
+        let mut verifier = SemanticBlockVerifier::new(&network, state.clone(), transactions);
+        // Exercise both a finalized parent and a non-finalized parent, including history leaves.
+        for height in [Height(1), Height(2)] {
+            let zs::ReadResponse::ChainInfo(info) = read_state
+                .clone()
+                .oneshot(zs::ReadRequest::ChainInfo)
+                .await
+                .unwrap()
+            else {
+                unreachable!()
+            };
+            let coinbase = Arc::new(Transaction::test_v4(
+                vec![transparent::Input::Coinbase {
+                    height,
+                    data: vec![0],
+                    sequence: u32::MAX,
+                }],
+                vec![transparent::Output::new(
+                    zebra_chain::parameters::subsidy::block_subsidy(height, &network).unwrap(),
+                    transparent::Script::new(&[0x51]),
+                )],
+                LockTime::unlocked(),
+                height,
+            ));
+            let proposal = Block {
+                header: Arc::new(block::Header {
+                    version: 4,
+                    previous_block_hash: info.tip_hash,
+                    merkle_root: [coinbase.hash()].into_iter().collect(),
+                    commitment_bytes: info
+                        .chain_history_root
+                        .map(|root| root.bytes_in_serialized_order())
+                        .unwrap_or([0; 32])
+                        .into(),
+                    time: info.cur_time.into(),
+                    difficulty_threshold: info.expected_difficulty,
+                    nonce: [0; 32].into(),
+                    solution: equihash::Solution::for_proposal(),
+                }),
+                transactions: vec![coinbase],
+            };
+            let mut solved = proposal.clone();
+            Arc::make_mut(&mut solved.header).nonce = [1; 32].into();
+            assert_ne!(proposal.hash(), solved.hash());
+            let solved = Arc::new(solved);
+            calls.store(0, Ordering::SeqCst);
+            verifier
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::CheckProposal(Arc::new(proposal)))
+                .await
+                .unwrap();
+            calls.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(
+                verifier
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(Request::Commit(solved.clone()))
+                    .await
+                    .unwrap(),
+                solved.hash()
+            );
+            assert_eq!(
+                state
+                    .clone()
+                    .oneshot(zs::Request::Block(solved.hash().into()))
+                    .await
+                    .unwrap(),
+                zs::Response::Block(Some(solved)),
+            );
+        }
+    })
+    .await
+    .expect("proposal reuse must not stall");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cached_proposal_still_requires_proof_of_work() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let (verifier, _, solved, calls) = verified_proposal().await;
+        calls.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+        let mut invalid = (*solved).clone();
+        Arc::make_mut(&mut invalid.header).solution = equihash::Solution::for_proposal();
+        assert_eq!(proposal_key(&invalid), proposal_key(&solved));
+        assert!(matches!(
+            verifier.oneshot(Request::Commit(Arc::new(invalid))).await,
+            Err(VerifyBlockError::Equihash { .. })
+                | Err(VerifyBlockError::Block {
+                    source: BlockError::DifficultyFilter(..)
+                })
+        ));
+    })
+    .await
+    .expect("invalid proof of work must not stall");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn changed_proposals_require_transaction_verification() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let (cached, _, _, _) = verified_proposal().await;
+        let contextual = cached.proposals.borrow().front().unwrap().2.clone();
+        let network = zebra_chain::parameters::testnet::Parameters::build()
+            .with_disable_pow(true)
+            .to_network()
+            .unwrap();
+        let original = network
+            .block_iter()
+            .map(|(_, bytes)| bytes.zcash_deserialize_into::<Block>().unwrap())
+            .find(|block| {
+                block
+                    .transactions
+                    .iter()
+                    .any(|tx| tx.version() == 5 && !tx.is_coinbase() && tx.has_transparent_inputs())
+            })
+            .expect("vectors contain a V5 transparent spend");
+        let key = proposal_key(&original);
+        for change in 0..4 {
+            let mut block = original.clone();
+            match change {
+                0 => {
+                    let mut inputs = block.transactions[0].inputs();
+                    let transparent::Input::Coinbase { data, .. } = &mut inputs[0] else {
+                        panic!("first transaction is coinbase")
+                    };
+                    data.push(1);
+                    block.transactions[0] = Arc::new(
+                        (*block.transactions[0])
+                            .clone()
+                            .with_transparent_inputs(inputs),
+                    );
+                }
+                1 => Arc::make_mut(&mut block.header).time += chrono::Duration::seconds(1),
+                2 => {
+                    let tx = block
+                        .transactions
+                        .iter_mut()
+                        .find(|tx| {
+                            tx.version() == 5 && !tx.is_coinbase() && tx.has_transparent_inputs()
+                        })
+                        .unwrap();
+                    let hash = tx.hash();
+                    let mut inputs = tx.inputs();
+                    let transparent::Input::PrevOut { unlock_script, .. } = &mut inputs[0] else {
+                        panic!("non-coinbase inputs spend outputs")
+                    };
+                    *unlock_script = transparent::Script::new(&[0]);
+                    *tx = Arc::new((**tx).clone().with_transparent_inputs(inputs));
+                    assert_eq!(
+                        tx.hash(),
+                        hash,
+                        "authorizing bytes are excluded from V5 txids"
+                    );
+                }
+                _ => Arc::make_mut(&mut block.header).previous_block_hash = block::Hash([9; 32]),
+            }
+            Arc::make_mut(&mut block.header).merkle_root =
+                block.transactions.iter().map(|tx| tx.hash()).collect();
+            assert_ne!(proposal_key(&block), key);
+            let count = block.transactions.len();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let transactions = tower::service_fn({
+                let calls = calls.clone();
+                move |request: tx::BlockRequest| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    std::future::ready(Ok::<_, BoxError>(tx::BlockResponse {
+                        tx_id: request.transaction.unmined_id(),
+                        miner_fee: None,
+                        sigops: 0,
+                    }))
+                }
+            });
+            let state = tower::service_fn(|request| async move {
+                match request {
+                    zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
+                    zs::Request::CommitSemanticallyVerifiedBlock(_) => {
+                        Err::<_, BoxError>("fully verified".into())
+                    }
+                    _ => panic!("a changed proposal must miss"),
+                }
+            });
+            let verifier = SemanticBlockVerifier::new(&network, state, transactions);
+            verifier.proposals.send_modify(|proposals| {
+                proposals.push_front((
+                    key,
+                    original.header.previous_block_hash,
+                    contextual.clone(),
+                    contextual.retained_bytes(),
+                ))
+            });
+            assert!(verifier
+                .oneshot(Request::Commit(Arc::new(block)))
+                .await
+                .is_err());
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                count,
+                "mutation {change} must fully verify"
+            );
+        }
+    })
+    .await
+    .expect("cache miss verification must not stall");
+}
+
+/// Full-sized proposals of one-input/one-P2PKH-output payments keep the eight-entry cache window.
+#[test]
+fn full_size_transparent_proposals_keep_eight_entries() {
+    use std::collections::HashMap;
+
+    use zebra_chain::amount::DeferredPoolBalanceChange;
+
+    let _init_guard = zebra_test::init();
+    let mut block: Block = zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    block.transactions = vec![block.transactions[0].clone()];
+    // A minimal P2PKH payment: one input spending OP_TRUE with no scriptSig, one standard output.
+    let mut p2pkh = vec![0x76, 0xa9, 20];
+    p2pkh.extend([0; 20]);
+    p2pkh.extend([0x88, 0xac]);
+    let output = transparent::Output::new(1.try_into().unwrap(), transparent::Script::new(&p2pkh));
+    let payment = |index, padding| {
+        Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: [7; 32].into(),
+                    index,
+                },
+                unlock_script: transparent::Script::new(&vec![0x61; padding]), // OP_NOP
+                sequence: u32::MAX,
+            }],
+            vec![output.clone()],
+            LockTime::unlocked(),
+            Height(0),
+        )
+    };
+    let transaction_bytes = payment(0, 0).zcash_serialized_size();
+    assert_eq!(transaction_bytes, 104);
+    let limit = usize::try_from(block::MAX_BLOCK_BYTES).unwrap();
+    // The transaction count grows from a one-byte CompactSize to three bytes.
+    let available = limit - block.zcash_serialized_size() - 2;
+    let count = available / transaction_bytes;
+    assert!((253..=u16::MAX.into()).contains(&(count + 1)));
+    block.transactions.reserve_exact(count);
+    let mut spent = HashMap::with_capacity(count);
+    for index in 0..count {
+        let index = u32::try_from(index).unwrap();
+        let padding = if index == 0 {
+            available % transaction_bytes
+        } else {
+            0
+        };
+        let transaction = payment(index, padding);
+        spent.insert(
+            transaction.spent_outpoints().next().unwrap(),
+            transparent::OrderedUtxo::new(
+                transparent::Output::new(1.try_into().unwrap(), transparent::Script::new(&[0x51])),
+                Height(1_046_399),
+                1,
+            ),
+        );
+        block.transactions.push(Arc::new(transaction));
+    }
+    Arc::make_mut(&mut block.header).merkle_root =
+        block.transactions.iter().map(|tx| tx.hash()).collect();
+    assert_eq!(block.zcash_serialized_size(), limit);
+    let block = Arc::new(block);
+    let prepared = zs::SemanticallyVerifiedBlock::with_hash(block.clone(), block.hash());
+    let contextual = zs::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        prepared,
+        spent,
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        Default::default(),
+    )
+    .unwrap();
+    let retained_bytes = contextual.retained_bytes();
+    let proposals = watch::channel(VecDeque::new()).0;
+    for key in 0..8 {
+        cache_proposal(
+            &proposals,
+            [key; 32],
+            block.header.previous_block_hash,
+            Box::new(contextual.clone()),
+        );
+    }
+    assert_eq!(
+        proposals.borrow().len(),
+        8,
+        "full-size P2PKH proposals keep eight slots: {count} payments, {retained_bytes} charged bytes each"
+    );
+}
+
+/// Prior-output scripts share the proposal budget even when their spending inputs are small.
+#[test]
+fn proposal_cache_spent_outputs_share_the_byte_bound() {
+    use std::collections::HashMap;
+
+    use zebra_chain::amount::DeferredPoolBalanceChange;
+
+    let _init_guard = zebra_test::init();
+    let ordinary: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let contextual = |block: Arc<Block>, spent| {
+        zs::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            zs::SemanticallyVerifiedBlock::with_hash(block.clone(), block.hash()),
+            spent,
+            DeferredPoolBalanceChange::zero(),
+            &Network::Mainnet,
+            Default::default(),
+        )
+        .unwrap()
+    };
+    let proposals = watch::channel(VecDeque::new()).0;
+    let small = contextual(ordinary.clone(), HashMap::new());
+    for key in 0..8 {
+        cache_proposal(
+            &proposals,
+            [key; 32],
+            ordinary.header.previous_block_hash,
+            Box::new(small.clone()),
+        );
+    }
+    assert_eq!(
+        proposals.borrow().len(),
+        8,
+        "ordinary proposals keep eight slots"
+    );
+
+    // Spendable scripts below the 10,000-byte limit, as in the orphan queue retention regression.
+    let mut script = Vec::new();
+    for _ in 0..19 {
+        script.extend([0x4d, 0xf4, 0x01]); // OP_PUSHDATA2, 500 bytes
+        script.extend([0; 500]);
+        script.push(0x75); // OP_DROP
+    }
+    script.push(0x51); // OP_TRUE
+    let spent_count = MAX_PROPOSAL_BYTES / (8 * script.len()) + 1;
+    let spent: HashMap<_, _> = (0..spent_count)
+        .map(|index| {
+            let index = u32::try_from(index).unwrap();
+            (
+                transparent::OutPoint {
+                    hash: [7; 32].into(),
+                    index,
+                },
+                transparent::OrderedUtxo::new(
+                    transparent::Output::new(
+                        1.try_into().unwrap(),
+                        transparent::Script::new(&script),
+                    ),
+                    Height(0),
+                    1,
+                ),
+            )
+        })
+        .collect();
+    let spending = ordinary.transactions[0]
+        .as_ref()
+        .clone()
+        .with_transparent_inputs(
+            spent
+                .keys()
+                .map(|outpoint| transparent::Input::PrevOut {
+                    outpoint: *outpoint,
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: u32::MAX,
+                })
+                .collect(),
+        )
+        .with_transparent_outputs(vec![transparent::Output::new(
+            i64::try_from(spent_count).unwrap().try_into().unwrap(),
+            transparent::Script::new(&[0x51]),
+        )]);
+    let mut large = (*ordinary).clone();
+    large.transactions.push(Arc::new(spending));
+    Arc::make_mut(&mut large.header).merkle_root =
+        large.transactions.iter().map(|tx| tx.hash()).collect();
+    let large = Arc::new(large);
+    assert!(8 * large.zcash_serialized_size() < MAX_PROPOSAL_BYTES);
+    assert!(8 * spent.len() * script.len() > MAX_PROPOSAL_BYTES);
+    let large_contextual = contextual(large.clone(), spent);
+    let charged = large_contextual.retained_bytes();
+    for key in 0..8 {
+        cache_proposal(
+            &proposals,
+            [key; 32],
+            large.header.previous_block_hash,
+            Box::new(large_contextual.clone()),
+        );
+    }
+    let proposals = proposals.borrow();
+    assert!(!proposals.is_empty());
+    assert!(
+        proposals.len() < 8,
+        "spent scripts must trigger eviction before the count cap"
+    );
+    assert!(proposals.len() * charged <= MAX_PROPOSAL_BYTES);
+    assert_eq!(
+        proposals.front().unwrap().0,
+        [7; 32],
+        "retain the newest proposal"
+    );
 }

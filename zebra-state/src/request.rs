@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    mem::{size_of, size_of_val},
     ops::{Add, Deref, DerefMut, RangeInclusive},
     pin::Pin,
     sync::Arc,
@@ -16,7 +17,7 @@ use zebra_chain::{
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
-    serialization::SerializationError,
+    serialization::{SerializationError, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
@@ -510,6 +511,32 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Conservative retained-content charge for caches, including decoded metadata and output scripts.
+    ///
+    /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.
+    /// Computing the charge serializes the block without copying its bytes; use a blocking worker.
+    pub fn retained_bytes(&self) -> usize {
+        block_retained_bytes(&self.block, &self.transaction_hashes)
+            .saturating_add(self.contextual_data_retained_bytes())
+    }
+
+    /// Contextual metadata and output maps, excluding the shared block and transaction hashes.
+    pub(crate) fn contextual_data_retained_bytes(&self) -> usize {
+        size_of::<Self>()
+            .saturating_add(output_retained_bytes(&self.new_outputs))
+            .saturating_add(output_retained_bytes(&self.spent_outputs))
+    }
+
+    /// Rebind a successfully validated proposal to its solved block.
+    ///
+    /// The caller must verify proof of work and ensure every serialized byte except nonce and
+    /// solution matches the proposal. Receipt time tracks the solved block, not the proposal.
+    pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        self.hash = block.hash();
+        self.block = block;
+        self.received_time = Some(received_time);
+    }
+
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
@@ -591,6 +618,59 @@ impl ContextuallyVerifiedBlock {
             transaction_fees,
         ))
     }
+}
+
+/// Conservative block content/metadata charge shared by proposal caches and orphan queues.
+pub(crate) fn block_retained_bytes(
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> usize {
+    let mut bytes = block
+        .zcash_serialized_size()
+        .saturating_add(size_of::<Block>())
+        .saturating_add(size_of::<block::Header>())
+        .saturating_add(
+            block
+                .transactions
+                .capacity()
+                .saturating_mul(size_of::<Arc<transaction::Transaction>>()),
+        )
+        .saturating_add(size_of_val(transaction_hashes));
+    for transaction in &block.transactions {
+        bytes = bytes.saturating_add(size_of_val(transaction.as_ref()));
+        if let Some(bundle) = transaction.transparent_bundle() {
+            bytes = bytes
+                .saturating_add(size_of_val(bundle.vin.as_slice()))
+                .saturating_add(size_of_val(bundle.vout.as_slice()));
+        }
+        if let Some(bundle) = transaction.sprout_bundle() {
+            bytes = bytes.saturating_add(size_of_val(bundle.joinsplits.as_slice()));
+        }
+        if let Some(bundle) = transaction.sapling_bundle() {
+            bytes = bytes
+                .saturating_add(size_of_val(bundle.shielded_spends()))
+                .saturating_add(size_of_val(bundle.shielded_outputs()));
+        }
+        for action in transaction
+            .orchard_actions()
+            .chain(transaction.ironwood_actions())
+        {
+            bytes = bytes.saturating_add(size_of_val(action));
+        }
+    }
+    bytes
+}
+
+/// Include scripts from prior transactions, not just the current block's wire bytes.
+pub(crate) fn output_retained_bytes(
+    outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> usize {
+    outputs.values().fold(
+        outputs
+            .capacity()
+            .saturating_mul(size_of::<(transparent::OutPoint, transparent::OrderedUtxo)>()),
+        |bytes, output| bytes.saturating_add(output.utxo.output.lock_script.as_raw_bytes().len()),
+    )
 }
 
 impl CheckpointVerifiedBlock {
@@ -1131,6 +1211,12 @@ pub enum Request {
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Commit a successful proposal result rebound to a solved block, without contextual rechecks.
+    ///
+    /// The caller must check proof of work, current time and serialized size after rebinding.
+    /// Returns [`Response::Committed`], with the same queue semantics as a semantic commit.
+    CommitContextuallyVerifiedBlock(Box<ContextuallyVerifiedBlock>),
 }
 
 impl Request {
@@ -1138,6 +1224,7 @@ impl Request {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
@@ -1744,6 +1831,7 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitContextuallyVerifiedBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
