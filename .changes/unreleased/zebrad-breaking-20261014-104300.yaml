@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Source integrations must pass the mempool transaction subscriber to `RpcImpl::spawn_block_template_updater` ([#11374](https://github.com/ZcashFoundation/zebra/pull/11374)).
+time: 2026-10-14T10:43:00.531622794+02:00

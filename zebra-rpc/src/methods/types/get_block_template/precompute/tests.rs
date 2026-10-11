@@ -420,3 +420,44 @@ fn shielded_miner_addresses_wait_longer_for_a_template() {
         );
     }
 }
+
+/// Rejections and overflow do not rebuild unchanged work, but collateral evictions do.
+#[tokio::test(start_paused = true)]
+async fn mempool_changes_compare_the_verified_set() {
+    let old_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    let rejected_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([2; 32]));
+    let template_ids: HashSet<_> = [old_id].into_iter().collect();
+    let (pool, snapshot) = watch::channel(template_ids.clone());
+    let mempool = tower::service_fn(move |request| {
+        assert_eq!(request, mempool::Request::TransactionIds);
+        std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+            mempool::Response::TransactionIds(snapshot.borrow().clone()),
+        ))
+    });
+    let (events, mut receiver) = broadcast::channel(1);
+    let changed = wait_for_mempool_change(&mut receiver, mempool, &template_ids, Instant::now());
+    tokio::pin!(changed);
+
+    for _ in 0..20 {
+        events
+            .send(MempoolChange::invalidated(
+                [rejected_id].into_iter().collect(),
+            ))
+            .unwrap();
+    }
+    assert!(
+        futures::poll!(&mut changed).is_pending(),
+        "overflowed rejection notifications did not change the verified set",
+    );
+
+    pool.send_replace(HashSet::new());
+    events
+        .send(MempoolChange::invalidated(
+            [rejected_id].into_iter().collect(),
+        ))
+        .unwrap();
+    tokio::time::advance(MEMPOOL_THROTTLE).await;
+    tokio::time::timeout(Duration::from_millis(1), changed)
+        .await
+        .expect("a collateral eviction must wake the updater even when its ID was not announced");
+}
