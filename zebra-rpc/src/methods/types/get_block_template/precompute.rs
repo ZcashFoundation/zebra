@@ -378,7 +378,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             if let Ok(height) = info.tip_height.next() {
                 store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
             }
-            if let Ok(Some(template)) = build(
+            if let Ok(Some((template, _))) = build(
                 &network,
                 &miner_params,
                 &coinbase_cache,
