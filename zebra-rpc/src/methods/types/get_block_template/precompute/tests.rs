@@ -197,9 +197,9 @@ fn wide_testnet_ranges_expire_before_mtp_maximum_activation() {
     }
 }
 
-/// A clock rollback must invalidate any template advertising timestamps beyond the new bound.
+/// A clock rollback narrows usable ranges without changing their difficulty or work identity.
 #[test]
-fn clock_rollback_invalidates_cached_timestamp_range() {
+fn clock_rollback_clamps_cached_timestamp_range() {
     let _init_guard = zebra_test::init();
     let regtest = Network::new_regtest(
         zebra_chain::parameters::testnet::ConfiguredActivationHeights {
@@ -211,22 +211,46 @@ fn clock_rollback_invalidates_cached_timestamp_range() {
 
     for network in [Network::Mainnet, Network::new_default_testnet(), regtest] {
         let cache = TemplateCache::default();
-        let current = template_with_max_time(&network, DateTime32::from(1654008719));
+        let mut current = template_with_max_time(&network, DateTime32::from(1654008719));
+        // The lower bound keeps Testnet minimum-difficulty work on its original side.
+        current.bits = network.target_difficulty_limit().to_compact();
+        current.target = network.target_difficulty_limit();
         let tip_hash = current.previous_block_hash;
         let boundary = current.max_time.saturating_sub(Duration32::from_hours(2));
-        let rollback = boundary.saturating_sub(Duration32::from_seconds(1));
-        // Checking only cur_time would miss the invalid advertised maximum.
-        assert!(current.cur_time <= rollback.saturating_add(Duration32::from_hours(2)));
-        cache.publish(current);
+        cache.publish(current.clone());
 
+        for max_time in [
+            current.max_time,
+            current.max_time.saturating_sub(Duration32::from_seconds(1)),
+            current.cur_time.saturating_sub(Duration32::from_seconds(1)),
+            current.min_time,
+            current.cur_time,
+            current.max_time,
+        ] {
+            let now = max_time.saturating_sub(Duration32::from_hours(2));
+            let clamped = cache
+                .template_for_tip(tip_hash, &network, now)
+                .expect("a usable range survives clock rollback");
+            assert_eq!(clamped.max_time, max_time);
+            assert_eq!(clamped.cur_time, current.cur_time.min(max_time));
+            assert_eq!(clamped.min_time, current.min_time);
+            assert_eq!(clamped.bits, current.bits);
+            assert_eq!(clamped.target, current.target);
+            assert_eq!(clamped.long_poll_id, current.long_poll_id);
+        }
+        let impossible = current
+            .min_time
+            .saturating_sub(Duration32::from_hours(2))
+            .saturating_sub(Duration32::from_seconds(1));
         assert!(cache
-            .template_for_tip(tip_hash, &network, boundary)
-            .is_some());
-        assert!(
+            .template_for_tip(tip_hash, &network, impossible)
+            .is_none());
+        assert_eq!(
             cache
-                .template_for_tip(tip_hash, &network, rollback)
-                .is_none(),
-            "every advertised timestamp must remain inside the local-clock bound on {network:?}",
+                .template_for_tip(tip_hash, &network, boundary)
+                .expect("a narrowed response does not change the cached snapshot")
+                .max_time,
+            current.max_time,
         );
     }
 }
