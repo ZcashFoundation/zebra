@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'The `ReadResponse::ValidBlockProposal` and `Response::ValidBlockProposal` variants now carry `Box<ContextuallyVerifiedBlock>`; request matches must handle `Request::CommitContextuallyVerifiedBlock`. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z
