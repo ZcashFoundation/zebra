@@ -24,20 +24,21 @@ use zebra_chain::{
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
 };
+use zebra_consensus::router::service_trait::BlockVerifierService;
 use zebra_network::AddressBookPeers;
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::{self, MempoolService};
 use zebra_rpc::{
     client::{
         BlockTemplateTimeSource,
         GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
         GetBlockTemplateParameters,
         GetBlockTemplateRequestMode::Template,
-        HexData,
+        HexData, SubmitBlockResponse,
     },
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
 };
-use zebra_state::WatchReceiver;
+use zebra_state::{ReadState as ReadStateService, State as StateService, WatchReceiver};
 
 use crate::components::metrics::Config;
 
@@ -493,11 +494,7 @@ where
         //       blocks.
         let mut any_success = false;
         for block in blocks {
-            let data = block
-                .zcash_serialize_to_vec()
-                .expect("serializing to Vec never fails");
-
-            match rpc.submit_block(HexData(data), None).await {
+            match submit_mined_block(&block, &rpc).await {
                 Ok(success) => {
                     info!(
                         ?height,
@@ -539,6 +536,27 @@ where
     }
 
     Ok(())
+}
+
+/// Submits a solved block to the block verifier.
+pub async fn submit_mined_block<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>(
+    block: &Block,
+    rpc: &RpcImpl<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>,
+) -> Result<SubmitBlockResponse, Report>
+where
+    Mempool: MempoolService,
+    State: StateService,
+    ReadState: ReadStateService,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+    Verifier: BlockVerifierService,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+{
+    let data = block
+        .zcash_serialize_to_vec()
+        .expect("serializing to Vec never fails");
+
+    Ok(rpc.submit_block(HexData(data), None).await?)
 }
 
 /// Mines one or more blocks based on `template`. Calculates equihash solutions, checks difficulty,
