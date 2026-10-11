@@ -125,6 +125,9 @@ impl<S> HttpRequestMiddleware<S> {
     }
 
     /// Maps whatever JSON-RPC version the client is using to JSON-RPC 2.0.
+    ///
+    /// Batches are converted only when all members are legacy request objects with non-null IDs.
+    /// Other batches pass through unchanged.
     async fn request_to_json_rpc_2(
         request: HttpRequest<HttpBody>,
         max_request_body_size: usize,
@@ -134,20 +137,55 @@ impl<S> HttpRequestMiddleware<S> {
             .collect()
             .await?
             .to_bytes();
-        let (version, bytes) =
-            if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
-                let version = request.version();
-                if matches!(version, JsonRpcVersion::Unknown) {
-                    (version, bytes)
-                } else {
-                    (
-                        version,
-                        serde_json::to_vec(&request.into_2()).expect("valid").into(),
-                    )
-                }
+        let (version, bytes) = if let Ok(request) =
+            serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref())
+        {
+            let version = request.version();
+            if matches!(version, JsonRpcVersion::Unknown) {
+                (version, bytes)
             } else {
+                (
+                    version,
+                    serde_json::to_vec(&request.into_2()).expect("valid").into(),
+                )
+            }
+        } else if let Some(requests) =
+            serde_json::from_slice::<Vec<&serde_json::value::RawValue>>(bytes.as_ref())
+                .ok()
+                .filter(|requests| {
+                    requests
+                        .iter()
+                        .all(|request| request.get().trim_start().starts_with('{'))
+                })
+                .and_then(|requests| {
+                    requests
+                        .into_iter()
+                        .map(|request| serde_json::from_str::<JsonRpcRequest>(request.get()))
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()
+                })
+        {
+            let version = requests
+                .first()
+                .map_or(JsonRpcVersion::Unknown, JsonRpcRequest::version);
+            if !matches!(
+                version,
+                JsonRpcVersion::Bitcoind | JsonRpcVersion::Lightwalletd
+            ) || requests.iter().any(|request| request.version() != version)
+            {
                 (JsonRpcVersion::Unknown, bytes)
-            };
+            } else {
+                let requests: Vec<_> = requests.into_iter().map(JsonRpcRequest::into_2).collect();
+                (
+                    version,
+                    serde_json::to_vec(&requests)
+                        .expect("requests contain only JSON values")
+                        .into(),
+                )
+            }
+        } else {
+            (JsonRpcVersion::Unknown, bytes)
+        };
         Ok((
             version,
             // `Vec::from` reuses the buffer without copying when it is uniquely owned.
@@ -165,6 +203,18 @@ impl<S> HttpRequestMiddleware<S> {
             if let Ok(response) = serde_json::from_slice::<'_, JsonRpcResponse>(bytes.as_ref()) {
                 serde_json::to_vec(&response.into_version(version))
                     .expect("valid")
+                    .into()
+            } else if matches!(version, JsonRpcVersion::Unknown) {
+                bytes
+            } else if let Ok(responses) =
+                serde_json::from_slice::<'_, Vec<JsonRpcResponse>>(bytes.as_ref())
+            {
+                let responses: Vec<_> = responses
+                    .into_iter()
+                    .map(|response| response.into_version(version))
+                    .collect();
+                serde_json::to_vec(&responses)
+                    .expect("responses contain only JSON values")
                     .into()
             } else {
                 bytes
@@ -243,7 +293,7 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum JsonRpcVersion {
     /// bitcoind used a mishmash of 1.0, 1.1, and 2.0 for its JSON-RPC.
     Bitcoind,

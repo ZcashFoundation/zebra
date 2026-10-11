@@ -8,10 +8,13 @@ use zebra_chain::block;
 #[allow(unused_imports)]
 use crate::methods::GetBlockTemplateHandler;
 
-/// Optional argument `jsonparametersobject` for `submitblock` RPC request
+/// Optional ignored argument `jsonparametersobject` for the `submitblock` RPC.
+///
+/// Any JSON value is accepted. A string `workid` in an object is retained but unused.
 ///
 /// See the notes for the [`submit_block`](crate::methods::RpcServer::submit_block) RPC.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(from = "serde_json::Value")]
 pub struct SubmitBlockParameters {
     /// The workid for the block template. Currently unused.
     ///
@@ -25,8 +28,18 @@ pub struct SubmitBlockParameters {
     /// > Therefore, using a "workid" is a very cheap solution to enable more mutations.
     ///
     /// <https://en.bitcoin.it/wiki/BIP_0022#Rationale>
-    #[serde(rename = "workid")]
     pub _work_id: Option<String>,
+}
+
+impl From<serde_json::Value> for SubmitBlockParameters {
+    fn from(mut value: serde_json::Value) -> Self {
+        Self {
+            _work_id: match value.get_mut("workid") {
+                Some(serde_json::Value::String(work_id)) => Some(std::mem::take(work_id)),
+                _ => None,
+            },
+        }
+    }
 }
 
 /// Response to a `submitblock` RPC request.
