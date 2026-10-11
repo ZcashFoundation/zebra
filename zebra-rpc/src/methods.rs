@@ -1154,7 +1154,7 @@ where
             return Ok(None);
         };
 
-        if cache.is_empty() && !cache.updater_is_running() {
+        if cache.is_uninitialized() && !cache.updater_is_running() {
             return Ok(None);
         }
 
@@ -1265,7 +1265,7 @@ where
         }
     }
 
-    /// Returns the precomputed template, if it extends the tip the state has committed.
+    /// Returns work extending the committed tip or the current proof-of-work checked parent.
     ///
     /// Waits up to [`precompute::new_tip_timeout()`] for the updater task to catch up with a recent
     /// tip change, re-reading the tip every time it publishes.
@@ -1312,6 +1312,17 @@ where
                     )
                     .ok()?;
                     return Some(template);
+                }
+
+                if let Some(candidate) = precompute::mining_candidate(self.read_state.clone()).await
+                {
+                    if let Some(template) = cache.template_for_tip(
+                        candidate.tip_hash,
+                        &self.network,
+                        self.template_clock_now(),
+                    ) {
+                        return Some(template);
+                    }
                 }
 
                 template_changes.changed().await;
