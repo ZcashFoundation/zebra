@@ -19,6 +19,7 @@ pub struct BatchLayer<Request> {
     max_items_weight_in_batch: usize,
     max_batches: Option<usize>,
     max_latency: std::time::Duration,
+    max_idle: std::time::Duration,
 
     // TODO: is the variance correct here?
     // https://doc.rust-lang.org/1.33.0/nomicon/subtyping.html#variance
@@ -35,11 +36,13 @@ impl<Request> BatchLayer<Request> {
         max_items_weight_in_batch: usize,
         max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
+        max_idle: std::time::Duration,
     ) -> Self {
         BatchLayer {
             max_items_weight_in_batch,
             max_batches: max_batches.into(),
             max_latency,
+            max_idle,
             _handles_requests: PhantomData,
         }
     }
@@ -61,6 +64,7 @@ where
             self.max_items_weight_in_batch,
             self.max_batches,
             self.max_latency,
+            self.max_idle,
         )
     }
 }
@@ -71,6 +75,7 @@ impl<Request> fmt::Debug for BatchLayer<Request> {
             .field("max_items_weight_in_batch", &self.max_items_weight_in_batch)
             .field("max_batches", &self.max_batches)
             .field("max_latency", &self.max_latency)
+            .field("max_idle", &self.max_idle)
             .finish()
     }
 }
