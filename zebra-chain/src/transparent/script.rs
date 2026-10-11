@@ -5,7 +5,7 @@ use std::{fmt, io};
 use hex::{FromHex, FromHexError, ToHex};
 
 use crate::serialization::{
-    zcash_serialize_bytes, SerializationError, ZcashDeserialize, ZcashSerialize,
+    zcash_serialize_bytes, CompactSizeMessage, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
 /// An encoding of a Bitcoin script.
@@ -94,6 +94,13 @@ impl FromHex for Script {
 impl ZcashSerialize for Script {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
         zcash_serialize_bytes(&self.0, writer)
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        CompactSizeMessage::try_from(self.0.len())
+            .expect("script length fits in MAX_PROTOCOL_MESSAGE_LEN")
+            .zcash_serialized_size()
+            + self.0.len()
     }
 }
 

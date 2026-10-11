@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Transaction size calculations avoid serializing transaction contents.
+time: 2026-10-09T04:35:36.682462542+02:00
