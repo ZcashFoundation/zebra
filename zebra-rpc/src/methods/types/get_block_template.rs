@@ -689,7 +689,8 @@ pub(crate) fn nsm_value_balance_for_next_block(
 /// Caches coinbases by height, parent NSM balance, and gross transaction fees.
 ///
 /// Shielded coinbases require expensive proofs. Keep zero-fee sizing and real-fee coinbases for
-/// the selected context, discarding old proof completions rather than evicting newer work.
+/// the selected and previously selected contexts, discarding old proof completions rather than
+/// evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
 #[derive(Clone, Default)]
 pub(crate) struct CoinbaseCache {
@@ -699,10 +700,17 @@ pub(crate) struct CoinbaseCache {
 }
 
 /// The context selected by the latest request and its bounded fee variants.
+///
+/// The previously selected context keeps its variants, so early work for a candidate's child
+/// doesn't discard the committed tip's proofs when that candidate is withdrawn.
 #[derive(Default)]
 struct CachedCoinbases {
     context: Option<(block::Height, Option<Amount<NonNegative>>)>,
     transactions: HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+    previous: (
+        Option<(block::Height, Option<Amount<NonNegative>>)>,
+        HashMap<Amount<NonNegative>, TransactionTemplate<amount::NegativeOrZero>>,
+    ),
 }
 
 impl CoinbaseCache {
@@ -712,9 +720,15 @@ impl CoinbaseCache {
             .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if cache.context != Some((height, parent_nsm_value_balance)) {
-            cache.context = Some((height, parent_nsm_value_balance));
-            cache.transactions.clear();
+        let context = Some((height, parent_nsm_value_balance));
+        if cache.context != context {
+            let cache = &mut *cache;
+            std::mem::swap(&mut cache.context, &mut cache.previous.0);
+            std::mem::swap(&mut cache.transactions, &mut cache.previous.1);
+            if cache.context != context {
+                cache.context = context;
+                cache.transactions.clear();
+            }
         }
     }
 
