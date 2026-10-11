@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: "Fixed `getrawmempool` verbose mode (`getrawmempool true`) reporting only directly dependent transactions in the `descendantcount`, `descendantsize`, and `descendantfees` fields. These fields now include all transitive in-mempool descendants, matching the field documentation and `zcashd` behavior."
+time: 2026-10-11T08:07:00.000000000Z

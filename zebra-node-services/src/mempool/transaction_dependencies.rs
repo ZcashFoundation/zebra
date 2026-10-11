@@ -122,6 +122,43 @@ impl TransactionDependencies {
         self.dependents.get(tx_hash).cloned().unwrap_or_default()
     }
 
+    /// Returns the set of hashes of transactions that directly or indirectly
+    /// depend on the transaction for `tx_hash` — its full set of in-mempool
+    /// descendants in the dependency DAG.
+    ///
+    /// Unlike [`TransactionDependencies::direct_dependents`], this traverses the
+    /// entire `dependents` graph, so grandchildren and deeper descendants are
+    /// included. The traversal keeps a `HashSet` of visited transactions and
+    /// only pushes a transaction onto the work stack the first time it is
+    /// reached, so each descendant is returned exactly once even in
+    /// diamond-shaped dependency graphs (e.g. `A -> B`, `A -> C`, `B -> D`).
+    ///
+    /// This method is non-destructive: it does not modify `self`. It is the
+    /// read-only counterpart of [`TransactionDependencies::remove_all`], which
+    /// removes the same set of transactions from the maps.
+    ///
+    /// # Correctness
+    ///
+    /// Callers must ensure there are no cyclical dependencies, as documented on
+    /// [`TransactionDependencies::add`]. The visited `HashSet` also bounds the
+    /// traversal if a cycle is somehow present, so it cannot loop forever.
+    pub fn all_dependents(&self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+        let mut all_dependents = HashSet::new();
+        let mut to_visit: Vec<transaction::Hash> = vec![*tx_hash];
+
+        while let Some(current) = to_visit.pop() {
+            if let Some(dependents) = self.dependents.get(&current) {
+                for dependent in dependents {
+                    if all_dependents.insert(*dependent) {
+                        to_visit.push(*dependent);
+                    }
+                }
+            }
+        }
+
+        all_dependents
+    }
+
     /// Returns a list of hashes of transactions that are direct dependencies of the transaction for `tx_hash`.
     pub fn direct_dependencies(&self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
         self.dependencies.get(tx_hash).cloned().unwrap_or_default()
@@ -141,5 +178,77 @@ impl TransactionDependencies {
     /// Returns the map of transaction's dependents
     pub fn dependents(&self) -> &HashMap<transaction::Hash, HashSet<transaction::Hash>> {
         &self.dependents
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use zebra_chain::transaction::Hash;
+
+    use super::TransactionDependencies;
+
+    /// Build a [`TransactionDependencies`] from `(parent, [children...])` edges,
+    /// populating the `dependents` map directly.
+    fn with_dependents(edges: &[(Hash, &[Hash])]) -> TransactionDependencies {
+        let mut deps = TransactionDependencies::default();
+        for (parent, children) in edges {
+            deps.dependents
+                .insert(*parent, children.iter().copied().collect());
+        }
+        deps
+    }
+
+    #[test]
+    fn all_dependents_follows_transitive_chain() {
+        // A -> B -> C
+        let a = Hash([0x0a; 32]);
+        let b = Hash([0x0b; 32]);
+        let c = Hash([0x0c; 32]);
+        let deps = with_dependents(&[(a, &[b]), (b, &[c])]);
+
+        assert_eq!(deps.all_dependents(&a), HashSet::from([b, c]));
+        assert_eq!(deps.all_dependents(&b), HashSet::from([c]));
+        assert_eq!(deps.all_dependents(&c), HashSet::new());
+    }
+
+    #[test]
+    fn all_dependents_handles_diamond() {
+        // A -> B, A -> C, B -> D  (a fork / diamond-shaped dependency graph)
+        let a = Hash([0x0a; 32]);
+        let b = Hash([0x0b; 32]);
+        let c = Hash([0x0c; 32]);
+        let d = Hash([0x0d; 32]);
+        let deps = with_dependents(&[(a, &[b, c]), (b, &[d])]);
+
+        assert_eq!(deps.all_dependents(&a), HashSet::from([b, c, d]));
+        assert_eq!(deps.all_dependents(&b), HashSet::from([d]));
+        assert_eq!(deps.all_dependents(&c), HashSet::new());
+        assert_eq!(deps.all_dependents(&d), HashSet::new());
+    }
+
+    #[test]
+    fn all_dependents_matches_add_population() {
+        // Build the same A -> B -> C DAG through the public `add` API, which
+        // populates `dependents`, and check that `all_dependents` reads it.
+        let a = Hash([0x0a; 32]);
+        let b = Hash([0x0b; 32]);
+        let c = Hash([0x0c; 32]);
+
+        let mut deps = TransactionDependencies::default();
+        // B spends an output created by A.
+        deps.add(
+            b,
+            vec![zebra_chain::transparent::OutPoint { hash: a, index: 0 }],
+        );
+        // C spends an output created by B.
+        deps.add(
+            c,
+            vec![zebra_chain::transparent::OutPoint { hash: b, index: 0 }],
+        );
+
+        assert_eq!(deps.all_dependents(&a), HashSet::from([b, c]));
+        assert_eq!(deps.all_dependents(&b), HashSet::from([c]));
     }
 }
