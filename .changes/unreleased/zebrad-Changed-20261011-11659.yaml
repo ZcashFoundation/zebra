@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: "The internal miner discards solutions whose parent is no longer committed, pauses public-network mining while behind or without recently live peers, and waits for a different parent after accepting its own public-network block. Regtest and configured Testnet retain peerless mining and may extend their own accepted blocks ([#11659](https://github.com/ZcashFoundation/zebra/pull/11659))."
+time: 2026-10-11T00:00:00Z
