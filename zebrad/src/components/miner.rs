@@ -1,9 +1,6 @@
 //! Internal mining in Zebra.
 //!
 //! # TODO
-//! - pause mining if we have no peers, like `zcashd` does,
-//!   and add a developer config that mines regardless of how many peers we have.
-//!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
 use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
@@ -11,7 +8,12 @@ use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
 use color_eyre::Report;
 use futures::{stream::FuturesUnordered, StreamExt};
 use thread_priority::{ThreadBuilder, ThreadPriority};
-use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
+use tokio::{
+    select,
+    sync::watch,
+    task::JoinHandle,
+    time::{sleep, timeout},
+};
 use tower::Service;
 use tracing::{Instrument, Span};
 
@@ -280,7 +282,29 @@ where
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
-        let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
+        if !rpc.internal_mining_is_enabled() {
+            template_sender.send_replace(None);
+            // Recovery must request fresh work, not wait on the withdrawn template's long poll.
+            parameters = GetBlockTemplateParameters::new(
+                Template,
+                None,
+                vec![LongPoll, CoinbaseTxn],
+                None,
+                None,
+            );
+            sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+            continue;
+        }
+
+        // Recheck eligibility even while a long poll is pending.
+        let Ok(template) = timeout(
+            BLOCK_TEMPLATE_WAIT_TIME,
+            rpc.get_block_template(Some(parameters.clone())),
+        )
+        .await
+        else {
+            continue;
+        };
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
@@ -406,7 +430,9 @@ where
         // Get the latest block template, and mark the current value as seen.
         // We mark the value first to avoid missed updates.
         template_receiver.mark_as_seen();
-        let template = template_receiver.cloned_watch_data();
+        let template = template_receiver
+            .cloned_watch_data()
+            .filter(|_| rpc.internal_mining_is_enabled());
 
         let Some(template) = template else {
             if solver_id == 0 {
@@ -431,10 +457,21 @@ where
             continue;
         };
 
+        let Ok(tip) = timeout(BLOCK_TEMPLATE_WAIT_TIME, rpc.read_committed_tip()).await else {
+            sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+            continue;
+        };
+        if tip? != Some(template.header.previous_block_hash) {
+            // ponytail: committed parents only; accept live candidates when state exposes them.
+            template_receiver.changed().await?;
+            continue;
+        }
+
         let height = template.coinbase_height().expect("template is valid");
 
         // Set up the cancellation conditions for the miner.
         let mut cancel_receiver = template_receiver.clone();
+        let cancel_rpc = rpc.clone();
         let old_header = *template.header;
         let cancel_fn = move || match cancel_receiver.has_changed() {
             // Guard against get_block_template() providing an identical header. This could happen
@@ -445,8 +482,10 @@ where
 
                 // We only need to check header equality, because the block data is bound to the
                 // header.
-                if has_changed
-                    && Some(old_header) != cancel_receiver.cloned_watch_data().map(|b| *b.header)
+                if !cancel_rpc.internal_mining_is_enabled()
+                    || (has_changed
+                        && Some(old_header)
+                            != cancel_receiver.cloned_watch_data().map(|b| *b.header))
                 {
                     Err(SolverCancelled)
                 } else {
@@ -488,14 +527,11 @@ where
         };
 
         // Submit the newly mined blocks to the verifiers.
-        //
-        // TODO: if there is a new template (`cancel_fn().is_err()`), and
-        //       GetBlockTemplate.submit_old is false, return immediately, and skip submitting the
-        //       blocks.
         let mut any_success = false;
         for block in blocks {
             match submit_mined_block(&block, &rpc).await {
-                Ok(success) => {
+                Ok(None) => continue,
+                Ok(Some(success)) => {
                     info!(
                         ?height,
                         hash = ?block.hash(),
@@ -538,11 +574,12 @@ where
     Ok(())
 }
 
-/// Submits a solved block to the block verifier.
+/// Submits a solved block, or returns `None` if its parent is stale, mining is paused,
+/// or the state tip read times out.
 pub async fn submit_mined_block<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>(
     block: &Block,
     rpc: &RpcImpl<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>,
-) -> Result<SubmitBlockResponse, Report>
+) -> Result<Option<SubmitBlockResponse>, Report>
 where
     Mempool: MempoolService,
     State: StateService,
@@ -552,11 +589,18 @@ where
     Verifier: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    let Ok(tip) = timeout(BLOCK_TEMPLATE_WAIT_TIME, rpc.read_committed_tip()).await else {
+        return Ok(None);
+    };
+    if tip? != Some(block.header.previous_block_hash) || !rpc.internal_mining_is_enabled() {
+        return Ok(None);
+    }
+
     let data = block
         .zcash_serialize_to_vec()
         .expect("serializing to Vec never fails");
 
-    Ok(rpc.submit_block(HexData(data), None).await?)
+    Ok(Some(rpc.submit_block(HexData(data), None).await?))
 }
 
 /// Mines one or more blocks based on `template`. Calculates equihash solutions, checks difficulty,
