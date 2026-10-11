@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -18,6 +19,7 @@ use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
+use tokio::sync::watch;
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -25,6 +27,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network},
+    serialization::{sha256d, ZcashSerialize},
     transparent,
     work::equihash,
 };
@@ -47,7 +50,11 @@ pub struct SemanticBlockVerifier<S, V> {
     network: Network,
     state_service: S,
     transaction_verifier: V,
+    /// Successful proposals, newest first; shared by all outstanding verification requests.
+    proposals: Arc<watch::Sender<ProposalCache>>,
 }
+
+type ProposalCache = VecDeque<([u8; 32], block::Hash, Arc<zs::ContextuallyVerifiedBlock>)>;
 
 /// Block verification errors.
 // TODO: dedupe with crate::error::BlockError
@@ -72,6 +79,9 @@ pub enum VerifyBlockError {
 
     #[error(transparent)]
     Time(zebra_chain::block::BlockTimeError),
+
+    #[error("block exceeds the maximum serialized size")]
+    OversizedBlock,
 
     /// Error when attempting to commit a block after semantic verification.
     #[error("unable to commit block after semantic verification: {0}")]
@@ -298,6 +308,7 @@ where
             network: network.clone(),
             state_service,
             transaction_verifier,
+            proposals: Arc::new(watch::channel(VecDeque::new()).0),
         }
     }
 }
@@ -332,6 +343,7 @@ where
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
+        let proposals = self.proposals.clone();
 
         let block = request.block();
 
@@ -378,6 +390,52 @@ where
                 // attacks that use any other fields.
                 check::difficulty_is_valid(&block.header, &network, &height, &hash)?;
                 check::equihash_solution_is_valid(&block.header)?;
+            }
+
+            // Hash only when populating the cache or when there is something to reuse.
+            let proposal_key = if request.is_proposal() || !proposals.borrow().is_empty() {
+                let block = block.clone();
+                let (key, size) = tokio::task::spawn_blocking(move || {
+                    (proposal_key(&block), block.zcash_serialized_size())
+                })
+                .await
+                .expect("proposal hashing task must not panic");
+                if u64::try_from(size).expect("block sizes fit u64") > block::MAX_BLOCK_BYTES {
+                    return Err(VerifyBlockError::OversizedBlock);
+                }
+                Some(key)
+            } else {
+                None
+            };
+            let cached = if let Some(key) = proposal_key.filter(|_| !request.is_proposal()) {
+                proposals
+                    .borrow()
+                    .iter()
+                    .find(|(cached_key, parent, _)| {
+                        *cached_key == key && *parent == block.header.previous_block_hash
+                    })
+                    .map(|(_, _, contextual)| contextual.clone())
+            } else {
+                None
+            };
+            if let Some(cached) = cached {
+                check::time_is_valid_at(&block.header, Utc::now(), &height, &hash)
+                    .map_err(VerifyBlockError::Time)?;
+                let mut contextual = (*cached).clone();
+                contextual.rebind(block, received_time);
+                return match state_service
+                    .oneshot(zs::Request::CommitContextuallyVerifiedBlock(Box::new(
+                        contextual,
+                    )))
+                    .await
+                {
+                    Ok(zs::Response::Committed(committed_hash)) => {
+                        assert_eq!(committed_hash, hash, "state must commit correct hash");
+                        Ok(hash)
+                    }
+                    Err(source) => Err(map_commit_error(source, hash)),
+                    _ => unreachable!("wrong response for CommitContextuallyVerifiedBlock"),
+                };
             }
 
             // Next, check the Merkle root validity, to ensure that
@@ -518,6 +576,7 @@ where
                 received_time: Some(received_time),
             };
 
+            let parent = prepared_block.block.header.previous_block_hash;
             // Return early for proposal requests.
             if request.is_proposal() {
                 return match state_service
@@ -528,7 +587,18 @@ where
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
                 {
-                    zs::Response::ValidBlockProposal => Ok(hash),
+                    zs::Response::ValidBlockProposal(contextual) => {
+                        let key = proposal_key.expect("proposals always have a cache key");
+                        proposals.send_modify(|proposals| {
+                            proposals.retain(|(old_key, old_parent, _)| {
+                                (*old_key, *old_parent) != (key, parent)
+                            });
+                            proposals.push_front((key, parent, Arc::from(contextual)));
+                            // ponytail: eight exact templates; enlarge only if measured churn needs it.
+                            proposals.truncate(8);
+                        });
+                        Ok(hash)
+                    }
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
                 };
             }
@@ -553,4 +623,22 @@ where
         .instrument(span)
         .boxed()
     }
+}
+
+/// Hash all wire bytes except nonce and solution, without allocating a serialized block.
+fn proposal_key(block: &block::Block) -> [u8; 32] {
+    let header = block::Header {
+        nonce: [0; 32].into(),
+        solution: equihash::Solution::Common([0; 1344]),
+        ..*block.header
+    };
+    let mut writer = sha256d::Writer::default();
+    header
+        .zcash_serialize(&mut writer)
+        .expect("hash writers cannot fail");
+    block
+        .transactions
+        .zcash_serialize(&mut writer)
+        .expect("hash writers cannot fail");
+    writer.finish()
 }

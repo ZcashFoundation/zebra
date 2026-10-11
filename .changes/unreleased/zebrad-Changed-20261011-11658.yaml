@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Avoid repeated transaction and contextual validation when submitted blocks exactly match validated mining proposals apart from nonce and solution. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z

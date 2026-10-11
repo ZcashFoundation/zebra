@@ -21,7 +21,7 @@ trait IntoQueued {
 impl IntoQueued for Arc<Block> {
     fn into_queued(self) -> QueuedSemanticallyVerified {
         let (rsp_tx, _) = oneshot::channel();
-        (self.prepare(), rsp_tx)
+        (self.prepare(), rsp_tx, None)
     }
 }
 
@@ -84,10 +84,10 @@ fn dequeue_gives_right_children() -> Result<()> {
     assert_eq!(2, children.len());
     assert!(children
         .iter()
-        .any(|(block, _)| block.hash == child1.hash()));
+        .any(|(block, _, _)| block.hash == child1.hash()));
     assert!(children
         .iter()
-        .any(|(block, _)| block.hash == child2.hash()));
+        .any(|(block, _, _)| block.hash == child2.hash()));
     assert_eq!(0, queue.blocks.len());
     assert_eq!(0, queue.by_parent.len());
     assert_eq!(0, queue.by_height.len());

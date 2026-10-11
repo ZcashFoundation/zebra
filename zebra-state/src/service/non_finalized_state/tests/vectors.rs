@@ -331,6 +331,70 @@ fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, Finalized
     (state, finalized_state)
 }
 
+#[test]
+fn cached_proposal_respects_block_and_parent_invalidation() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = Arc::new(network.test_block(653599, 583999).unwrap());
+    let mut solved = parent.make_fake_child().set_work(10);
+    Arc::make_mut(&mut Arc::make_mut(&mut solved).header).nonce = [1; 32].into();
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(parent.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    // Retain the successful proposal payload before committing its solved counterpart.
+    let mut proposal = (*solved).clone();
+    Arc::make_mut(&mut proposal.header).nonce = [0; 32].into();
+    let mut proposal_state = state.clone();
+    proposal_state.disable_metrics();
+    proposal_state
+        .commit_block(Arc::new(proposal).prepare(), &finalized_state)
+        .unwrap();
+    let mut cached = proposal_state.best_tip_block().unwrap().clone();
+    assert_ne!(cached.hash, solved.hash());
+    cached.rebind(solved.clone(), std::time::Instant::now());
+    state
+        .commit_block(solved.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(solved.hash()).unwrap();
+
+    let normal_error = state
+        .commit_block(solved.clone().prepare(), &finalized_state)
+        .unwrap_err();
+    assert_eq!(
+        normal_error,
+        crate::ValidateContextError::BlockPreviouslyInvalidated {
+            block_hash: solved.hash(),
+        }
+    );
+    assert_eq!(
+        state.commit_prevalidated_contextual(cached.clone(), &finalized_state),
+        Err(normal_error),
+    );
+    assert_eq!(state.best_tip().unwrap().1, parent.hash());
+    assert!(!state.any_chain_contains(&solved.hash()));
+
+    // A different solved hash is not itself invalidated, but cannot restore its removed parent.
+    let mut sibling = (*solved).clone();
+    Arc::make_mut(&mut sibling.header).nonce = [2; 32].into();
+    let sibling = Arc::new(sibling);
+    cached.rebind(sibling.clone(), std::time::Instant::now());
+    state.invalidate_block(parent.hash()).unwrap();
+    let normal_error = state
+        .commit_block(sibling.prepare(), &finalized_state)
+        .unwrap_err();
+    assert_eq!(
+        normal_error,
+        crate::ValidateContextError::NotReadyToBeCommitted
+    );
+    assert_eq!(
+        state.commit_prevalidated_contextual(cached, &finalized_state),
+        Err(normal_error),
+    );
+    assert!(state.best_chain().is_none());
+}
+
 /// Invalidating the non-finalized root of a tracked chain previously called
 /// `BTreeSet::remove(&chain)`, which compared the stored chain against
 /// itself via `Chain::cmp` and reached an `unreachable!()` for matching tip

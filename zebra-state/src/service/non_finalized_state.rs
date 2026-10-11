@@ -384,6 +384,47 @@ impl NonFinalizedState {
         Ok(())
     }
 
+    /// Apply an exact proposal verdict to its solved block and original parent.
+    ///
+    /// Normal chain application rebuilds indexes and the history leaf using the solved hash.
+    pub(super) fn commit_prevalidated_contextual(
+        &mut self,
+        contextual: ContextuallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<(), ValidateContextError> {
+        // Local invalidation refers to solved hashes, which proposals do not bind.
+        if self
+            .invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == contextual.hash))
+        {
+            return Err(ValidateContextError::BlockPreviouslyInvalidated {
+                block_hash: contextual.hash,
+            });
+        }
+        let parent_hash = contextual.block.header.previous_block_hash;
+        let (height, hash) = (contextual.height, contextual.hash);
+        let parent_chain = if parent_hash == finalized_state.finalized_tip_hash() {
+            Arc::new(Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .expect("a successful proposal has a finalized parent"),
+                finalized_state.note_commitment_trees_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            ))
+        } else {
+            self.parent_chain(parent_hash)?
+        };
+        let chain = Arc::unwrap_or_clone(parent_chain).push(contextual)?;
+        self.insert_with(Arc::new(chain), |chains| {
+            chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+        });
+        self.update_metrics_for_committed_block(height, hash);
+        Ok(())
+    }
+
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     #[allow(clippy::unwrap_in_result)]

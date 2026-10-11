@@ -420,3 +420,159 @@ fn shielded_miner_addresses_wait_longer_for_a_template() {
         );
     }
 }
+
+#[tokio::test]
+async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
+    use std::{
+        collections::HashMap,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+    use zebra_state::{ContextuallyVerifiedBlock, Request, Response, SemanticallyVerifiedBlock};
+    use zebra_test::mock_service::MockService;
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = zebra_chain::parameters::testnet::Parameters::build()
+            .with_disable_pow(true)
+            .to_network()
+            .unwrap();
+        let mut full = template_with_max_time(&network, DateTime32::from(1654008719));
+        let empty = full.clone();
+        let outpoint = transparent::OutPoint {
+            hash: [7; 32].into(),
+            index: 0,
+        };
+        let output =
+            transparent::Output::new(1.try_into().unwrap(), transparent::Script::new(&[0x51]));
+        let utxo = transparent::OrderedUtxo::new(output.clone(), Height(1), 1);
+        let transaction = Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            vec![output],
+            LockTime::unlocked(),
+            Height(0),
+        );
+        full.transactions.push(TransactionTemplate {
+            data: (&transaction).into(),
+            hash: transaction.hash(),
+            auth_digest: block::merkle::AUTH_DIGEST_PLACEHOLDER,
+            depends: vec![],
+            fee: Amount::zero(),
+            sigops: 0,
+            required: false,
+        });
+        full.default_roots.merkle_root = [full.coinbase_txn.hash, transaction.hash()]
+            .into_iter()
+            .collect();
+        let reused = Arc::new(AtomicUsize::new(0));
+        let state = tower::service_fn({
+            let network = network.clone();
+            let reused = reused.clone();
+            let parent = (Height(full.height - 1), full.previous_block_hash);
+            move |request| {
+                let network = network.clone();
+                let utxo = utxo.clone();
+                let reused = reused.clone();
+                async move {
+                    Ok::<_, zebra_consensus::BoxError>(match request {
+                        Request::Tip => Response::Tip(Some(parent)),
+                        Request::BestChainBlockHash(_) => Response::BlockHash(None),
+                        Request::KnownBlock(_) => Response::KnownBlock(None),
+                        Request::AwaitUtxo(requested) => {
+                            assert_eq!(requested, outpoint);
+                            Response::Utxo(utxo.utxo)
+                        }
+                        Request::CheckBlockProposalValidity(block) => {
+                            Response::ValidBlockProposal(Box::new(
+                                ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+                                    block,
+                                    HashMap::from([(outpoint, utxo)]),
+                                    DeferredPoolBalanceChange::zero(),
+                                    &network,
+                                    Default::default(),
+                                )
+                                .unwrap(),
+                            ))
+                        }
+                        Request::CommitContextuallyVerifiedBlock(block) => {
+                            reused.fetch_add(1, Ordering::SeqCst);
+                            let block: SemanticallyVerifiedBlock = (*block).into();
+                            Response::Committed(block.hash)
+                        }
+                        other => panic!("unexpected state request: {other:?}"),
+                    })
+                }
+            }
+        });
+        let (router, _, _handles, _) = zebra_consensus::router::init_test(
+            zebra_consensus::Config {
+                checkpoint_sync: false,
+            },
+            &network,
+            state,
+        )
+        .await;
+        let cache = TemplateCache::default();
+        let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build().for_unit_tests();
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.subscribe(),
+            network.clone(),
+            verifier.clone(),
+        ));
+        cache.publish(empty);
+        // The empty template must not reach the verifier.
+        tokio::time::pause();
+        verifier.expect_no_requests().await;
+        tokio::time::resume();
+        let expected =
+            proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
+                .unwrap();
+        cache.publish(full.clone());
+        let first = verifier
+            .expect_request(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
+            .await;
+        full.cur_time = full.cur_time.saturating_add(Duration32::from_seconds(1));
+        cache.publish(full.clone());
+        full.cur_time = full.cur_time.saturating_add(Duration32::from_seconds(1));
+        cache.publish(full.clone());
+        tokio::time::pause();
+        verifier.expect_no_requests().await;
+        tokio::time::resume();
+        // Forward the worker's request through the real router, populating its consensus cache.
+        first.respond(
+            router
+                .clone()
+                .oneshot(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(VerifyRequest::Commit(Arc::new(expected.clone())))
+                .await
+                .unwrap(),
+            expected.hash()
+        );
+        assert_eq!(reused.load(Ordering::SeqCst), 1);
+        let latest =
+            proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
+                .unwrap();
+        verifier
+            .expect_request(VerifyRequest::CheckProposal(Arc::new(latest.clone())))
+            .await
+            .respond(latest.hash());
+        tasks.abort_all();
+    })
+    .await
+    .expect("background validation must not stall publication");
+}

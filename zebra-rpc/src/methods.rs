@@ -1050,6 +1050,7 @@ where
                 self.read_state.clone(),
                 self.latest_chain_tip.clone(),
                 self.gbt.sync_status(),
+                self.gbt.block_verifier_router(),
             )
             .in_current_span(),
         ))
