@@ -13,7 +13,7 @@ use futures::{
 use pin_project::pin_project;
 use tokio::{
     sync::mpsc,
-    time::{sleep, Sleep},
+    time::{sleep_until, Instant, Sleep},
 };
 use tokio_util::sync::PollSemaphore;
 use tower::{Service, ServiceExt};
@@ -55,10 +55,8 @@ where
 
     /// The timer for the pending batch, if it has any items.
     ///
-    /// The timer is started when the first entry of a new batch is
-    /// submitted, so that the batch latency of all entries is at most
-    /// self.max_latency. However, we don't keep the timer running unless
-    /// there is a pending request to prevent wakeups on idle services.
+    /// The deadline is the earlier of the first item's latency bound and the last item's
+    /// idle bound. No timer runs for an empty batch.
     pending_batch_timer: Option<Pin<Box<Sleep>>>,
 
     /// The batches that the worker is concurrently executing.
@@ -87,6 +85,9 @@ where
     /// The maximum delay before processing a batch with items that have a total weight
     /// that is less than `max_items_weight_in_batch`.
     max_latency: std::time::Duration,
+
+    /// The maximum idle time after the most recent item in a pending batch.
+    max_idle: std::time::Duration,
 }
 
 /// Get the error out
@@ -110,6 +111,7 @@ where
         max_items_weight_in_batch: usize,
         max_concurrent_batches: usize,
         max_latency: std::time::Duration,
+        max_idle: std::time::Duration,
         close: PollSemaphore,
     ) -> (ErrorHandle, Worker<T, Request>) {
         let error_handle = ErrorHandle {
@@ -128,6 +130,7 @@ where
             max_items_weight_in_batch,
             max_concurrent_batches,
             max_latency,
+            max_idle,
         };
 
         (error_handle, worker)
@@ -195,6 +198,7 @@ where
     ///
     /// See [`Batch::new()`](crate::Batch::new) for details.
     pub async fn run(mut self) {
+        let mut batch_deadline = Instant::now();
         loop {
             // Wait on either a new message or the batch timer.
             //
@@ -269,7 +273,11 @@ where
                             );
 
                             // The first message in a new batch.
-                            self.pending_batch_timer = Some(Box::pin(sleep(self.max_latency)));
+                            let now = Instant::now();
+                            batch_deadline = now + self.max_latency;
+                            self.pending_batch_timer = Some(Box::pin(sleep_until(
+                                batch_deadline.min(now + self.max_idle),
+                            )));
                         } else {
                             tracing::trace!(
                                 pending_items_weight = self.pending_items_weight,
@@ -277,6 +285,9 @@ where
                                 running_batches = self.concurrent_batches.len(),
                                 "waiting for full batch or batch timer",
                             );
+                            if let Some(timer) = self.pending_batch_timer.as_mut() {
+                                timer.as_mut().reset(batch_deadline.min(Instant::now() + self.max_idle));
+                            }
                         }
                     }
                     None => {

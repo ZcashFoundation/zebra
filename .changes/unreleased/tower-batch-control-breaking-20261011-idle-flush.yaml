@@ -1,0 +1,7 @@
+project: tower-batch-control
+kind: breaking
+body: >-
+  Added a required `max_idle` duration to `Batch::new`, `Batch::pair`, and
+  `BatchLayer::new` for idle-triggered flushing without extending `max_latency`.
+  Pass `max_latency` to preserve latency-only timer flushing.
+time: 2026-10-11T00:00:00Z
