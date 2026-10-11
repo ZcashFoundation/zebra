@@ -282,6 +282,20 @@ async fn a_subscription_reports_a_template_published_before_the_wait() {
         .expect("a template published before the wait should still end it");
 }
 
+/// Relay authentication only uses a currently published template's parent history root.
+#[test]
+fn relay_history_root_is_absent_after_template_withdrawal() {
+    let cache = TemplateCache::default();
+    let template = template();
+    let parent = template.previous_block_hash;
+    let history_root = template.default_roots.chain_history_root;
+    assert_eq!(cache.chain_history_root(parent), None);
+    cache.publish(template);
+    assert_eq!(cache.chain_history_root(parent), Some(history_root));
+    cache.clear();
+    assert_eq!(cache.chain_history_root(parent), None);
+}
+
 /// Checks that a subscription reports each later publish, so a long poll that loops keeps waiting
 /// on templates it hasn't seen rather than on the one it just read.
 #[tokio::test]
