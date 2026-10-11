@@ -40,8 +40,7 @@
 //!  * Old State Version Cleanup Task
 //!    * deletes outdated state versions
 //!  * Block Gossip Task
-//!    * runs in the background and continuously queries the state for
-//!      newly committed blocks to be gossiped to peers
+//!    * gossips committed tips and authenticated pending submissions to peers
 //!  * Block Notify Task
 //!    * if the user has configured a `notify.block_notify_command`, runs that command
 //!      whenever the best chain tip changes (Zebra's equivalent of zcashd's `-blocknotify`)
@@ -94,7 +93,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
-use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
+use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
@@ -375,14 +374,15 @@ impl StartCmd {
         //
         // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
+        let submitted_blocks = SubmittedBlockCache::default();
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(Inbound::new(
-                config.sync.full_verify_concurrency_limit,
-                setup_rx,
-            ));
+            .service(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
+                    .with_submitted_blocks(submitted_blocks.clone()),
+            );
 
         let (peer_set, address_book, misbehavior_sender) =
             zebra_network::init_with_block_gossip_peer_ips(
@@ -481,6 +481,8 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
+        let rpc_impl =
+            rpc_impl.with_submitted_blocks(submitted_blocks.clone(), max_checkpoint_height);
         let rpc_impl = rpc_impl.with_end_of_support_height(
             sync::end_of_support::end_of_support_height(&config.network.network),
         );
@@ -603,6 +605,7 @@ impl StartCmd {
                 chain_tip_change.clone(),
                 peer_set.clone(),
                 Some(submit_block_channel.receiver()),
+                submitted_blocks,
             )
             .in_current_span(),
         );

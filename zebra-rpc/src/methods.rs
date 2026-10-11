@@ -568,6 +568,9 @@ pub trait Rpc {
     /// Submits block to the node to be validated and committed.
     /// Returns the [`SubmitBlockResponse`] for the operation, as a JSON string.
     ///
+    /// Template-parent submissions above the checkpoint cutoff are advertised after proof-of-work
+    /// and body authentication. Full verification and commit still finish before the response.
+    ///
     /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
     /// method: post
     /// tags: mining
@@ -1019,6 +1022,17 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Shares pending bodies with inbound peers and sets the router's checkpoint cutoff.
+    pub fn with_submitted_blocks(
+        mut self,
+        cache: crate::SubmittedBlockCache,
+        max_checkpoint_height: Height,
+    ) -> Self {
+        self.gbt.submitted_blocks = cache;
+        self.gbt.max_checkpoint_height = max_checkpoint_height;
+        self
     }
 
     /// Reads wall time for template deadlines and serve-time timestamp validation.
@@ -2948,12 +2962,66 @@ where
             .coinbase_height()
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
+        let block = Arc::new(block);
+        let chain_history_root = self
+            .gbt
+            .template_cache()
+            .and_then(|cache| cache.chain_history_root(block.header.previous_block_hash));
+        let mut relayed = false;
+        if let Some(chain_history_root) =
+            chain_history_root.filter(|_| height > self.gbt.max_checkpoint_height)
+        {
+            let network = self.network.clone();
+            let candidate = block.clone();
+            let authenticated = tokio::task::spawn_blocking(move || {
+                if !network.disable_pow()
+                    && (zebra_consensus::difficulty_is_valid(
+                        &candidate.header,
+                        &network,
+                        &height,
+                        &block_hash,
+                    )
+                    .is_err()
+                        || zebra_consensus::equihash_solution_is_valid(&candidate.header).is_err())
+                {
+                    return false;
+                }
+                let hashes = candidate
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash())
+                    .collect::<Vec<_>>();
+                if zebra_consensus::merkle_root_validity(&network, &candidate, &hashes).is_err() {
+                    return false;
+                }
+                // Before NU5, only legacy transaction IDs authenticate authorizing data.
+                if NetworkUpgrade::current(&network, height) < NetworkUpgrade::Nu5 {
+                    candidate.transactions.iter().all(|tx| tx.version() <= 4)
+                } else {
+                    *candidate.header.commitment_bytes
+                        == <[u8; 32]>::from(
+                            block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                                &chain_history_root,
+                                &candidate.auth_data_root(),
+                            ),
+                        )
+                }
+            })
+            .await
+            .map_misc_error()?;
+            if authenticated {
+                self.gbt
+                    .submitted_blocks
+                    .insert(block_hash, height, block.clone());
+                relayed = true;
+            }
+        }
 
         let block_verifier_router_response = block_verifier_router
             .ready()
             .await
             .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::Commit(Arc::new(block)))
+            .call(zebra_consensus::Request::Commit(block))
             .await;
 
         let chain_error = match block_verifier_router_response {
@@ -2976,9 +3044,39 @@ where
             // Turns BoxError into Result<VerifyChainError, BoxError>,
             // by downcasting from Any to VerifyChainError.
             Err(box_error) => {
+                let timed_out = box_error.is::<tower::timeout::error::Elapsed>();
                 let error = box_error
                     .downcast::<RouterError>()
                     .map(|boxed_chain_error| *boxed_chain_error);
+                use zebra_consensus::{error::TransactionError, VerifyBlockError};
+                // Another submission can still commit after duplicate or operational failures.
+                let inconclusive = match &error {
+                    Ok(error) if error.is_duplicate_request() => true,
+                    Ok(RouterError::Block { source }) => match source.as_ref() {
+                        VerifyBlockError::Depth { .. }
+                        | VerifyBlockError::StateService { .. }
+                        | VerifyBlockError::Time(_)
+                        | VerifyBlockError::Commit(
+                            zebra_state::CommitBlockError::WriteTaskExited { .. },
+                        )
+                        | VerifyBlockError::Transaction(
+                            TransactionError::TransparentInputNotFound
+                            | TransactionError::InternalDowncastError(_),
+                        ) => true,
+                        VerifyBlockError::Commit(
+                            zebra_state::CommitBlockError::ValidateContextError(error),
+                        ) => matches!(
+                            error.as_ref(),
+                            zebra_state::ValidateContextError::NotReadyToBeCommitted { .. }
+                        ),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if relayed && !timed_out && !inconclusive {
+                    self.gbt.submitted_blocks.remove(block_hash);
+                    tracing::warn!(?block_hash, ?height, ?error, "early-relayed block rejected");
+                }
 
                 tracing::info!(
                     ?error,

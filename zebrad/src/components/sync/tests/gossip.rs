@@ -54,6 +54,7 @@ struct GateState {
 struct GatedPeerSet {
     state: Arc<Mutex<GateState>>,
     requests: mpsc::UnboundedSender<zn::Request>,
+    waiting: Arc<tokio::sync::Notify>,
 }
 
 impl GatedPeerSet {
@@ -65,6 +66,7 @@ impl GatedPeerSet {
                 wakers: Vec::new(),
             })),
             requests,
+            waiting: Default::default(),
         };
 
         (peer_set, request_receiver)
@@ -87,6 +89,7 @@ impl Service<zn::Request> for GatedPeerSet {
         match state.readiness {
             Readiness::Pending => {
                 state.wakers.push(cx.waker().clone());
+                self.waiting.notify_one();
                 Poll::Pending
             }
             Readiness::Ready => Poll::Ready(Ok(())),
@@ -126,6 +129,7 @@ async fn gossip_keeps_draining_mined_blocks_without_ready_peers() {
         chain_tip_change,
         peer_set,
         Some(channel.receiver()),
+        Default::default(),
     ));
 
     for n in 0..MORE_THAN_CHANNEL_CAPACITY {
@@ -171,6 +175,7 @@ async fn gossip_broadcasts_latest_mined_block_when_peers_become_ready() {
         chain_tip_change,
         peer_set.clone(),
         Some(channel.receiver()),
+        Default::default(),
     ));
 
     mined_block_sender
@@ -229,6 +234,7 @@ async fn gossip_broadcasts_tip_change_when_peers_become_ready() {
         chain_tip_change,
         peer_set.clone(),
         None,
+        Default::default(),
     ));
 
     let (hash, height) = mined_block(1);
@@ -283,6 +289,7 @@ async fn gossip_keeps_pending_tip_change_when_a_side_chain_block_is_mined() {
         chain_tip_change,
         peer_set.clone(),
         Some(channel.receiver()),
+        Default::default(),
     ));
 
     let (tip_hash, tip_height) = mined_block(1);
@@ -353,6 +360,7 @@ async fn gossip_returns_permanent_peer_set_errors() {
             chain_tip_change,
             peer_set,
             Some(channel.receiver()),
+            Default::default(),
         ),
     )
     .await
@@ -362,4 +370,259 @@ async fn gossip_returns_permanent_peer_set_errors() {
         matches!(result, Err(BlockGossipError::PeerSetReadiness(_))),
         "unexpected gossip result: {result:?}"
     );
+}
+
+/// Pending bodies are served before verification; rejecting one cannot displace a committed advert.
+#[tokio::test]
+async fn gossip_and_inbound_relay_submissions_before_verification() {
+    use crate::components::inbound::{Inbound, InboundSetupData};
+    use tower::{buffer::Buffer, util::BoxService, ServiceExt};
+    use zebra_chain::{
+        chain_sync_status::MockSyncStatus,
+        chain_tip::mock::MockChainTip,
+        parameters::{testnet::Parameters, NetworkUpgrade},
+        serialization::{DateTime32, ZcashSerialize},
+        work::difficulty::ParameterDifficulty,
+    };
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_node_services::mempool;
+    use zebra_rpc::{
+        client::HexData,
+        methods::{RpcImpl, RpcServer},
+        SubmittedBlockCache,
+    };
+    use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Parameters::build()
+            .with_disable_pow(true)
+            .to_network()
+            .unwrap();
+        let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+        let tip_hash = block::Hash([1; 32]);
+        let chain_info = GetBlockTemplateChainInfo {
+            tip_hash,
+            tip_height: height,
+            chain_history_root: Some([0; 32].into()),
+            expected_difficulty: network.target_difficulty_limit().to_compact(),
+            cur_time: DateTime32::now(),
+            min_time: DateTime32::now(),
+            max_time: DateTime32::now(),
+            chain_value_pools: Default::default(),
+        };
+        let read_state = tower::service_fn(move |request| {
+            let info = chain_info.clone();
+            async move {
+                Ok::<_, BoxError>(match request {
+                    ReadRequest::Tip => ReadResponse::Tip(Some((info.tip_height, info.tip_hash))),
+                    ReadRequest::ChainInfo => ReadResponse::ChainInfo(info),
+                    other => panic!("unexpected state request: {other:?}"),
+                })
+            }
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(tip_hash);
+        tip_sender.send_best_tip_height(height);
+        tip_sender.send_best_tip_block_time(Utc::now());
+        let (_chain_sender, latest_chain_tip, chain_tip_change) =
+            ChainTipSender::new(None, &network);
+        let (sync_status, _recent_syncs) = SyncStatus::new();
+        let (peer_set, mut requests) = GatedPeerSet::new();
+        peer_set.set_readiness(Readiness::Ready);
+        let cache = SubmittedBlockCache::default();
+        let channel = SubmitBlockChannel::new();
+        let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut synced = MockSyncStatus::default();
+        synced.set_is_close_to_tip(true);
+        let (_logs, logs) = tokio::sync::watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            network.clone(),
+            zebra_rpc::config::mining::Config {
+                miner_address: Some("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx".parse().unwrap()),
+                ..Default::default()
+            },
+            false,
+            "0.0.1",
+            "relay test",
+            mempool.clone(),
+            state.clone(),
+            read_state,
+            verifier.clone(),
+            synced,
+            tip,
+            MockAddressBookPeers::default(),
+            logs,
+            Some(channel.sender()),
+        );
+        queue.abort();
+        let rpc = rpc.with_submitted_blocks(cache.clone(), Height(0));
+        let updater = rpc.spawn_block_template_updater().unwrap();
+        // The full build reads the mempool only after publishing the coinbase-only template.
+        let full_build = mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await;
+        let template = rpc
+            .get_block_template(None)
+            .await
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        let block = zebra_rpc::proposal_block_from_template(&template, None, &network).unwrap();
+        full_build.respond(mempool::Response::FullTransactions {
+            transactions: vec![],
+            transaction_dependencies: Default::default(),
+            last_seen_tip_hash: tip_hash,
+        });
+        updater.abort();
+
+        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel();
+        let (misbehavior_sender, _misbehavior_rx) = mpsc::channel(1);
+        assert!(setup_tx
+            .send(InboundSetupData {
+                address_book: Arc::new(std::sync::Mutex::new(zn::AddressBook::new(
+                    "127.0.0.1:0".parse().unwrap(),
+                    &network,
+                    zn::constants::DEFAULT_MAX_CONNS_PER_IP,
+                    tracing::Span::none(),
+                ))),
+                block_download_peer_set: Buffer::new(BoxService::new(peer_set.clone()), 1),
+                block_verifier: Buffer::new(
+                    BoxService::new(MockService::build().for_unit_tests()),
+                    1
+                ),
+                mempool: Buffer::new(BoxService::new(mempool), 1),
+                state: Buffer::new(BoxService::new(state.clone()), 1),
+                latest_chain_tip,
+                misbehavior_sender,
+            })
+            .is_ok());
+        let mut inbound = Inbound::new(1, setup_rx).with_submitted_blocks(cache.clone());
+        let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+            sync_status,
+            chain_tip_change,
+            peer_set.clone(),
+            Some(channel.receiver()),
+            cache.clone(),
+        ));
+
+        let mut committed_hash = None;
+        for n in 0..3 {
+            let mut candidate = block.clone();
+            Arc::make_mut(&mut candidate.header).nonce = [n; 32].into();
+            let candidate = Arc::new(candidate);
+            let hash = candidate.hash();
+            let call = tokio::spawn({
+                let rpc = rpc.clone();
+                let bytes = candidate.zcash_serialize_to_vec().unwrap();
+                async move { rpc.submit_block(HexData(bytes), None).await }
+            });
+            let verification = verifier
+                .expect_request(zebra_consensus::Request::Commit(candidate.clone()))
+                .await;
+            assert!(!call.is_finished());
+            assert_eq!(cache.get(&hash), Some(candidate.clone()));
+            if n < 2 {
+                assert_eq!(
+                    requests.recv().await,
+                    Some(zn::Request::AdvertiseBlockToAll(hash))
+                );
+            }
+            let (call, verification) = if n == 0 {
+                let duplicate = tokio::spawn({
+                    let rpc = rpc.clone();
+                    let bytes = candidate.zcash_serialize_to_vec().unwrap();
+                    async move { rpc.submit_block(HexData(bytes), None).await }
+                });
+                let duplicate_verification = verifier
+                    .expect_request(zebra_consensus::Request::Commit(candidate.clone()))
+                    .await;
+                verification.respond_error(
+                    zebra_consensus::RouterError::Block {
+                        source: Box::new(zebra_consensus::VerifyBlockError::Block {
+                            source: zebra_consensus::BlockError::AlreadyInChain(
+                                hash,
+                                zebra_state::KnownBlock::BestChain,
+                            ),
+                        }),
+                    }
+                    .into(),
+                );
+                assert_eq!(
+                    call.await.unwrap().unwrap(),
+                    zebra_rpc::client::SubmitBlockErrorResponse::Duplicate.into()
+                );
+                assert!(!duplicate.is_finished());
+                (duplicate, duplicate_verification)
+            } else {
+                (call, verification)
+            };
+            if n == 0 {
+                assert_eq!(
+                    inbound
+                        .ready()
+                        .await
+                        .unwrap()
+                        .call(zn::Request::BlocksByHash([hash].into()))
+                        .await
+                        .unwrap(),
+                    zn::Response::Blocks(vec![zn::InventoryResponse::Available((candidate, None))])
+                );
+            }
+            if n == 1 {
+                peer_set.set_readiness(Readiness::Pending);
+                verification.respond(hash);
+                committed_hash = Some(hash);
+                assert_eq!(
+                    call.await.unwrap().unwrap(),
+                    zebra_rpc::client::SubmitBlockResponse::Accepted
+                );
+                peer_set.waiting.notified().await;
+            } else {
+                verification.respond_error(
+                    zebra_consensus::RouterError::Block {
+                        source: Box::new(zebra_consensus::VerifyBlockError::Transaction(
+                            zebra_consensus::error::TransactionError::Other(
+                                "transaction has Orchard actions (temporarily disabled)".into(),
+                            ),
+                        )),
+                    }
+                    .into(),
+                );
+                assert_eq!(
+                    call.await.unwrap().unwrap(),
+                    zebra_rpc::client::SubmitBlockErrorResponse::Rejected.into()
+                );
+            }
+            assert_eq!(cache.get(&hash).is_some(), n == 1);
+            if n == 0 {
+                let request = inbound
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(zn::Request::BlocksByHash([hash].into()));
+                tokio::pin!(request);
+                assert!(futures::poll!(&mut request).is_pending());
+                state
+                    .expect_request(zebra_state::Request::Block(hash.into()))
+                    .await
+                    .respond(zebra_state::Response::Block(None));
+                assert_eq!(
+                    request.await.unwrap(),
+                    zn::Response::Blocks(vec![zn::InventoryResponse::Missing(hash)])
+                );
+            }
+        }
+        peer_set.set_readiness(Readiness::Ready);
+        assert_eq!(
+            requests.recv().await,
+            Some(zn::Request::AdvertiseBlockToAll(committed_hash.unwrap()))
+        );
+        gossip.abort();
+    })
+    .await
+    .expect("pending relay and committed advertisement regression must finish");
 }

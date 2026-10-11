@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: "Added `SubmittedBlockCache` and `RpcImpl::with_submitted_blocks` to share authenticated pending mining submissions with peer serving and gossip."
+time: 2026-10-11T12:00:00.000000000+00:00

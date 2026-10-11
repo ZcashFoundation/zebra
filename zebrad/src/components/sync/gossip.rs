@@ -1,4 +1,4 @@
-//! A task that gossips newly verified [`block::Hash`]es to peers.
+//! A task that gossips committed tips and authenticated submitted blocks to peers.
 //!
 //! [`block::Hash`]: zebra_chain::block::Hash
 
@@ -21,7 +21,7 @@ use crate::{
 
 use BlockGossipError::*;
 
-/// Errors that can occur when gossiping committed blocks
+/// Errors that can occur when gossiping blocks.
 #[derive(Error, Debug)]
 pub enum BlockGossipError {
     #[error("chain tip sender was dropped")]
@@ -34,7 +34,7 @@ pub enum BlockGossipError {
     PeerSetReadiness(zn::BoxError),
 }
 
-/// Run continuously, gossiping newly verified [`block::Hash`]es to peers.
+/// Run continuously, gossiping committed tips and authenticated submitted blocks.
 ///
 /// Once the state has reached the chain tip, broadcast the [`block::Hash`]es
 /// of newly verified blocks to all ready peers.
@@ -46,12 +46,16 @@ pub enum BlockGossipError {
 /// In particular, if a lot of blocks are committed at the same time,
 /// gossips will be disabled or skipped until the state reaches the latest tip.
 ///
+/// Pending submissions bypass the tip delay and reach all peers. They never replace a pending
+/// committed mined-block advertisement, and committing still advertises the block independently.
+///
 /// [`block::Hash`]: zebra_chain::block::Hash
 pub async fn gossip_best_tip_block_hashes<ZN>(
     sync_status: SyncStatus,
     mut chain_state: ChainTipChange,
     broadcast_network: ZN,
     mut mined_block_receiver: Option<mpsc::Receiver<(block::Hash, block::Height)>>,
+    submitted_blocks: zebra_rpc::SubmittedBlockCache,
 ) -> Result<(), BlockGossipError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -62,6 +66,7 @@ where
     // use the same timeout as tips requests,
     // so broadcasts don't delay the syncer too long
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
+    let mut submitted_receiver = submitted_blocks.subscribe();
 
     loop {
         // TODO: Refactor this into a struct and move the contents of this loop into its own method.
@@ -107,20 +112,17 @@ where
         .in_current_span();
 
         // TODO: Move this logic for selecting the first ready future and updating `chain_state` to its own method.
-        let (((mut hash, mut height), log_msg, updated_chain_state), mut is_block_submission) =
-            if let Some(mined_block_receiver) = mined_block_receiver.as_mut() {
-                tokio::select! {
-                    tip_change_close_to_network_tip = tip_change_close_to_network_tip_fut => {
-                        (tip_change_close_to_network_tip?, false)
-                    },
-
-                    Some(tip_change) = mined_block_receiver.recv() => {
-                       ((tip_change, "sending mined block broadcast", chain_state), true)
-                    }
-                }
-            } else {
-                (tip_change_close_to_network_tip_fut.await?, false)
-            };
+        let mut is_early = false;
+        let (((mut hash, mut height), log_msg, updated_chain_state), mut is_block_submission) = tokio::select! {
+            Some(tip_change) = recv_mined_block(&mut mined_block_receiver) => {
+                ((tip_change, "sending mined block broadcast", chain_state), true)
+            },
+            early = recv_submitted_block(&mut submitted_receiver) => {
+                is_early = true;
+                ((early, "sending pending block broadcast", chain_state), true)
+            },
+            tip_change = tip_change_close_to_network_tip_fut => (tip_change?, false),
+        };
 
         chain_state = updated_chain_state;
 
@@ -161,6 +163,17 @@ where
 
                         (hash, height) = mined_block;
                         is_block_submission = true;
+                        is_early = false;
+                    }
+
+                    early = recv_submitted_block(&mut submitted_receiver),
+                        if !is_block_submission || is_early => {
+                        if !is_block_submission {
+                            displaced_tip = Some((hash, height));
+                        }
+                        (hash, height) = early;
+                        is_block_submission = true;
+                        is_early = true;
                     }
                 }
             };
@@ -176,9 +189,22 @@ where
                 );
             }
 
+            // A rejection or expiry can withdraw a pending body while peers are unready.
+            if is_early && submitted_blocks.get(&hash).is_none() {
+                if let Some(tip) = displaced_tip.take() {
+                    (hash, height) = tip;
+                    is_block_submission = false;
+                    is_early = false;
+                    continue;
+                }
+                break;
+            }
+
             // block broadcasts inform other nodes about new blocks,
             // so our internal Grow or Reset state doesn't matter to them
             let request = if is_block_submission {
+                // ponytail: early adverts can replace committed inventory deferred for busy peers;
+                // use a priority-aware deferred slot in the peer set if this ceiling matters.
                 zn::Request::AdvertiseBlockToAll(hash)
             } else {
                 zn::Request::AdvertiseBlock(hash, None)
@@ -198,6 +224,7 @@ where
             // Mark the last change hash of `chain_state` as the last block submission hash to avoid
             // advertising a block hash to some peers twice.
             if is_block_submission
+                && !is_early
                 && mined_block_receiver
                     .as_ref()
                     .is_some_and(|rx| rx.is_empty())
@@ -210,6 +237,7 @@ where
                 Some(tip) if !is_best_tip => {
                     (hash, height) = tip;
                     is_block_submission = false;
+                    is_early = false;
                 }
                 _ => break,
             }
@@ -227,4 +255,16 @@ async fn recv_mined_block(
         Some(mined_block_receiver) => mined_block_receiver.recv().await,
         None => std::future::pending().await,
     }
+}
+
+/// Receives the latest pending submission, coalescing updates while committed adverts wait.
+async fn recv_submitted_block(
+    receiver: &mut watch::Receiver<Option<(block::Hash, block::Height)>>,
+) -> (block::Hash, block::Height) {
+    while receiver.changed().await.is_ok() {
+        if let Some(block) = *receiver.borrow_and_update() {
+            return block;
+        }
+    }
+    std::future::pending().await
 }

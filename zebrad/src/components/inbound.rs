@@ -217,6 +217,9 @@ pub struct Inbound {
     ///
     /// Some services are unavailable until Zebra has completed setup.
     setup: Setup,
+
+    /// Authenticated submitted bodies available before state commit.
+    submitted_blocks: zebra_rpc::SubmittedBlockCache,
 }
 
 impl Inbound {
@@ -232,7 +235,14 @@ impl Inbound {
                 full_verify_concurrency_limit,
                 setup,
             },
+            submitted_blocks: Default::default(),
         }
+    }
+
+    /// Shares authenticated pending submissions with the RPC service.
+    pub fn with_submitted_blocks(mut self, cache: zebra_rpc::SubmittedBlockCache) -> Self {
+        self.submitted_blocks = cache;
+        self
     }
 
     /// Remove `self.setup`, temporarily replacing it with an invalid state.
@@ -461,6 +471,7 @@ impl Service<zn::Request> for Inbound {
                 }
 
                 let state = state.clone();
+                let submitted_blocks = self.submitted_blocks.clone();
 
                 async move {
                     let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
@@ -475,7 +486,11 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?;
+                        let response = if let Some(block) = submitted_blocks.get(&hash) {
+                            zs::Response::Block(Some(block))
+                        } else {
+                            state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?
+                        };
 
                         // Add the block responses to the list, while updating the size limit.
                         //
