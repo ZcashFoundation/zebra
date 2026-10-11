@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: "Relay template-parent mining submissions after proof of work and body authentication, before full verification. RPC responses still wait for commit; definitively rejected pending bodies are withdrawn and logged."
+time: 2026-10-11T12:00:00.000000000+00:00
