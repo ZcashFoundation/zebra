@@ -2,14 +2,14 @@
 //! seen, and what services they provide.
 
 use std::{
-    collections::HashMap,
+    cmp::Reverse,
+    collections::{BTreeSet, HashMap, HashSet},
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::Instant,
 };
 
 use chrono::Utc;
-use indexmap::IndexMap;
 use tokio::sync::watch;
 use tracing::Span;
 
@@ -19,13 +19,45 @@ use crate::{
     connection_metrics::network_kind_label,
     constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
-    protocol::external::{canonical_peer_addr, canonical_socket_addr, connection_limit_key},
+    peer::PeerPreference,
+    protocol::external::{
+        canonical_peer_addr, canonical_socket_addr, connection_limit_key, types::PeerServices,
+    },
     types::MetaAddr,
     AddressBookPeers, BanList, PeerAddrState, PeerSocketAddr,
 };
 
 #[cfg(test)]
 mod tests;
+
+/// The fields used by [`MetaAddr::cmp`], in the same order, without owned peer metadata.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct PeerPriority {
+    state: PeerAddrState,
+    preference: Result<PeerPreference, &'static str>,
+    last_attempt: Option<Instant>,
+    last_failure: Option<Instant>,
+    last_response: Option<DateTime32>,
+    untrusted_last_seen: Reverse<Option<DateTime32>>,
+    services: Option<PeerServices>,
+    // Canonical socket addresses order by IP version, IP address, then port.
+    addr: PeerSocketAddr,
+}
+
+impl From<&MetaAddr> for PeerPriority {
+    fn from(peer: &MetaAddr) -> Self {
+        Self {
+            state: peer.last_connection_state,
+            preference: peer.peer_preference(),
+            last_attempt: peer.last_attempt(),
+            last_failure: peer.last_failure(),
+            last_response: peer.last_response(),
+            untrusted_last_seen: Reverse(peer.untrusted_last_seen()),
+            services: peer.services,
+            addr: peer.addr,
+        }
+    }
+}
 
 /// A database of peer listener addresses, their advertised services, and
 /// information on when they were last seen.
@@ -62,11 +94,16 @@ mod tests;
 /// - the canonical address of any connection.
 #[derive(Debug)]
 pub struct AddressBook {
-    /// Peer listener addresses, suitable for outbound connections,
-    /// with entries in ascending [`MetaAddr`] reconnection-attempt order.
+    /// Peer listener metadata, stored once and keyed by canonical outbound address.
     ///
-    /// Some peers in this list might have open outbound or inbound connections.
-    by_addr: IndexMap<PeerSocketAddr, MetaAddr>,
+    /// Some peers in this map might have open outbound or inbound connections.
+    by_addr: HashMap<PeerSocketAddr, MetaAddr>,
+
+    /// Peer keys in ascending [`MetaAddr`] reconnection-attempt order.
+    by_priority: BTreeSet<PeerPriority>,
+
+    /// Listener addresses grouped by [`connection_limit_key`] for ban removal.
+    by_group: HashMap<IpAddr, HashSet<PeerSocketAddr>>,
 
     /// The address with a [`PeerAddrState::Responded`](PeerAddrState) last connection state and
     /// the most recent `last_response` time per IPv4 address or IPv6 `/64` subnet.
@@ -74,7 +111,7 @@ pub struct AddressBook {
     /// This is used to avoid initiating outbound connections past [`Config::max_connections_per_ip`](crate::config::Config), and
     /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
     // TODO: Replace with `by_ip: HashMap<IpAddr, BTreeMap<DateTime32, MetaAddr>>` to support configured `max_connections_per_ip` greater than 1
-    most_recent_by_ip: Option<HashMap<IpAddr, MetaAddr>>,
+    most_recent_by_ip: Option<HashMap<IpAddr, (PeerSocketAddr, Option<DateTime32>)>>,
 
     /// The peer groups banned for misbehaviour.
     ///
@@ -158,7 +195,9 @@ impl AddressBook {
         // Avoid initiating outbound handshakes when max_connections_per_ip is 1.
         let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
-            by_addr: IndexMap::new(),
+            by_addr: HashMap::new(),
+            by_priority: BTreeSet::new(),
+            by_group: HashMap::new(),
             local_listener: canonical_socket_addr(local_listener),
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
@@ -176,16 +215,55 @@ impl AddressBook {
     fn insert_meta_addr(&mut self, mut meta_addr: MetaAddr) -> Option<MetaAddr> {
         meta_addr.addr = canonical_peer_addr(meta_addr.addr);
         let addr = meta_addr.addr;
-        let previous = self.by_addr.shift_remove(&addr);
-        let insertion_index = self
-            .by_addr
-            .partition_point(|_, existing| existing < &meta_addr);
-        let unexpected_previous = self.by_addr.shift_insert(insertion_index, addr, meta_addr);
-        debug_assert!(
-            unexpected_previous.is_none(),
-            "the existing address was removed before indexed insertion",
+        let priority = PeerPriority::from(&meta_addr);
+        let previous = self.by_addr.insert(addr, meta_addr);
+        if let Some(previous) = &previous {
+            assert!(
+                self.by_priority.remove(&PeerPriority::from(previous)),
+                "replaced peer must exist in the priority index",
+            );
+        } else {
+            assert!(
+                self.by_group
+                    .entry(connection_limit_key(addr.ip()))
+                    .or_default()
+                    .insert(addr),
+                "new peer must not already exist in the group index",
+            );
+        }
+        assert!(
+            self.by_priority.insert(priority),
+            "new peer priority must be unique",
         );
         previous
+    }
+
+    /// Remove a peer from all three indexes without updating metrics or the response cache.
+    #[allow(clippy::unwrap_in_result)]
+    fn remove_meta_addr(&mut self, addr: PeerSocketAddr) -> Option<MetaAddr> {
+        let removed = self.by_addr.remove(&addr)?;
+        assert!(
+            self.by_priority.remove(&PeerPriority::from(&removed)),
+            "removed peer must exist in the priority index",
+        );
+        let group = connection_limit_key(addr.ip());
+        let addrs = self
+            .by_group
+            .get_mut(&group)
+            .expect("stored peer must have a group index entry");
+        assert!(addrs.remove(&addr), "stored peer must exist in its group");
+        if addrs.is_empty() {
+            self.by_group.remove(&group);
+        }
+        Some(removed)
+    }
+
+    fn ordered_peers(&self) -> impl DoubleEndedIterator<Item = &MetaAddr> {
+        self.by_priority.iter().map(|priority| {
+            self.by_addr
+                .get(&priority.addr)
+                .expect("priority index peers must exist in the address index")
+        })
     }
 
     /// Construct an [`AddressBook`] with the given `local_listener`, `network`,
@@ -236,7 +314,10 @@ impl AddressBook {
                     .most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
-                    .insert(connection_limit_key(socket_addr.ip()), meta_addr.clone());
+                    .insert(
+                        connection_limit_key(socket_addr.ip()),
+                        (socket_addr, meta_addr.last_response()),
+                    );
             }
             // overwrite any duplicate addresses
             let _ = new_book.insert_meta_addr(meta_addr);
@@ -301,17 +382,17 @@ impl AddressBook {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
 
-        let mut peers = self.by_addr.clone();
-
         // Unconditionally add our local listener address to the advertised peers,
         // to replace any self-connection failures. The address book and change
         // constructors make sure that the SocketAddr is canonical.
         let local_listener = self.local_listener_meta_addr(now);
-        peers.insert(local_listener.addr, local_listener);
 
         // Then sanitize and shuffle
-        let mut peers: Vec<MetaAddr> = peers
+        let mut peers: Vec<MetaAddr> = self
+            .by_addr
             .values()
+            .filter(|peer| peer.addr != local_listener.addr)
+            .chain(std::iter::once(&local_listener))
             .filter_map(|meta_addr| meta_addr.sanitize(&self.network))
             // # Security
             //
@@ -335,11 +416,8 @@ impl AddressBook {
     pub fn cacheable(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         let _guard = self.span.enter();
 
-        let peers = self.by_addr.clone();
-
         // Get peers in preferred order, then keep the recently active ones
-        peers
-            .values()
+        self.ordered_peers()
             // # Security
             //
             // Remove peers that:
@@ -380,7 +458,7 @@ impl AddressBook {
 
         if let Some(previous) = most_recent_by_ip.get(&connection_limit_key(updated.addr.ip())) {
             updated.last_connection_state == PeerAddrState::Responded
-                && updated.last_response() > previous.last_response()
+                && updated.last_response() > previous.1
         } else {
             updated.last_connection_state == PeerAddrState::Responded
         }
@@ -394,7 +472,7 @@ impl AddressBook {
         };
 
         if let Some(previous) = most_recent_by_ip.get(&connection_limit_key(addr.ip())) {
-            previous.addr == addr
+            previous.0 == addr
         } else {
             false
         }
@@ -505,15 +583,17 @@ impl AddressBook {
                 // Remove every address in the banned group, not just the one
                 // that crossed the threshold: the rest of an IPv6 `/64` belongs
                 // to the same peer.
-                let banned_addrs: Vec<_> = self
-                    .by_addr
-                    .keys()
-                    .filter(|addr| connection_limit_key(addr.ip()) == group)
-                    .cloned()
-                    .collect();
-
-                for addr in banned_addrs {
-                    let _ = self.by_addr.shift_remove(&addr);
+                if let Some(banned_addrs) = self.by_group.remove(&group) {
+                    for addr in banned_addrs {
+                        let removed = self
+                            .by_addr
+                            .remove(&addr)
+                            .expect("group index peers must exist in the address index");
+                        assert!(
+                            self.by_priority.remove(&PeerPriority::from(&removed)),
+                            "banned peer must exist in the priority index",
+                        );
+                    }
                 }
 
                 warn!(
@@ -551,7 +631,10 @@ impl AddressBook {
                 self.most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
-                    .insert(connection_limit_key(updated.addr.ip()), updated.clone());
+                    .insert(
+                        connection_limit_key(updated.addr.ip()),
+                        (updated.addr, updated.last_response()),
+                    );
             }
 
             let _ = self.insert_meta_addr(updated.clone());
@@ -573,12 +656,14 @@ impl AddressBook {
             // And we would start connecting to those outdated peers again,
             // ignoring the age limit in [`MetaAddr::is_probably_reachable`].
             while self.by_addr.len() > self.addr_limit {
+                let surplus_addr = self
+                    .by_priority
+                    .last()
+                    .expect("just checked there is at least one peer")
+                    .addr;
                 let surplus_peer = self
-                    .peers()
-                    .next_back()
-                    .expect("just checked there is at least one peer");
-
-                let _ = self.by_addr.shift_remove(&surplus_peer.addr);
+                    .remove_meta_addr(surplus_addr)
+                    .expect("priority index peers must exist in the address index");
 
                 // Check if this surplus peer's addr matches that in `most_recent_by_ip`
                 // for this the surplus peer's ip to remove it there as well.
@@ -612,7 +697,8 @@ impl AddressBook {
     /// book metrics are accurate.
     #[allow(dead_code)]
     fn take(&mut self, removed_addr: PeerSocketAddr) -> Option<MetaAddr> {
-        let _guard = self.span.enter();
+        let span = self.span.clone();
+        let _guard = span.enter();
 
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
@@ -623,7 +709,7 @@ impl AddressBook {
             recent_peers = self.recently_live_peers(chrono_now).len(),
         );
 
-        if let Some(entry) = self.by_addr.shift_remove(&removed_addr) {
+        if let Some(entry) = self.remove_meta_addr(removed_addr) {
             // Check if this surplus peer's addr matches that in `most_recent_by_ip`
             // for this the surplus peer's ip to remove it there as well.
             if self.should_remove_most_recent_by_ip(entry.addr) {
@@ -657,7 +743,7 @@ impl AddressBook {
     /// Returns peers in reconnection attempt order, including recently connected peers.
     pub fn peers(&'_ self) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
-        self.by_addr.values().cloned()
+        self.ordered_peers().cloned()
     }
 
     /// Is this IP ready for a new outbound connection attempt?
@@ -677,11 +763,16 @@ impl AddressBook {
             // if we're not checking IPs, any connection is allowed
             return true;
         };
-        let Some(same_ip_peer) = most_recent_by_ip.get(&limit_key) else {
+        let Some((_, last_response)) = most_recent_by_ip.get(&limit_key) else {
             // If there's no entry for this IP, any connection is allowed
             return true;
         };
-        !same_ip_peer.has_connection_recently_responded(chrono_now)
+        !last_response.is_some_and(|last_response| {
+            last_response.saturating_elapsed(chrono_now)
+                <= constants::MIN_PEER_RECONNECTION_DELAY
+                    .try_into()
+                    .expect("unexpectedly large constant")
+        })
     }
 
     /// Return an iterator over peers that are due for a reconnection attempt,
@@ -695,8 +786,7 @@ impl AddressBook {
 
         // Skip live peers, banned peers, and peers pending a reconnect attempt.
         // The peers are already stored in sorted order.
-        self.by_addr
-            .values()
+        self.ordered_peers()
             .filter(move |peer| {
                 !self.bans.is_banned(peer.addr.ip())
                     && peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
@@ -713,8 +803,7 @@ impl AddressBook {
     ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
-        self.by_addr
-            .values()
+        self.ordered_peers()
             .filter(move |peer| peer.last_connection_state == state)
             .cloned()
     }
@@ -728,8 +817,7 @@ impl AddressBook {
     ) -> impl DoubleEndedIterator<Item = MetaAddr> + '_ {
         let _guard = self.span.enter();
 
-        self.by_addr
-            .values()
+        self.ordered_peers()
             .filter(move |peer| {
                 !peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
             })
@@ -885,8 +973,7 @@ impl AddressBookPeers for AddressBook {
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         let _guard = self.span.enter();
 
-        self.by_addr
-            .values()
+        self.ordered_peers()
             .filter(|peer| peer.was_recently_live(now))
             .cloned()
             .collect()
@@ -956,6 +1043,8 @@ impl Clone for AddressBook {
 
         AddressBook {
             by_addr: self.by_addr.clone(),
+            by_priority: self.by_priority.clone(),
+            by_group: self.by_group.clone(),
             local_listener: self.local_listener,
             network: self.network.clone(),
             addr_limit: self.addr_limit,

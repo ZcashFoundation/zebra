@@ -1,0 +1,6 @@
+project: zebra-network
+kind: Changed
+body: >-
+  The address book indexes peers by address, priority and connection group instead of shifting
+  an ordered map on every update, eviction and ban.
+time: 2026-10-12T16:00:03.000000000+02:00
