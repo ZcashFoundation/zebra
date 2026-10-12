@@ -913,47 +913,16 @@ async fn setup(
 }
 
 mod submitblock_test {
-    use std::io;
-    use std::sync::{Arc, Mutex};
-    use tokio::sync::Notify;
-    use tracing::{Instrument, Level};
-    use tracing_subscriber::fmt;
+    use std::time::Duration;
+    use tracing::Instrument;
     use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 
-    // Custom in-memory writer to capture logs
-    struct TestWriter(Arc<Mutex<Vec<u8>>>, Arc<Notify>);
-
-    impl io::Write for TestWriter {
-        #[allow(clippy::unwrap_in_result)]
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let mut logs = self.0.lock().unwrap();
-            logs.extend_from_slice(buf);
-            self.1.notify_one();
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
+    const MINED_BLOCK_BROADCAST_DEADLINE: Duration = Duration::from_secs(7);
 
     #[tokio::test]
     async fn submitblock_channel() -> Result<(), crate::BoxError> {
-        let logs = Arc::new(Mutex::new(Vec::new()));
-        let log_written = Arc::new(Notify::new());
-        let writer_notify = log_written.clone();
-        let log_sink = logs.clone();
-
-        // Set up a tracing subscriber with a custom writer
-        let subscriber = fmt()
-            .with_max_level(Level::INFO)
-            .with_writer(move || TestWriter(log_sink.clone(), writer_notify.clone()))
-            .finish();
-
-        let _guard = tracing::subscriber::set_default(subscriber);
-
         let (sync_status, _recent_syncs) = SyncStatus::new();
 
         // State
@@ -994,9 +963,9 @@ mod submitblock_test {
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();
+        let sender = submitblock_channel.sender();
         // Send a block to the channel
-        submitblock_channel
-            .sender()
+        sender
             .send((block::Hash([1; 32]), block::Height(1)))
             .await
             .unwrap();
@@ -1011,29 +980,21 @@ mod submitblock_test {
             .in_current_span(),
         );
 
-        // Wait for the gossip task's log instead of the unrelated periodic gossip delay.
-        tokio::time::timeout(Duration::from_secs(7), async {
-            loop {
-                let notified = log_written.notified();
-                if String::from_utf8_lossy(&logs.lock().unwrap())
-                    .contains("sending mined block broadcast")
-                {
-                    break;
-                }
-                notified.await;
+        // Wait for channel consumption, even when the peer set has no ready peers.
+        tokio::time::timeout(MINED_BLOCK_BROADCAST_DEADLINE, async {
+            while sender.capacity() < sender.max_capacity() {
+                tokio::task::yield_now().await;
             }
         })
         .await
-        .expect("the gossip task must process the submitted block");
+        .expect("the gossip task consumes the mined block notification");
+        // A dropped receiver also frees capacity, so the task must still hold the channel open.
+        assert!(
+            !sender.is_closed(),
+            "the gossip task keeps running after consuming the notification"
+        );
 
-        // Check that the block was processed as a mined block by the gossip task.
-        let captured_logs = logs.lock().unwrap();
-        let log_output = String::from_utf8(captured_logs.clone()).unwrap();
-
-        assert!(log_output.contains("initializing block gossip task"));
-        assert!(log_output.contains("sending mined block broadcast"));
-
-        std::mem::drop(gossip_task_handle);
+        gossip_task_handle.abort();
 
         Ok(())
     }

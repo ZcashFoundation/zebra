@@ -128,21 +128,6 @@ pub const MIN_CONCURRENCY_LIMIT: usize = 1;
 /// failure loop.
 pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 
-/// Controls how long we wait between gossiping successive blocks or transactions.
-///
-/// ## Correctness
-///
-/// If this timeout is set too high, blocks and transactions won't propagate through
-/// the network efficiently.
-///
-/// If this timeout is set too low, the peer set and remote peers can get overloaded.
-#[cfg(not(test))]
-pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
-
-/// Keep gossip throttled in unit tests without waiting for real peer-network delays.
-#[cfg(test)]
-pub const PEER_GOSSIP_DELAY: Duration = Duration::from_millis(10);
-
 /// The per-peer wire-response budget used to derive complete download deadlines.
 ///
 /// Connections start this timeout at dispatch, not while waiting for capacity. The complete sync
