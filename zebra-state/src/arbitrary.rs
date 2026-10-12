@@ -39,7 +39,7 @@ where
 
 impl SemanticallyVerifiedBlock {
     /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
-    /// with fake zero-valued spent UTXOs.
+    /// with fake zero-valued UTXOs for spends from earlier blocks.
     ///
     /// Only for use in tests.
     #[cfg(test)]
@@ -58,8 +58,8 @@ impl SemanticallyVerifiedBlock {
 }
 
 impl ContextuallyVerifiedBlock {
-    /// Create a block that's ready for non-finalized `Chain` contextual
-    /// validation, using a [`SemanticallyVerifiedBlock`] and fake zero-valued spent UTXOs.
+    /// Create a block ready for non-finalized `Chain` contextual validation, using actual
+    /// intra-block outputs and fake zero-valued UTXOs for spends from earlier blocks.
     ///
     /// Only for use in tests.
     pub fn test_with_zero_spent_utxos(block: impl Into<SemanticallyVerifiedBlock>) -> Self {
@@ -79,7 +79,10 @@ impl ContextuallyVerifiedBlock {
             .map(AsRef::as_ref)
             .flat_map(Transaction::inputs)
             .flat_map(|input| input.outpoint())
-            .map(|outpoint| (outpoint, zero_utxo.clone()))
+            .map(|outpoint| {
+                let utxo = block.new_outputs.get(&outpoint).unwrap_or(&zero_utxo);
+                (outpoint, utxo.clone())
+            })
             .collect();
 
         ContextuallyVerifiedBlock::with_block_and_spent_utxos(
@@ -105,6 +108,7 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             received_time,
         } = block.into();
+        let new_outputs = Arc::new(new_outputs);
 
         Self {
             block,
