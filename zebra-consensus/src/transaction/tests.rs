@@ -6192,7 +6192,7 @@ fn cacheable_mainnet_orchard_transaction() -> Transaction {
                 && !tx.has_sapling_shielded_data()
                 && !tx.lock_time_is_time()
                 && tx
-                    .value_balance(&HashMap::new())
+                    .value_balance(&HashMap::<_, transparent::Utxo>::new())
                     .ok()
                     .and_then(|balance| balance.remaining_transaction_value().ok())
                     .is_some_and(|fee| fee >= zip317::conventional_fee(tx))
@@ -6442,7 +6442,7 @@ fn cacheable_mainnet_sapling_transaction() -> (NetworkUpgrade, Transaction) {
                 && tx.inputs().is_empty()
                 && !tx.lock_time_is_time()
                 && tx
-                    .value_balance(&HashMap::new())
+                    .value_balance(&HashMap::<_, transparent::Utxo>::new())
                     .ok()
                     .and_then(|balance| balance.remaining_transaction_value().ok())
                     .is_some_and(|fee| fee >= zip317::conventional_fee(tx))
