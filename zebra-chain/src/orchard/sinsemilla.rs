@@ -1,7 +1,10 @@
 //! Sinsemilla hash functions and helpers.
 
+#[cfg(test)]
 use bitvec::prelude::*;
+#[cfg(test)]
 use halo2::pasta::pallas;
+#[cfg(test)]
 use sinsemilla::HashDomain;
 
 /// Sinsemilla Hash Function
@@ -16,6 +19,7 @@ use sinsemilla::HashDomain;
 /// SinsemillaHash: B^Y^\[N\] × B[{0 .. 𝑘·𝑐}] → P_𝑥 ∪ {⊥}
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
+#[cfg(test)]
 #[allow(non_snake_case)]
 pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
     let domain = std::str::from_utf8(D).expect("must be valid UTF-8");
