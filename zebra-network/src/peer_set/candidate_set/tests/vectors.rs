@@ -8,19 +8,25 @@ use std::{
 
 use chrono::{DateTime, Duration, Utc};
 use tokio::time::{self, Instant};
+use tower::{buffer::Buffer, util::BoxService};
 use tracing::Span;
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
+    address_book_updater::{
+        AddressBookRequest, AddressBookResponse, AddressBookUpdater, MIN_CHANNEL_SIZE,
+    },
     constants::{DEFAULT_MAX_CONNS_PER_IP, GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
     AddressBook, Request, Response,
 };
 
-use super::super::{crawl::validate_addrs, crawl_once, crawler_services};
+use super::super::{
+    crawl::{validate_addrs, GOSSIPED_ADDRS_PER_REQUEST},
+    crawl_once, crawler_services,
+};
 
 /// Test that offset is applied when all addresses have `last_seen` times in the future.
 #[test]
@@ -179,6 +185,71 @@ fn candidate_set_updates_are_rate_limited() {
 
             time::advance(MIN_PEER_GET_ADDR_INTERVAL / POLL_FREQUENCY_FACTOR).await;
         }
+    });
+}
+
+/// Test that a large gossiped batch reaches the address book in bounded chunks (#11618).
+#[test]
+fn gossiped_addresses_are_sent_to_the_address_book_in_chunks() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let mut peer_service = MockService::build().for_unit_tests();
+    let mut address_book_service = MockService::build().for_unit_tests();
+    let (_next_peer_service, mut crawl_service) = crawler_services(
+        Buffer::new(
+            BoxService::new(address_book_service.clone()),
+            MIN_CHANNEL_SIZE,
+        ),
+        peer_service.clone(),
+    );
+
+    runtime.block_on(async move {
+        let addr_count = 2 * GOSSIPED_ADDRS_PER_REQUEST + GOSSIPED_ADDRS_PER_REQUEST / 2;
+        let addrs = (1..=u32::try_from(addr_count).expect("a few hundred addresses fit in u32"))
+            .map(|index| {
+                MetaAddr::new_gossiped_meta_addr(
+                    SocketAddr::new(IpAddr::from(index.to_be_bytes()), 8233).into(),
+                    PeerServices::NODE_NETWORK,
+                    DateTime32::now(),
+                )
+            })
+            .collect();
+
+        let crawl = tokio::spawn(async move { crawl_once(&mut crawl_service, Some(1)).await });
+
+        peer_service
+            .expect_request(Request::Peers)
+            .await
+            .respond(Response::Peers(addrs));
+
+        let mut chunk_sizes = Vec::new();
+        while chunk_sizes.iter().sum::<usize>() < addr_count {
+            let request = address_book_service
+                .expect_request_that(|request| {
+                    matches!(request, AddressBookRequest::ExtendGossiped(_))
+                })
+                .await;
+            let AddressBookRequest::ExtendGossiped(changes) = request.request() else {
+                unreachable!("just checked the request type");
+            };
+            chunk_sizes.push(changes.len());
+            request.respond(AddressBookResponse::Extended);
+        }
+
+        crawl
+            .await
+            .expect("crawl task should not panic")
+            .expect("crawls should not fail");
+
+        assert_eq!(
+            chunk_sizes,
+            [
+                GOSSIPED_ADDRS_PER_REQUEST,
+                GOSSIPED_ADDRS_PER_REQUEST,
+                GOSSIPED_ADDRS_PER_REQUEST / 2
+            ],
+        );
     });
 }
 
