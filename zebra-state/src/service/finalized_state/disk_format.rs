@@ -70,6 +70,15 @@ where
     }
 }
 
+/// Store already serialized bytes without copying them before insertion into the write batch.
+impl<'a> IntoDisk for &'a [u8] {
+    type Bytes = &'a [u8];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self
+    }
+}
+
 impl<T> IntoDisk for Arc<T>
 where
     T: IntoDisk,
