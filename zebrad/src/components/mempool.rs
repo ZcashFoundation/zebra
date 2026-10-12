@@ -104,7 +104,15 @@ fn adjusted_mempool_misbehavior_score(
             is_in_branch_id_grace_period(transaction_upgrade, verification_height, network)
         });
 
-    if is_grace_mismatch {
+    // Lock times are checked against our own tip, so a peer whose tip is ahead can honestly
+    // relay a transaction we reject.
+    let is_tip_relative_lock_time = matches!(
+        error,
+        TransactionError::LockedUntilAfterBlockHeight(_)
+            | TransactionError::LockedUntilAfterBlockTime(_)
+    );
+
+    if is_grace_mismatch || is_tip_relative_lock_time {
         0
     } else {
         error.mempool_misbehavior_score()
