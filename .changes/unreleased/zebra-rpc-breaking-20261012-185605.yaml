@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: Builds against the `zebra-consensus` `router::init` and `router::init_test` that take a read-only state service; `zebra-consensus` types appear in the public API, so upgrade both together.
+time: 2026-10-12T18:56:05.85572169+02:00
