@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     mem::{size_of, size_of_val},
-    ops::{Add, Deref, DerefMut, RangeInclusive},
+    ops::{Add, Deref, RangeInclusive},
     pin::Pin,
     sync::Arc,
     time::Instant,
@@ -12,7 +12,7 @@ use std::{
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
-    block::{self, Block, HeightDiff},
+    block::{self, merkle::AuthDataRoot, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
@@ -298,8 +298,24 @@ pub struct SemanticallyVerifiedBlock {
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+///
+/// The wrapped block is immutable so a cached authorizing-data root cannot be paired with another
+/// block body:
+///
+/// ```compile_fail
+/// use std::sync::Arc;
+/// use zebra_chain::block::Block;
+/// use zebra_state::CheckpointVerifiedBlock;
+///
+/// fn replace_body(mut verified: CheckpointVerifiedBlock, block: Arc<Block>) {
+///     verified.block = block;
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+pub struct CheckpointVerifiedBlock {
+    verified: SemanticallyVerifiedBlock,
+    auth_data_root: Option<AuthDataRoot>,
+}
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -705,7 +721,18 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
+        Self::from(SemanticallyVerifiedBlock::with_hash(block, hash))
+    }
+
+    /// Computes and caches the authorizing-data root from this immutable block body.
+    pub fn with_precomputed_auth_data_root(mut self) -> Self {
+        self.auth_data_root = Some(self.block.auth_data_root());
+        self
+    }
+
+    /// Returns the cached root, if it was computed before the block reached the writer.
+    pub(crate) fn precomputed_auth_data_root(&self) -> Option<AuthDataRoot> {
+        self.auth_data_root
     }
 }
 
@@ -731,7 +758,16 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        Self::from(SemanticallyVerifiedBlock::from(block))
+    }
+}
+
+impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
+    fn from(verified: SemanticallyVerifiedBlock) -> Self {
+        Self {
+            verified,
+            auth_data_root: None,
+        }
     }
 }
 
@@ -784,7 +820,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
 
 impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
-        checkpoint_verified.0
+        checkpoint_verified.verified
     }
 }
 
@@ -792,12 +828,7 @@ impl Deref for CheckpointVerifiedBlock {
     type Target = SemanticallyVerifiedBlock;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for CheckpointVerifiedBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &self.verified
     }
 }
 
@@ -1433,7 +1464,8 @@ pub enum ReadRequest {
     MiningCandidateChanges,
 
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
-    /// with the current disk space usage in bytes.
+    /// with the latest disk space usage estimate in bytes. Primary services normally refresh
+    /// it every 30 seconds; read-only services measure it on demand.
     UsageInfo,
 
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
