@@ -23,6 +23,74 @@ use crate::{
 
 use super::generate; // TODO: this should be rewritten as strategies
 
+/// Parallel digest computation must preserve the serial root for every block vector.
+#[test]
+fn auth_data_root_parallel_matches_serial_vectors() {
+    use crate::block::merkle::AuthDataRoot;
+
+    let _init_guard = zebra_test::init();
+
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
+        let block = Block::zcash_deserialize(*block_bytes).unwrap();
+        let serial = block.transactions.iter().collect::<AuthDataRoot>();
+
+        assert_eq!(
+            block.auth_data_root(),
+            serial,
+            "auth data root at {:?}",
+            block.coinbase_height()
+        );
+    }
+}
+
+/// Cover empty, legacy, mixed-version, padded, and large trees around the parallel threshold.
+#[test]
+fn auth_data_root_parallel_matches_serial_edge_cases() {
+    use crate::{block::merkle::AuthDataRoot, transaction::AuthDigest};
+
+    let _init_guard = zebra_test::init();
+    let legacy =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES).unwrap();
+    let mut mixed =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+
+    assert!(legacy
+        .transactions
+        .iter()
+        .all(|tx| tx.auth_digest().is_none()));
+    assert!(mixed
+        .transactions
+        .iter()
+        .any(|tx| tx.auth_digest().is_some()));
+    mixed.transactions.insert(1, legacy.transactions[0].clone());
+
+    for source in [legacy, mixed] {
+        for tx_count in [0, 1, 2, 3, 7, 15, 16, 17, 32, 257] {
+            let block = Block {
+                header: source.header.clone(),
+                transactions: source
+                    .transactions
+                    .iter()
+                    .cycle()
+                    .take(tx_count)
+                    .cloned()
+                    .collect(),
+            };
+            let serial = block
+                .transactions
+                .iter()
+                .map(|tx| tx.auth_digest().unwrap_or(AuthDigest([0xFF; 32])))
+                .collect::<AuthDataRoot>();
+            let actual = block.auth_data_root();
+
+            assert_eq!(actual, serial, "auth data root for {tx_count} transactions");
+            if tx_count == 0 {
+                assert_eq!(actual, AuthDataRoot::from([0; 32]));
+            }
+        }
+    }
+}
+
 #[test]
 fn blockheaderhash_debug() {
     let _init_guard = zebra_test::init();
@@ -94,7 +162,7 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
         ],
         LockTime::unlocked(),
     );
-    let utxos = HashMap::new();
+    let utxos = HashMap::<_, transparent::Utxo>::new();
 
     assert!(
         coinbase.value_balance(&utxos).is_err(),
@@ -162,7 +230,7 @@ fn genesis_transparent_outputs_are_not_issued_supply() {
         for network in [&network, &Network::Mainnet] {
             let change = genesis
                 .chain_value_pool_change(
-                    &HashMap::new(),
+                    &HashMap::<_, transparent::Utxo>::new(),
                     DeferredPoolBalanceChange::zero(),
                     network,
                     ValueBalance::zero(),
@@ -334,7 +402,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         )],
     );
     let pre_activation_change = before_activation.chain_value_pool_change(
-        &HashMap::new(),
+        &HashMap::<_, transparent::Utxo>::new(),
         DeferredPoolBalanceChange::zero(),
         &network,
         before_seed,
@@ -365,7 +433,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     );
     let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
     let (change, fees) = block.chain_value_pool_change_and_fees(
-        &HashMap::new(),
+        &HashMap::<_, transparent::Utxo>::new(),
         deferred_change,
         &network,
         parent,
@@ -377,7 +445,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     assert_eq!(after.total()?, (parent.total()? + total)?);
     let next = make_block(height.next()?, Vec::new());
     let next_change = next.chain_value_pool_change(
-        &HashMap::new(),
+        &HashMap::<_, transparent::Utxo>::new(),
         DeferredPoolBalanceChange::zero(),
         &network,
         after,
@@ -400,7 +468,12 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         ],
     );
     assert_eq!(
-        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, parent)?,
+        underfunded.chain_value_pool_change(
+            &HashMap::<_, transparent::Utxo>::new(),
+            deferred_change,
+            &network,
+            parent,
+        )?,
         change,
         "ledger accounting does not validate funding payouts",
     );
