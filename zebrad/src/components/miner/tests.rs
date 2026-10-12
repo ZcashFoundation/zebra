@@ -1,8 +1,131 @@
-//! Internal miner eligibility and notification-race regressions.
+//! Internal miner notification and candidate-retention tests.
 
-use zebra_chain::serialization::ZcashDeserializeInto;
+use futures::FutureExt;
+use zebra_chain::serialization::{DateTime32, ZcashDeserializeInto};
 
 use super::*;
+
+#[tokio::test(start_paused = true)]
+async fn idle_solver_wakes_when_template_arrives() {
+    let block = zebra_chain::block::genesis::regtest_genesis_block();
+    let (sender, receiver) = watch::channel(None);
+    let mut receiver = WatchReceiver::new(receiver);
+    receiver.mark_as_seen();
+    assert!(receiver.cloned_watch_data().is_none());
+
+    let start = tokio::time::Instant::now();
+    let send_work = tokio::spawn(async move {
+        sleep(Duration::from_secs(1)).await;
+        sender
+            .send(Some(block))
+            .expect("the idle solver still receives work");
+        sender
+    });
+    wait_for_mining_template_change(&mut receiver).await;
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+    assert!(receiver.cloned_watch_data().is_some());
+    let sender = send_work.await.expect("the sender task does not panic");
+
+    // An update between the empty read and the wait must not be lost.
+    sender.send_replace(None);
+    receiver.mark_as_seen();
+    assert!(receiver.cloned_watch_data().is_none());
+    sender.send_replace(Some(zebra_chain::block::genesis::regtest_genesis_block()));
+    assert!(wait_for_mining_template_change(&mut receiver)
+        .now_or_never()
+        .is_some());
+
+    let start = tokio::time::Instant::now();
+    wait_for_mining_template_change(&mut receiver).await;
+    assert_eq!(start.elapsed(), BLOCK_TEMPLATE_WAIT_TIME);
+    drop(sender);
+    assert!(wait_for_mining_template_change(&mut receiver)
+        .now_or_never()
+        .is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn parked_solver_rechecks_parent_without_new_work() {
+    let (sender, receiver) =
+        watch::channel(Some(zebra_chain::block::genesis::regtest_genesis_block()));
+    let mut receiver = WatchReceiver::new(receiver);
+    receiver.mark_as_seen();
+
+    // Retained work is not republished when its parent commits, so the wait must end anyway.
+    let start = tokio::time::Instant::now();
+    wait_for_committed_parent(&mut receiver)
+        .await
+        .expect("the template sender is still open");
+    assert_eq!(start.elapsed(), BLOCK_TEMPLATE_REFRESH_LIMIT);
+
+    drop(sender);
+    assert!(wait_for_committed_parent(&mut receiver).await.is_err());
+}
+
+#[test]
+fn submitold_retains_only_eligible_mining_candidates() {
+    let original: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("the block fixture has valid serialization");
+    let second: Block = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .expect("the block fixture has valid serialization");
+    let mut refresh = (*original).clone();
+    Arc::make_mut(&mut refresh.header).merkle_root = second.header.merkle_root;
+    let time = original.header.time;
+    let valid_times = time..=time;
+
+    let (sender, receiver) = watch::channel(Some(original.clone()));
+    assert!(!sender.send_if_modified(|current| {
+        update_mining_template(current, refresh.clone(), Some(true), valid_times.clone())
+    }));
+    assert!(!receiver.has_changed().expect("the sender is alive"));
+    assert!(Arc::ptr_eq(receiver.borrow().as_ref().unwrap(), &original));
+
+    for submit_old in [None, Some(false)] {
+        let mut current = Some(original.clone());
+        assert!(update_mining_template(
+            &mut current,
+            refresh.clone(),
+            submit_old,
+            valid_times.clone(),
+        ));
+        assert_eq!(current.unwrap().header, refresh.header);
+    }
+
+    let mut other_parent = refresh.clone();
+    Arc::make_mut(&mut other_parent.header).previous_block_hash = second.header.previous_block_hash;
+    let mut other_height = refresh.clone();
+    other_height.transactions = second.transactions;
+    let mut other_difficulty = refresh.clone();
+    Arc::make_mut(&mut other_difficulty.header).difficulty_threshold =
+        zebra_chain::work::difficulty::CompactDifficulty::from_bytes_in_display_order(&[
+            0x20, 0x07, 0xff, 0xff,
+        ])
+        .expect("the test difficulty is representable");
+    for replacement in [other_parent, other_height, other_difficulty] {
+        assert!(update_mining_template(
+            &mut Some(original.clone()),
+            replacement,
+            Some(true),
+            valid_times.clone(),
+        ));
+    }
+    for invalid_time in [DateTime32::MIN, DateTime32::MAX] {
+        assert!(update_mining_template(
+            &mut Some(original.clone()),
+            refresh.clone(),
+            Some(true),
+            invalid_time.into()..=invalid_time.into(),
+        ));
+    }
+    assert!(update_mining_template(
+        &mut None,
+        refresh,
+        Some(true),
+        valid_times
+    ));
+}
 
 #[test]
 fn solver_observes_template_published_after_change_check() {

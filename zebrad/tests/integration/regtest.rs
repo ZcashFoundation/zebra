@@ -1544,7 +1544,7 @@ async fn internal_miner_withdraws_work_while_public_sync_is_behind() {
 
 #[cfg(feature = "internal-miner")]
 #[tokio::test(start_paused = true)]
-async fn internal_miner_retries_timed_out_tip_then_waits_for_committed_parent() {
+async fn internal_miner_retries_timed_out_tip_then_rechecks_committed_parent() {
     use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
     use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_rpc::methods::RpcImpl;
@@ -1599,11 +1599,21 @@ async fn internal_miner_retries_timed_out_tip_then_waits_for_committed_parent() 
             block.hash(),
         ))));
     tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(60)).await;
-    read_state.expect_no_requests().await;
+
+    // A retained template isn't republished when its parent commits, so the parked solver
+    // rechecks the committed tip instead of waiting only for a new template.
+    tokio::time::advance(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+    read_state
+        .expect_request(zebra_state::ReadRequest::Tip)
+        .await
+        .respond(zebra_state::ReadResponse::Tip(Some((
+            Height(1),
+            block.hash(),
+        ))));
+    tokio::task::yield_now().await;
     assert!(
         !solver.is_finished(),
-        "wait for a new template, without retrying"
+        "keep waiting for the committed parent"
     );
     solver.abort();
     queue.abort();

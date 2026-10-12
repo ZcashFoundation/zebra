@@ -3,7 +3,9 @@
 //! # TODO
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
-use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{
+    cmp::min, ops::RangeInclusive, sync::Arc, thread::available_parallelism, time::Duration,
+};
 
 use color_eyre::Report;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -60,6 +62,28 @@ pub const BLOCK_TEMPLATE_REFRESH_LIMIT: Duration = Duration::from_secs(2);
 /// generation.
 pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 
+/// Keeps potentially valid work across mempool refreshes without retaining a stale parent or time.
+fn update_mining_template(
+    current: &mut Option<Arc<Block>>,
+    replacement: Block,
+    submit_old: Option<bool>,
+    valid_times: RangeInclusive<chrono::DateTime<chrono::Utc>>,
+) -> bool {
+    if let Some(current) = current {
+        if current.header == replacement.header
+            || (submit_old == Some(true)
+                && current.header.previous_block_hash == replacement.header.previous_block_hash
+                && current.coinbase_height() == replacement.coinbase_height()
+                && current.header.difficulty_threshold == replacement.header.difficulty_threshold
+                && valid_times.contains(&current.header.time))
+        {
+            return false;
+        }
+    }
+    *current = Some(Arc::new(replacement));
+    true
+}
+
 /// Public networks do not extend the previous locally accepted block.
 fn mining_parent_is_allowed(
     network: &Network,
@@ -84,6 +108,24 @@ fn mining_template_changed(
     receiver.borrow_mapped(|template| {
         template.as_ref().map(|block| block.header.as_ref()) != Some(old_header)
     })
+}
+
+/// Waits for new work or channel closure, with periodic shutdown checks.
+async fn wait_for_mining_template_change(receiver: &mut WatchReceiver<Option<Arc<Block>>>) {
+    let _ = timeout(BLOCK_TEMPLATE_WAIT_TIME, receiver.changed()).await;
+}
+
+/// Waits for new work, or until the committed tip should be checked again.
+///
+/// Retained work isn't republished when its parent commits, so the tip must be rechecked even
+/// if the template doesn't change.
+async fn wait_for_committed_parent(
+    receiver: &mut WatchReceiver<Option<Arc<Block>>>,
+) -> Result<(), Report> {
+    match timeout(BLOCK_TEMPLATE_REFRESH_LIMIT, receiver.changed()).await {
+        Ok(changed) => changed.map_err(Into::into),
+        Err(_elapsed) => Ok(()),
+    }
 }
 
 /// Initialize the miner based on its config, and spawn a task for it.
@@ -357,12 +399,6 @@ where
             .try_into_template()
             .expect("invalid RPC response: proposal in response to a template request");
 
-        info!(
-            height = ?template.height(),
-            transactions = ?template.transactions().len(),
-            "mining with an updated block template",
-        );
-
         // Tell the next get_block_template() call to wait until the template has changed.
         parameters = GetBlockTemplateParameters::new(
             Template,
@@ -378,14 +414,21 @@ where
             rpc.network(),
         )?;
 
-        // If the template has actually changed, send an updated template.
-        template_sender.send_if_modified(|old_block| {
-            if old_block.as_ref().map(|b| *b.header) == Some(*block.header) {
-                return false;
-            }
-            *old_block = Some(Arc::new(block));
-            true
-        });
+        // Mempool-only refreshes need not discard an in-progress Equihash solve.
+        if template_sender.send_if_modified(|current| {
+            update_mining_template(
+                current,
+                block,
+                template.submit_old(),
+                template.min_time().into()..=template.max_time().into(),
+            )
+        }) {
+            info!(
+                height = ?template.height(),
+                transactions = ?template.transactions().len(),
+                "mining with an updated block template",
+            );
+        }
 
         // If the blockchain is changing rapidly, limit how often we'll update the template.
         // But if we're shutting down, do that immediately.
@@ -483,7 +526,7 @@ where
 
             // Skip the wait if we didn't get a template because we are shutting down.
             if !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+                wait_for_mining_template_change(&mut template_receiver).await;
             }
 
             continue;
@@ -501,7 +544,7 @@ where
             )
         {
             // Wait for a committed parent; public work must also leave our last accepted block.
-            template_receiver.changed().await?;
+            wait_for_committed_parent(&mut template_receiver).await?;
             continue;
         }
 
