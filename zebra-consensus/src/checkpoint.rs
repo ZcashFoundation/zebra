@@ -40,7 +40,7 @@ use zebra_chain::{
     block::{self, Block},
     diagnostic::task::CheckForPanics,
     parameters::{
-        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network,
+        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network, NetworkUpgrade,
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::ZcashSerialize,
@@ -1602,21 +1602,36 @@ where
         // cancelling its downloads) would leave the verifier ahead of the
         // state, and it would reject the blocks it is missing.
         let state_service = self.state_service.clone();
+        let network = self.network.clone();
         let reset_sender = self.reset_sender.clone();
         let commit_checkpoint_verified = async move {
             loop {
+                let verified = rx
+                    .await
+                    // The verifier can drop a block it got back from a failed commit
+                    // while it is being dropped.
+                    .unwrap_or(Err(VerifyCheckpointError::Dropped))?;
+                let verified = if NetworkUpgrade::current(&network, verified.block.height)
+                    >= NetworkUpgrade::Nu5
+                {
+                    tokio::task::spawn_blocking(move || {
+                        let mut verified = verified;
+                        verified.block = verified.block.with_precomputed_auth_data_root();
+                        verified
+                    })
+                    .await
+                    .expect("checkpoint auth-root preparation should not panic")
+                } else {
+                    verified
+                };
                 let Verified {
-                    mut block,
+                    block,
                     notifications,
                     retained,
                     epoch,
                     previous_sent,
                     sent,
-                } = rx
-                    .await
-                    // The verifier can drop a block it got back from a failed commit
-                    // while it is being dropped.
-                    .unwrap_or(Err(VerifyCheckpointError::Dropped))?;
+                } = verified;
                 let hash = block.hash;
 
                 // Send blocks to the state in the order they were verified.
@@ -1626,9 +1641,14 @@ where
 
                 // Keep a copy of the block in case the state fails it without checking it.
                 // Its new outputs are only rebuilt if that happens.
-                let new_outputs = std::mem::take(&mut block.new_outputs);
-                let mut child = block.clone();
-                block.new_outputs = new_outputs;
+                let mut child = zs::SemanticallyVerifiedBlock {
+                    block: block.block.clone(),
+                    hash: block.hash,
+                    height: block.height,
+                    new_outputs: Default::default(),
+                    transaction_hashes: block.transaction_hashes.clone(),
+                    received_time: block.received_time,
+                };
                 let request = match notifications.clone() {
                     Some(notifications) => zs::Request::CommitMinedCheckpointVerifiedBlock {
                         block,
@@ -1706,7 +1726,7 @@ where
                             tip,
                             child: Some(QueuedBlock {
                                 bytes: child.retained_bytes(),
-                                block: child,
+                                block: child.into(),
                                 tx,
                                 notifications,
                                 retained,

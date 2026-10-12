@@ -951,6 +951,7 @@ impl NonFinalizedState {
                     block.clone(),
                     network,
                     &parent_history_tree,
+                    None,
                 );
                 if result.is_err() {
                     cancel_tree_update.store(true, Ordering::Release);
