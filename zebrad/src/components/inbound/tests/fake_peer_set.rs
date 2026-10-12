@@ -43,10 +43,11 @@ use crate::{
             Inbound, InboundSetupData, GETDATA_MAX_TRANSACTION_COUNT,
         },
         mempool::{
-            gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
-            SameEffectsChainRejectionError, UnboxMempoolError,
+            gossip::TRANSACTION_GOSSIP_DELAY, gossip_mempool_transaction_id,
+            Config as MempoolConfig, Mempool, MempoolError, SameEffectsChainRejectionError,
+            UnboxMempoolError,
         },
-        sync::{self, BlockGossipError, SyncStatus, BLOCK_VERIFY_TIMEOUT, PEER_GOSSIP_DELAY},
+        sync::{self, BlockGossipError, SyncStatus, BLOCK_VERIFY_TIMEOUT},
     },
     BoxError,
 };
@@ -638,8 +639,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let mut hs = HashSet::new();
     hs.insert(tx1_id);
 
-    // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Transaction and block IDs are gossiped in any order.
+    tokio::time::sleep(TRANSACTION_GOSSIP_DELAY).await;
     let possible_requests = &mut [
         Request::AdvertiseTransactionIds(hs, None),
         Request::AdvertiseBlock(block_two.hash(), None),
@@ -699,8 +700,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Test the block is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Test the block is gossiped without a batch delay.
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash(), None))
         .await
@@ -775,8 +775,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::Expired)
     );
 
-    // Test transaction 2 is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Test transaction 2 is gossiped after the transaction batch delay.
+    tokio::time::sleep(TRANSACTION_GOSSIP_DELAY).await;
 
     let mut hs = HashSet::new();
     hs.insert(tx2_id);
@@ -806,8 +806,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
-        // Test the block is gossiped, after waiting for the multi-gossip delay
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Test the block is gossiped without a batch delay.
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
@@ -1213,8 +1212,6 @@ async fn setup(
     //
     // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
     for block in committed_blocks.iter().skip(1) {
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
-
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
