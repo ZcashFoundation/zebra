@@ -285,6 +285,7 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
+/// Mempool state queries use `read_state_service` directly, without the state writer's buffer.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -292,14 +293,17 @@ where
 ///
 /// # Correctness
 ///
+/// Both state services must refer to the same chain state.
+///
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
-#[instrument(skip(state_service, mempool))]
-pub async fn init<S, Mempool>(
+#[instrument(skip(state_service, read_state_service, mempool))]
+pub async fn init<S, ReadState, Mempool>(
     config: Config,
     network: &Network,
     mut state_service: S,
+    read_state_service: ReadState,
     mempool: oneshot::Receiver<Mempool>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
@@ -313,6 +317,11 @@ pub async fn init<S, Mempool>(
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
         + Clone
@@ -408,7 +417,7 @@ where
     let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
 
     let mempool_transaction =
-        transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
+        transaction::MempoolTxVerifier::new(network, read_state_service, mempool);
     let mempool_transaction =
         Buffer::new(BoxService::new(mempool_transaction), VERIFIER_BUFFER_BOUND);
 
@@ -484,10 +493,11 @@ pub struct BackgroundTaskHandles {
 ///
 /// See [`init`] for more details.
 #[cfg(any(test, feature = "proptest-impl"))]
-pub async fn init_test<S>(
+pub async fn init_test<S, ReadState>(
     config: Config,
     network: &Network,
     state_service: S,
+    read_state_service: ReadState,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -500,11 +510,17 @@ pub async fn init_test<S>(
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
 {
     init(
         config.clone(),
         network,
         state_service.clone(),
+        read_state_service,
         oneshot::channel::<
             Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
         >()

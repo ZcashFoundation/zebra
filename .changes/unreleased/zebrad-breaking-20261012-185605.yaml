@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'Source integrations must pass a read-only state service to `Mempool::new` and the mempool transaction downloader.'
+time: 2026-10-12T18:56:05.843673346+02:00

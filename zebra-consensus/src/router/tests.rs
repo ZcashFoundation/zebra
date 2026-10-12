@@ -50,13 +50,19 @@ async fn verifiers_from_network(
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<BoxService<zs::Request, zs::Response, BoxError>, zs::Request>,
 ) {
-    let state_service = zs::init_test(&network).await;
+    let (state_service, read_state, _, _) = zs::init_test_services(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
-    ) = crate::router::init_test(Config::default(), &network, state_service.clone()).await;
+    ) = crate::router::init_test(
+        Config::default(),
+        &network,
+        state_service.clone(),
+        read_state,
+    )
+    .await;
 
     // We can drop the download task handle here, because:
     // - if the download task fails, the tests will panic, and
@@ -147,6 +153,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
+    let (state, read_state, _, _) = zs::init_test_services(&network).await;
 
     // Test that the chain::init function works. Most of the other tests use
     // init_from_verifiers.
@@ -157,7 +164,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
-    ) = super::init_test(config.clone(), &network, zs::init_test(&network).await).await;
+    ) = super::init_test(config.clone(), &network, state, read_state).await;
 
     // Add a timeout layer
     let block_verifier_router =
