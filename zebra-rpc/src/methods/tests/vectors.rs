@@ -2969,15 +2969,6 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                 std::iter::empty(),
             )
             .generate_id();
-            let _ = types::get_block_template::zip317::select_mempool_transactions(
-                &network,
-                height,
-                &miner,
-                Vec::new(),
-                Default::default(),
-                Some(&cache),
-                Some(pools.nsm_amount()),
-            );
             let make_template = |fees: i64| {
                 let mut transaction = Mainnet
                     .unmined_transactions_in_blocks(..)
