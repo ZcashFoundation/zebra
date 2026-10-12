@@ -446,7 +446,7 @@ impl WriteBlockWorkerTask {
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
             } else if let Some(mut contextual) = contextual {
-                contextual.new_outputs = queued_child.new_outputs;
+                contextual.new_outputs = Arc::new(queued_child.new_outputs);
                 non_finalized_state.commit_prevalidated_contextual(
                     *contextual,
                     &finalized_state.db,
