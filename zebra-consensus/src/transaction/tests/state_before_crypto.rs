@@ -17,7 +17,7 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
         .enable_all()
         .build()
         .expect("the state runtime must initialize");
-    let (state, _read_state, _, _) =
+    let (_state, read_state, _, _) =
         state_runtime.block_on(zebra_state::init_test_services(&Network::Mainnet));
 
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
@@ -55,7 +55,7 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
             .scope(verifier.clone(), async {
                 timeout(
                     test_timeout(),
-                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, state).oneshot(
+                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, read_state).oneshot(
                         MempoolRequest {
                             transaction,
                             height,
@@ -118,7 +118,7 @@ fn mempool_valid_state_response_releases_proof_verification() {
                     .expect_request_that(|request| {
                         matches!(
                             request,
-                            zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                            zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
                         )
                     })
                     .await
@@ -128,7 +128,7 @@ fn mempool_valid_state_response_releases_proof_verification() {
                     0,
                     "proof verification must wait for the state response"
                 );
-                response.respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+                response.respond(zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors);
                 timeout(test_timeout(), verification)
                     .await
                     .expect("mempool verification completes")
@@ -167,9 +167,9 @@ fn mempool_anchor_state_readiness_and_response_keep_their_deadline() {
             let calls = Arc::new(AtomicUsize::new(0));
             let state_calls = calls.clone();
             let state = tower::limit::ConcurrencyLimit::new(
-                service_fn(move |_: zebra_state::Request| {
+                service_fn(move |_: zebra_state::ReadRequest| {
                     state_calls.fetch_add(1, Ordering::SeqCst);
-                    std::future::pending::<Result<zebra_state::Response, crate::BoxError>>()
+                    std::future::pending::<Result<zebra_state::ReadResponse, crate::BoxError>>()
                 }),
                 1,
             );

@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: '`components::mempool::downloads::Downloads` takes a read-only state service that answers `zebra_state::ReadRequest`s instead of the state write service, so mempool downloads check chain state without waiting behind queued block commits.'
+time: 2026-11-17T12:17:55.430030424+01:00

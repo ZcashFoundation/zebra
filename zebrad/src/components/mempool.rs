@@ -31,7 +31,12 @@ use std::{
 use chrono::Duration;
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::{broadcast, mpsc, oneshot, Notify};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
+use tower::{
+    buffer::Buffer,
+    timeout::Timeout,
+    util::{BoxCloneService, BoxService},
+    Service,
+};
 
 use zebra_chain::{
     block::{self, Height},
@@ -83,11 +88,12 @@ use downloads::{
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type ReadState = BoxCloneService<zs::ReadRequest, zs::ReadResponse, zs::BoxError>;
 type TxVerifier = Buffer<
     BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
     transaction::MempoolRequest,
 >;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, ReadState>;
 
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
@@ -301,9 +307,11 @@ pub struct Mempool {
     /// Used to construct the transaction downloader.
     outbound: Outbound,
 
-    /// Handle to the state service.
-    /// Used to construct the transaction downloader.
-    state: State,
+    /// Keeps the state writer alive until the mempool is dropped during shutdown.
+    _state: State,
+
+    /// Read-only state handle used to construct the transaction downloader.
+    read_state: ReadState,
 
     /// Handle to the transaction verifier service.
     /// Used to construct the transaction downloader.
@@ -353,6 +361,7 @@ impl Mempool {
         config: &Config,
         outbound: Outbound,
         state: State,
+        read_state: ReadState,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
@@ -373,7 +382,8 @@ impl Mempool {
             latest_chain_tip,
             chain_tip_change,
             outbound,
-            state,
+            _state: state,
+            read_state,
             tx_verifier,
             transaction_sender,
             misbehavior_sender,
@@ -438,7 +448,7 @@ impl Mempool {
             TxDownloads::new(
                 Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                 Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-                self.state.clone(),
+                self.read_state.clone(),
                 self.network.fee_reduction_height(),
                 self.transaction_verified.clone(),
             )
