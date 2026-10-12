@@ -1108,7 +1108,7 @@ impl Service<Request> for StateService {
                     block: contextual.block.clone(),
                     hash: contextual.hash,
                     height: contextual.height,
-                    new_outputs: std::mem::take(&mut contextual.new_outputs),
+                    new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut contextual.new_outputs)),
                     transaction_hashes: contextual.transaction_hashes.clone(),
                     received_time: contextual.received_time,
                 };

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Contextually verified blocks share their `new_outputs` and `spent_outputs` maps through `Arc`, and value balances use the `zebra-chain` API that accepts `HashMap<OutPoint, U: AsRef<Utxo>>`; `zebra-chain` types appear in the public API, so upgrade both together.'
+time: 2026-10-12T18:56:05.782445082+02:00

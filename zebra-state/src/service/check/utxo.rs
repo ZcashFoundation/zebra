@@ -4,12 +4,15 @@ use std::collections::HashMap;
 
 use zebra_chain::{
     amount,
-    transparent::{self, utxos_from_ordered_utxos, CoinbaseSpendRestriction::*},
+    transparent::{self, CoinbaseSpendRestriction::*},
 };
 
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::{finalized_state::ZebraDb, non_finalized_state::SpendingTransactionId},
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{CreatedUtxos, SpendingTransactionId},
+    },
     SemanticallyVerifiedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
@@ -37,7 +40,7 @@ use crate::{
 /// - unshielded spends of a transparent coinbase output.
 pub fn transparent_spend(
     semantically_verified: &SemanticallyVerifiedBlock,
-    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    non_finalized_chain_created_utxos: &CreatedUtxos,
     non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
@@ -56,7 +59,7 @@ pub fn transparent_spend(
                 spend,
                 spend_tx_index_in_block,
                 &semantically_verified.new_outputs,
-                non_finalized_chain_unspent_utxos,
+                non_finalized_chain_created_utxos,
                 non_finalized_chain_spent_utxos,
                 finalized_state,
             )?;
@@ -125,7 +128,7 @@ fn transparent_spend_chain_order(
     spend: transparent::OutPoint,
     spend_tx_index_in_block: usize,
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    non_finalized_chain_created_utxos: &CreatedUtxos,
     non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<transparent::OrderedUtxo, ValidateContextError> {
@@ -155,9 +158,9 @@ fn transparent_spend_chain_order(
         });
     }
 
-    non_finalized_chain_unspent_utxos
+    non_finalized_chain_created_utxos
         .get(&spend)
-        .cloned()
+        .map(|utxo| utxo.as_ref().clone())
         .or_else(|| finalized_state.utxo(&spend))
         // we don't keep spent UTXOs in the finalized state,
         // so all we can say is that it's missing from both
@@ -230,12 +233,6 @@ pub fn remaining_transaction_value(
     semantically_verified: &SemanticallyVerifiedBlock,
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<(), ValidateContextError> {
-    let utxos = utxos_from_ordered_utxos(
-        utxos
-            .iter()
-            .map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
-    );
-
     for (tx_index_in_block, transaction) in
         semantically_verified.block.transactions.iter().enumerate()
     {
@@ -244,7 +241,7 @@ pub fn remaining_transaction_value(
         }
 
         // Check the remaining transparent value pool for this transaction
-        let value_balance = transaction.value_balance(&utxos);
+        let value_balance = transaction.value_balance(utxos);
         match value_balance {
             Ok(vb) => match vb.remaining_transaction_value() {
                 Ok(_) => Ok(()),
