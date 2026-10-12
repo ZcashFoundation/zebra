@@ -31,6 +31,13 @@ use crate::{
 
 use super::disk_format::upgrade::restorable_db_versions;
 
+/// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
+/// than parallel serialization saves.
+const PARALLEL_BLOCK_TX_THRESHOLD: usize = 64;
+
+/// Minimum input or address count for parallel finalized-state lookups.
+const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
+
 pub mod block;
 pub mod chain;
 pub mod metrics;
@@ -425,6 +432,11 @@ impl ZebraDb {
     /// Call this periodically (e.g., every 30 seconds) from a background task.
     pub(crate) fn export_metrics(&self) {
         self.db.export_metrics();
+    }
+
+    /// Returns the latest disk usage estimate, measuring read-only secondaries on demand.
+    pub(crate) fn cached_size(&self) -> u64 {
+        self.db.cached_size()
     }
 
     /// Returns the estimated total disk space usage of the database.

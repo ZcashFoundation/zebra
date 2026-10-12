@@ -1,0 +1,7 @@
+project: zebra-state
+kind: breaking
+body: >-
+  `CheckpointVerifiedBlock` no longer implements `DerefMut` and its contents are private, so a
+  precomputed authorizing data root cannot be paired with a different block body; build it
+  with `From<Arc<Block>>` or `From<SemanticallyVerifiedBlock>`.
+time: 2026-10-12T16:10:00.000000000+02:00
