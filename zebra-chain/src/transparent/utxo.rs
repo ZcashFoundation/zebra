@@ -54,6 +54,12 @@ pub struct OrderedUtxo {
     pub tx_index_in_block: usize,
 }
 
+impl AsRef<Utxo> for Utxo {
+    fn as_ref(&self) -> &Utxo {
+        self
+    }
+}
+
 impl AsRef<Utxo> for OrderedUtxo {
     fn as_ref(&self) -> &Utxo {
         &self.utxo
