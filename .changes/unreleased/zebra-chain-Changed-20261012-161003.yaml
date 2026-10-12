@@ -1,0 +1,6 @@
+project: zebra-chain
+kind: Changed
+body: >-
+  `Block::auth_data_root` computes transaction authorizing data digests in parallel for blocks
+  with 16 or more transactions.
+time: 2026-10-12T16:10:03.000000000+02:00
