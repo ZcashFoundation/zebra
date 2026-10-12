@@ -1,0 +1,7 @@
+project: zebrad
+kind: Changed
+body: >-
+  Block template transaction selection calculates coinbase resource usage without
+  constructing a separate zero-fee coinbase, avoiding an additional shielded proof when
+  a sizing coinbase would otherwise be needed.
+time: 2026-10-12T16:10:12.000000000+02:00

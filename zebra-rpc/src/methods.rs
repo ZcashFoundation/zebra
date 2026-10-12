@@ -1176,6 +1176,9 @@ where
     /// Long polling must not alternate between cached work and independently generated fallback
     /// identities. While an updater is alive it owns initialization and refreshes; requests wait
     /// for its publications rather than starting competing builds after a cache timeout.
+    ///
+    /// Returns `None` when no live updater can supply usable work or unowned work needs refreshing.
+    /// Sync and build failures are returned rather than hidden behind repeated cache waits.
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
@@ -1185,6 +1188,8 @@ where
             return Ok(None);
         };
 
+        // Only handlers without a live updater may build on demand. An updater owns cold starts
+        // and boundary refreshes too, so its timeout cannot fan out another proof per request.
         if cache.is_uninitialized() && !cache.updater_is_running() {
             return Ok(None);
         }
