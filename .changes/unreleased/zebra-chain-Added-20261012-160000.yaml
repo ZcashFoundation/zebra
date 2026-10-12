@@ -1,0 +1,7 @@
+project: zebra-chain
+kind: Added
+body: >-
+  `sapling::tree::NoteCommitmentTree::append_batch` and
+  `orchard::tree::NoteCommitmentTree::append_batch` append a block of note commitments at
+  once, reducing aligned subtrees in parallel.
+time: 2026-10-12T16:00:00.000000000+02:00
