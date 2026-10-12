@@ -1,10 +1,12 @@
 //! Sinsemilla hash functions and helpers.
 
+#[cfg(test)]
 use bitvec::prelude::*;
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, CurveExt},
     pasta::pallas,
 };
+#[cfg(test)]
 use sinsemilla::HashDomain;
 
 /// [Coordinate Extractor for Pallas][concreteextractorpallas]
@@ -52,6 +54,7 @@ pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
 /// SinsemillaHash: B^Y^\[N\] × B[{0 .. 𝑘·𝑐}] → P_𝑥 ∪ {⊥}
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
+#[cfg(test)]
 #[allow(non_snake_case)]
 pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
     let domain = std::str::from_utf8(D).expect("must be valid UTF-8");
