@@ -1,0 +1,7 @@
+project: zebra-state
+kind: Added
+body: >-
+  `CheckpointVerifiedBlock::with_precomputed_auth_data_root` computes and seals the block
+  authorizing data root before the block reaches the finalized state writer, and `impl
+  IntoDisk for &[u8]`.
+time: 2026-10-12T16:10:01.000000000+02:00

@@ -41,7 +41,7 @@ use zebra_chain::{
     amount::{self},
     block::{self, Block},
     parameters::{
-        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network,
+        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network, NetworkUpgrade,
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::ZcashSerialize,
@@ -1268,6 +1268,7 @@ where
     /// uncommitted suffix so the remaining range can fit in the unchanged admission budget.
     fn commit_verified_range(&self, blocks: Vec<QueuedBlock>) {
         let mut state_service = self.state_service.clone();
+        let network = self.network.clone();
         let reset_sender = self.reset_sender.clone();
         let committed_sender = self.committed_sender.clone();
         let target_height = blocks
@@ -1277,7 +1278,15 @@ where
             .height;
         drop(tokio::spawn(async move {
             let mut blocks = blocks.into_iter().rev();
-            while let Some(queued) = blocks.next() {
+            while let Some(mut queued) = blocks.next() {
+                if NetworkUpgrade::current(&network, queued.block.height) >= NetworkUpgrade::Nu5 {
+                    queued = tokio::task::spawn_blocking(move || {
+                        queued.block = queued.block.with_precomputed_auth_data_root();
+                        queued
+                    })
+                    .await
+                    .expect("authorizing-data hashing is infallible for verified transactions");
+                }
                 let QueuedBlock {
                     block,
                     tx,
