@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  On GNU/Linux, `zebrad` defaults to at most 16 glibc malloc arenas unless
+  `MALLOC_ARENA_MAX` or `glibc.malloc.arena_max` is configured.
+time: 2026-10-12T16:00:09.000000000+02:00
