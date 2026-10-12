@@ -1,0 +1,5 @@
+project: zebra-network
+kind: Changed
+body: >-
+  Peer misbehavior scores are flushed every 5 seconds instead of 30.
+time: 2026-10-12T16:00:06.000000000+02:00
