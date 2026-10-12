@@ -7,7 +7,7 @@ mod script;
 pub(crate) mod serialize;
 mod utxo;
 
-use std::{collections::HashMap, fmt, iter, ops::AddAssign};
+use std::{collections::HashMap, fmt, ops::AddAssign};
 
 use zcash_script::{opcode::Evaluable as _, pattern::push_num};
 use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
@@ -258,54 +258,22 @@ impl Input {
         }
     }
 
-    /// Get the value spent by this input, by looking up its [`OutPoint`] in
-    /// [`Utxo`]s.
+    /// Get the value spent by this input, looking up its [`OutPoint`] in plain or ordered UTXOs.
     ///
     /// This amount is added to the transaction value pool by this input.
     ///
     /// # Panics
     ///
     /// If the provided [`Utxo`]s don't have this input's [`OutPoint`].
-    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NonNegative> {
-        if let Some(outpoint) = self.outpoint() {
-            // look up the specific Output and convert it to the expected format
-            let output = utxos
+    pub fn value<U: AsRef<Utxo>>(&self, utxos: &HashMap<OutPoint, U>) -> Amount<NonNegative> {
+        self.outpoint().map_or(Amount::zero(), |outpoint| {
+            utxos
                 .get(&outpoint)
-                .expect("provided Utxos don't have spent OutPoint")
+                .unwrap_or_else(|| panic!("provided Utxos don't have spent {outpoint:?}"))
+                .as_ref()
                 .output
-                .clone();
-            self.value_from_outputs(&iter::once((outpoint, output)).collect())
-        } else {
-            // coinbase inputs don't need any UTXOs
-            self.value_from_outputs(&HashMap::new())
-        }
-    }
-
-    /// Get the value spent by this input, by looking up its [`OutPoint`] in
-    /// [`OrderedUtxo`]s.
-    ///
-    /// See [`Self::value`] for details.
-    ///
-    /// # Panics
-    ///
-    /// If the provided [`OrderedUtxo`]s don't have this input's [`OutPoint`].
-    pub fn value_from_ordered_utxos(
-        &self,
-        ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
-    ) -> Amount<NonNegative> {
-        if let Some(outpoint) = self.outpoint() {
-            // look up the specific Output and convert it to the expected format
-            let output = ordered_utxos
-                .get(&outpoint)
-                .expect("provided Utxos don't have spent OutPoint")
-                .utxo
-                .output
-                .clone();
-            self.value_from_outputs(&iter::once((outpoint, output)).collect())
-        } else {
-            // coinbase inputs don't need any UTXOs
-            self.value_from_outputs(&HashMap::new())
-        }
+                .value()
+        })
     }
 }
 
