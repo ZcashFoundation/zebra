@@ -1758,7 +1758,7 @@ fn sprout_aggregate_value_balance_out_of_range_is_rejected() {
     );
     assert!(
         out_of_range
-            .value_balance(&std::collections::HashMap::new())
+            .value_balance(&std::collections::HashMap::<_, transparent::Utxo>::new())
             .is_err(),
         "the transaction value balance must propagate the error"
     );
