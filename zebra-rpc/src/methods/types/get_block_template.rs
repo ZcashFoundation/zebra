@@ -313,7 +313,6 @@ impl BlockTemplateResponse {
             miner_params,
             transactions,
             dependencies,
-            Some(coinbase_cache),
             parent_nsm_value_balance,
         );
         Ok(Self::new_internal(
@@ -421,6 +420,7 @@ impl BlockTemplateResponse {
             .expect("mempool tx fees must be non-negative");
 
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(net, chain_info);
+        coinbase_cache.select(height, parent_nsm_value_balance);
 
         // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
         // shielded address) as a last resort — caching the result so subsequent requests for the
@@ -683,7 +683,7 @@ pub(crate) fn nsm_value_balance_for_next_block(
 
 /// Caches coinbases by height, parent NSM balance, and gross transaction fees.
 ///
-/// Shielded coinbases require expensive proofs. Keep zero-fee sizing and real-fee coinbases for
+/// Shielded coinbases require expensive proofs. Keep coinbase-only and fee-bearing coinbases for
 /// the selected context, discarding old proof completions rather than evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
 #[derive(Clone, Default)]
@@ -701,7 +701,7 @@ struct CachedCoinbases {
 }
 
 impl CoinbaseCache {
-    /// Selects the context before a template starts constructing either coinbase.
+    /// Selects the context before a template starts constructing its coinbase.
     fn select(&self, height: block::Height, parent_nsm_value_balance: Option<Amount<NonNegative>>) {
         let mut cache = self
             .entries
@@ -750,7 +750,7 @@ impl CoinbaseCache {
             return;
         }
         let map = &mut cache.transactions;
-        // Fee churn must not evict the zero-fee sizing coinbase or grow the cache without bound.
+        // Fee churn must not evict the coinbase-only entry or grow the cache without bound.
         if !map.contains_key(&fee) && map.len() >= 4 {
             let evict_key = map
                 .keys()
