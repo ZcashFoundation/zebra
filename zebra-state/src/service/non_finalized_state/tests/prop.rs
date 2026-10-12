@@ -1,6 +1,10 @@
 //! Randomised property tests for the non-finalized state.
 
-use std::{collections::BTreeMap, env, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    env,
+    sync::Arc,
+};
 
 use zebra_test::prelude::*;
 
@@ -12,13 +16,14 @@ use zebra_chain::{
     parameters::NetworkUpgrade::*,
     parameters::*,
     primitives::zcash_history::BlockCommitmentTreeRoots,
+    transparent,
     value_balance::ValueBalance,
     LedgerState,
 };
 
 use crate::{
     arbitrary::Prepare,
-    request::ContextuallyVerifiedBlock,
+    request::{ContextuallyVerifiedBlock, SemanticallyVerifiedBlock},
     service::{arbitrary::PreparedChain, non_finalized_state::Chain},
 };
 
@@ -27,6 +32,27 @@ const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 
 /// The default number of proptest cases for short partial chain tests.
 const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
+
+/// Resolve both earlier-block and intra-block spends for contextual test construction.
+fn spent_utxos(
+    block: &SemanticallyVerifiedBlock,
+    chain: &Chain,
+) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
+    block
+        .block
+        .transactions
+        .iter()
+        .flat_map(|tx| tx.spent_outpoints())
+        .map(|outpoint| {
+            let utxo = block
+                .new_outputs
+                .get(&outpoint)
+                .or_else(|| chain.created_utxos.get(&outpoint).map(Arc::as_ref))
+                .expect("generated spends refer to earlier outputs");
+            (outpoint, utxo.clone())
+        })
+        .collect()
+}
 
 /// Check that chain block pushes work with blocks from genesis
 ///
@@ -50,10 +76,11 @@ fn push_genesis_chain() -> Result<()> {
         chain_values.insert(None, (None, only_chain.chain_value_pools.into()));
 
         for block in chain.iter().take(count).skip(1).cloned() {
+            let spent_outputs = spent_utxos(&block, &only_chain);
             let block =
             ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                     block,
-                    only_chain.unspent_utxos(),
+                    spent_outputs,
                     DeferredPoolBalanceChange::zero(),
                     &network,
                     only_chain.chain_value_pools,
@@ -148,9 +175,10 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             ValueBalance::zero(),
         );
         for block in chain.iter().take(fork_at_count).skip(1).cloned() {
+            let spent_outputs = spent_utxos(&block, &partial_chain);
             let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                 block,
-                partial_chain.unspent_utxos(),
+                spent_outputs,
                 DeferredPoolBalanceChange::zero(),
                 &network,
                 partial_chain.chain_value_pools,
@@ -170,8 +198,9 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         );
 
         for block in chain.iter().cloned() {
+            let spent_outputs = spent_utxos(&block, &full_chain);
             let block =
-            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos(), DeferredPoolBalanceChange::zero(), &network, full_chain.chain_value_pools)?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, spent_outputs, DeferredPoolBalanceChange::zero(), &network, full_chain.chain_value_pools)?;
 
             // Check some properties of the genesis block and don't push it to the chain.
             if block.height == block::Height(0) {
@@ -213,8 +242,9 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // Re-add blocks to the fork and check if we arrive at the
         // same original full chain.
         for block in chain.iter().skip(fork_at_count).cloned() {
+            let spent_outputs = spent_utxos(&block, &forked);
             let block =
-            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, forked.unspent_utxos(), DeferredPoolBalanceChange::zero(), &network, forked.chain_value_pools)?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, spent_outputs, DeferredPoolBalanceChange::zero(), &network, forked.chain_value_pools)?;
             forked = forked.push(block).expect("forked chain push is valid");
         }
 
