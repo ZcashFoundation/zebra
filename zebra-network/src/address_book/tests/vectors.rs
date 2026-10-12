@@ -19,7 +19,7 @@ use crate::{
         MAX_PEER_MISBEHAVIOR_SCORE,
     },
     meta_addr::{MetaAddr, MetaAddrChange},
-    protocol::external::types::PeerServices,
+    protocol::external::{canonical_peer_addr, connection_limit_key, types::PeerServices},
     AddressBook,
 };
 
@@ -55,17 +55,38 @@ fn gossiped_change(
         .expect("gossiped MetaAddr should produce a NewGossiped change")
 }
 
-fn assert_address_book_invariants(address_book: &AddressBook) {
+pub(super) fn assert_address_book_invariants(address_book: &AddressBook) {
+    assert_eq!(address_book.by_addr.len(), address_book.by_priority.len());
+    assert_eq!(
+        address_book.by_addr.len(),
+        address_book
+            .by_group
+            .values()
+            .map(|addrs| addrs.len())
+            .sum::<usize>(),
+    );
     assert!(
-        address_book.by_addr.values().is_sorted(),
+        address_book.peers().is_sorted(),
         "address book values must remain sorted in ascending MetaAddr reconnection-attempt order",
     );
 
     for (addr, meta_addr) in &address_book.by_addr {
-        assert_eq!(
-            *addr, meta_addr.addr,
-            "address book keys must match their stored MetaAddr addresses",
-        );
+        assert_eq!(*addr, meta_addr.addr);
+        assert_eq!(*addr, canonical_peer_addr(*addr));
+        assert!(address_book
+            .by_priority
+            .contains(&super::super::PeerPriority::from(meta_addr)));
+        assert!(address_book
+            .by_group
+            .get(&connection_limit_key(addr.ip()))
+            .is_some_and(|addrs| addrs.contains(addr)));
+    }
+    for (group, addrs) in &address_book.by_group {
+        assert!(!addrs.is_empty());
+        for addr in addrs {
+            assert_eq!(*group, connection_limit_key(addr.ip()));
+            assert!(address_book.by_addr.contains_key(addr));
+        }
     }
 }
 
@@ -110,6 +131,8 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
         reason: "test misbehavior".to_string(),
     });
+    assert_address_book_invariants(&address_book);
+    assert!(address_book.get(other_port_same_ip).is_none());
 
     assert!(
         address_book.bans().is_banned(banned_addr.ip()),
@@ -424,7 +447,7 @@ fn test_reconnection_peers_skips_recently_updated_ip<
 
 /// Regression test for <https://github.com/ZcashFoundation/zebra/issues/11134>.
 ///
-/// `by_addr` is ordered by reconnection order, not grouped by IP, so the ban path's old
+/// Peers are ordered by reconnection order, not grouped by IP, so the ban path's old
 /// `skip_while(ip != banned).take_while(ip == banned)` scan stopped at the first entry for a
 /// different IP, and any later entry on the banned IP survived. That survivor then stayed at the
 /// front of the reconnection order for the lifetime of the process: it was selected as a candidate
@@ -455,8 +478,11 @@ fn ban_removes_every_entry_for_the_banned_ip() {
     // Without this ordering the test would also pass before the fix, because a contiguous scan
     // removes contiguous entries correctly.
     assert_eq!(
-        address_book.by_addr.keys().collect::<Vec<_>>(),
-        vec![&banned_addr, &unrelated_addr, &zombie_addr],
+        address_book
+            .peers()
+            .map(|peer| peer.addr)
+            .collect::<Vec<_>>(),
+        vec![banned_addr, unrelated_addr, zombie_addr],
         "test setup: the unrelated IP must sort between the two entries for the banned IP",
     );
 
@@ -471,8 +497,11 @@ fn ban_removes_every_entry_for_the_banned_ip() {
         "ban-threshold misbehavior should ban the peer IP",
     );
     assert_eq!(
-        address_book.by_addr.keys().collect::<Vec<_>>(),
-        vec![&unrelated_addr],
+        address_book
+            .peers()
+            .map(|peer| peer.addr)
+            .collect::<Vec<_>>(),
+        vec![unrelated_addr],
         "the ban should remove every entry for the banned IP, including the one that does not \
          sort next to the banned address",
     );
