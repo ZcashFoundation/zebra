@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Fixed
-body: "`getinfo`, `getnetworkinfo` and `getpeerinfo` read the address book on a blocking thread, so waiting on its lock no longer parks an async runtime worker and stalls other RPC requests ([#11618](https://github.com/ZcashFoundation/zebra/issues/11618))."
+body: "`getinfo`, `getnetworkinfo` and `getpeerinfo` read the address book on a blocking thread, so waiting on its lock no longer parks an async runtime worker and stalls other RPC requests ([#11702](https://github.com/ZcashFoundation/zebra/pull/11702))."
 time: 2026-10-12T20:00:00.000000000+00:00
