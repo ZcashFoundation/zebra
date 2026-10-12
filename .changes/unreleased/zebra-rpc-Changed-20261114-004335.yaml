@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Mining to a Unified address skips Orchard receivers while Orchard payouts are disabled, using an available Sapling or transparent receiver instead. Addresses without an enabled receiver return a construction error ([#11696](https://github.com/ZcashFoundation/zebra/pull/11696)).
+time: 2026-11-14T00:43:35.796817007+01:00
