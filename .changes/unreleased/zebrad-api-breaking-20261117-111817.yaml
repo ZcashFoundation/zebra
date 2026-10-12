@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: breaking
+body: 'Removed `components::sync::PEER_GOSSIP_DELAY`: `components::sync::gossip_best_tip_block_hashes` advertises committed blocks without a delay, and mempool transaction gossip waits the new `components::mempool::gossip::TRANSACTION_GOSSIP_DELAY` (2 seconds) between batches ([#11693](https://github.com/ZcashFoundation/zebra/pull/11693)).'
+time: 2026-11-17T11:18:17.219975631+01:00
