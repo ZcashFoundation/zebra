@@ -1,0 +1,8 @@
+project: zebrad
+kind: breaking
+body: >-
+  Peer connection, request, response, message, byte and handshake metrics no longer carry
+  their per-peer `addr`, `remote_ip` or `user_agent` labels, and RPC metrics label
+  unregistered method names as `unknown`. Update dashboards and alerts that select
+  or group by these labels; the bundled dashboards are updated.
+time: 2026-10-12T16:00:05.000000000+02:00

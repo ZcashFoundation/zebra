@@ -1,0 +1,8 @@
+project: zebra-rpc
+kind: breaking
+body: >-
+  `RpcMetricsMiddleware::new` now requires an `Arc<HashSet<&'static str>>` of registered RPC
+  method names, collected from `RpcModule::method_names()`. Unregistered names use the
+  `unknown` method label in request, duration and error metrics
+  ([#11689](https://github.com/ZcashFoundation/zebra/pull/11689)).
+time: 2026-10-19T13:11:39.711026703+02:00

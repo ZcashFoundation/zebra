@@ -7,7 +7,7 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{fmt, panic};
+use std::{collections::HashSet, fmt, panic, sync::Arc};
 
 use cookie::Cookie;
 use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
@@ -141,10 +141,13 @@ impl RpcServer {
 
         let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
 
+        let rpc = rpc.into_rpc();
+        let registered_methods: Arc<HashSet<_>> = Arc::new(rpc.method_names().collect());
+
         let rpc_middleware = RpcServiceBuilder::new()
             .rpc_logger(1024)
             .layer_fn(FixRpcResponseMiddleware::new)
-            .layer_fn(RpcMetricsMiddleware::new)
+            .layer_fn(move |service| RpcMetricsMiddleware::new(service, registered_methods.clone()))
             .layer_fn(RpcTracingMiddleware::new);
 
         let server = Server::builder()
@@ -158,7 +161,7 @@ impl RpcServer {
         info!("{OPENED_RPC_ENDPOINT_MSG}{}", server.local_addr()?);
 
         Ok(tokio::spawn(async move {
-            server.start(rpc.into_rpc()).stopped().await;
+            server.start(rpc).stopped().await;
             Ok(())
         }))
     }

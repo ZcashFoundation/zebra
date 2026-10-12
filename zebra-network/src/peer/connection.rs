@@ -108,6 +108,7 @@ impl Handler {
     pub fn command(&self) -> Cow<'static, str> {
         match self {
             Handler::Finished(Ok(response)) => format!("Finished({})", response.command()).into(),
+            Handler::Finished(Err(PeerError::Serialization(_))) => "Finished(Serialization)".into(),
             Handler::Finished(Err(error)) => format!("Finished({})", error.kind()).into(),
 
             Handler::Ping { .. } => "Ping".into(),
@@ -609,7 +610,7 @@ where
     #[allow(dead_code)]
     pub(super) connection_tracker: ConnectionTracker,
 
-    /// The metrics label for this peer. Usually the remote IP and port.
+    /// The address label for peer logs. Usually the remote IP and port.
     pub(super) metrics_label: String,
 
     /// The state for this peer, when the metrics were last updated.
@@ -814,7 +815,6 @@ where
                             metrics::counter!(
                                 "zebra.net.in.responses",
                                 "command" => response.command(),
-                                "addr" => self.metrics_label.clone(),
                             )
                             .increment(1);
                         } else {
@@ -960,8 +960,6 @@ where
             error.is_some(),
             "closing connections must call fail_with() or shutdown() to set the error slot"
         );
-
-        self.update_state_metrics(error.expect("checked is_some").to_string());
     }
 
     /// Fail this connection, log the failure, and shut it down.
@@ -998,7 +996,6 @@ where
             metrics::counter!(
                 "zebra.net.out.requests.canceled",
                 "command" => request.command(),
-                "addr" => self.metrics_label.clone(),
             )
             .increment(1);
             self.update_state_metrics(format!("Out::Req::Canceled::{}", request.command()));
@@ -1012,7 +1009,6 @@ where
         metrics::counter!(
             "zebra.net.out.requests",
             "command" => request.command(),
-            "addr" => self.metrics_label.clone(),
         )
         .increment(1);
         self.update_state_metrics(format!("Out::Req::{}", request.command()));
@@ -1411,7 +1407,6 @@ where
         metrics::counter!(
             "zebra.net.in.requests",
             "command" => req.command(),
-            "addr" => self.metrics_label.clone(),
         )
         .increment(1);
         self.update_state_metrics(format!("In::Req::{}", req.command()));
@@ -1482,7 +1477,6 @@ where
         metrics::counter!(
             "zebra.net.out.responses",
             "command" => rsp.command(),
-            "addr" => self.metrics_label.clone(),
         )
         .increment(1);
         self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
@@ -1701,6 +1695,8 @@ where
 {
     /// Update the connection state metrics for this connection,
     /// using `extra_state_info` as additional state information.
+    ///
+    /// Counts live connections by command, without retaining per-peer address series.
     fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
         let current_metrics_state = if let Some(extra_state_info) = extra_state_info.into() {
             format!("{}::{extra_state_info}", self.state.command()).into()
@@ -1714,26 +1710,24 @@ where
 
         self.erase_state_metrics();
 
-        // Set the new state
+        // Count this connection in the aggregate live-state gauge.
         metrics::gauge!(
             "zebra.net.connection.state",
             "command" => current_metrics_state.clone(),
-            "addr" => self.metrics_label.clone(),
         )
         .increment(1.0);
 
         self.last_metrics_state = Some(current_metrics_state);
     }
 
-    /// Erase the connection state metrics for this connection.
+    /// Decrement the aggregate connection state gauge for this connection.
     fn erase_state_metrics(&mut self) {
         if let Some(last_metrics_state) = self.last_metrics_state.take() {
             metrics::gauge!(
                 "zebra.net.connection.state",
                 "command" => last_metrics_state,
-                "addr" => self.metrics_label.clone(),
             )
-            .set(0.0);
+            .decrement(1.0);
         }
     }
 
