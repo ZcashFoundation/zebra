@@ -18,6 +18,12 @@ mod tests;
 pub static NOTE_COMMITMENT_TREE_UPDATE_COUNT_FOR_TESTS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
+/// The most note commitments a cancellable update appends between cancellation checks.
+///
+/// Each batch still hashes its independent subtrees in parallel, and a cancelled update stops
+/// after at most one more batch per pool.
+const CANCELLABLE_APPEND_BATCH: usize = 256;
+
 /// An argument wrapper struct for note commitment trees.
 ///
 /// The default instance represents the trees and subtrees that correspond to the genesis block.
@@ -348,16 +354,14 @@ impl NoteCommitmentTrees {
         // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
         let mut subtree_root = None;
 
-        for sapling_note_commitment in sapling_note_commitments {
+        for batch in sapling_note_commitments.chunks(CANCELLABLE_APPEND_BATCH) {
             if is_cancelled() {
                 return Ok(None);
             }
-            sapling_nct.append(sapling_note_commitment)?;
 
-            // Subtrees end heights come from the blocks they are completed in,
-            // so we check for new subtrees after appending the note.
-            // (If we check before, subtrees at the end of blocks have the wrong heights.)
-            if let Some(index_and_node) = sapling_nct.completed_subtree_index_and_root() {
+            // Subtrees end heights come from the blocks they are completed in, so a batch reports
+            // the last subtree its commitments completed.
+            if let Some(index_and_node) = sapling_nct.append_batch(batch)? {
                 subtree_root = Some(index_and_node);
             }
         }
@@ -419,16 +423,14 @@ impl NoteCommitmentTrees {
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let mut subtree_root = None;
 
-        for orchard_note_commitment in orchard_note_commitments {
+        for batch in orchard_note_commitments.chunks(CANCELLABLE_APPEND_BATCH) {
             if is_cancelled() {
                 return Ok(None);
             }
-            orchard_nct.append(orchard_note_commitment)?;
 
-            // Subtrees end heights come from the blocks they are completed in,
-            // so we check for new subtrees after appending the note.
-            // (If we check before, subtrees at the end of blocks have the wrong heights.)
-            if let Some(index_and_node) = orchard_nct.completed_subtree_index_and_root() {
+            // Subtrees end heights come from the blocks they are completed in, so a batch reports
+            // the last subtree its commitments completed.
+            if let Some(index_and_node) = orchard_nct.append_batch(batch)? {
                 subtree_root = Some(index_and_node);
             }
         }
