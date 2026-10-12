@@ -142,7 +142,7 @@ fn spend(version: Version, input_count: usize, script_sig: &transparent::Script)
 }
 
 /// A state service that holds the first `input_count` test outputs.
-fn state(input_count: usize) -> BoxCloneService<zs::Request, zs::Response, BoxError> {
+fn state(input_count: usize) -> BoxCloneService<zs::ReadRequest, zs::ReadResponse, BoxError> {
     let utxo_height = (height() - 1_000).expect("the height is valid");
     let utxos: Arc<HashMap<_, _>> = Arc::new(
         (0..input_count)
@@ -155,16 +155,16 @@ fn state(input_count: usize) -> BoxCloneService<zs::Request, zs::Response, BoxEr
             .collect(),
     );
 
-    BoxCloneService::new(service_fn(move |request: zs::Request| {
+    BoxCloneService::new(service_fn(move |request: zs::ReadRequest| {
         let utxos = utxos.clone();
 
         async move {
             match request {
-                zs::Request::UnspentBestChainUtxo(outpoint) => Ok(
-                    zs::Response::UnspentBestChainUtxo(utxos.get(&outpoint).cloned()),
+                zs::ReadRequest::UnspentBestChainUtxo(outpoint) => Ok(
+                    zs::ReadResponse::UnspentBestChainUtxo(utxos.get(&outpoint).cloned()),
                 ),
-                zs::Request::CheckBestChainTipNullifiersAndAnchors(_) => {
-                    Ok(zs::Response::ValidBestChainTipNullifiersAndAnchors)
+                zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
+                    Ok(zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors)
                 }
                 other => Err(format!("unexpected state request: {other:?}").into()),
             }

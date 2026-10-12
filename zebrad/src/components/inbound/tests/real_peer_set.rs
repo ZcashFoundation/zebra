@@ -760,7 +760,7 @@ async fn setup(
     // State
     // UTXO verification doesn't matter for these tests.
     let state_config = StateConfig::ephemeral();
-    let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
@@ -819,6 +819,7 @@ async fn setup(
         &mempool_config,
         peer_set.background_service(),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
         latest_chain_tip.clone(),

@@ -235,6 +235,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         zebra_consensus::Config::default(),
         network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 

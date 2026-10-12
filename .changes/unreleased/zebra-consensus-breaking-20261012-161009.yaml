@@ -1,0 +1,7 @@
+project: zebra-consensus
+kind: breaking
+body: >-
+  `router::init` and `router::init_test` take a read-only `ReadRequest` state service after
+  the write state service, and `MempoolTxVerifier` uses it for its state reads instead of the
+  serialized write buffer.
+time: 2026-10-12T16:10:09.000000000+02:00

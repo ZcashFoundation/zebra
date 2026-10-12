@@ -22,6 +22,9 @@ use super::super::SameEffectsTipRejectionError;
 #[allow(unused_imports)]
 use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 
+#[cfg(test)]
+mod tests;
+
 /// The set of verified transactions stored in the mempool.
 ///
 /// This also caches the all the spent outputs from the transactions in the mempool. The spent
@@ -54,6 +57,9 @@ pub struct VerifiedSet {
 
     /// The total cost of the verified transactions in the set.
     total_cost: u64,
+
+    /// Incrementally maintained action and fee-weighted size totals.
+    metrics: MempoolMetrics,
 
     /// The set of spent out points by the verified transactions.
     spent_outpoints: HashSet<transparent::OutPoint>,
@@ -140,6 +146,7 @@ impl VerifiedSet {
         self.created_outputs.clear();
         self.transactions_serialized_size = 0;
         self.total_cost = 0;
+        self.metrics = MempoolMetrics::default();
         self.update_metrics();
     }
 
@@ -190,6 +197,7 @@ impl VerifiedSet {
 
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
+        self.metrics.update(&transaction, true);
         transaction.time = Some(chrono::Utc::now());
         transaction.height = height;
         self.transactions.insert(tx_id, transaction);
@@ -305,6 +313,7 @@ impl VerifiedSet {
 
                 self.transactions_serialized_size -= removed_tx.transaction.size;
                 self.total_cost -= removed_tx.cost();
+                self.metrics.update(&removed_tx, false);
                 self.remove_outputs(&removed_tx.transaction);
 
                 Some(removed_tx)
@@ -391,109 +400,120 @@ impl VerifiedSet {
         }
     }
 
-    fn update_metrics(&mut self) {
-        // Track the sum of unpaid actions within each transaction (as they are subject to the
-        // unpaid action limit). Transactions that have weight >= 1 have no unpaid actions by
-        // definition.
-        let mut unpaid_actions_with_weight_lt20pct = 0;
-        let mut unpaid_actions_with_weight_lt40pct = 0;
-        let mut unpaid_actions_with_weight_lt60pct = 0;
-        let mut unpaid_actions_with_weight_lt80pct = 0;
-        let mut unpaid_actions_with_weight_lt1 = 0;
-
-        // Track the total number of paid actions across all transactions in the mempool. This
-        // added to the bucketed unpaid actions above is equal to the total number of conventional
-        // actions in the mempool.
-        let mut paid_actions = 0;
-
-        // Track the sum of transaction sizes (the metric by which they are mainly limited) across
-        // several buckets.
-        let mut size_with_weight_lt1 = 0;
-        let mut size_with_weight_eq1 = 0;
-        let mut size_with_weight_gt1 = 0;
-        let mut size_with_weight_gt2 = 0;
-        let mut size_with_weight_gt3 = 0;
-
-        for entry in self.transactions().values() {
-            paid_actions += entry.conventional_actions - entry.unpaid_actions;
-
-            if entry.fee_weight_ratio > 3.0 {
-                size_with_weight_gt3 += entry.transaction.size;
-            } else if entry.fee_weight_ratio > 2.0 {
-                size_with_weight_gt2 += entry.transaction.size;
-            } else if entry.fee_weight_ratio > 1.0 {
-                size_with_weight_gt1 += entry.transaction.size;
-            } else if entry.fee_weight_ratio == 1.0 {
-                size_with_weight_eq1 += entry.transaction.size;
-            } else {
-                size_with_weight_lt1 += entry.transaction.size;
-                if entry.fee_weight_ratio < 0.2 {
-                    unpaid_actions_with_weight_lt20pct += entry.unpaid_actions;
-                } else if entry.fee_weight_ratio < 0.4 {
-                    unpaid_actions_with_weight_lt40pct += entry.unpaid_actions;
-                } else if entry.fee_weight_ratio < 0.6 {
-                    unpaid_actions_with_weight_lt60pct += entry.unpaid_actions;
-                } else if entry.fee_weight_ratio < 0.8 {
-                    unpaid_actions_with_weight_lt80pct += entry.unpaid_actions;
-                } else {
-                    unpaid_actions_with_weight_lt1 += entry.unpaid_actions;
-                }
-            }
-        }
+    /// Publish cached totals without scanning the transactions.
+    fn update_metrics(&self) {
+        // Integer-to-f64 casts below can round large totals, which is fine for display-only gauges.
 
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
             "bk" => "< 0.2",
         )
-        .set(unpaid_actions_with_weight_lt20pct as f64);
+        .set(f64::from(self.metrics.unpaid_actions[0]));
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
             "bk" => "< 0.4",
         )
-        .set(unpaid_actions_with_weight_lt40pct as f64);
+        .set(f64::from(self.metrics.unpaid_actions[1]));
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
             "bk" => "< 0.6",
         )
-        .set(unpaid_actions_with_weight_lt60pct as f64);
+        .set(f64::from(self.metrics.unpaid_actions[2]));
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
             "bk" => "< 0.8",
         )
-        .set(unpaid_actions_with_weight_lt80pct as f64);
+        .set(f64::from(self.metrics.unpaid_actions[3]));
         metrics::gauge!(
             "zcash.mempool.actions.unpaid",
             "bk" => "< 1",
         )
-        .set(unpaid_actions_with_weight_lt1 as f64);
-        metrics::gauge!("zcash.mempool.actions.paid").set(paid_actions as f64);
+        .set(f64::from(self.metrics.unpaid_actions[4]));
+        metrics::gauge!("zcash.mempool.actions.paid").set(f64::from(self.metrics.paid_actions));
         metrics::gauge!("zcash.mempool.size.transactions",).set(self.transaction_count() as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
             "bk" => "< 1",
         )
-        .set(size_with_weight_lt1 as f64);
+        .set(self.metrics.size_by_weight[0] as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
             "bk" => "1",
         )
-        .set(size_with_weight_eq1 as f64);
+        .set(self.metrics.size_by_weight[1] as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
             "bk" => "> 1",
         )
-        .set(size_with_weight_gt1 as f64);
+        .set(self.metrics.size_by_weight[2] as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
             "bk" => "> 2",
         )
-        .set(size_with_weight_gt2 as f64);
+        .set(self.metrics.size_by_weight[3] as f64);
         metrics::gauge!(
             "zcash.mempool.size.weighted",
             "bk" => "> 3",
         )
-        .set(size_with_weight_gt3 as f64);
+        .set(self.metrics.size_by_weight[4] as f64);
         metrics::gauge!("zcash.mempool.size.bytes",).set(self.transactions_serialized_size as f64);
         metrics::gauge!("zcash.mempool.cost.bytes").set(self.total_cost as f64);
+    }
+}
+
+/// Non-cumulative metric buckets, updated once for each inserted or removed transaction.
+#[derive(Default)]
+struct MempoolMetrics {
+    /// Unpaid actions in fee-weight intervals [0, .2), [.2, .4), [.4, .6), [.6, .8), [.8, 1).
+    unpaid_actions: [u32; 5],
+    /// Paid actions across all fee weights.
+    paid_actions: u32,
+    /// Serialized sizes for fee weights < 1, = 1, (1, 2], (2, 3], and > 3.
+    size_by_weight: [usize; 5],
+}
+
+impl MempoolMetrics {
+    /// Add a transaction's contribution when `insert` is true, otherwise subtract it.
+    fn update(&mut self, transaction: &VerifiedUnminedTx, insert: bool) {
+        let weight = transaction.fee_weight_ratio;
+        let size_bucket = if weight > 3.0 {
+            4
+        } else if weight > 2.0 {
+            3
+        } else if weight > 1.0 {
+            2
+        } else if weight == 1.0 {
+            1
+        } else {
+            0
+        };
+        let paid_actions = transaction.conventional_actions - transaction.unpaid_actions;
+        if insert {
+            self.paid_actions += paid_actions;
+            self.size_by_weight[size_bucket] += transaction.transaction.size;
+        } else {
+            self.paid_actions -= paid_actions;
+            self.size_by_weight[size_bucket] -= transaction.transaction.size;
+        }
+
+        // Transactions with weight >= 1 have no unpaid actions.
+        if size_bucket == 0 {
+            let unpaid_bucket = if weight < 0.2 {
+                0
+            } else if weight < 0.4 {
+                1
+            } else if weight < 0.6 {
+                2
+            } else if weight < 0.8 {
+                3
+            } else {
+                4
+            };
+            if insert {
+                self.unpaid_actions[unpaid_bucket] += transaction.unpaid_actions;
+            } else {
+                self.unpaid_actions[unpaid_bucket] -= transaction.unpaid_actions;
+            }
+        }
     }
 }
