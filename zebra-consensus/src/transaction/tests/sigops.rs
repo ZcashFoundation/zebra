@@ -83,21 +83,21 @@ async fn mempool_rejects_too_many_sigops_before_script_verification() {
         );
 
         let spent_utxo = spent_utxo.clone();
-        let state = service_fn(move |request: zs::Request| {
+        let state = service_fn(move |request: zs::ReadRequest| {
             let spent_utxo = spent_utxo.clone();
             async move {
                 match request {
-                    zs::Request::UnspentBestChainUtxo(outpoint) => {
+                    zs::ReadRequest::UnspentBestChainUtxo(outpoint) => {
                         assert_eq!(outpoint.hash, Hash([1; 32]));
                         assert!(outpoint.index < 266);
-                        Ok(zs::Response::UnspentBestChainUtxo(Some(spent_utxo)))
+                        Ok(zs::ReadResponse::UnspentBestChainUtxo(Some(spent_utxo)))
                     }
-                    zs::Request::CheckBestChainTipNullifiersAndAnchors(_) => {
+                    zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                         assert_eq!(
                             legacy_sigops, 10,
                             "over-limit transactions never dispatch checks"
                         );
-                        Ok(zs::Response::ValidBestChainTipNullifiersAndAnchors)
+                        Ok(zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors)
                     }
                     other => Err(format!("unexpected state request: {other:?}").into()),
                 }

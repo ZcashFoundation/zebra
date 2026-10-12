@@ -2351,6 +2351,7 @@ async fn canonical_header_modified_body_is_retried(checkpoint_sync: bool) {
         ConsensusConfig { checkpoint_sync },
         &Network::Mainnet,
         state,
+        MockService::build().for_unit_tests(),
     )
     .await;
     assert_eq!(height <= max_checkpoint_height, checkpoint_sync);

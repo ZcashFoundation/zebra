@@ -123,7 +123,10 @@ pub struct MempoolTxVerifier<ZS, Mempool> {
 
 impl<ZS, Mempool> MempoolTxVerifier<ZS, Mempool>
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
@@ -132,6 +135,7 @@ where
     Mempool::Future: Send + 'static,
 {
     /// Creates a new mempool transaction verifier.
+    /// Read-only lookups bypass the buffered state writer.
     pub fn new(network: &Network, state: ZS, mempool_setup_rx: oneshot::Receiver<Mempool>) -> Self {
         Self {
             network: network.clone(),
@@ -149,7 +153,10 @@ impl<ZS>
         Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     >
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
 {
     /// Creates a new mempool transaction verifier for tests using a closed
@@ -453,7 +460,10 @@ where
 
 impl<ZS, Mempool> Service<MempoolRequest> for MempoolTxVerifier<ZS, Mempool>
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
@@ -579,14 +589,14 @@ where
             // already queued in a batch verifier. Include service readiness in the state deadline.
             let response = tokio::time::timeout(
                 UTXO_LOOKUP_TIMEOUT,
-                state.clone().oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+                state.clone().oneshot(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(
                     unmined_tx.clone(),
                 )),
             )
             .await
             .map_err(BoxError::from)??;
             assert!(
-                response == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                response == zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
                 "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
             );
 
@@ -640,7 +650,10 @@ where
 
 impl<ZS, Mempool> MempoolTxVerifier<ZS, Mempool>
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
@@ -684,16 +697,16 @@ where
     ) -> Result<DateTime32, TransactionError> {
         let query = state
             .clone()
-            .oneshot(zs::Request::BestChainNextMedianTimePast);
+            .oneshot(zs::ReadRequest::BestChainNextMedianTimePast);
 
         let response = tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
             .await
             .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?
             .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?;
-        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = response {
+        if let zebra_state::ReadResponse::BestChainNextMedianTimePast(median_time_past) = response {
             Ok(median_time_past)
         } else {
-            unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
+            unreachable!("ReadRequest::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
         }
     }
 
@@ -733,9 +746,9 @@ where
 
                 let query = state
                     .clone()
-                    .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
+                    .oneshot(zs::ReadRequest::UnspentBestChainUtxo(*outpoint));
 
-                let zebra_state::Response::UnspentBestChainUtxo(utxo) =
+                let zebra_state::ReadResponse::UnspentBestChainUtxo(utxo) =
                     tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
                         .await
                         .map_err(|_| TransactionError::TransparentInputNotFound)?

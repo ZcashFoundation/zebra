@@ -310,15 +310,15 @@ async fn mempool_fee_policy_follows_jumps_and_rollbacks() {
         mempool.dummy_call().await;
         let reverify = async {
             state
-                .expect_request(zs::Request::KnownTransaction(transaction.id.mined_id()))
+                .expect_request(zs::ReadRequest::KnownTransaction(transaction.id.mined_id()))
                 .await
                 .unwrap()
-                .respond(zs::Response::KnownTransaction(false));
+                .respond(zs::ReadResponse::KnownTransaction(false));
             state
-                .expect_request(zs::Request::Tip)
+                .expect_request(zs::ReadRequest::Tip)
                 .await
                 .unwrap()
-                .respond(zs::Response::Tip(Some((tip.height, tip.hash))));
+                .respond(zs::ReadResponse::Tip(Some((tip.height, tip.hash))));
             let height = tip.height.next().unwrap();
             let result = classify(height);
             if expected_ratio.is_none() {
@@ -1476,15 +1476,15 @@ async fn delayed_fee_rejections_follow_current_activation_policy() {
         };
         let mut rpc_response = responses.pop().map(Result::unwrap);
         state_service
-            .expect_request(zs::Request::KnownTransaction(transaction.id.mined_id()))
+            .expect_request(zs::ReadRequest::KnownTransaction(transaction.id.mined_id()))
             .await
             .unwrap()
-            .respond(zs::Response::KnownTransaction(false));
+            .respond(zs::ReadResponse::KnownTransaction(false));
         state_service
-            .expect_request(zs::Request::Tip)
+            .expect_request(zs::ReadRequest::Tip)
             .await
             .unwrap()
-            .respond(zs::Response::Tip(Some((tip.height, tip.hash))));
+            .respond(zs::ReadResponse::Tip(Some((tip.height, tip.hash))));
         let delayed_verification = tx_verifier
             .expect_request(tx::MempoolRequest {
                 transaction: transaction.clone(),
@@ -1511,15 +1511,15 @@ async fn delayed_fee_rejections_follow_current_activation_policy() {
         let reverify = async {
             if should_retry {
                 state_service
-                    .expect_request(zs::Request::KnownTransaction(transaction.id.mined_id()))
+                    .expect_request(zs::ReadRequest::KnownTransaction(transaction.id.mined_id()))
                     .await
                     .unwrap()
-                    .respond(zs::Response::KnownTransaction(false));
+                    .respond(zs::ReadResponse::KnownTransaction(false));
                 state_service
-                    .expect_request(zs::Request::Tip)
+                    .expect_request(zs::ReadRequest::Tip)
                     .await
                     .unwrap()
-                    .respond(zs::Response::Tip(Some((tip.height, tip.hash))));
+                    .respond(zs::ReadResponse::Tip(Some((tip.height, tip.hash))));
                 let verification = tx_verifier
                     .expect_request(tx::MempoolRequest {
                         transaction: transaction.clone(),
@@ -2800,7 +2800,7 @@ async fn setup_with_mempool_config(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
@@ -2813,6 +2813,7 @@ async fn setup_with_mempool_config(
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
@@ -2885,7 +2886,7 @@ async fn cancel_handles_drained_after_verification_timeout() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2975,7 +2976,7 @@ async fn verification_timeout_releases_peer_slot() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -3055,7 +3056,7 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -3105,7 +3106,7 @@ async fn enabled_mempool_with_mock_verifier(
     tokio::sync::mpsc::Receiver<zn::MisbehaviorReport>,
 ) {
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let (state, _read_only_state, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(StateConfig::ephemeral(), network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
@@ -3116,6 +3117,7 @@ async fn enabled_mempool_with_mock_verifier(
         &config,
         Buffer::new(BoxService::new(peer_set), 1),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,

@@ -87,7 +87,7 @@ async fn per_peer_cap_applies_to_pushed_transactions() {
         MockService::build().for_unit_tests();
     let verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
 
     let mut downloads = Downloads::new(
@@ -169,8 +169,10 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         })),
         BoxCloneService::new(service_fn(|request| async move {
             match request {
-                zs::Request::KnownTransaction(_) => Ok(zs::Response::KnownTransaction(false)),
-                zs::Request::Tip => Ok(zs::Response::Tip(None)),
+                zs::ReadRequest::KnownTransaction(_) => {
+                    Ok(zs::ReadResponse::KnownTransaction(false))
+                }
+                zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(None)),
                 request => Err(format!("unexpected state request: {request:?}").into()),
             }
         })),
@@ -220,8 +222,8 @@ async fn mined_transaction_needs_no_body() {
         service_fn(|_| async { panic!("a mined transaction must not be downloaded") }),
         service_fn(|_| async { panic!("a mined transaction must not be verified") }),
         service_fn(move |request| async move {
-            assert_eq!(request, zs::Request::KnownTransaction(hash));
-            Ok::<_, BoxError>(zs::Response::KnownTransaction(true))
+            assert_eq!(request, zs::ReadRequest::KnownTransaction(hash));
+            Ok::<_, BoxError>(zs::ReadResponse::KnownTransaction(true))
         }),
         Network::Mainnet.fee_reduction_height(),
         Arc::new(Notify::new()),
@@ -260,8 +262,10 @@ async fn verification_errors_reach_rpc_before_mempool_poll() {
         )));
         let state = BoxCloneService::new(service_fn(move |request| async move {
             match request {
-                zs::Request::KnownTransaction(_) => Ok(zs::Response::KnownTransaction(false)),
-                zs::Request::Tip => Ok(zs::Response::Tip(Some((
+                zs::ReadRequest::KnownTransaction(_) => {
+                    Ok(zs::ReadResponse::KnownTransaction(false))
+                }
+                zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(Some((
                     activation.previous().unwrap(),
                     zebra_chain::block::Hash([1; 32]),
                 )))),
@@ -364,8 +368,8 @@ async fn completed_batch_keeps_queue_checker_awake() {
         service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
         service_fn(|request| async move {
             Ok(match request {
-                zs::Request::KnownTransaction(_) => zs::Response::KnownTransaction(false),
-                zs::Request::Tip => zs::Response::Tip(None),
+                zs::ReadRequest::KnownTransaction(_) => zs::ReadResponse::KnownTransaction(false),
+                zs::ReadRequest::Tip => zs::ReadResponse::Tip(None),
                 _ => unreachable!("downloads only query transactions and the tip"),
             })
         }),
@@ -413,7 +417,7 @@ async fn full_queue_can_retry_before_completed_task_exits() {
     let mut downloads = Downloads::new(
         service_fn(|_| std::future::pending::<Result<zn::Response, BoxError>>()),
         service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
-        service_fn(|_| std::future::pending::<Result<zs::Response, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<zs::ReadResponse, BoxError>>()),
         Network::Mainnet.fee_reduction_height(),
         Arc::new(Notify::new()),
     );

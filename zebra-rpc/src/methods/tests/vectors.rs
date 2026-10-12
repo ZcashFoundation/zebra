@@ -2540,6 +2540,7 @@ async fn rpc_getblockcount() {
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -2584,6 +2585,7 @@ async fn rpc_getblockcount_empty_state() {
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -2633,6 +2635,7 @@ async fn rpc_getpeerinfo() {
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -2785,6 +2788,7 @@ async fn rpc_getblockhash() {
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -6651,6 +6655,7 @@ async fn rpc_submitblock_errors() {
         zebra_consensus::Config::default(),
         &Mainnet,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -7828,6 +7833,7 @@ async fn rpc_addnode() {
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
