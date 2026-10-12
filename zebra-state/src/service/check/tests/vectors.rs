@@ -493,8 +493,21 @@ fn ironwood_block_auth_commitment_accepts_honest_body_and_detects_a_forgery() {
     Arc::make_mut(&mut block.header).commitment_bytes =
         commitment.bytes_in_serialized_order().into();
 
-    block_commitment_is_valid_for_chain_history(Arc::new(block.clone()), &network, &history_tree)
+    let verified = crate::CheckpointVerifiedBlock::from(Arc::new(block.clone()))
+        .with_precomputed_auth_data_root();
+    assert_eq!(
+        verified.precomputed_auth_data_root(),
+        Some(block.auth_data_root())
+    );
+    for cached_root in [None, verified.precomputed_auth_data_root()] {
+        block_commitment_is_valid_for_chain_history(
+            verified.block.clone(),
+            &network,
+            &history_tree,
+            cached_root,
+        )
         .expect("a valid NU6.3 block with an Ironwood bundle must pass the commitment check");
+    }
 
     // Change one authorizing-only byte. Under ZIP-244 the coinbase scriptSig is excluded from
     // the txid, so this leaves the block hash unchanged: exactly the body an unauthenticated
@@ -523,20 +536,32 @@ fn ironwood_block_auth_commitment_accepts_honest_body_and_detects_a_forgery() {
         "changing a coinbase scriptSig must not change the block header hash"
     );
 
-    let error =
-        block_commitment_is_valid_for_chain_history(Arc::new(forged), &network, &history_tree)
-            .expect_err("a body that doesn't match its header commitment must be rejected");
+    let forged =
+        crate::CheckpointVerifiedBlock::from(Arc::new(forged)).with_precomputed_auth_data_root();
+    assert_ne!(
+        forged.precomputed_auth_data_root(),
+        verified.precomputed_auth_data_root()
+    );
+    for cached_root in [None, forged.precomputed_auth_data_root()] {
+        let error = block_commitment_is_valid_for_chain_history(
+            forged.block.clone(),
+            &network,
+            &history_tree,
+            cached_root,
+        )
+        .expect_err("a body that doesn't match its header commitment must be rejected");
 
-    assert!(
-        error.is_auth_commitment_mismatch(),
-        "a forged Ironwood body must be classified as an authorizing data commitment mismatch: \
-         got {error:?}"
-    );
-    assert_eq!(
-        error.misbehavior_score(),
-        100,
-        "a forged Ironwood body must score the serving peer at the ban threshold"
-    );
+        assert!(
+            error.is_auth_commitment_mismatch(),
+            "a forged Ironwood body must be classified as an authorizing data commitment mismatch: \
+             got {error:?}"
+        );
+        assert_eq!(
+            error.misbehavior_score(),
+            100,
+            "a forged Ironwood body must score the serving peer at the ban threshold"
+        );
+    }
 }
 
 /// Reserve-funded payout checks start at reissuance, not at NU7, and use the exact parent.

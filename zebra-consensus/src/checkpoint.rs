@@ -42,7 +42,7 @@ use zebra_chain::{
     block::{self, Block},
     diagnostic::task::CheckForPanics,
     parameters::{
-        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network,
+        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network, NetworkUpgrade,
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::ZcashSerialize,
@@ -1471,10 +1471,24 @@ where
         tx: oneshot::Sender<Result<block::Hash, VerifyCheckpointError>>,
     ) {
         let state_service = self.state_service.clone();
+        let network = self.network.clone();
         let reset_sender = self.reset_sender.clone();
         let task = tokio::spawn(async move {
+            let verified = if NetworkUpgrade::current(&network, verified.block.height)
+                >= NetworkUpgrade::Nu5
+            {
+                tokio::task::spawn_blocking(move || {
+                    let mut verified = verified;
+                    verified.block = verified.block.with_precomputed_auth_data_root();
+                    verified
+                })
+                .await
+                .expect("checkpoint auth-root preparation should not panic")
+            } else {
+                verified
+            };
             let Verified {
-                mut block,
+                block,
                 notifications,
                 retained,
                 epoch,
@@ -1487,9 +1501,14 @@ where
             }
 
             // Avoid copying outputs on the successful path; rebuild them only for recovery.
-            let new_outputs = std::mem::take(&mut block.new_outputs);
-            let mut child = block.clone();
-            block.new_outputs = new_outputs;
+            let mut child = zs::SemanticallyVerifiedBlock {
+                block: block.block.clone(),
+                hash: block.hash,
+                height: block.height,
+                new_outputs: Default::default(),
+                transaction_hashes: block.transaction_hashes.clone(),
+                received_time: block.received_time,
+            };
             let commit = match notifications.clone() {
                 Some(notifications) => zs::Request::CommitMinedCheckpointVerifiedBlock {
                     block,
@@ -1538,7 +1557,7 @@ where
                         epoch,
                         tip,
                         child: Some(QueuedBlock {
-                            block: child,
+                            block: child.into(),
                             tx,
                             notifications,
                             retained,

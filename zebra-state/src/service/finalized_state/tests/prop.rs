@@ -124,7 +124,8 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         h == nu5_height ||
                         h == nu5_height_plus1 => {
                             let block = block.block.clone().set_block_commitment([0x42; 32]);
-                            let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+                            let checkpoint_verified = CheckpointVerifiedBlock::from(block)
+                                .with_precomputed_auth_data_root();
                             let (rsp_tx, mut rsp_rx) = oneshot::channel();
                             let error = state.commit_finalized(
                                 (checkpoint_verified, rsp_tx, None),
@@ -138,7 +139,8 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         },
                     _ => {},
                 }
-                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
+                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone())
+                    .with_precomputed_auth_data_root();
                 let expected_tip = ChainTipBlock::from(checkpoint_verified.clone());
                 let (rsp_tx, mut rsp_rx) = oneshot::channel();
                 let (tip, trees) = state.commit_finalized(

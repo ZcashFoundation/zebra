@@ -140,7 +140,7 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         received_time: None,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(semantically_verified),
+        CheckpointVerifiedBlock::from(semantically_verified),
         Treestate::default(),
         DeferredPoolBalanceChange::zero(),
     );
@@ -290,7 +290,7 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
         })
         .collect();
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+        CheckpointVerifiedBlock::from(SemanticallyVerifiedBlock {
             hash: block.hash(),
             block,
             height,
