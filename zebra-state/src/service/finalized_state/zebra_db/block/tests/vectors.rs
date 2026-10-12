@@ -30,7 +30,11 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+    service::finalized_state::{
+        disk_db::{DiskWriteBatch, WriteDisk},
+        disk_format::TransactionLocation,
+        ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
+    },
     CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
 
@@ -132,7 +136,7 @@ fn test_block_db_round_trip_with(
             let new_outputs =
                 new_ordered_outputs_with_height(&original_block, Height(0), &transaction_hashes);
 
-            CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+            CheckpointVerifiedBlock::from(SemanticallyVerifiedBlock {
                 block: original_block.clone(),
                 hash,
                 height: Height(0),
@@ -152,6 +156,37 @@ fn test_block_db_round_trip_with(
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new();
         batch.prepare_block_header_and_transaction_data_batch(&state.db, &finalized);
+
+        // Compare the entire ordered batch with the serial typed-serialization path.
+        let mut serial_batch = DiskWriteBatch::new();
+        let cf = |name| {
+            state
+                .db
+                .cf_handle(name)
+                .expect("the test database has this column")
+        };
+        serial_batch.zs_insert(
+            &cf("block_header_by_height"),
+            finalized.height,
+            &original_block.header,
+        );
+        serial_batch.zs_insert(&cf("hash_by_height"), finalized.height, finalized.hash);
+        serial_batch.zs_insert(&cf("height_by_hash"), finalized.hash, finalized.height);
+        for (index, (tx, hash)) in original_block
+            .transactions
+            .iter()
+            .zip(finalized.transaction_hashes.iter())
+            .enumerate()
+        {
+            let location = TransactionLocation::from_usize(finalized.height, index);
+            serial_batch.zs_insert(&cf("tx_by_loc"), location, tx);
+            serial_batch.zs_insert(&cf("hash_by_tx_loc"), location, hash);
+            serial_batch.zs_insert(&cf("tx_loc_by_hash"), hash, location);
+        }
+        assert_eq!(
+            batch, serial_batch,
+            "parallel serialization must preserve batch bytes"
+        );
         state.db.write(batch).expect("block is valid for writing");
 
         // Now read it back from the state
