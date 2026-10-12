@@ -182,6 +182,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             zebra_consensus::Config::default(),
             &network,
             state_service.clone(),
+            read_state.clone(),
         )
         .await;
     assert_eq!(max_checkpoint_height, Height(8));
