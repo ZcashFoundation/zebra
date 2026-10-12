@@ -744,7 +744,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Wait for the block gossip request.
+    // Test the block is gossiped without a batch delay.
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash(), None))
         .await
@@ -844,7 +844,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
-        // Wait for the block gossip request.
+        // Test the block is gossiped without a batch delay.
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
