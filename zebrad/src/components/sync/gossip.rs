@@ -68,13 +68,9 @@ where
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
     let mut submitted_receiver = submitted_blocks.subscribe();
 
-    loop {
-        // TODO: Refactor this into a struct and move the contents of this loop into its own method.
+    let next_tip = |mut chain_tip: ChainTipChange| {
         let mut sync_status = sync_status.clone();
-        let mut chain_tip = chain_state.clone();
-
-        // TODO: Move the contents of this async block to its own method
-        let tip_change_close_to_network_tip_fut = async move {
+        async move {
             /// A brief duration to wait after a tip change for a new message in the mined block channel.
             // TODO: Add a test to check that Zebra does not advertise mined blocks to peers twice.
             const WAIT_FOR_BLOCK_SUBMISSION_DELAY: Duration = Duration::from_micros(100);
@@ -107,21 +103,30 @@ where
                 .unwrap_or(tip_action)
                 .best_tip_hash_and_height();
 
-            Ok((best_tip, "sending committed block broadcast", chain_tip))
+            Ok::<_, BlockGossipError>((best_tip, "sending committed block broadcast", chain_tip))
         }
-        .in_current_span();
+        .in_current_span()
+    };
+    let tip_change_close_to_network_tip_fut = next_tip(chain_state.clone());
+    tokio::pin!(tip_change_close_to_network_tip_fut);
 
+    loop {
         // TODO: Move this logic for selecting the first ready future and updating `chain_state` to its own method.
         let mut is_early = false;
+        let mut consumed_tip = false;
         let (((mut hash, mut height), log_msg, updated_chain_state), mut is_block_submission) = tokio::select! {
+            biased;
             Some(tip_change) = recv_mined_block(&mut mined_block_receiver) => {
                 ((tip_change, "sending mined block broadcast", chain_state), true)
+            },
+            tip_change = &mut tip_change_close_to_network_tip_fut => {
+                consumed_tip = true;
+                (tip_change?, false)
             },
             early = recv_submitted_block(&mut submitted_receiver) => {
                 is_early = true;
                 ((early, "sending pending block broadcast", chain_state), true)
             },
-            tip_change = tip_change_close_to_network_tip_fut => (tip_change?, false),
         };
 
         chain_state = updated_chain_state;
@@ -238,6 +243,11 @@ where
                 }
                 _ => break,
             }
+        }
+
+        // An early submission must not restart either the tip delay or its pending change wait.
+        if consumed_tip || !is_early {
+            tip_change_close_to_network_tip_fut.set(next_tip(chain_state.clone()));
         }
     }
 }
