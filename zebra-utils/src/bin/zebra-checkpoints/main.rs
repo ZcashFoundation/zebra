@@ -294,7 +294,10 @@ async fn main() -> Result<()> {
             height_limit.0
         );
     } else {
-        eprintln!("zebra-checkpoints generated {checkpoint_count} checkpoints");
+        eprintln!(
+            "zebra-checkpoints generated {checkpoint_count} checkpoints, the last at height {}",
+            last_checkpoint_height.0
+        );
     }
 
     Ok(())

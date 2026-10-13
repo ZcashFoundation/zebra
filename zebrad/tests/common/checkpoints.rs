@@ -10,13 +10,14 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{ensure, Result};
 use tempfile::TempDir;
 
 use zebra_chain::{
-    block::{Height, TryIntoHeight},
-    parameters::Network,
+    block::{Height, HeightDiff, TryIntoHeight},
+    parameters::{constants::MAX_BLOCK_REORG_HEIGHT, Network},
 };
+use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::{
@@ -179,6 +180,7 @@ pub async fn run(network: Network) -> Result<()> {
     let (_zebra_checkpoints, _zebrad) = wait_for_zebra_checkpoints_generation(
         zebra_checkpoints,
         zebrad,
+        zebra_tip_height,
         test_type,
         show_zebrad_logs,
     )?;
@@ -393,6 +395,7 @@ pub fn wait_for_zebra_checkpoints_generation<
 >(
     mut zebra_checkpoints: TestChild<TempDir>,
     mut zebrad: TestChild<P>,
+    zebra_tip_height: Height,
     test_type: TestType,
     show_zebrad_logs: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
@@ -437,13 +440,47 @@ pub fn wait_for_zebra_checkpoints_generation<
 
         // Read all the checkpoints before the status line, so a long checkpoint list can't fill
         // the stdout pipe and block zebra-checkpoints before it logs its status.
-        while zebra_checkpoints_mut.wait_for_stdout_line(None) {}
+        let mut checkpoint_lines: usize = 0;
+        while zebra_checkpoints_mut.wait_for_stdout_line(None) {
+            checkpoint_lines += 1;
+        }
 
         // zebra-checkpoints logs one of these lines after it prints all its checkpoints.
         // There are no new checkpoints for about a day after each checkpoint list update.
-        zebra_checkpoints_mut.expect_stderr_line_matches(
-            "zebra-checkpoints (found no new checkpoints|generated [0-9]+ checkpoints)",
+        let status = zebra_checkpoints_mut.expect_stderr_line_matches(
+            "zebra-checkpoints (found no new checkpoints|generated [0-9]+ checkpoints, the last at height [0-9]+)",
         )?;
+        let generated =
+            regex::Regex::new("generated ([0-9]+) checkpoints, the last at height ([0-9]+)")
+                .expect("regex is valid")
+                .captures(&status);
+
+        let Some(generated) = generated else {
+            ensure!(
+                checkpoint_lines == 0,
+                "zebra-checkpoints found no new checkpoints, but printed {checkpoint_lines} lines",
+            );
+            return Ok(zebra_checkpoints_mut);
+        };
+
+        // CI copies the checkpoints from the test logs, so they must all be there.
+        let generated_count: usize = generated[1].parse()?;
+        ensure!(
+            generated_count == checkpoint_lines,
+            "zebra-checkpoints generated {generated_count} checkpoints, \
+             but the test logs have {checkpoint_lines}",
+        );
+
+        // zebra-checkpoints skips Zebra's rollback window, then needs a full checkpoint gap of
+        // blocks, so its last checkpoint must be within both of the tip we saw before launching it.
+        let last_checkpoint_height = Height(generated[2].parse()?);
+        let max_tip_gap = HeightDiff::from(MAX_BLOCK_REORG_HEIGHT)
+            + HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
+        ensure!(
+            zebra_tip_height - last_checkpoint_height <= max_tip_gap,
+            "zebra-checkpoints stopped too far below the tip: last checkpoint \
+             {last_checkpoint_height:?}, tip {zebra_tip_height:?}",
+        );
 
         // Tell the other thread that `zebra_checkpoints` has finished
         is_zebra_checkpoints_finished.store(true, Ordering::SeqCst);
