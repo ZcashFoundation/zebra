@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Mined and submitted block adverts no longer wait for connected peers to answer earlier requests ([#11705](https://github.com/ZcashFoundation/zebra/issues/11705)).
+time: 2026-10-13T02:53:16+02:00

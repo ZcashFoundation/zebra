@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: '`Request::AdvertiseBlockToAll` now uses bounded advert channels to reach busy peers without waiting for pending responses or peer writes ([#11705](https://github.com/ZcashFoundation/zebra/issues/11705)).'
+time: 2026-10-13T02:53:16+02:00
