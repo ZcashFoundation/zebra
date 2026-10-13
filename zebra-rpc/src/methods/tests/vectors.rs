@@ -5402,7 +5402,8 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
     let _init_guard = zebra_test::init();
 
     tokio::time::timeout(Duration::from_secs(20), async {
-        for stay_synced in [false, true] {
+        for (stay_synced, withdraw_after_snapshot) in [(false, false), (true, false), (true, true)]
+        {
             let net = Network::Mainnet;
             let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
                 .zcash_deserialize_into()
@@ -5443,6 +5444,8 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
                 panic!("the candidate subscription enables early work");
             };
             candidates.changed().await;
+            let guard = Arc::new(tokio::sync::watch::Sender::new(Some(guard)));
+            let withdraw_on_read = Arc::new(AtomicBool::new(false));
 
             // Use the real guard/subscription for withdrawal, but serve modern-height context so
             // the updater can build a NU5 template without seeding millions of Mainnet blocks.
@@ -5468,16 +5471,23 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
             let candidate_available = Arc::new(AtomicBool::new(true));
             let read_state = tower::service_fn({
                 let candidate_available = candidate_available.clone();
+                let guard = guard.clone();
+                let withdraw_on_read = withdraw_on_read.clone();
                 move |request| {
                     let rebuilding = matches!(request, ReadRequest::ChainInfo);
                     let mut build_released = build_released.clone();
                     let response = match request {
                         ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
-                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(
-                            candidate_available
+                        ReadRequest::MiningCandidate => {
+                            let snapshot = candidate_available
                                 .load(Ordering::SeqCst)
-                                .then(|| candidate_info.clone()),
-                        ),
+                                .then(|| candidate_info.clone());
+                            if withdraw_on_read.load(Ordering::SeqCst) {
+                                guard.send_replace(None);
+                                candidate_available.store(false, Ordering::SeqCst);
+                            }
+                            ReadResponse::MiningCandidate(snapshot)
+                        }
                         ReadRequest::MiningCandidateChanges => {
                             ReadResponse::MiningCandidateChanges(candidates.clone())
                         }
@@ -5545,9 +5555,22 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
             assert_eq!(template.previous_block_hash, candidate_hash);
             assert_ne!(template.previous_block_hash, tip_hash);
 
-            if stay_synced {
+            if withdraw_after_snapshot {
+                withdraw_on_read.store(true, Ordering::SeqCst);
+                let waiting = rpc.precomputed_template_for_state_tip(cache);
+                tokio::pin!(waiting);
+                assert!(
+                    futures::poll!(&mut waiting).is_pending(),
+                    "a snapshot whose guard dropped must not admit cached work"
+                );
+                assert!(guard.borrow().is_none());
+                assert!(
+                    cache.template_for_tip(candidate_hash, &net, now).is_some(),
+                    "the updater has not run yet, so live guard validation must reject this cache"
+                );
+            } else if stay_synced {
                 candidate_available.store(false, Ordering::SeqCst);
-                drop(guard);
+                guard.send_replace(None);
                 while *builds_started.borrow_and_update() == 0 {
                     builds_started.changed().await.unwrap();
                 }
@@ -5575,7 +5598,7 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
                 // the updater, which must invalidate its cached candidate before the sync-gated retry.
                 sync.set_is_close_to_tip(false);
                 candidate_available.store(false, Ordering::SeqCst);
-                drop(guard);
+                guard.send_replace(None);
                 let error = tokio::time::timeout(Duration::from_millis(100), waiting)
                     .await
                     .expect("withdrawal must wake the miner without waiting for max_time")
