@@ -24,7 +24,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::{oneshot, watch, Semaphore};
+use tokio::sync::{oneshot, watch, OwnedSemaphorePermit, Semaphore};
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -64,7 +64,7 @@ use crate::{
 pub(crate) type MiningCandidate = (
     block::Hash,
     Arc<crate::GetBlockTemplateChainInfo>,
-    watch::Receiver<()>,
+    watch::Receiver<Arc<OwnedSemaphorePermit>>,
     tokio::time::Instant,
 );
 
@@ -1164,26 +1164,28 @@ impl Service<Request> for StateService {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 };
                 let state = self.read_service.clone();
-                let (guard, mut cancelled) = watch::channel(());
+                // Keep the slot reserved until verification ends, even after early work expires.
+                let (guard, mut cancelled) = watch::channel(Arc::new(permit));
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 tokio::spawn(async move {
                     let compute_state = state.clone();
                     let parent = block.header.previous_block_hash;
+                    let compute_permit = cancelled.borrow().clone();
                     let compute = tokio::task::spawn_blocking(move || {
-                        let info = read::difficulty::mining_candidate_chain_info(
+                        let _permit = compute_permit;
+                        read::difficulty::mining_candidate_chain_info(
                             &compute_state.latest_non_finalized_state(),
                             &compute_state.db,
                             &compute_state.network,
                             block,
-                        );
-                        (info, permit)
+                        )
                     });
-                    let (info, _permit) = tokio::select! {
+                    let info = tokio::select! {
                         biased;
                         _ = cancelled.changed() => return,
                         _ = tokio::time::sleep_until(deadline) => return,
                         result = compute => match result {
-                            Ok((Some(info), permit)) => (Arc::new(info), permit),
+                            Ok(Some(info)) => Arc::new(info),
                             _ => return,
                         },
                     };
