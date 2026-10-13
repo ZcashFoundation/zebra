@@ -3,6 +3,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 use indexmap::IndexMap;
@@ -236,8 +237,9 @@ struct WriteBlockWorkerTask {
 /// The message type for the non-finalized block write task channel.
 pub enum NonFinalizedWriteMessage {
     /// A newly downloaded and semantically verified block prepared for
-    /// contextual validation and insertion into the non-finalized state.
-    Commit(QueuedSemanticallyVerified),
+    /// contextual validation and insertion into the non-finalized state,
+    /// with the time it was sent to the writer.
+    Commit(QueuedSemanticallyVerified, Instant),
     /// The hash of a block that should be invalidated and removed from
     /// the non-finalized state, if present.
     Invalidate {
@@ -258,12 +260,6 @@ pub enum NonFinalizedWriteMessage {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<block::Hash, PreciousError>>,
     },
-}
-
-impl From<QueuedSemanticallyVerified> for NonFinalizedWriteMessage {
-    fn from(block: QueuedSemanticallyVerified) -> Self {
-        NonFinalizedWriteMessage::Commit(block)
-    }
 }
 
 /// A worker with a task that reads, validates, and writes blocks to the
@@ -496,7 +492,9 @@ impl WriteBlockWorkerTask {
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
-                NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
+                NonFinalizedWriteMessage::Commit(queued_child, queued_at) => {
+                    Some((queued_child, queued_at))
+                }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
                     tracing::info!(?hash, "invalidating a block in the non-finalized state");
                     let _ = rsp_tx.send(non_finalized_state.invalidate_block(hash));
@@ -525,7 +523,8 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx, contextual, notifications)) = queued_child_and_rsp_tx
+            let Some(((queued_child, rsp_tx, contextual, notifications), queued_at)) =
+                queued_child_and_rsp_tx
             else {
                 forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
                 update_latest_chain_channels(
@@ -537,6 +536,9 @@ impl WriteBlockWorkerTask {
                 );
                 continue;
             };
+
+            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue")
+                .record(queued_at.elapsed().as_secs_f64());
 
             let child_hash = queued_child.hash;
             let child_height = queued_child.height;
@@ -574,21 +576,31 @@ impl WriteBlockWorkerTask {
             // parent's misbehaviour score.
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
-            } else if let Some(mut contextual) = contextual {
-                // A replaced identical body keeps its first receipt time.
-                contextual.received_time = queued_child.received_time;
-                non_finalized_state.commit_prevalidated_contextual(
-                    *contextual,
-                    &finalized_state.db,
-                    notifications.as_ref(),
-                )
             } else {
-                tracing::trace!(?child_hash, "validating queued child");
-                validate_and_commit_non_finalized(
-                    &finalized_state.db,
-                    non_finalized_state,
-                    queued_child,
+                // Measure only commits here, not proposals or restored backup blocks.
+                let phase_start = Instant::now();
+                let result = if let Some(mut contextual) = contextual {
+                    // A replaced identical body keeps its first receipt time.
+                    contextual.received_time = queued_child.received_time;
+                    non_finalized_state.commit_prevalidated_contextual(
+                        *contextual,
+                        &finalized_state.db,
+                        notifications.as_ref(),
+                    )
+                } else {
+                    tracing::trace!(?child_hash, "validating queued child");
+                    validate_and_commit_non_finalized(
+                        &finalized_state.db,
+                        non_finalized_state,
+                        queued_child,
+                    )
+                };
+                metrics::histogram!(
+                    "state.block_writer.phase.duration_seconds",
+                    "phase" => "contextual_commit"
                 )
+                .record(phase_start.elapsed().as_secs_f64());
+                result
             };
 
             // TODO: fix the test timing bugs that require the result to be sent
@@ -636,6 +648,7 @@ impl WriteBlockWorkerTask {
             // TODO: if this causes state request errors due to chain conflicts,
             //       fix the `service::read` bugs,
             //       or do the channel update after the finalized state commit
+            let phase_start = Instant::now();
             let (tip_block_height, replaced_snapshot) = update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
@@ -645,6 +658,11 @@ impl WriteBlockWorkerTask {
             );
             let tip_block_height =
                 tip_block_height.expect("just successfully inserted a non-finalized block above");
+            metrics::histogram!(
+                "state.block_writer.phase.duration_seconds",
+                "phase" => "update_latest_chain_channels"
+            )
+            .record(phase_start.elapsed().as_secs_f64());
 
             // Readers can now find the block's outputs in the published state, so the state
             // service doesn't need its own copies.
@@ -661,6 +679,7 @@ impl WriteBlockWorkerTask {
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
             drop(replaced_snapshot);
 
+            let phase_start = Instant::now();
             finalize_root_blocks_and_forget_evicted(
                 finalized_state,
                 non_finalized_state,
@@ -670,6 +689,11 @@ impl WriteBlockWorkerTask {
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
             );
+            metrics::histogram!(
+                "state.block_writer.phase.duration_seconds",
+                "phase" => "finalization"
+            )
+            .record(phase_start.elapsed().as_secs_f64());
 
             // Update the metrics if semantic and contextual validation passes
             //
