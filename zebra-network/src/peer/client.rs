@@ -18,7 +18,7 @@ use futures::{
 use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
-use zebra_chain::diagnostic::task::CheckForPanics;
+use zebra_chain::{block, diagnostic::task::CheckForPanics};
 
 use crate::{
     peer::{
@@ -47,6 +47,9 @@ pub struct Client {
 
     /// Used to send [`Request`]s to the remote peer.
     pub(crate) server_tx: mpsc::Sender<ClientRequest>,
+
+    /// Sends block adverts without waiting for an outstanding request's response.
+    pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<block::Hash>,
 
     /// Used to register missing inventory in client [`Response`]s,
     /// so that the peer set can route retries to other clients.

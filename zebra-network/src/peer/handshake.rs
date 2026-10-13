@@ -1070,6 +1070,8 @@ where
             // and between the different connection tasks. We create separate tasks and channels
             // for each new connection.
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
+            // Bound pending adverts; slow peers can catch up through later tip gossip.
+            let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
@@ -1189,7 +1191,7 @@ where
 
             let server = Connection::new(
                 inbound_service,
-                server_rx,
+                (server_rx, block_advert_rx),
                 error_slot.clone(),
                 peer_tx,
                 connection_tracker,
@@ -1219,6 +1221,7 @@ where
                 connection_info,
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
+                block_advert_tx,
                 inv_collector,
                 error_slot,
                 connection_task,

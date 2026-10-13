@@ -12,6 +12,8 @@ use tower::{
     Service,
 };
 
+use zebra_chain::block;
+
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
     peer::{Client, ConnectedAddr, ConnectionInfo},
@@ -31,12 +33,16 @@ pub struct LoadTrackedClient {
 
     /// The metadata for the connected peer `service`.
     connection_info: Arc<ConnectionInfo>,
+
+    /// Sends block adverts even when the load-tracked service is busy.
+    pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<block::Hash>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
 impl From<Client> for LoadTrackedClient {
     fn from(client: Client) -> Self {
         let connection_info = client.connection_info.clone();
+        let block_advert_tx = client.block_advert_tx.clone();
 
         let service = PeakEwma::new(
             client,
@@ -48,6 +54,7 @@ impl From<Client> for LoadTrackedClient {
         LoadTrackedClient {
             service,
             connection_info,
+            block_advert_tx,
         }
     }
 }

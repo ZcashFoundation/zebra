@@ -24,7 +24,7 @@ use tower::load_shed::error::Overloaded;
 use tracing::Span;
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
     serialization::{SerializationError, ZcashDeserializeInto},
     transaction::UnminedTx,
 };
@@ -556,6 +556,129 @@ async fn empty_find_blocks_result_sends_no_inventory() {
     assert!(error_slot.try_get_error().is_none());
     connection_task.abort();
     assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// Block adverts bypass pending responses without replacing their handlers or closing the client.
+#[tokio::test]
+async fn block_advert_while_awaiting_response() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+        let (
+            mut connection,
+            mut client_tx,
+            _inbound_service,
+            mut peer_outbound_messages,
+            shared_error_slot,
+        ) = new_test_connection();
+        let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+        connection.block_advert_rx = block_advert_rx;
+        let connection_task = tokio::spawn(connection.run(peer_rx));
+
+        // Exercise the idle path before leaving an address request awaiting its response.
+        let idle_hash = block::Hash([1; 32]);
+        block_advert_tx.try_send(idle_hash).unwrap();
+        assert_eq!(
+            peer_outbound_messages.next().await,
+            Some(Message::Inv(vec![InventoryHash::Block(idle_hash)]))
+        );
+
+        let (request_tx, mut request_rx) = oneshot::channel();
+        client_tx
+            .try_send(ClientRequest {
+                request: Request::Peers,
+                tx: request_tx,
+                inv_collector: None,
+                transient_addr: None,
+                span: Span::current(),
+            })
+            .unwrap();
+        assert_eq!(peer_outbound_messages.next().await, Some(Message::GetAddr));
+
+        let busy_hash = block::Hash([2; 32]);
+        block_advert_tx.try_send(busy_hash).unwrap();
+        assert_eq!(
+            peer_outbound_messages.next().await,
+            Some(Message::Inv(vec![InventoryHash::Block(busy_hash)]))
+        );
+        assert!(request_rx.try_recv().unwrap().is_none());
+
+        // Closing only the advert channel must leave the original request alive.
+        drop(block_advert_tx);
+        peer_tx.try_send(Ok(Message::Addr(Vec::new()))).unwrap();
+        assert_eq!(
+            request_rx.await.unwrap().unwrap(),
+            Response::Peers(Vec::new())
+        );
+        assert!(shared_error_slot.try_get_error().is_none());
+
+        drop(client_tx);
+        connection_task.await.unwrap();
+    })
+    .await
+    .expect("adverts and the original response finish before the request timeout");
+}
+
+/// A pending GetBlocks response must not be displaced by a simultaneous unsolicited advert.
+#[tokio::test]
+async fn getblocks_response_precedes_ready_block_advert() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+        let (
+            mut connection,
+            client_tx,
+            mut inbound_service,
+            mut peer_outbound_messages,
+            shared_error_slot,
+        ) = new_test_connection();
+        let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+        connection.block_advert_rx = block_advert_rx;
+        let response_hash = block::Hash([3; 32]);
+        let advert_hash = block::Hash([4; 32]);
+
+        // Queue both inputs before starting the loop, making selection order deterministic.
+        peer_tx
+            .try_send(Ok(Message::GetBlocks {
+                known_blocks: Vec::new(),
+                stop: None,
+            }))
+            .unwrap();
+        block_advert_tx.try_send(advert_hash).unwrap();
+        let connection_task = tokio::spawn(connection.run(peer_rx));
+
+        tokio::join!(
+            async {
+                inbound_service
+                    .expect_request(Request::FindBlocks {
+                        known_blocks: Vec::new(),
+                        stop: None,
+                    })
+                    .await
+                    .respond(Response::BlockHashes(vec![response_hash]));
+            },
+            async {
+                assert_eq!(
+                    peer_outbound_messages.next().await,
+                    Some(Message::Inv(vec![InventoryHash::Block(response_hash)]))
+                );
+                assert_eq!(
+                    peer_outbound_messages.next().await,
+                    Some(Message::Inv(vec![InventoryHash::Block(advert_hash)]))
+                );
+            }
+        );
+        assert!(shared_error_slot.try_get_error().is_none());
+
+        drop(client_tx);
+        connection_task.await.unwrap();
+    })
+    .await
+    .expect("the response and advert are both delivered");
 }
 
 /// Test that the connection run loop fails correctly when dropped
