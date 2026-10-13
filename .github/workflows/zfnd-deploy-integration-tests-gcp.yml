@@ -580,6 +580,8 @@ jobs:
       # Capture HEIGHT HASH lines from the container logs into a file on the
       # instance so the upload-checkpoint-artifact job can retrieve them with
       # `gcloud compute scp` instead of rediscovering the container.
+      # An empty capture is only valid if zebra-checkpoints reported no new checkpoints,
+      # so a broken capture fails here instead of silently stopping checkpoint updates.
       - name: Capture checkpoints from container logs
         if: ${{ startsWith(inputs.test_id, 'generate-checkpoints-') }}
         env:
@@ -593,8 +595,10 @@ jobs:
             --ssh-flag="-o ConnectionAttempts=20" \
             --ssh-flag="-o ConnectTimeout=5" \
             --command="
-            sudo docker logs ${CONTAINER_ID} 2>&1 | grep -oE '[0-9]+ [0-9a-f]{64}' > /tmp/checkpoints.txt;
+            sudo docker logs ${CONTAINER_ID} 2>&1 | grep -E '[0-9]+ [0-9a-f]{64}|zebra-checkpoints found no new checkpoints' > /tmp/checkpoint-log.txt;
+            grep -oE '[0-9]+ [0-9a-f]{64}' /tmp/checkpoint-log.txt > /tmp/checkpoints.txt;
             echo \"Captured \$(wc -l < /tmp/checkpoints.txt) checkpoint lines\";
+            [ -s /tmp/checkpoints.txt ] || grep 'zebra-checkpoints found no new checkpoints' /tmp/checkpoint-log.txt || { echo 'ERROR: no checkpoints captured and zebra-checkpoints did not report that there were none'; exit 1; };
             "
 
   # Upload the checkpoint file captured in the test-result job as a workflow
@@ -650,12 +654,6 @@ jobs:
 
           LINES=$(wc -l < "${OUT}")
           echo "Retrieved ${LINES} checkpoint lines into ${OUT}"
-          # An empty file is expected when the test skips because the chain tip is still too
-          # close to the last compiled-in checkpoint. We still upload it, so checkpoint-update.yml
-          # always finds both artifacts; it appends nothing and opens no PR.
-          if [ "$LINES" -eq 0 ]; then
-            echo "::notice::No new checkpoints were generated for ${TEST_ID}"
-          fi
 
       - name: Upload checkpoint artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
