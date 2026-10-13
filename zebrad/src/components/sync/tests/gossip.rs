@@ -471,9 +471,10 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
         tip_sender.send_best_tip_hash(tip_hash);
         tip_sender.send_best_tip_height(height);
         tip_sender.send_best_tip_block_time(Utc::now());
-        let (_chain_sender, latest_chain_tip, chain_tip_change) =
+        let (mut chain_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(None, &network);
-        let (sync_status, _recent_syncs) = SyncStatus::new();
+        let (sync_status, mut recent_syncs) = SyncStatus::new();
+        recent_syncs.push_extend_tips_length(0);
         let (peer_set, mut requests) = GatedPeerSet::new();
         peer_set.set_readiness(Readiness::Ready);
         let cache = SubmittedBlockCache::default();
@@ -550,6 +551,14 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
             })
             .is_ok());
         let mut inbound = Inbound::new(1, setup_rx).with_submitted_blocks(cache.clone());
+        chain_sender.set_finalized_tip(ChainTipBlock {
+            hash: tip_hash,
+            height,
+            time: Utc::now(),
+            transactions: Vec::new(),
+            transaction_hashes: Arc::new([]),
+            previous_block_hash: block::Hash([0xff; 32]),
+        });
         let gossip = tokio::spawn(gossip_best_tip_block_hashes(
             sync_status,
             chain_tip_change,
@@ -557,6 +566,7 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
             Some(channel.receiver()),
             cache.clone(),
         ));
+        tokio::time::sleep(PEER_GOSSIP_DELAY * 3 / 4).await;
 
         let mut committed_hash = None;
         for n in 0..3 {
@@ -578,6 +588,14 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
                 assert_eq!(
                     requests.recv().await,
                     Some(zn::Request::AdvertiseBlock(hash, None))
+                );
+            }
+            if n == 0 {
+                assert_eq!(
+                    tokio::time::timeout(PEER_GOSSIP_DELAY / 2, requests.recv())
+                        .await
+                        .expect("an early advert must preserve elapsed tip gossip time"),
+                    Some(zn::Request::AdvertiseBlock(tip_hash, None))
                 );
             }
             let (call, verification) = if n == 0 {
