@@ -133,10 +133,9 @@ pub enum Request {
     /// subsequent blocks. However, Bitcoin nodes *also* send `inv` messages
     /// unsolicited in order to gossip new blocks to their peers. These gossip
     /// messages can race with the response to a `getblocks` request, and there
-    /// is no way for the network layer to distinguish them. For this reason, the
-    /// response may occasionally contain a single hash of a new chain tip rather
-    /// than a list of hashes of subsequent blocks. We believe that unsolicited
-    /// `inv` messages will always have exactly one block hash.
+    /// is no way for the network layer to distinguish them. Singleton inventories
+    /// are therefore returned and also forwarded to inbound gossip, so the block is
+    /// still fetched if inbound drops the advert.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         //
