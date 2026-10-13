@@ -634,8 +634,10 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
                 verification.respond_error(
                     zebra_consensus::RouterError::Block {
                         source: Box::new(zebra_consensus::VerifyBlockError::Transaction(
-                            zebra_consensus::error::TransactionError::Other(
-                                "transaction has Orchard actions (temporarily disabled)".into(),
+                            zebra_consensus::error::TransactionError::InternalDowncastError(
+                                "downcast to known transaction error type failed, original error: \
+                                 ScriptInvalid"
+                                    .into(),
                             ),
                         )),
                     }
