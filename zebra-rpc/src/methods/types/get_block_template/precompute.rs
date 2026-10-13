@@ -80,8 +80,8 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
 /// and the mempool disagree about the tip.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// Minimum spacing between event-driven builds, so idle arrivals start immediately and bursts
-/// coalesce without extending the window. Slow builds already provide their own spacing.
+/// Minimum pause after event-driven builds, so idle arrivals start immediately and bursts
+/// coalesce without extending the window. Slow builds wait at least their own duration.
 pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_millis(100);
 
 /// A block template for the block after the current chain tip, shared between [`run()`] and the
@@ -192,8 +192,9 @@ impl TemplateCache {
 /// Keeps `cache` filled with a block template for the current chain tip.
 ///
 /// Publishes a coinbase-only template as soon as the chain tip changes, then replaces it with a
-/// template that contains mempool transactions. Rebuilds after throttled mempool changes, with
-/// [`MEMPOOL_LONG_POLL_INTERVAL`] seconds as a backstop for missed events and clock changes.
+/// template that contains mempool transactions. Rebuilds after throttled mempool changes, with a
+/// backstop for missed events and clock changes after at least [`MEMPOOL_LONG_POLL_INTERVAL`]
+/// seconds. Both waits respect the previous build's duration.
 ///
 /// Runs until the task is aborted.
 #[allow(clippy::too_many_arguments)]
@@ -269,7 +270,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             }
         }
 
-        let next_mempool_build = Instant::now() + MEMPOOL_THROTTLE;
+        let build_started = Instant::now();
         // Await the full build even if the tip changes: dropping it would detach its
         // `spawn_blocking` proof, letting repeated tip changes accumulate CPU-heavy work.
         let built = match build(
@@ -334,6 +335,12 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
             }
         };
 
+        // Pace mempool work by its cost, including proofs, rather than allowing slow builds to
+        // run back-to-back. Tip changes still bypass this pause.
+        let build_finished = Instant::now();
+        let next_mempool_build =
+            build_finished + MEMPOOL_THROTTLE.max(build_finished - build_started);
+
         // Build the coinbase transaction for the block after next while we're idle, so the next tip
         // change doesn't have to wait for a shielded coinbase proof.
         if let Some(height) = latest_chain_tip
@@ -353,7 +360,11 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                     return;
                 }
             }
-            _ = sleep(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)) => {}
+            _ = sleep_until(
+                next_mempool_build.max(
+                    build_finished + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
+                ),
+            ) => {}
             _ = wait_for_mempool_change(
                 &mut mempool_changes, mempool.clone(), &mempool_tx_ids, next_mempool_build,
             ) => {}
@@ -393,8 +404,8 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
             }
         }
 
-        // ponytail: at most ten event-driven builds per second; increase the window if sustained
-        // valid traffic makes selection too costly. Shielded builds remain serialized.
+        // The deadline includes the previous build's duration, so expensive work gets an equal
+        // idle interval even when verified additions arrive continuously.
         sleep_until(next_build).await;
 
         // Discard the whole burst, including lagged notifications, before taking the snapshot.
