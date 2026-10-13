@@ -6,8 +6,11 @@ use zcash_keys::address::Address;
 
 use zebra_chain::{
     block,
+    chain_sync_status::MockSyncStatus,
+    chain_tip::mock::MockChainTip,
     parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
+    transaction::{Transaction, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_state::GetBlockTemplateChainInfo;
@@ -460,4 +463,165 @@ async fn mempool_changes_compare_the_verified_set() {
     tokio::time::timeout(Duration::from_millis(1), changed)
         .await
         .expect("a collateral eviction must wake the updater even when its ID was not announced");
+}
+
+/// Slow builds get an equal idle interval, including the backstop, but tip changes bypass it.
+#[tokio::test(start_paused = true)]
+async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = block::Hash([1; 32]);
+    let now = DateTime32::now();
+    let slow_build = Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL + 1);
+    let transaction = VerifiedUnminedTx::new(
+        Arc::new(Transaction::test_v1(
+            vec![],
+            vec![],
+            zebra_chain::transaction::LockTime::Height(Height(1)),
+        ))
+        .into(),
+        10_000.try_into().unwrap(),
+        0,
+        0,
+        Arc::new(vec![]),
+    )
+    .unwrap();
+
+    for change_tip in [false, true] {
+        let (state_tip, state_tip_rx) = watch::channel(hash);
+        let read_state = tower::service_fn({
+            let state_tip_rx = state_tip_rx.clone();
+            let chain_info = GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip_height: height,
+                tip_hash: hash,
+                cur_time: now,
+                min_time: now,
+                max_time: now.saturating_add(Duration32::from_minutes(90)),
+                chain_history_root: fake_history_tree(&network).hash(),
+                chain_value_pools: Default::default(),
+            };
+            move |request| {
+                let mut chain_info = chain_info.clone();
+                chain_info.tip_hash = *state_tip_rx.borrow();
+                std::future::ready(Ok::<_, zebra_node_services::BoxError>(match request {
+                    ReadRequest::Tip => ReadResponse::Tip(Some((height, chain_info.tip_hash))),
+                    ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                    other => panic!("unexpected state request: {other:?}"),
+                }))
+            }
+        });
+        let (pool, pool_rx) = watch::channel(Vec::<VerifiedUnminedTx>::new());
+        let (build_started, mut builds) = watch::channel(0);
+        let mempool = tower::service_fn(move |request| {
+            let (response, full_read) = match request {
+                mempool::Request::TransactionIds => (
+                    mempool::Response::TransactionIds(
+                        pool_rx
+                            .borrow()
+                            .iter()
+                            .map(|tx| tx.transaction.id)
+                            .collect(),
+                    ),
+                    false,
+                ),
+                mempool::Request::FullTransactions => {
+                    build_started.send_modify(|count| *count += 1);
+                    (
+                        mempool::Response::FullTransactions {
+                            transactions: pool_rx.borrow().clone(),
+                            transaction_dependencies: Default::default(),
+                            last_seen_tip_hash: *state_tip_rx.borrow(),
+                        },
+                        true,
+                    )
+                }
+                other => panic!("unexpected mempool request: {other:?}"),
+            };
+            async move {
+                if full_read {
+                    sleep(slow_build).await;
+                }
+                Ok::<_, zebra_node_services::BoxError>(response)
+            }
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(height);
+        tip_sender.send_best_tip_hash(hash);
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let miner_params = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .unwrap(),
+        );
+        let cache = TemplateCache::default();
+        let mut publications = cache.subscribe();
+        let (events, receiver) = broadcast::channel(1);
+        let updater = tokio::spawn(run(
+            network.clone(),
+            miner_params,
+            CoinbaseCache::default(),
+            cache,
+            mempool,
+            receiver,
+            read_state,
+            tip,
+            sync,
+        ));
+        tokio::time::timeout(Duration::from_secs(1), builds.changed())
+            .await
+            .expect("the initial full build starts")
+            .unwrap();
+        publications.changed().await;
+        tokio::time::advance(slow_build).await;
+        tokio::time::timeout(Duration::from_millis(1), publications.changed())
+            .await
+            .expect("the initial full template is published");
+        let finished = Instant::now();
+
+        pool.send_replace(vec![transaction.clone()]);
+        events
+            .send(MempoolChange::added(
+                [transaction.transaction.id].into_iter().collect(),
+            ))
+            .unwrap();
+        if change_tip {
+            let new_hash = block::Hash([2; 32]);
+            state_tip.send_replace(new_hash);
+            tip_sender.send_best_tip_hash(new_hash);
+        } else {
+            tokio::time::advance(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)).await;
+            assert_eq!(*builds.borrow(), 1, "the backstop must not bypass pacing");
+            tokio::time::advance(
+                slow_build
+                    - Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)
+                    - Duration::from_millis(1),
+            )
+            .await;
+            assert_eq!(
+                *builds.borrow(),
+                1,
+                "the mempool must wait for the full pause"
+            );
+            tokio::time::advance(Duration::from_millis(1)).await;
+        }
+        tokio::time::timeout(Duration::from_millis(1), builds.changed())
+            .await
+            .expect("the next build starts at its deadline, or immediately for a new tip")
+            .unwrap();
+        assert_eq!(
+            finished.elapsed(),
+            if change_tip {
+                Duration::ZERO
+            } else {
+                slow_build
+            },
+        );
+        updater.abort();
+    }
 }
