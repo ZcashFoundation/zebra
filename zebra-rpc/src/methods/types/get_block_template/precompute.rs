@@ -436,22 +436,31 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             }
         }
 
-        let build_started = Instant::now();
-        let building = full_build.get_or_insert_with(|| {
-            Box::pin(build(
-                &network,
-                &miner_params,
-                &coinbase_cache,
-                read_state.clone(),
-                Some(mempool.clone()),
-                None,
-                None,
-            ))
+        // Sum the time spent awaiting a retained build, so a resume doesn't hide earlier proof work.
+        // Interruptions aren't counted, so a rejected candidate doesn't delay mempool refreshes.
+        let resumed = Instant::now();
+        let (awaited, building) = full_build.get_or_insert_with(|| {
+            (
+                Duration::ZERO,
+                Box::pin(build(
+                    &network,
+                    &miner_params,
+                    &coinbase_cache,
+                    read_state.clone(),
+                    Some(mempool.clone()),
+                    None,
+                    None,
+                )),
+            )
         });
         let built = tokio::select! {
             built = building => built,
-            _ = candidate_changes.changed() => continue,
+            _ = candidate_changes.changed() => {
+                *awaited += resumed.elapsed();
+                continue;
+            }
         };
+        let build_duration = *awaited + resumed.elapsed();
         full_build = None;
         let built = match built {
             Ok(Some((template, mempool_tx_ids))) => {
@@ -521,8 +530,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         // Pace mempool work by its cost, including proofs, rather than allowing slow builds to
         // run back-to-back. Tip changes still bypass this pause.
         let build_finished = Instant::now();
-        let next_mempool_build =
-            build_finished + MEMPOOL_THROTTLE.max(build_finished - build_started);
+        let next_mempool_build = build_finished + MEMPOOL_THROTTLE.max(build_duration);
 
         // Build the coinbase transaction for the block after next while we're idle, so the next tip
         // change doesn't have to wait for a shielded coinbase proof.
