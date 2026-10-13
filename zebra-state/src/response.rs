@@ -34,9 +34,13 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// Keeps early mining work alive until block verification finishes.
+/// Keeps published early mining work alive and reserves its slot until verification finishes.
+///
+/// A candidate that cannot publish work releases the slot after its computation finishes.
 #[derive(Clone, Debug)]
-pub struct MiningCandidateGuard(pub(crate) tokio::sync::watch::Sender<()>);
+pub struct MiningCandidateGuard(
+    pub(crate) tokio::sync::watch::Receiver<Option<Arc<tokio::sync::OwnedSemaphorePermit>>>,
+);
 
 impl PartialEq for MiningCandidateGuard {
     fn eq(&self, other: &Self) -> bool {
