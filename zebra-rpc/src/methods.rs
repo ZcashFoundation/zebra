@@ -3209,10 +3209,13 @@ where
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
         let block = Arc::new(block);
-        let chain_history_root = self
-            .gbt
-            .template_cache()
-            .and_then(|cache| cache.chain_history_root(block.header.previous_block_hash));
+        let chain_history_root = self.gbt.template_cache().and_then(|cache| {
+            cache.chain_history_root(
+                block.header.previous_block_hash,
+                height,
+                block.header.difficulty_threshold,
+            )
+        });
         let mut relayed = false;
         if let Some(chain_history_root) =
             chain_history_root.filter(|_| height > self.gbt.max_checkpoint_height)
