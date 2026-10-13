@@ -385,12 +385,10 @@ fn commit_response_precedes_the_replaced_snapshot_drop() {
 
     let (queued, non_finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
     queued
-        .send(NonFinalizedWriteMessage::Commit((
-            child.clone().prepare(),
-            rsp_tx,
-            None,
-            None,
-        )))
+        .send(NonFinalizedWriteMessage::Commit(
+            (child.clone().prepare(), rsp_tx, None, None),
+            Instant::now(),
+        ))
         .unwrap();
     drop(queued);
     let (invalid_block_reset_sender, _resets) = tokio::sync::mpsc::unbounded_channel();
