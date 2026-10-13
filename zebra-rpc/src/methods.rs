@@ -1341,7 +1341,20 @@ where
                         &self.network,
                         self.template_clock_now(),
                     ) {
-                        return Some(template);
+                        // A detached state response can outlive its verifier. Check the live
+                        // subscription after cloning cached work, without waiting for the updater.
+                        let ReadResponse::MiningCandidateChanges(candidates) = self
+                            .read_state
+                            .clone()
+                            .oneshot(ReadRequest::MiningCandidateChanges)
+                            .await
+                            .ok()?
+                        else {
+                            return None;
+                        };
+                        if candidates.is_current(candidate.tip_hash) {
+                            return Some(template);
+                        }
                     }
                 }
 
