@@ -361,6 +361,82 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
     });
 }
 
+/// A competing request must not displace work while its verifier still owns the guard.
+#[tokio::test]
+async fn live_mining_candidate_is_not_replaced() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return chain info");
+        };
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let block = Arc::new(block);
+        let ReadResponse::MiningCandidateChanges(mut changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return a candidate subscription");
+        };
+        let Response::MiningCandidate(Some(guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(block.clone()))
+            .await
+            .unwrap()
+        else {
+            panic!("the first candidate must reserve the available slot");
+        };
+        changes.changed().await;
+
+        let mut replacement = (*block).clone();
+        Arc::make_mut(&mut replacement.header).nonce = [1; 32];
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(Arc::new(replacement)))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == block.hash()
+        ));
+
+        drop(guard);
+        changes.changed().await;
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(None)
+        ));
+    })
+    .await
+    .expect("live candidate admission and withdrawal must finish before expiry");
+}
+
 #[test]
 fn state_behaves_when_blocks_are_committed_in_order() -> Result<()> {
     let _init_guard = zebra_test::init();
