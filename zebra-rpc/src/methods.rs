@@ -3281,8 +3281,7 @@ where
                             zebra_state::CommitBlockError::WriteTaskExited { .. },
                         )
                         | VerifyBlockError::Transaction(
-                            TransactionError::TransparentInputNotFound
-                            | TransactionError::InternalDowncastError(_),
+                            TransactionError::TransparentInputNotFound,
                         ) => true,
                         VerifyBlockError::Commit(
                             zebra_state::CommitBlockError::ValidateContextError(error),
@@ -3294,6 +3293,8 @@ where
                     },
                     _ => false,
                 };
+                // Unknown transaction errors include invalid scripts, so they cannot justify
+                // continuing to serve an unverified body.
                 if relayed && !timed_out && !inconclusive {
                     self.gbt.submitted_blocks.remove(block_hash);
                     tracing::warn!(?block_hash, ?height, ?error, "early-relayed block rejected");
