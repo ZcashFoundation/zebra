@@ -379,6 +379,72 @@ async fn block_advert_to_all_reaches_unready_peer() {
     .expect("the ready peer permits dispatch while the busy peer remains unready");
 }
 
+/// Upgrades must exclude obsolete peers from adverts even while their services remain busy.
+#[tokio::test(start_paused = true)]
+async fn block_adverts_skip_busy_outdated_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let peer_versions = PeerVersions {
+        peer_versions: vec![
+            Version::min_specified_for_upgrade(&network, NetworkUpgrade::Nu6_2),
+            Version::min_specified_for_upgrade(&network, NetworkUpgrade::Nu6_3),
+        ],
+    };
+    let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    best_tip.send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&network));
+    let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+
+    timeout(Duration::from_secs(1), async {
+        peer_set.ready().await.unwrap();
+        let busy_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let mut busy_service = peer_set.take_ready_service(&busy_addr).unwrap();
+        let _first_request = busy_service.call(Request::Peers);
+        busy_service.ready().await.unwrap();
+        let _second_request = busy_service.call(Request::Peers);
+        assert!(busy_service.ready().now_or_never().is_none());
+        peer_set.push_unready(busy_addr, busy_service);
+
+        let before_upgrade = block::Hash([11; 32]);
+        peer_set
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(before_upgrade))
+            .await
+            .unwrap();
+        for handle in &mut handles {
+            assert_eq!(
+                handle.block_advert_receiver.try_recv().unwrap(),
+                before_upgrade
+            );
+        }
+
+        best_tip.send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&network));
+        let after_upgrade = block::Hash([12; 32]);
+        peer_set
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(after_upgrade))
+            .await
+            .unwrap();
+        assert!(peer_set.cancel_handles.contains_key(&busy_addr));
+        assert!(!peer_set.ready_services.contains_key(&busy_addr));
+        assert!(handles[0].block_advert_receiver.try_recv().is_err());
+        assert_eq!(
+            handles[1].block_advert_receiver.try_recv().unwrap(),
+            after_upgrade
+        );
+    })
+    .await
+    .expect("the supported peer permits dispatch while the obsolete peer remains busy");
+}
+
 /// Out-of-band adverts must respect bans and removal independently of peer readiness.
 #[tokio::test]
 async fn block_adverts_skip_banned_and_removed_peers() {
