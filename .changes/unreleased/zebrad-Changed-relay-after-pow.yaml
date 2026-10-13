@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: "Relay template-parent mining submissions after proof of work and body authentication, before full verification. RPC responses still wait for commit; definitively rejected pending bodies are withdrawn and logged."
+body: "Relay submitted blocks before commit only when they match an exact successful local proposal verdict, except for nonce and Equihash solution. Early advertisements use ordinary gossip; all-peer advertisements remain commit-only. State-owned committed notifications survive RPC cancellation, and unavailable notification capacity rejects mined commits before mutation without blocking ordinary commits."
 time: 2026-10-11T12:00:00.000000000+00:00
