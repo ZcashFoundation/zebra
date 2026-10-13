@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: 'Mining templates can extend a proof-of-work checked parent before verification completes. Early templates are coinbase-only and withdrawn on rejection or after 30 seconds. Long polls recheck cached child work immediately when its parent commits. New candidates interrupt template retry backoff.'
-time: 2026-10-11T00:00:00Z
