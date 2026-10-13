@@ -127,7 +127,7 @@ use tower::{
 };
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
@@ -386,12 +386,8 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
-    /// Stores requests that should be routed to peers once they are ready.
-    queued_broadcast_all: Option<(
-        Request,
-        tokio::sync::mpsc::UnboundedSender<ResponseFuture>,
-        HashSet<D::Key>,
-    )>,
+    /// Block advert channels for every connected peer, independent of service readiness.
+    block_advert_senders: HashMap<D::Key, tokio_mpsc::Sender<block::Hash>>,
 
     /// Inbound peer IPs that must always receive block inventory broadcasts.
     block_gossip_peer_ips: HashSet<IpAddr>,
@@ -564,7 +560,7 @@ where
             queued_find_requests: VecDeque::new(),
             queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
-            queued_broadcast_all: None,
+            block_advert_senders: HashMap::new(),
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
@@ -686,6 +682,7 @@ where
     fn shut_down_tasks_and_channels(&mut self, cx: &mut Context<'_>) {
         // Drop services and cancel their background tasks.
         self.ready_services = HashMap::new();
+        self.block_advert_senders.clear();
 
         for (_peer_key, handle) in self.cancel_handles.drain() {
             let _ = handle.send(CancelClientWork);
@@ -791,6 +788,7 @@ where
 
                     if self.bans_receiver.borrow().is_banned(key.ip()) {
                         warn!(?key, "service is banned, dropping service");
+                        self.block_advert_senders.remove(&key);
                         std::mem::drop(svc);
                         let cancel = self.cancel_handles.remove(&key);
                         debug_assert!(
@@ -837,6 +835,7 @@ where
                 // Unready -> Errored
                 Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
+                    self.block_advert_senders.remove(&key);
 
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
@@ -880,6 +879,7 @@ where
                 Ok(()) => {
                     if self.bans_receiver.borrow().is_banned(key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
+                        self.block_advert_senders.remove(&key);
                         std::mem::drop(svc);
                         continue;
                     }
@@ -891,7 +891,7 @@ where
                 Err(error) => {
                     debug!(%error, "service failed while ready, dropping service");
 
-                    // Ready services can just be dropped, they don't need any cleanup.
+                    self.block_advert_senders.remove(&key);
                     std::mem::drop(svc);
                 }
             }
@@ -1007,6 +1007,8 @@ where
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
+                    self.block_advert_senders
+                        .insert(key, svc.block_advert_tx.clone());
                     self.push_unready(key, svc);
                 }
             }
@@ -1026,6 +1028,7 @@ where
             let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
             if !eligible {
                 self.find_response_stalls.clear(*key);
+                self.block_advert_senders.remove(key);
             }
             eligible
         });
@@ -1049,6 +1052,7 @@ where
                 .expect("unready services retain their client until completion");
             if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
                 self.find_response_stalls.clear(*key);
+                self.block_advert_senders.remove(key);
                 if let Some(cancel) = self.cancel_handles.remove(key) {
                     let _ = cancel.send(CancelClientWork);
                 }
@@ -1128,6 +1132,7 @@ where
         self.find_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
+        self.block_advert_senders.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
             remaining_sidecars.remove(key);
             if remaining_sidecars.is_empty() {
@@ -1161,6 +1166,7 @@ where
         if svc.remote_version() >= self.minimum_peer_version.current() {
             self.ready_services.insert(key, svc);
         } else {
+            self.block_advert_senders.remove(&key);
             std::mem::drop(svc);
         }
     }
@@ -1188,6 +1194,7 @@ where
             self.find_response_stalls.clear(key);
             // Reject delayed response events before the next peer-set poll.
             self.find_peer_queue.retain(|(addr, _)| *addr != key);
+            self.block_advert_senders.remove(&key);
             // Cancel any request made to the service because it is using an outdated protocol
             // version.
             let _ = tx.send(CancelClientWork);
@@ -1876,7 +1883,7 @@ where
         }
     }
 
-    /// Routes the same request to up to `max_peers` ready peers.
+    /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
     ///
     /// `max_peers` must be at least one, and at most the number of ready peers.
     fn route_multiple(
@@ -1897,7 +1904,7 @@ where
         self.send_multiple(req, selected_peers)
     }
 
-    /// Sends to ready peers, reporting block-advert failures after every selected peer finishes.
+    /// Sends the same request to the provided ready peers, ignoring return values.
     ///
     /// # Security
     ///
@@ -1911,30 +1918,22 @@ where
         req: Request,
         peers: Vec<D::Key>,
     ) -> <Self as tower::Service<Request>>::Future {
-        let require_success = matches!(
-            req,
-            Request::AdvertiseBlock(..) | Request::AdvertiseBlockToAll(_)
-        );
         let mut futs = FuturesUnordered::new();
         for key in peers {
             let mut svc = self
                 .take_ready_service(&key)
                 .expect("selected peers are ready");
-            futs.push(svc.call(req.clone()).map_err(BoxError::from));
+            futs.push(svc.call(req.clone()).map_err(|_| ()));
             self.push_unready(key, svc);
         }
 
         async move {
-            let mut first_error = None;
             let mut succeeded = 0;
             let mut failed = 0;
             while let Some(result) = futs.next().await {
                 match result {
                     Ok(_) => succeeded += 1,
-                    Err(error) => {
-                        failed += 1;
-                        first_error.get_or_insert(error);
-                    }
+                    Err(_) => failed += 1,
                 }
             }
             tracing::debug!(
@@ -1942,11 +1941,7 @@ where
                 err.len = failed,
                 "sent peer request to multiple peers"
             );
-            if require_success {
-                first_error.map_or(Ok(Response::Nil), Err)
-            } else {
-                Ok(Response::Nil)
-            }
+            Ok(Response::Nil)
         }
         .boxed()
     }
@@ -1994,8 +1989,7 @@ where
             return;
         };
 
-        // Like `broadcast_all_queued`, don't deliver to peers that were banned
-        // while the request was queued.
+        // Don't deliver to peers that were banned while the request was queued.
         let bans = self.bans_receiver.borrow().clone();
         remaining_sidecars.retain(|key| !bans.is_banned(key.ip()));
 
@@ -2028,110 +2022,6 @@ where
 
         if !remaining_sidecars.is_empty() {
             self.queued_sidecar_broadcast = Some((req, remaining_sidecars));
-        }
-    }
-
-    /// Broadcasts to ready and queued peers, retaining every delivery future until completion.
-    fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        let ready_peers = self.ready_services.keys().copied().collect();
-        let send_multiple_fut = self.send_multiple(req.clone(), ready_peers);
-        let Some(mut queued_broadcast_fut_receiver) = self.queue_broadcast_all_unready(&req) else {
-            return send_multiple_fut;
-        };
-
-        async move {
-            let mut pending = FuturesUnordered::new();
-            pending.push(send_multiple_fut);
-            let mut receiving = true;
-            let mut first_error = None;
-            while receiving || !pending.is_empty() {
-                tokio::select! {
-                    delivery = queued_broadcast_fut_receiver.recv(), if receiving => {
-                        match delivery {
-                            Some(delivery) => pending.push(delivery),
-                            None => receiving = false,
-                        }
-                    }
-                    result = pending.next(), if !pending.is_empty() => {
-                        if let Some(Err(error)) = result {
-                            first_error.get_or_insert(error);
-                        }
-                    }
-                }
-            }
-            first_error.map_or(Ok(Response::Nil), Err)
-        }
-        .boxed()
-    }
-
-    /// If there are unready peers, queues a request to be broadcasted to them and
-    /// returns a channel receiver for callers to await the broadcast_all() futures, or
-    /// returns None if there are no unready peers.
-    fn queue_broadcast_all_unready(
-        &mut self,
-        req: &Request,
-    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<ResponseFuture>> {
-        if !self.cancel_handles.is_empty() {
-            // Each original peer is removed after its delivery is queued, so the total
-            // number of futures in this channel is bounded by the peer snapshot below.
-            // An unbounded channel avoids stalling on capacity without a registered wakeup.
-            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-            let unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
-            let queued = (req.clone(), sender, unready_peers);
-
-            // Supersession is not successful delivery of the displaced block.
-            if let Some((_, previous, _)) = self.queued_broadcast_all.take() {
-                let _ =
-                    previous.send(async { Err("block broadcast was superseded".into()) }.boxed());
-            }
-            self.queued_broadcast_all = Some(queued);
-
-            Some(receiver)
-        } else {
-            None
-        }
-    }
-
-    /// Broadcasts the same requests to all ready peers which were unready when
-    /// [`PeerSet::broadcast_all()`] was last called, ignoring return values.
-    fn broadcast_all_queued(&mut self) {
-        let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all.take() else {
-            return;
-        };
-
-        if sender.is_closed() {
-            return;
-        }
-
-        let bans = self.bans_receiver.borrow().clone();
-        remaining_peers.retain(|addr| {
-            !bans.is_banned(addr.ip())
-                && (self.ready_services.contains_key(addr)
-                    || self.cancel_handles.contains_key(addr))
-        });
-
-        if remaining_peers.is_empty() {
-            return;
-        }
-
-        let peers: Vec<_> = self
-            .ready_services
-            .keys()
-            .filter(|ready_peer| remaining_peers.remove(ready_peer))
-            .copied()
-            .collect();
-
-        if peers.is_empty() {
-            self.queued_broadcast_all = Some((req, sender, remaining_peers));
-            return;
-        }
-
-        if sender.send(self.send_multiple(req.clone(), peers)).is_err() {
-            return;
-        }
-
-        if !remaining_peers.is_empty() {
-            self.queued_broadcast_all = Some((req, sender, remaining_peers));
         }
     }
 
@@ -2355,8 +2245,6 @@ where
 
         // Waiting block requests still take priority over broadcasts.
         self.route_queued_inv_requests(&mut peer_cx);
-        // Drop queued peers that disconnected while unready, even when no peers are ready.
-        self.broadcast_all_queued();
 
         if ready_peers.is_pending() {
             // # Correctness
@@ -2419,7 +2307,16 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
-            Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
+            Request::AdvertiseBlockToAll(hash) => {
+                let bans = self.bans_receiver.borrow();
+                for (key, sender) in &self.block_advert_senders {
+                    if !bans.is_banned(key.ip()) {
+                        // Drop full-channel adverts: slow peers receive later tip gossip.
+                        let _ = sender.try_send(hash);
+                    }
+                }
+                future::ready(Ok(Response::Nil)).boxed()
+            }
 
             // Broadcasts that must always reach the configured zcashd-compat sidecar peers
             Request::AdvertiseBlock(_, _) | Request::PushTransaction(_, _) => {
