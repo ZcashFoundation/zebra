@@ -6136,6 +6136,42 @@ async fn rpc_submitblock_cache_is_bounded_and_expires() {
         .all(|block| cache.get(&block.hash()).is_none()));
 }
 
+#[tokio::test(start_paused = true)]
+async fn rpc_submitblock_withdrawal_restores_pending_advertisement() {
+    let cache = crate::SubmittedBlockCache::default();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(3)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let mut pending = cache.subscribe();
+    pending.borrow_and_update();
+    for block in &blocks[..2] {
+        cache.insert(
+            block.hash(),
+            block.coinbase_height().unwrap(),
+            block.clone(),
+        );
+    }
+    cache.remove(blocks[1].hash());
+    assert!(pending.has_changed().unwrap());
+    assert_eq!(
+        *pending.borrow_and_update(),
+        Some((blocks[0].hash(), blocks[0].coinbase_height().unwrap()))
+    );
+    assert!(cache.get(&blocks[0].hash()).is_some());
+    assert!(cache.get(&blocks[1].hash()).is_none());
+
+    tokio::time::advance(Duration::from_secs(90)).await;
+    cache.insert(
+        blocks[2].hash(),
+        blocks[2].coinbase_height().unwrap(),
+        blocks[2].clone(),
+    );
+    cache.remove(blocks[2].hash());
+    assert_eq!(*pending.borrow_and_update(), None);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_validateaddress() {
     let _init_guard = zebra_test::init();
