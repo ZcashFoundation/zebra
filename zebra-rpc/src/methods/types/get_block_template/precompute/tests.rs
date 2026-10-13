@@ -920,6 +920,10 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
         let mempool_response = mempool
             .expect_request(mempool::Request::FullTransactions)
             .await;
+        // Build time before the interruption must still pace the resumed build's successor. It
+        // must exceed twice the mempool pause, so pacing by the pause alone fails the check below.
+        let awaited_build = MEMPOOL_THROTTLE * 3;
+        tokio::time::sleep(awaited_build).await;
         let candidate = Arc::new(
             proposal_block_from_template(&original, BlockTemplateTimeSource::CurTime, &network)
                 .expect("the real Regtest template produces a candidate"),
@@ -1019,6 +1023,7 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
             }
             changes.changed().await;
         };
+        let restored_at = Instant::now();
         assert_eq!(restored.height, original.height);
         assert_eq!(restored.previous_block_hash, tip_hash);
         assert!(cache
@@ -1032,13 +1037,19 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
             ReadResponse::Tip(Some((Height(0), hash))) if hash == tip_hash
         ));
         // Resuming the old build must not lose a mempool change received during early work.
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
             mempool
                 .expect_request(mempool::Request::TransactionIds)
                 .await
                 .respond(mempool::Response::TransactionIds(
                     [added_id].into_iter().collect(),
                 ));
+            // Restoration is observed near the resumed build's end; unpaced builds wait only
+            // `MEMPOOL_THROTTLE`.
+            assert!(
+                restored_at.elapsed() >= awaited_build / 2,
+                "the resumed build's earlier proof time must pace the next mempool build"
+            );
             mempool
                 .expect_request(mempool::Request::FullTransactions)
                 .await
