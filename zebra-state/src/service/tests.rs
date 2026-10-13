@@ -312,10 +312,7 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
 
             // Signal the same cancellation branch as guard drop, but retain the sender so
             // its closed notification proves the outer task exited before another admission.
-            guard
-                .0
-                .send(())
-                .expect("the candidate task is still listening");
+            guard.0.send_modify(|_| {});
             guard.0.closed().await;
             drop(guard);
             assert_eq!(
@@ -361,12 +358,12 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
     });
 }
 
-/// A competing request must not displace work while its verifier still owns the guard.
+/// A live or expired candidate reserves its slot until its verifier drops the guard.
 #[tokio::test]
-async fn live_mining_candidate_is_not_replaced() {
+async fn mining_candidate_slot_is_held_until_verification_finishes() {
     let _init_guard = zebra_test::init();
 
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         let network = Network::Mainnet;
         let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
             .zcash_deserialize_into::<Arc<Block>>()
@@ -406,9 +403,10 @@ async fn live_mining_candidate_is_not_replaced() {
         changes.changed().await;
 
         let mut replacement = (*block).clone();
-        Arc::make_mut(&mut replacement.header).nonce = [1; 32];
+        Arc::make_mut(&mut replacement.header).nonce = [1; 32].into();
         assert!(matches!(
             state
+                .clone()
                 .oneshot(Request::MiningCandidate(Arc::new(replacement)))
                 .await
                 .unwrap(),
@@ -423,7 +421,9 @@ async fn live_mining_candidate_is_not_replaced() {
             ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == block.hash()
         ));
 
-        drop(guard);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
         changes.changed().await;
         assert!(matches!(
             read_state
@@ -432,9 +432,27 @@ async fn live_mining_candidate_is_not_replaced() {
                 .unwrap(),
             ReadResponse::MiningCandidate(None)
         ));
+        guard.0.closed().await;
+        assert!(matches!(
+            state
+                .clone()
+                .oneshot(Request::MiningCandidate(block.clone()))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+
+        drop(guard);
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(block))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(Some(_))
+        ));
     })
     .await
-    .expect("live candidate admission and withdrawal must finish before expiry");
+    .expect("candidate expiry must not release the slot before verification finishes");
 }
 
 #[test]
