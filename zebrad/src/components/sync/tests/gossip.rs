@@ -577,7 +577,7 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
             if n < 2 {
                 assert_eq!(
                     requests.recv().await,
-                    Some(zn::Request::AdvertiseBlockToAll(hash))
+                    Some(zn::Request::AdvertiseBlock(hash, None))
                 );
             }
             let (call, verification) = if n == 0 {
@@ -671,6 +671,31 @@ async fn gossip_and_inbound_relay_submissions_before_verification() {
         assert_eq!(
             requests.recv().await,
             Some(zn::Request::AdvertiseBlockToAll(committed_hash.unwrap()))
+        );
+        // An early advert after the committed request must not replace its all-peer deferred slot.
+        let mut candidate = block.clone();
+        Arc::make_mut(&mut candidate.header).nonce = [3; 32].into();
+        let candidate = Arc::new(candidate);
+        let hash = candidate.hash();
+        let call = tokio::spawn({
+            let rpc = rpc.clone();
+            let bytes = candidate.zcash_serialize_to_vec().unwrap();
+            async move { rpc.submit_block(HexData(bytes), None).await }
+        });
+        let verification = verifier
+            .expect_request(zebra_consensus::Request::Commit(candidate))
+            .await;
+        loop {
+            let request = requests.recv().await.unwrap();
+            assert!(!matches!(request, zn::Request::AdvertiseBlockToAll(_)));
+            if request == zn::Request::AdvertiseBlock(hash, None) {
+                break;
+            }
+        }
+        verification.respond(hash);
+        assert_eq!(
+            call.await.unwrap().unwrap(),
+            zebra_rpc::client::SubmitBlockResponse::Accepted
         );
         gossip.abort();
     })
