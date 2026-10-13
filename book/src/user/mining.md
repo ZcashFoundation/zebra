@@ -103,11 +103,14 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 listen_addr = "127.0.0.1:8232"
 ```
 
-Submitted blocks extending the current precomputed template's parent are advertised after proof of
-work and body authentication, without waiting for full verification. This is automatic, with no
-configuration switch. Checkpoint-era blocks wait for commit. The RPC response still waits for full
-verification and commit. Definitively rejected early submissions are withdrawn from peer serving and
-logged as warnings; duplicates and cancelled calls retain the bounded cache. Restrict RPC to trusted miners.
+Submitted blocks matching the current precomputed template's parent, height, and difficulty are
+advertised after proof of work and body authentication, without waiting for full verification.
+Early advertisements use ordinary block gossip; all-peer delivery is reserved for committed
+submissions. This is automatic, with no configuration switch. Checkpoint-era blocks wait for commit.
+The RPC response still waits for full verification and commit. Rejected early submissions are
+withdrawn from peer serving and logged as warnings, except for duplicates and known inconclusive
+failures. Cancelled calls retain the bounded cache. Withdrawal cannot retract bodies already served,
+and peers can penalize invalid blocks received before rejection. Restrict RPC to trusted miners.
 
 ## Running zebra
 
