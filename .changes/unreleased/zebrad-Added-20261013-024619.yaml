@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Block-acceptance timing histograms `zebra.consensus.block.phase.duration_seconds` and `state.block_writer.phase.duration_seconds`, labeled by phase and excluding block proposals.
+time: 2026-10-13T02:46:19.944659189+02:00
