@@ -47,6 +47,7 @@ use crate::{
 };
 
 mod header;
+mod mining_candidate;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
@@ -644,7 +645,7 @@ async fn mining_candidate_expires_after_its_lifetime() {
             panic!("state returns the requested candidate subscription");
         };
         let admitted = tokio::time::Instant::now();
-        let Response::MiningCandidate(Some(guard)) = state
+        let Response::MiningCandidate(Some(mut guard)) = state
             .clone()
             .oneshot(Request::MiningCandidate(Arc::new(block)))
             .await
@@ -653,7 +654,7 @@ async fn mining_candidate_expires_after_its_lifetime() {
             panic!("the subscription enables candidate publication");
         };
         // Publication ends at the deadline whether or not the computation finished first.
-        guard.0.closed().await;
+        while guard.0.changed().await.is_ok() {}
         assert!(
             admitted.elapsed() >= lifetime,
             "a valid candidate must stay live until its lifetime ends"
@@ -757,14 +758,21 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
                 panic!("the first candidate should reserve the available computation slot");
             };
 
-            // Signal the same cancellation branch as guard drop, but retain the sender so
-            // its closed notification proves the outer task exited before another admission.
-            guard
-                .0
-                .send(())
-                .expect("the candidate task is still listening");
-            guard.0.closed().await;
+            let permit = Arc::downgrade(
+                guard
+                    .0
+                    .borrow()
+                    .as_ref()
+                    .expect("the admitted candidate reserves its slot"),
+            );
+            while permit.strong_count() < 2 {
+                tokio::task::yield_now().await;
+            }
             drop(guard);
+            // The publication task has exited when only the queued computation owns the permit.
+            while permit.strong_count() != 1 {
+                tokio::task::yield_now().await;
+            }
             assert_eq!(
                 Arc::strong_count(&block),
                 2,
@@ -808,17 +816,23 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
     });
 }
 
-/// A competing request must not displace work while its verifier still owns the guard.
+/// A live or expired candidate reserves its slot until its verifier drops the guard.
 #[tokio::test]
-async fn live_mining_candidate_is_not_replaced() {
+async fn mining_candidate_slot_is_held_until_verification_finishes() {
     let _init_guard = zebra_test::init();
 
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         let network = Network::Mainnet;
         let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
             .zcash_deserialize_into::<Arc<Block>>()
             .unwrap();
-        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        // Short enough for the paused advance below to expire the candidate.
+        let (state, read_state, _, _) = populated_state_with_mining_candidate_lifetime(
+            [genesis],
+            &network,
+            Duration::from_secs(30),
+        )
+        .await;
         let ReadResponse::ChainInfo(context) = read_state
             .clone()
             .oneshot(ReadRequest::ChainInfo)
@@ -842,7 +856,7 @@ async fn live_mining_candidate_is_not_replaced() {
         else {
             panic!("state must return a candidate subscription");
         };
-        let Response::MiningCandidate(Some(guard)) = state
+        let Response::MiningCandidate(Some(mut guard)) = state
             .clone()
             .oneshot(Request::MiningCandidate(block.clone()))
             .await
@@ -853,9 +867,10 @@ async fn live_mining_candidate_is_not_replaced() {
         changes.changed().await;
 
         let mut replacement = (*block).clone();
-        Arc::make_mut(&mut replacement.header).nonce = [1; 32];
+        Arc::make_mut(&mut replacement.header).nonce = [1; 32].into();
         assert!(matches!(
             state
+                .clone()
                 .oneshot(Request::MiningCandidate(Arc::new(replacement)))
                 .await
                 .unwrap(),
@@ -870,7 +885,9 @@ async fn live_mining_candidate_is_not_replaced() {
             ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == block.hash()
         ));
 
-        drop(guard);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
         changes.changed().await;
         assert!(matches!(
             read_state
@@ -879,9 +896,31 @@ async fn live_mining_candidate_is_not_replaced() {
                 .unwrap(),
             ReadResponse::MiningCandidate(None)
         ));
+        guard
+            .0
+            .changed()
+            .await
+            .expect_err("expiry closes publication without releasing the verifier's slot");
+        assert!(matches!(
+            state
+                .clone()
+                .oneshot(Request::MiningCandidate(block.clone()))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(None)
+        ));
+
+        drop(guard);
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(block))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(Some(_))
+        ));
     })
     .await
-    .expect("live candidate admission and withdrawal must finish before expiry");
+    .expect("candidate expiry must not release the slot before verification finishes");
 }
 
 #[test]

@@ -24,7 +24,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::FuturesUnordered, StreamExt};
-use tokio::sync::{oneshot, watch, Semaphore};
+use tokio::sync::{oneshot, watch, OwnedSemaphorePermit, Semaphore};
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -68,7 +68,7 @@ use crate::{
 pub(crate) type MiningCandidate = (
     block::Hash,
     Arc<crate::GetBlockTemplateChainInfo>,
-    watch::Receiver<()>,
+    watch::Sender<Option<Arc<OwnedSemaphorePermit>>>,
     tokio::time::Instant,
 );
 
@@ -1405,30 +1405,46 @@ impl Service<Request> for StateService {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 };
                 let state = self.read_service.clone();
-                let (guard, mut cancelled) = watch::channel(());
+                // Published work reserves the slot until verification ends, even after expiry.
+                let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
                 let deadline = tokio::time::Instant::now() + self.mining_candidate_lifetime;
                 tokio::spawn(async move {
                     let compute_state = state.clone();
                     let parent = block.header.previous_block_hash;
+                    // Queued or running blocking work keeps its own permit through cancellation
+                    // or timeout.
+                    let compute_permit = cancelled
+                        .borrow()
+                        .as_ref()
+                        .expect("the newly admitted candidate owns its slot")
+                        .clone();
                     let compute = tokio::task::spawn_blocking(move || {
-                        let info = read::difficulty::mining_candidate_chain_info(
+                        let _permit = compute_permit;
+                        read::difficulty::mining_candidate_chain_info(
                             &compute_state.latest_non_finalized_state(),
                             &compute_state.db,
                             &compute_state.network,
                             block,
-                        );
-                        (info, permit)
+                        )
                     });
-                    let (info, _permit) = tokio::select! {
+                    // Drop the guard's permit reference before notifying waiting receivers.
+                    let info = tokio::select! {
                         biased;
-                        _ = cancelled.changed() => return,
-                        _ = tokio::time::sleep_until(deadline) => return,
+                        _ = cancelled.closed() => return,
+                        _ = tokio::time::sleep_until(deadline) => {
+                            cancelled.send_modify(|permit| *permit = None);
+                            return;
+                        },
                         result = compute => match result {
-                            Ok((Some(info), permit)) => (Arc::new(info), permit),
-                            _ => return,
+                            Ok(Some(info)) => Arc::new(info),
+                            _ => {
+                                cancelled.send_modify(|permit| *permit = None);
+                                return;
+                            },
                         },
                     };
-                    if cancelled.has_changed().is_err() || tokio::time::Instant::now() >= deadline {
+                    if cancelled.is_closed() || tokio::time::Instant::now() >= deadline {
+                        cancelled.send_modify(|permit| *permit = None);
                         return;
                     }
                     state.mining_candidate.send_replace(Some((
@@ -1438,7 +1454,7 @@ impl Service<Request> for StateService {
                         deadline,
                     )));
                     tokio::select! {
-                        _ = cancelled.changed() => {}
+                        _ = cancelled.closed() => {}
                         _ = tokio::time::sleep_until(deadline) => {}
                     }
                     state.mining_candidate.send_if_modified(|candidate| {
@@ -1838,7 +1854,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let candidate = state.mining_candidate.borrow().clone();
                 Ok(ReadResponse::MiningCandidate(candidate.and_then(
                     |(parent, info, cancelled, deadline)| {
-                        (cancelled.has_changed().is_ok()
+                        (!cancelled.is_closed()
                             && tokio::time::Instant::now() < deadline
                             && state.best_tip().map(|(_, hash)| hash) == Some(parent))
                         .then_some(info)
