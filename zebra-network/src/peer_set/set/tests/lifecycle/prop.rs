@@ -65,6 +65,65 @@ proptest! {
         })?;
     }
 
+    /// A response retained past stall-triggered removal cannot disconnect a replacement.
+    ///
+    /// The old connection reaches the stall threshold before all of its response
+    /// futures finish reporting, and the remaining outcome arrives after replacement.
+    #[test]
+    fn delayed_response_after_stall_removal_cannot_stall_replacement(
+        request_kind in any::<FindRequestKind>(),
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+            let mut original = test.connect();
+
+            // Complete the response at the peer, but delay polling its classification wrapper.
+            let old_response = test.request()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            original
+                .try_to_receive_outbound_client_request()
+                .request()
+                .ok_or_else(|| TestCaseError::fail("expected an outbound find request"))?
+                .tx
+                .send(Ok(request_kind.empty_response()))
+                .map_err(|_| TestCaseError::fail("the find response receiver was dropped"))?;
+
+            for _ in 0..FIND_RESPONSE_STALL_THRESHOLD {
+                test.stall(&mut original)
+                    .await
+                    .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            }
+            test.poll();
+            prop_assert!(
+                !original.wants_connection_heartbeats(),
+                "reaching the stall threshold must remove the original connection"
+            );
+
+            let mut replacement = test.connect();
+            test.stall_without_disconnecting(&mut replacement, FIND_RESPONSE_STALL_THRESHOLD - 1)
+                .await?;
+            prop_assert!(
+                replacement.wants_connection_heartbeats(),
+                "the replacement must remain connected below its own stall threshold"
+            );
+
+            timeout(Duration::from_secs(5), old_response)
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            test.poll();
+            prop_assert!(
+                replacement.wants_connection_heartbeats(),
+                "a response from the stalled-out connection must not disconnect its replacement"
+            );
+
+            Ok(())
+        })?;
+    }
+
     /// A response future from a removed connection cannot stall its replacement.
     #[test]
     fn delayed_old_response_cannot_stall_replacement(
