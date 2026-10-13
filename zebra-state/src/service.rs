@@ -195,7 +195,7 @@ pub(crate) struct StateService {
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
 
-    /// Bounds uncancellable early-work computations, including ones whose guards were dropped.
+    /// Bounds early-work computations and keeps a live candidate from being replaced.
     mining_candidate_slot: Arc<Semaphore>,
 
     // Metrics
@@ -1170,23 +1170,26 @@ impl Service<Request> for StateService {
                     let compute_state = state.clone();
                     let parent = block.header.previous_block_hash;
                     let compute = tokio::task::spawn_blocking(move || {
-                        let _permit = permit;
-                        read::difficulty::mining_candidate_chain_info(
+                        let info = read::difficulty::mining_candidate_chain_info(
                             &compute_state.latest_non_finalized_state(),
                             &compute_state.db,
                             &compute_state.network,
                             block,
-                        )
+                        );
+                        (info, permit)
                     });
-                    let info = tokio::select! {
+                    let (info, _permit) = tokio::select! {
                         biased;
                         _ = cancelled.changed() => return,
                         _ = tokio::time::sleep_until(deadline) => return,
                         result = compute => match result {
-                            Ok(Some(info)) => Arc::new(info),
+                            Ok((Some(info), permit)) => (Arc::new(info), permit),
                             _ => return,
                         },
                     };
+                    if cancelled.has_changed().is_err() || tokio::time::Instant::now() >= deadline {
+                        return;
+                    }
                     state.mining_candidate.send_replace(Some((
                         parent,
                         info.clone(),
