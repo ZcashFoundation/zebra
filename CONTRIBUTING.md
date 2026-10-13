@@ -62,9 +62,9 @@ This is not personal; it's about managing review capacity. We encourage you to r
 
 Zebra enforces code quality through review. For the full list of architecture rules, code patterns, testing requirements, and security considerations, see [`AGENTS.md`](AGENTS.md). The key points:
 
-- **Build requirements**: `cargo fmt`, `cargo clippy`, and `cargo test` must all pass
+- **Build requirements**: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo nextest run` must all pass. Use [`cargo nextest`](https://nexte.st/), not plain `cargo test`: the test harness needs one process per test, so `cargo test` fails with "a hook has already been installed" even on an unmodified checkout
 - **Architecture**: Dependencies flow downward only; `zebra-chain` is sync-only
 - **Error handling**: Use `thiserror`; `expect()` messages explain why the invariant holds
 - **Async**: CPU-heavy work in `spawn_blocking`; all waits need timeouts
 - **Security**: Bound allocations from untrusted data; validate at system boundaries
-- **Changelog**: Update `CHANGELOG.md` for user-visible changes (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))
+- **Changelog**: Never edit `CHANGELOG.md` by hand. Add a change fragment with `changie new -j <crate> -k <kind> -b "..."` (see [Changelog Guidelines](https://zebra.zfnd.org/dev/changelog-guidelines.html))
