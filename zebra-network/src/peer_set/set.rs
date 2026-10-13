@@ -143,7 +143,11 @@ use crate::{
         InventoryChange, InventoryRegistry,
     },
     protocol::{
-        external::{connection_limit_key, types::PeerServices, InventoryHash},
+        external::{
+            connection_limit_key,
+            types::{PeerServices, Version},
+            InventoryHash,
+        },
         internal::{Request, Response},
     },
     BanList, BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
@@ -386,8 +390,8 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
-    /// Block advert channels for every connected peer, independent of service readiness.
-    block_advert_senders: HashMap<D::Key, tokio_mpsc::Sender<block::Hash>>,
+    /// Block advert channels and remote versions for every connected peer, including busy peers.
+    block_advert_senders: HashMap<D::Key, (Version, tokio_mpsc::Sender<block::Hash>)>,
 
     /// Inbound peer IPs that must always receive block inventory broadcasts.
     block_gossip_peer_ips: HashSet<IpAddr>,
@@ -1008,7 +1012,7 @@ where
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
                     self.block_advert_senders
-                        .insert(key, svc.block_advert_tx.clone());
+                        .insert(key, (svc.remote_version(), svc.block_advert_tx.clone()));
                     self.push_unready(key, svc);
                 }
             }
@@ -2308,9 +2312,11 @@ where
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlockToAll(hash) => {
+                let minimum_version = self.minimum_peer_version.current();
                 let bans = self.bans_receiver.borrow();
-                for (key, sender) in &self.block_advert_senders {
-                    if !bans.is_banned(key.ip()) {
+                for (key, (version, sender)) in &self.block_advert_senders {
+                    // Busy peers are not disconnected on upgrades until their services become ready.
+                    if *version >= minimum_version && !bans.is_banned(key.ip()) {
                         // Drop full-channel adverts: slow peers receive later tip gossip.
                         let _ = sender.try_send(hash);
                     }
