@@ -110,7 +110,7 @@ pub fn init() -> impl Drop {
             .with(ErrorLayer::default())
             .init();
 
-        color_eyre::config::HookBuilder::default()
+        let hook_result = color_eyre::config::HookBuilder::default()
             .add_frame_filter(Box::new(|frames| {
                 let mut displayed = std::collections::HashSet::new();
                 let filters = &[
@@ -150,8 +150,13 @@ pub fn init() -> impl Drop {
                 });
             }))
             .panic_message(SkipTestReturnedErrPanicMessages)
-            .install()
-            .unwrap();
+            .install();
+
+        // Another color-eyre hook might already be installed, for example by a test
+        // harness or by code under test. In that case, keep using the existing hook.
+        if let Err(error) = hook_result {
+            tracing::info!(?error, "color-eyre hook is already installed, keeping it");
+        }
     });
 
     drop_guard
