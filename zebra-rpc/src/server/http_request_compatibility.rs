@@ -10,7 +10,7 @@ use futures::{future, FutureExt};
 use http_body_util::{BodyExt, Limited};
 use hyper::header;
 use jsonrpsee::{
-    core::BoxError,
+    core::{server::BoundedWriter, BoxError},
     server::{HttpBody, HttpRequest, HttpResponse},
 };
 use jsonrpsee_types::ErrorObject;
@@ -128,6 +128,7 @@ impl<S> HttpRequestMiddleware<S> {
     ///
     /// Batches are converted only when all members are legacy request objects with non-null IDs.
     /// Other batches pass through unchanged.
+    /// Converted batches must also fit the request body size limit.
     async fn request_to_json_rpc_2(
         request: HttpRequest<HttpBody>,
         max_request_body_size: usize,
@@ -176,12 +177,9 @@ impl<S> HttpRequestMiddleware<S> {
                 (JsonRpcVersion::Unknown, bytes)
             } else {
                 let requests: Vec<_> = requests.into_iter().map(JsonRpcRequest::into_2).collect();
-                (
-                    version,
-                    serde_json::to_vec(&requests)
-                        .expect("requests contain only JSON values")
-                        .into(),
-                )
+                let mut writer = BoundedWriter::new(max_request_body_size);
+                serde_json::to_writer(&mut writer, &requests)?;
+                (version, writer.into_bytes().into())
             }
         } else {
             (JsonRpcVersion::Unknown, bytes)

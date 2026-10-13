@@ -152,6 +152,25 @@ async fn versionless_batch_returns_legacy_results() {
     );
 }
 
+/// Adding the version field must not let a legacy batch exceed the request size budget.
+#[tokio::test]
+async fn legacy_batch_rewrite_respects_request_body_limit() {
+    let body = r#"[{"method":"echo","params":[],"id":0}]"#;
+    let rewritten = r#"[{"jsonrpc":"2.0","method":"echo","params":[],"id":0}]"#;
+    for limit in [body.len(), rewritten.len() - 1, rewritten.len()] {
+        let request = HttpRequest::builder()
+            .method("POST")
+            .body(HttpBody::from(body.to_owned()))
+            .expect("the request has a valid method and body");
+        let mut middleware = HttpRequestMiddleware::new(MockRpcService, None, limit);
+        assert_eq!(
+            middleware.call(request).await.is_ok(),
+            limit == rewritten.len(),
+            "the normalized batch must fit within {limit} bytes"
+        );
+    }
+}
+
 #[tokio::test]
 async fn two_point_zero_batches_preserve_null_ids() {
     for body in [
