@@ -77,7 +77,7 @@ impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
 /// Up to four authenticated pending submissions, available to inbound peers for 90 seconds.
 #[derive(Clone, Debug)]
 pub struct SubmittedBlockCache {
-    entries: Arc<watch::Sender<VecDeque<(block::Hash, Arc<Block>, Instant)>>>,
+    entries: Arc<watch::Sender<VecDeque<(block::Hash, block::Height, Arc<Block>, Instant)>>>,
     pending: Arc<watch::Sender<Option<(block::Hash, block::Height)>>>,
 }
 
@@ -97,8 +97,8 @@ impl SubmittedBlockCache {
         self.entries
             .borrow()
             .iter()
-            .find(|(key, _, expires)| key == hash && *expires > now)
-            .map(|(_, block, _)| block.clone())
+            .find(|(key, _, _, expires)| key == hash && *expires > now)
+            .map(|(_, _, block, _)| block.clone())
     }
 
     /// Subscribes to pending advertisements, including the current one.
@@ -110,35 +110,35 @@ impl SubmittedBlockCache {
 
     pub(crate) fn insert(&self, hash: block::Hash, height: block::Height, block: Arc<Block>) {
         // ponytail: scan four bodies in the shared snapshot; index only if the bound grows.
-        let inserted = self.entries.send_if_modified(|entries| {
+        self.entries.send_if_modified(|entries| {
             let now = Instant::now();
-            entries.retain(|(_, _, expires)| *expires > now);
-            if entries.iter().any(|(key, _, _)| *key == hash) {
+            entries.retain(|(_, _, _, expires)| *expires > now);
+            if entries.iter().any(|(key, _, _, _)| *key == hash) {
                 return false;
             }
             if entries.len() == 4 {
                 entries.pop_front();
             }
-            entries.push_back((hash, block, now + Duration::from_secs(90)));
+            entries.push_back((hash, height, block, now + Duration::from_secs(90)));
+            // Publish under the entries lock so concurrent removals cannot leave a stale advert.
+            self.pending.send_replace(Some((hash, height)));
             true
         });
-        if inserted {
-            self.pending.send_replace(Some((hash, height)));
-        }
     }
 
     /// Withdraws a definitively rejected body, without coupling its lifetime to any RPC caller.
     pub(crate) fn remove(&self, hash: block::Hash) {
         self.entries.send_modify(|entries| {
-            entries.retain(|(key, _, _)| *key != hash);
-        });
-        self.pending.send_if_modified(|pending| {
-            if pending.is_some_and(|(key, _)| key == hash) {
-                *pending = None;
-                true
-            } else {
-                false
-            }
+            let now = Instant::now();
+            entries.retain(|(key, _, _, expires)| *key != hash && *expires > now);
+            self.pending.send_if_modified(|pending| {
+                if pending.is_some_and(|(key, _)| key == hash) {
+                    *pending = entries.back().map(|(key, height, _, _)| (*key, *height));
+                    true
+                } else {
+                    false
+                }
+            });
         });
     }
 }
