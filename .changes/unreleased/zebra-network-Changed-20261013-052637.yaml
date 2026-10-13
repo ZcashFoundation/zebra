@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: 'Also forward singleton block inventories to inbound gossip handling when they complete block-discovery requests ([#11709](https://github.com/ZcashFoundation/zebra/issues/11709)).'
+time: 2026-10-13T05:26:37Z

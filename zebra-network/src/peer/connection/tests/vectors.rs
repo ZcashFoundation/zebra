@@ -24,7 +24,7 @@ use tower::load_shed::error::Overloaded;
 use tracing::Span;
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
     serialization::{SerializationError, ZcashDeserializeInto},
     transaction::UnminedTx,
 };
@@ -363,6 +363,118 @@ async fn connection_run_loop_message_ok() {
     connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
+}
+
+/// Singleton block inventories complete FindBlocks and also reach the inbound downloader.
+#[tokio::test]
+async fn connection_find_blocks_singleton_inv_is_also_advertised() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        _shared_error_slot,
+    ) = new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let (request_tx, request_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            },
+            tx: request_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .expect("internal request channel is valid");
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::GetBlocks {
+            known_blocks: vec![],
+            stop: None,
+        }),
+    );
+
+    let hash = block::Hash([1; 32]);
+    peer_tx
+        .try_send(Ok(Message::Inv(vec![hash.into()])))
+        .expect("peer inbound response channel is valid");
+
+    inbound_service
+        .expect_request(Request::AdvertiseBlock(hash, None))
+        .await
+        .respond(Response::Nil);
+    assert_eq!(
+        request_rx
+            .await
+            .expect("peer internal response channel is valid")
+            .expect("singleton inventory completes FindBlocks"),
+        Response::BlockHashes(vec![hash]),
+    );
+
+    connection.abort();
+}
+
+/// Multi-block inventories complete FindBlocks without being advertised to inbound.
+#[tokio::test]
+async fn connection_find_blocks_multi_inv_is_not_advertised() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        _shared_error_slot,
+    ) = new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let (request_tx, request_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: vec![],
+                stop: None,
+            },
+            tx: request_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .expect("internal request channel is valid");
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::GetBlocks {
+            known_blocks: vec![],
+            stop: None,
+        }),
+    );
+
+    let hashes = vec![block::Hash([1; 32]), block::Hash([2; 32])];
+    peer_tx
+        .try_send(Ok(Message::Inv(
+            hashes.iter().copied().map(Into::into).collect(),
+        )))
+        .expect("peer inbound response channel is valid");
+    assert_eq!(
+        request_rx
+            .await
+            .expect("peer internal response channel is valid")
+            .expect("multi-block inventory completes FindBlocks"),
+        Response::BlockHashes(hashes),
+    );
+    inbound_service.expect_no_requests().await;
+
+    connection.abort();
 }
 
 /// Test that the connection run loop fails correctly when dropped
