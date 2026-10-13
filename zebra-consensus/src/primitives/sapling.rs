@@ -102,7 +102,14 @@ impl CachedItem for Item {
     }
 }
 
-impl RequestWeight for Item {}
+impl RequestWeight for Item {
+    fn request_weight(&self) -> usize {
+        self.bundle
+            .shielded_spends()
+            .len()
+            .saturating_add(self.bundle.shielded_outputs().len())
+    }
+}
 
 /// A service that verifies Sapling shielded data in batches.
 ///
