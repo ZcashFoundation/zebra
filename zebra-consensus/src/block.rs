@@ -14,6 +14,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Instant,
 };
 
 use chrono::Utc;
@@ -376,7 +377,7 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
-        let received_time = std::time::Instant::now();
+        let received_time = Instant::now();
 
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
@@ -389,6 +390,7 @@ where
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());
 
         async move {
+            let phase_start = Instant::now();
             let hash = block.hash();
             // Check that this block is actually a new block.
             tracing::trace!("checking that block is not already in state");
@@ -482,6 +484,14 @@ where
             };
 
             if let Some(cached) = cached {
+                // Cache hits skip transaction verification, so record their checks and commit
+                // under the same phases as other blocks.
+                metrics::histogram!(
+                    "zebra.consensus.block.phase.duration_seconds",
+                    "phase" => "block_checks"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
+                let phase_start = Instant::now();
                 let mut contextual = (*cached).clone();
                 contextual.rebind(block, received_time);
                 let commit = match request {
@@ -493,7 +503,13 @@ where
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
                 };
-                return match state_service.oneshot(commit).await {
+                let result = state_service.oneshot(commit).await;
+                metrics::histogram!(
+                    "zebra.consensus.block.phase.duration_seconds",
+                    "phase" => "state_commit"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
+                return match result {
                     Ok(zs::Response::Committed(committed_hash)) => {
                         assert_eq!(committed_hash, hash, "state must commit correct hash");
                         Ok(hash)
@@ -540,6 +556,15 @@ where
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
+
+            if !request.is_proposal() {
+                metrics::histogram!(
+                    "zebra.consensus.block.phase.duration_seconds",
+                    "phase" => "block_checks"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
+            }
+            let phase_start = Instant::now();
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
@@ -600,6 +625,14 @@ where
             }
             if let Some(error) = transaction_error {
                 return Err(VerifyBlockError::Transaction(error.into()));
+            }
+
+            if !request.is_proposal() {
+                metrics::histogram!(
+                    "zebra.consensus.block.phase.duration_seconds",
+                    "phase" => "transaction_verification"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
             }
 
             // Check the summed block totals
@@ -678,13 +711,20 @@ where
                 Request::CheckProposal(_) => unreachable!("proposals return after validation"),
             };
 
-            match state_service
+            let phase_start = Instant::now();
+            let result = state_service
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::StateService { source, hash })?
                 .call(commit)
-                .await
-            {
+                .await;
+            metrics::histogram!(
+                "zebra.consensus.block.phase.duration_seconds",
+                "phase" => "state_commit"
+            )
+            .record(phase_start.elapsed().as_secs_f64());
+
+            match result {
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
