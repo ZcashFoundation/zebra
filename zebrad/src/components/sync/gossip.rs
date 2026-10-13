@@ -46,8 +46,8 @@ pub enum BlockGossipError {
 /// In particular, if a lot of blocks are committed at the same time,
 /// gossips will be disabled or skipped until the state reaches the latest tip.
 ///
-/// Pending submissions bypass the tip delay and reach all peers. They never replace a pending
-/// committed mined-block advertisement, and committing still advertises the block independently.
+/// Pending submissions bypass the tip delay using ordinary gossip fanout. Only committed mined
+/// blocks use all-peer delivery, so early adverts cannot replace their deferred advertisements.
 ///
 /// [`block::Hash`]: zebra_chain::block::Hash
 pub async fn gossip_best_tip_block_hashes<ZN>(
@@ -202,9 +202,7 @@ where
 
             // block broadcasts inform other nodes about new blocks,
             // so our internal Grow or Reset state doesn't matter to them
-            let request = if is_block_submission {
-                // ponytail: early adverts can replace committed inventory deferred for busy peers;
-                // use a priority-aware deferred slot in the peer set if this ceiling matters.
+            let request = if is_block_submission && !is_early {
                 zn::Request::AdvertiseBlockToAll(hash)
             } else {
                 zn::Request::AdvertiseBlock(hash, None)
