@@ -919,13 +919,20 @@ where
 
         debug!(?self.prospective_tips);
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
+        // State can advance during fanout. Compact unknown hashes in place, preserving download
+        // order.
+        let mut retained = 0;
+        for index in 0..download_set.len() {
+            let hash = download_set[index];
             debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+            if !self.state_contains(hash).await? {
+                if retained != index {
+                    download_set.swap_indices(retained, index);
+                }
+                retained += 1;
             }
         }
+        download_set.truncate(retained);
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
