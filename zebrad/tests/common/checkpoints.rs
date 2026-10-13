@@ -14,10 +14,9 @@ use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
 use zebra_chain::{
-    block::{Height, HeightDiff, TryIntoHeight},
-    parameters::{constants::MAX_BLOCK_REORG_HEIGHT, Network},
+    block::{Height, TryIntoHeight},
+    parameters::Network,
 };
-use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::{
@@ -46,18 +45,6 @@ use super::{
 ///
 /// We use a constant so the compiler detects typos.
 pub const LOG_ZEBRAD_CHECKPOINTS: &str = "LOG_ZEBRAD_CHECKPOINTS";
-
-/// The gap that `zebra-checkpoints` leaves between the network chain tip and the last checkpoint
-/// it generates.
-///
-/// `zebra-checkpoints` ignores the blocks in Zebra's rollback window (`MAX_BLOCK_REORG_HEIGHT`),
-/// then needs a full `MAX_CHECKPOINT_HEIGHT_GAP` of settled blocks before it prints a checkpoint.
-/// So it only generates a checkpoint if the tip is more than this many blocks above the last
-/// compiled-in checkpoint.
-fn min_checkpoint_generation_gap() -> HeightDiff {
-    HeightDiff::from(MAX_BLOCK_REORG_HEIGHT)
-        + HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff")
-}
 
 /// The test entry point.
 #[allow(clippy::print_stdout)]
@@ -158,35 +145,6 @@ pub async fn run(network: Network) -> Result<()> {
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
     let zebra_tip_height = zebrad_tip_height(zebra_rpc_address).await?;
-
-    // Skip the test if the chain tip is too close to the last compiled-in checkpoint.
-    //
-    // `zebra-checkpoints` only considers blocks below `tip - MAX_BLOCK_REORG_HEIGHT`, and the
-    // highest block it can turn into a checkpoint is one below that limit. So it exits without
-    // printing anything, which is correct, but leaves this test with no output to check.
-    //
-    // This happens for about a day after each checkpoint list update, until the network produces
-    // enough new blocks.
-    let last_checkpoint_height = last_checkpoint
-        .try_into_height()
-        .expect("zebrad logs its last checkpoint as a height");
-    let new_blocks = zebra_tip_height - last_checkpoint_height;
-    let min_new_blocks = min_checkpoint_generation_gap();
-
-    if new_blocks <= min_new_blocks {
-        tracing::info!(
-            ?network,
-            ?zebra_tip_height,
-            ?last_checkpoint_height,
-            ?new_blocks,
-            ?min_new_blocks,
-            "skipping zebra_checkpoints test: there are not enough new blocks for \
-             zebra-checkpoints to generate a checkpoint yet",
-        );
-
-        return Ok(());
-    }
-
     tracing::info!(
         ?network,
         ?zebra_rpc_address,
@@ -221,7 +179,6 @@ pub async fn run(network: Network) -> Result<()> {
     let (_zebra_checkpoints, _zebrad) = wait_for_zebra_checkpoints_generation(
         zebra_checkpoints,
         zebrad,
-        zebra_tip_height,
         test_type,
         show_zebrad_logs,
     )?;
@@ -436,14 +393,9 @@ pub fn wait_for_zebra_checkpoints_generation<
 >(
     mut zebra_checkpoints: TestChild<TempDir>,
     mut zebrad: TestChild<P>,
-    zebra_tip_height: Height,
     test_type: TestType,
     show_zebrad_logs: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let last_checkpoint_gap = min_checkpoint_generation_gap();
-    let expected_final_checkpoint_height =
-        (zebra_tip_height - last_checkpoint_gap).expect("network tip is high enough");
-
     let is_zebra_checkpoints_finished = AtomicBool::new(false);
     let is_zebra_checkpoints_finished = &is_zebra_checkpoints_finished;
 
@@ -483,23 +435,15 @@ pub fn wait_for_zebra_checkpoints_generation<
             "waiting for zebra_checkpoints to generate checkpoints...",
         );
 
-        // zebra-checkpoints does not log anything when it finishes, it just prints checkpoints.
-        // It skips Zebra's rollback window, and the last checkpoint can be up to
-        // MAX_CHECKPOINT_HEIGHT_GAP below that boundary.
-        //
-        // We know that checkpoints are always less than 1000 blocks apart, but they can happen
-        // anywhere in that range due to block sizes. So we ignore the last 3 digits of the height.
-        let expected_final_checkpoint_prefix1 = expected_final_checkpoint_height.0 / 1000;
-        // To ensure it also works on corner cases, we also consider the next possible checkpoint.
-        let expected_final_checkpoint_prefix2 = expected_final_checkpoint_prefix1 + 1;
-
-        // Mainnet and testnet checkpoints always have at least one leading zero in their hash.
-        let expected_final_checkpoint =
-            format!("({expected_final_checkpoint_prefix1}[0-9][0-9][0-9]|{expected_final_checkpoint_prefix2}[0-9][0-9][0-9]) 0");
-        zebra_checkpoints_mut.expect_stdout_line_matches(&expected_final_checkpoint)?;
-
-        // Write the rest of the checkpoints: there can be 0-2 more checkpoints.
+        // Read all the checkpoints before the status line, so a long checkpoint list can't fill
+        // the stdout pipe and block zebra-checkpoints before it logs its status.
         while zebra_checkpoints_mut.wait_for_stdout_line(None) {}
+
+        // zebra-checkpoints logs one of these lines after it prints all its checkpoints.
+        // There are no new checkpoints for about a day after each checkpoint list update.
+        zebra_checkpoints_mut.expect_stderr_line_matches(
+            "zebra-checkpoints (found no new checkpoints|generated [0-9]+ checkpoints)",
+        )?;
 
         // Tell the other thread that `zebra_checkpoints` has finished
         is_zebra_checkpoints_finished.store(true, Ordering::SeqCst);
