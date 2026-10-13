@@ -69,6 +69,20 @@ impl PartialEq for MiningCandidateChanges {
 impl Eq for MiningCandidateChanges {}
 
 impl MiningCandidateChanges {
+    /// Returns whether `hash` is still published, unexpired, and owned by a live verifier.
+    ///
+    /// Check after selecting cached work: a detached chain-info response can outlive its guard.
+    pub fn is_current(&self, hash: block::Hash) -> bool {
+        self.0
+            .borrow()
+            .as_ref()
+            .is_some_and(|(_, info, cancelled, deadline)| {
+                info.tip_hash == hash
+                    && cancelled.has_changed().is_ok()
+                    && tokio::time::Instant::now() < *deadline
+            })
+    }
+
     /// Marks earlier notifications as observed before reading the current candidate.
     pub fn mark_seen(&mut self) {
         self.0.borrow_and_update();
