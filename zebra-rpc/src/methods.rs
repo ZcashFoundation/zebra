@@ -939,6 +939,14 @@ where
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
+
+    /// One-shot construction-entry clock change; zero means no pending change.
+    #[cfg(test)]
+    template_build_time: Option<Arc<std::sync::atomic::AtomicU32>>,
+
+    /// Records which thread performs real template construction in executor-isolation tests.
+    #[cfg(test)]
+    template_build_thread: Option<Arc<std::sync::OnceLock<std::thread::ThreadId>>>,
 }
 
 /// A type alias for the last event logged by the server.
@@ -1038,6 +1046,10 @@ where
             gbt,
             #[cfg(test)]
             template_clock: None,
+            #[cfg(test)]
+            template_build_time: None,
+            #[cfg(test)]
+            template_build_thread: None,
         };
 
         // run the process queue
@@ -1058,6 +1070,53 @@ where
         }
 
         DateTime32::now()
+    }
+
+    /// Builds off the async executor, retaining fallback ownership even if its caller cancels.
+    async fn build_block_template(
+        &self,
+        miner_params: &MinerParams,
+        chain_info: zebra_state::GetBlockTemplateChainInfo,
+        server_long_poll_id: LongPollId,
+        mempool_txs: Vec<transaction::VerifiedUnminedTx>,
+        mempool_tx_deps: mempool::TransactionDependencies,
+        build_guard: tokio::sync::OwnedMutexGuard<()>,
+    ) -> Result<(BlockTemplateResponse, tokio::sync::OwnedMutexGuard<()>)> {
+        let network = self.network.clone();
+        let miner_params = miner_params.clone();
+        let coinbase_cache = self.gbt.coinbase_cache();
+        #[cfg(test)]
+        let (clock, build_time, build_thread) = (
+            self.template_clock.clone(),
+            self.template_build_time.clone(),
+            self.template_build_thread.clone(),
+        );
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            {
+                if let Some(thread) = build_thread {
+                    let _ = thread.set(std::thread::current().id());
+                }
+                if let (Some(clock), Some(build_time)) = (clock, build_time) {
+                    let timestamp = build_time.swap(0, std::sync::atomic::Ordering::SeqCst);
+                    if timestamp != 0 {
+                        clock.store(timestamp, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+            BlockTemplateResponse::from_mempool(
+                &network,
+                &coinbase_cache,
+                &miner_params,
+                &chain_info,
+                server_long_poll_id,
+                mempool_txs,
+                mempool_tx_deps,
+            )
+            .map(|template| (template, build_guard))
+        })
+        .await
+        .map_misc_error()?
     }
 
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
@@ -1103,25 +1162,20 @@ where
     ///
     /// # Correctness
     ///
-    /// Long polling must not fall through to the synchronous path below while this cache is
-    /// serving. That path derives its own long poll ID from a fresh state and mempool read, so
-    /// with two independent ID sources neither side ever matches the other: the client alternates
-    /// between a cached template and a freshly built one, each call returning immediately, and it
-    /// never waits. Its work is cancelled on every response, so it mines nothing.
-    ///
-    /// Returns `None` if there is no updater task, if it hasn't caught up with a recent chain tip
-    /// change, or if the chain tip channel closed.
+    /// Long polling must not alternate between cached work and independently generated fallback
+    /// identities. While an updater is alive it owns initialization and refreshes; requests wait
+    /// for its publications rather than starting competing builds after a cache timeout.
     async fn precomputed_block_template(
         &self,
         client_long_poll_id: Option<LongPollId>,
         long_poll_started: DateTime32,
-    ) -> Option<BlockTemplateResponse> {
-        let cache = self.gbt.template_cache()?;
+    ) -> Result<Option<BlockTemplateResponse>> {
+        let Some(cache) = self.gbt.template_cache() else {
+            return Ok(None);
+        };
 
-        // Skip the tip read when there's nothing to serve: without an updater task, every request
-        // builds its own template anyway.
-        if cache.is_empty() {
-            return None;
+        if cache.is_empty() && !cache.updater_is_running() {
+            return cache.build_error().map_or(Ok(None), Err);
         }
 
         // Subscribe before the first read below. A template published between reading the cache
@@ -1138,7 +1192,28 @@ where
         tip_change.mark_best_tip_seen();
 
         loop {
-            let template = self.precomputed_template_for_state_tip(cache).await?;
+            let refresh_at = cache.fallback_refresh_at();
+            if refresh_at.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                return Ok(None);
+            }
+            types::get_block_template::check_synced_to_tip(
+                &self.network,
+                self.latest_chain_tip.clone(),
+                self.gbt.sync_status(),
+            )?;
+            let Some(template) = self.precomputed_template_for_state_tip(cache).await else {
+                if let Some(error) = cache.build_error() {
+                    return Err(error);
+                }
+                if cache.updater_is_running() {
+                    tokio::select! {
+                        () = template_changes.changed() => {}
+                        _ = tokio::time::sleep(precompute::RETRY_DELAY) => {}
+                    }
+                    continue;
+                }
+                return Ok(None);
+            };
 
             let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
             let now = self.template_clock_now();
@@ -1151,7 +1226,7 @@ where
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
 
-                return Some(template);
+                return Ok(Some(template));
             }
 
             // The client is long polling on exactly this template, so wait for a reason to send
@@ -1171,10 +1246,19 @@ where
 
                 tip_changed = tip_change.best_tip_changed() => {
                     // A closed chain tip channel means Zebra is shutting down.
-                    tip_changed.ok()?;
+                    if tip_changed.is_err() {
+                        return Ok(None);
+                    }
                 }
 
                 () = template_changes.changed() => {}
+
+                () = async {
+                    match refresh_at {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                } => return Ok(None),
 
                 // Recheck wall time after waking: the monotonic timer cannot detect clock changes.
                 () = wait_for_max_time, if long_poll_started <= max_time => {}
@@ -1194,12 +1278,18 @@ where
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
 
-        // Falling back to an on-demand build costs a shielded coinbase proof per request, so a
-        // shielded miner address waits longer for the updater than a transparent one.
+        // This bounds each cache/state wait. A live updater keeps ownership across timeouts;
+        // if it has stopped, requests may use the serialized fallback instead.
         let timeout = precompute::new_tip_timeout(self.gbt.miner_params()?);
 
         tokio::time::timeout(timeout, async move {
             loop {
+                types::get_block_template::check_synced_to_tip(
+                    &self.network,
+                    self.latest_chain_tip.clone(),
+                    self.gbt.sync_status(),
+                )
+                .ok()?;
                 // The state publishes committed blocks before updating `latest_chain_tip`.
                 // Read its tip on every cache publication, including after a wait, so neither
                 // a lagging tip channel nor a tip snapshot from before the wait admits stale work.
@@ -1216,6 +1306,12 @@ where
                 if let Some(template) =
                     cache.template_for_tip(tip_hash, &self.network, self.template_clock_now())
                 {
+                    types::get_block_template::check_synced_to_tip(
+                        &self.network,
+                        self.latest_chain_tip.clone(),
+                        self.gbt.sync_status(),
+                    )
+                    .ok()?;
                     return Some(template);
                 }
 
@@ -2730,8 +2826,7 @@ where
 
         use types::get_block_template::{
             check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
-            nsm_value_balance_for_next_block, validate_block_proposal,
-            zip317::select_mempool_transactions,
+            validate_block_proposal,
         };
 
         // Clone Services
@@ -2764,6 +2859,11 @@ where
             .gbt
             .miner_params()
             .ok_or_error(0, "miner parameters are required for get_block_template")?;
+        let coinbase_cache = self.gbt.coinbase_cache();
+        let mut template_changes = self
+            .gbt
+            .template_cache()
+            .map(precompute::TemplateCache::subscribe);
 
         // - Precomputed template
         //
@@ -2773,20 +2873,38 @@ where
 
         if let Some(template) = self
             .precomputed_block_template(client_long_poll_id, long_poll_started)
-            .await
+            .await?
         {
             return Ok(template.into());
         }
 
-        // - Checks and fetches that can change during long polling
-        //
-        // The loop returns the server long poll ID, which should be different to the client one.
-        let (server_long_poll_id, chain_info, mempool_txs, mempool_tx_deps, submit_old) = loop {
+        // A fallback is only needed without a live updater. Its lock covers the snapshot,
+        // blocking construction and publication, so concurrent requests reuse the first result.
+        loop {
             // Check if we are synced to the tip.
             // The result of this check can change during long polling.
             //
             // Optional TODO:
             // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
+            check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
+            let build_guard = coinbase_cache.build.clone().lock_owned().await;
+            if self
+                .gbt
+                .template_cache()
+                .is_some_and(precompute::TemplateCache::updater_is_running)
+                || template_changes
+                    .as_mut()
+                    .is_some_and(precompute::TemplateChanges::take_changed)
+            {
+                drop(build_guard);
+                if let Some(template) = self
+                    .precomputed_block_template(client_long_poll_id, long_poll_started)
+                    .await?
+                {
+                    return Ok(template.into());
+                }
+                continue;
+            }
             check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
             // TODO: return an error if we have no peers, like `zcashd` does,
             //       and add a developer config that mines regardless of how many peers we have.
@@ -2829,6 +2947,11 @@ where
                     // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
                     .or_else(|| client_long_poll_id.is_none().then(Default::default))
             else {
+                drop(build_guard);
+                tokio::select! {
+                    _ = tokio::time::sleep(precompute::RETRY_DELAY) => {}
+                    _ = latest_chain_tip.best_tip_changed() => {}
+                }
                 continue;
             };
 
@@ -2853,19 +2976,49 @@ where
             // - the server long poll ID is different to the client long poll ID, or
             // - the timestamp range expired during this request.
             if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
-                // Expired work cannot be retained, even when only the mempool changed the ID.
-                let submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
-                    now <= max_time && server_long_poll_id.submit_old(old_long_poll_id)
+                let (mut template, _build_guard) = self
+                    .build_block_template(
+                        miner_params,
+                        chain_info,
+                        server_long_poll_id,
+                        mempool_txs,
+                        mempool_tx_deps,
+                        build_guard,
+                    )
+                    .await?;
+                let ReadResponse::Tip(Some((_, committed_tip))) = read_state
+                    .clone()
+                    .oneshot(ReadRequest::Tip)
+                    .await
+                    .map_misc_error()?
+                else {
+                    return Err(ErrorObject::owned(
+                        0,
+                        "no committed chain tip available",
+                        None::<()>,
+                    ));
+                };
+                if template.previous_block_hash != committed_tip {
+                    continue;
+                }
+                check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
+                let now = self.template_clock_now();
+                if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
+                    return Err(ErrorObject::owned(
+                        server::error::LegacyCode::Misc.into(),
+                        "local clock moved backwards while building the block template",
+                        None::<()>,
+                    ));
+                }
+                template.submit_old = client_long_poll_id.as_ref().map(|old_id| {
+                    now <= template.max_time && template.long_poll_id.submit_old(old_id)
                 });
-
-                break (
-                    server_long_poll_id,
-                    chain_info,
-                    mempool_txs,
-                    mempool_tx_deps,
-                    submit_old,
-                );
+                if let Some(cache) = self.gbt.template_cache() {
+                    cache.publish(template.clone());
+                }
+                return Ok(template.into());
             }
+            drop(build_guard);
 
             // - Polling wait conditions
             //
@@ -2918,7 +3071,23 @@ where
                     // around to build a template for the new tip from the state and the mempool.
                     if let Some(template) = self
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
-                        .await
+                        .await?
+                    {
+                        return Ok(template.into());
+                    }
+                }
+
+                // A request can age out of an unowned cache while still long polling. A later
+                // shared publication must wake it even without a tip change or mempool tick.
+                () = async {
+                    match template_changes.as_mut() {
+                        Some(changes) => changes.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(template) = self
+                        .precomputed_block_template(client_long_poll_id, long_poll_started)
+                        .await?
                     {
                         return Ok(template.into());
                     }
@@ -2939,66 +3108,7 @@ where
                     // Recheck wall time in the next iteration in case the clock moved backwards.
                 }
             }
-        };
-
-        // - Processing fetched data to create a transaction template
-        //
-        // Apart from random weighted transaction selection,
-        // the template only depends on the previously fetched data.
-        // This processing never fails.
-
-        tracing::debug!(
-            mempool_tx_hashes = ?mempool_txs
-                .iter()
-                .map(|tx| tx.transaction.id.mined_id())
-                .collect::<Vec<_>>(),
-            "selecting transactions for the template from the mempool"
-        );
-
-        let height = chain_info.tip_height.next().map_misc_error()?;
-
-        // Randomly select some mempool transactions.
-        let coinbase_cache = self.gbt.coinbase_cache();
-        let parent_nsm_value_balance = nsm_value_balance_for_next_block(&self.network, &chain_info);
-
-        let mempool_txs = select_mempool_transactions(
-            &self.network,
-            height,
-            miner_params,
-            mempool_txs,
-            mempool_tx_deps,
-            Some(&coinbase_cache),
-            parent_nsm_value_balance,
-        );
-
-        tracing::debug!(
-            selected_mempool_tx_hashes = ?mempool_txs
-                .iter()
-                .map(|#[cfg(not(test))] tx, #[cfg(test)] (_, tx)| tx.transaction.id.mined_id())
-                .collect::<Vec<_>>(),
-            "selected transactions for the template from the mempool"
-        );
-
-        // Build from the fetched snapshot, then recheck the local-clock bound before serving.
-
-        let template = BlockTemplateResponse::new_internal(
-            &self.network,
-            &coinbase_cache,
-            miner_params,
-            &chain_info,
-            server_long_poll_id,
-            mempool_txs,
-            submit_old,
-        );
-
-        // Coinbase construction can take seconds. Recheck the whole advertised range after it,
-        // just as the cache does, rather than returning timestamps invalidated by clock rollback.
-        (template.max_time
-            <= self
-                .template_clock_now()
-                .saturating_add(Duration32::from_hours(2)))
-        .then(|| template.into())
-        .ok_or_misc_error("local clock moved backwards while building the block template")
+        }
     }
 
     async fn submit_block(

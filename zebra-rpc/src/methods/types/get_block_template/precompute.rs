@@ -10,9 +10,16 @@
 //! ignores a template whose previous block hash isn't the current tip, and [`run()`] publishes a
 //! coinbase-only template for a new tip as soon as it sees one.
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, AtomicU8, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use jsonrpsee::core::RpcResult;
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
@@ -41,29 +48,16 @@ use crate::{
 
 use super::{
     check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, nsm_value_balance_for_next_block,
-    zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
+    fetch_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// How long `getblocktemplate` waits for [`run()`] to publish a template for the current chain
-/// tip, before building a template itself.
-///
-/// [`run()`] publishes a coinbase-only template as soon as it sees a tip change, so this timeout
-/// only expires if that task is busy building a template, or isn't running at all.
+/// Maximum duration of one cache/state wait before rechecking synchronization and updater ownership.
 pub(crate) const NEW_TIP_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// The same wait, for a miner address with a shielded component.
-///
-/// Building a template for a shielded address runs a coinbase proof, which takes seconds. So
-/// giving up on the updater is the expensive option, not the cheap one: every waiting request
-/// starts a proof of its own, alongside the one the updater is already running, which is the
-/// per-request proving this cache exists to avoid.
-///
-/// Wait long enough to cover a proof and the rest of the build, but not forever, so a wedged
-/// updater still can't stall `getblocktemplate` indefinitely.
+/// The same bounded cache wait for a miner address with a shielded component.
 pub(crate) const SHIELDED_NEW_TIP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long `getblocktemplate` waits for [`run()`] to publish a template for the current chain
@@ -78,25 +72,51 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
 
 /// How long [`run()`] waits before retrying, when Zebra isn't synced to the chain tip, or the state
 /// and the mempool disagree about the tip.
-const RETRY_DELAY: Duration = Duration::from_secs(1);
+pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// Bounds state/mempool snapshot reads, without cancelling a started coinbase proof.
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Minimum pause after event-driven builds, so idle arrivals start immediately and bursts
 /// coalesce without extending the window. Slow builds wait at least their own duration.
 pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_millis(100);
 
+/// Reading inputs owns no proof or mutex permit.
+const BUILD_FETCHING: u8 = 0;
+/// An unpolled mutex waiter can reserve the next permit, so it cannot be retained across replacement.
+const BUILD_WAITING_FOR_PERMIT: u8 = 1;
+/// Blocking work owns its permit independently and must be allowed to finish.
+const BUILD_STARTED: u8 = 2;
+
 /// A block template for the block after the current chain tip, shared between [`run()`] and the
 /// `getblocktemplate` RPC.
 #[derive(Clone)]
-pub(crate) struct TemplateCache(Arc<watch::Sender<Option<Arc<BlockTemplateResponse>>>>);
+pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<AtomicBool>);
+
+struct TemplateState {
+    template: Option<Arc<BlockTemplateResponse>>,
+    published_at: Instant,
+    error: Option<ErrorObjectOwned>,
+}
 
 impl Default for TemplateCache {
     fn default() -> Self {
-        Self(Arc::new(watch::Sender::new(None)))
+        Self(Arc::new(watch::Sender::new(None)), Arc::default())
+    }
+}
+
+/// Releases updater ownership and wakes requests if the updater stops or is cancelled.
+struct UpdaterGuard(TemplateCache);
+
+impl Drop for UpdaterGuard {
+    fn drop(&mut self) {
+        self.0 .1.store(false, Ordering::Release);
+        self.0 .0.send_modify(|_| {});
     }
 }
 
 /// A subscription to the templates [`run()`] publishes.
-pub(crate) struct TemplateChanges(watch::Receiver<Option<Arc<BlockTemplateResponse>>>);
+pub(crate) struct TemplateChanges(watch::Receiver<Option<TemplateState>>);
 
 impl TemplateChanges {
     /// Waits for a template published since this subscription was created, or since the last wait
@@ -111,20 +131,76 @@ impl TemplateChanges {
             std::future::pending::<()>().await
         }
     }
+
+    /// Consumes publications observed while waiting for another fallback build.
+    pub(crate) fn take_changed(&mut self) -> bool {
+        if self.0.has_changed().unwrap_or(false) {
+            self.0.borrow_and_update();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl TemplateCache {
+    /// Whether the updater, rather than an individual request, owns template construction.
+    pub(crate) fn updater_is_running(&self) -> bool {
+        self.1.load(Ordering::Acquire)
+    }
+
+    fn claim_updater(&self) -> Option<UpdaterGuard> {
+        self.1
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| UpdaterGuard(self.clone()))
+    }
+
     /// Returns `true` if the precomputed template extends `tip_hash`.
     fn holds_tip(&self, tip_hash: block::Hash) -> bool {
         self.0
             .borrow()
             .as_ref()
+            .and_then(|state| state.template.as_ref())
             .is_some_and(|template| template.previous_block_hash == tip_hash)
     }
 
     /// Returns `true` if no [`run()`] task has published a template yet.
     pub(crate) fn is_empty(&self) -> bool {
         self.0.borrow().is_none()
+    }
+
+    /// Unowned work must be refreshed at the normal mempool polling interval.
+    pub(crate) fn fallback_refresh_at(&self) -> Option<Instant> {
+        if self.updater_is_running() {
+            return None;
+        }
+        self.0
+            .borrow()
+            .as_ref()
+            .map(|state| state.published_at + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL))
+    }
+
+    /// Reports a live updater's failed build only when the caller could not select usable work.
+    pub(crate) fn build_error(&self) -> Option<ErrorObjectOwned> {
+        if !self.updater_is_running() {
+            return None;
+        }
+        self.0
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.error.clone())
+    }
+
+    fn record_error(&self, error: ErrorObjectOwned) {
+        self.0.send_modify(|state| {
+            let state = state.get_or_insert_with(|| TemplateState {
+                template: None,
+                published_at: Instant::now(),
+                error: None,
+            });
+            state.error = Some(error);
+        });
     }
 
     /// Subscribes to the templates [`run()`] publishes from now on.
@@ -139,7 +215,11 @@ impl TemplateCache {
 
     /// Publishes `template` as the precomputed template.
     pub(crate) fn publish(&self, template: BlockTemplateResponse) {
-        self.0.send_replace(Some(Arc::new(template)));
+        self.0.send_replace(Some(TemplateState {
+            template: Some(Arc::new(template)),
+            published_at: Instant::now(),
+            error: None,
+        }));
     }
 
     /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
@@ -151,7 +231,7 @@ impl TemplateCache {
         now: DateTime32,
     ) -> Option<Arc<BlockTemplateResponse>> {
         let cached = self.0.borrow();
-        let template = cached.as_ref()?;
+        let template = cached.as_ref()?.template.as_ref()?;
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.
         if template.previous_block_hash != tip_hash {
@@ -214,6 +294,10 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    let Some(_updater) = cache.claim_updater() else {
+        return;
+    };
+
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
     let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
@@ -256,6 +340,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                     &coinbase_cache,
                     read_state.clone(),
                     None::<Mempool>,
+                    None,
                 )
                 .await
                 {
@@ -264,6 +349,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                     // sync with the state.
                     Ok(None) => {}
                     Err(error) => {
+                        cache.record_error(error.clone());
                         tracing::debug!(?error, "failed to build a template for the new tip")
                     }
                 }
@@ -271,17 +357,27 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
         }
 
         let build_started = Instant::now();
-        // Await the full build even if the tip changes: dropping it would detach its
-        // `spawn_blocking` proof, letting repeated tip changes accumulate CPU-heavy work.
-        let built = match build(
+        // Cancel obsolete snapshots, but retain the owner of every dispatched proof.
+        let build_phase = AtomicU8::new(BUILD_FETCHING);
+        let mut full_build = Box::pin(build(
             &network,
             &miner_params,
             &coinbase_cache,
             read_state.clone(),
             Some(mempool.clone()),
-        )
-        .await
-        {
+            Some(&build_phase),
+        ));
+        let mut tip_change = latest_chain_tip.clone();
+        let built = tokio::select! {
+            built = &mut full_build => built,
+            _ = tip_change.best_tip_changed() => {
+                if build_phase.load(Ordering::Acquire) != BUILD_STARTED {
+                    continue;
+                }
+                full_build.await
+            }
+        };
+        let built = match built {
             Ok(Some((template, mempool_tx_ids))) => {
                 match state_tip_hash(read_state.clone()).await {
                     Ok(tip_hash) if tip_hash == Some(template.previous_block_hash) => {
@@ -315,6 +411,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                 continue;
             }
             Err(error) => {
+                cache.record_error(error.clone());
                 // While this keeps failing the RPC serves the last template, so miners silently
                 // lose the fees of everything that has arrived since. Log the start of a failing
                 // spell loudly, then stay quiet: the retry delay is a second, so warning on every
@@ -452,24 +549,31 @@ async fn build<Mempool, ReadStateService>(
     coinbase_cache: &CoinbaseCache,
     read_state: ReadStateService,
     mempool: Option<Mempool>,
+    phase: Option<&AtomicU8>,
 ) -> RpcResult<Option<(BlockTemplateResponse, HashSet<UnminedTxId>)>>
 where
     Mempool: MempoolService,
     ReadStateService: ReadState,
 {
-    let chain_info = fetch_chain_info(read_state).await?;
-    let height = chain_info.tip_height.next().map_misc_error()?;
-
-    let (mempool_txs, mempool_tx_deps) = match mempool {
-        Some(mempool) => {
-            match fetch_mempool_transactions(mempool, chain_info.tip_hash).await? {
-                Some(mempool_data) => mempool_data,
-                // The state and the mempool were out of sync, so a template built from this data
-                // could contain transactions that are already mined.
-                None => return Ok(None),
+    let snapshot = tokio::time::timeout(SNAPSHOT_TIMEOUT, async {
+        let chain_info = fetch_chain_info(read_state).await?;
+        let (mempool_txs, mempool_tx_deps) = match mempool {
+            Some(mempool) => {
+                let Some(snapshot) =
+                    fetch_mempool_transactions(mempool, chain_info.tip_hash).await?
+                else {
+                    return Ok(None);
+                };
+                snapshot
             }
-        }
-        None => Default::default(),
+            None => Default::default(),
+        };
+        Ok::<_, ErrorObjectOwned>(Some((chain_info, mempool_txs, mempool_tx_deps)))
+    })
+    .await
+    .map_misc_error()??;
+    let Some((chain_info, mempool_txs, mempool_tx_deps)) = snapshot else {
+        return Ok(None);
     };
     let mempool_tx_ids = mempool_txs.iter().map(|tx| tx.transaction.id).collect();
 
@@ -484,37 +588,31 @@ where
     let network = network.clone();
     let miner_params = miner_params.clone();
     let coinbase_cache = coinbase_cache.clone();
-    let parent_nsm_value_balance = nsm_value_balance_for_next_block(&network, &chain_info);
+    if let Some(phase) = phase {
+        phase.store(BUILD_WAITING_FOR_PERMIT, Ordering::Release);
+    }
+    let build_guard = coinbase_cache.build.clone().lock_owned().await;
+    if let Some(phase) = phase {
+        phase.store(BUILD_STARTED, Ordering::Release);
+    }
 
     // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
     // a shielded coinbase takes seconds to prove, so keep them off the async executor.
     tokio::task::spawn_blocking(move || {
-        let mempool_txs = select_mempool_transactions(
+        let _build_guard = build_guard;
+        BlockTemplateResponse::from_mempool(
             &network,
-            height,
+            &coinbase_cache,
             &miner_params,
+            &chain_info,
+            long_poll_id,
             mempool_txs,
             mempool_tx_deps,
-            Some(&coinbase_cache),
-            parent_nsm_value_balance,
-        );
-
-        // `submit_old` depends on the long poll ID the client sent, so the RPC sets it.
-        Some((
-            BlockTemplateResponse::new_internal(
-                &network,
-                &coinbase_cache,
-                &miner_params,
-                &chain_info,
-                long_poll_id,
-                mempool_txs,
-                None,
-            ),
-            mempool_tx_ids,
-        ))
+        )
+        .map(|template| Some((template, mempool_tx_ids)))
     })
     .await
-    .map_misc_error()
+    .map_misc_error()?
 }
 
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is

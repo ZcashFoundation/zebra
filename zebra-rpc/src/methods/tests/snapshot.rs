@@ -1255,6 +1255,20 @@ pub async fn test_mining_rpcs<State, ReadState>(
         }
     };
 
+    // Template mode also checks that the built template still extends the committed tip.
+    let make_mock_template_read_state_handler = || {
+        let mut read_state = read_state.clone();
+        let chain_info = make_mock_read_state_request_handler();
+
+        async move {
+            chain_info.await;
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::Tip))
+                .await
+                .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
+        }
+    };
+
     let make_mock_mempool_request_handler = || {
         let mut mempool = mempool.clone();
 
@@ -1275,7 +1289,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
 
     let mut mock_block_verifier_router = MockService::build().for_unit_tests();
-    let (rpc_mock_state, _) = RpcImpl::new(
+    let (mut rpc_mock_state, _) = RpcImpl::new(
         network.clone(),
         mining_conf,
         false,
@@ -1291,20 +1305,29 @@ pub async fn test_mining_rpcs<State, ReadState>(
         rx,
         None,
     );
+    // Build at the faked chain time: against the wall clock, Testnet templates from these historical
+    // timestamps always need a difficulty refresh.
+    rpc_mock_state.template_clock = Some(Arc::new(std::sync::atomic::AtomicU32::new(
+        fake_cur_time.timestamp(),
+    )));
 
     // Basic variant (default mode and no extra features)
 
-    // Fake the ChainInfo and FullTransaction responses
-    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    // Fake the ChainInfo, Tip and FullTransaction responses
+    let mock_read_state_request_handler = make_mock_template_read_state_handler();
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
     let get_block_template_fut = rpc_mock_state.get_block_template(None);
 
-    let (get_block_template, ..) = tokio::join!(
-        get_block_template_fut,
-        mock_mempool_request_handler,
-        mock_read_state_request_handler,
-    );
+    let (get_block_template, ..) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            get_block_template_fut,
+            mock_mempool_request_handler,
+            mock_read_state_request_handler,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| panic!("basic getblocktemplate must not stall on {network}"));
 
     let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
@@ -1335,11 +1358,21 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .parse()
         .expect("unexpected invalid LongPollId");
 
-    // Fake the ChainInfo and FullTransaction responses
-    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    // The basic call published its template to the shared cache. Snapshot long polling on fallback
+    // work instead: a clone with overridden miner parameters has no template cache.
+    let mut rpc_long_poll = rpc_mock_state.clone();
+    let miner_params = rpc_long_poll
+        .gbt
+        .miner_params()
+        .expect("mining is configured")
+        .clone();
+    rpc_long_poll.gbt.set_miner_params(miner_params);
+
+    // Fake the ChainInfo, Tip and FullTransaction responses
+    let mock_read_state_request_handler = make_mock_template_read_state_handler();
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
-    let get_block_template_fut = rpc_mock_state.get_block_template(
+    let get_block_template_fut = rpc_long_poll.get_block_template(
         GetBlockTemplateParameters {
             long_poll_id: long_poll_id.into(),
             ..Default::default()
@@ -1347,11 +1380,15 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .into(),
     );
 
-    let (get_block_template, ..) = tokio::join!(
-        get_block_template_fut,
-        mock_mempool_request_handler,
-        mock_read_state_request_handler,
-    );
+    let (get_block_template, ..) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            get_block_template_fut,
+            mock_mempool_request_handler,
+            mock_read_state_request_handler,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| panic!("long-poll getblocktemplate must not stall on {network}"));
 
     let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")

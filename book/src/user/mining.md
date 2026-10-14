@@ -121,6 +121,16 @@ Wait until Zebra is in sync. You will see the sync at 100% when this happens:
 INFO zebrad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(...) network_upgrade=Nu6 remaining_sync_blocks=1 time_since_last_state_block=0s
 ```
 
+Template requests share the updater's work during startup and refreshes, rather than starting a
+separate coinbase proof for each waiting miner. On-demand construction runs off the async executor
+and rechecks the committed parent and synchronization before returning.
+Long polls also recheck synchronization after waking.
+New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
+If the updater stops, cached work is refreshed at the normal mempool polling interval.
+Long polls continue observing shared template publications after switching to on-demand refresh.
+When no usable work exists, snapshot failures are returned to the RPC caller rather than hidden
+behind an indefinite cache wait.
+
 ## Testing the setup
 
 [#testing-the-setup]: #testing-the-setup
