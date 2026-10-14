@@ -262,6 +262,38 @@ impl fmt::Debug for BlockTemplateResponse {
 }
 
 impl BlockTemplateResponse {
+    /// Performs the CPU-bound selection and construction shared by updater and fallback builds.
+    pub(crate) fn from_mempool(
+        network: &Network,
+        coinbase_cache: &CoinbaseCache,
+        miner_params: &MinerParams,
+        chain_info: &GetBlockTemplateChainInfo,
+        long_poll_id: LongPollId,
+        transactions: Vec<VerifiedUnminedTx>,
+        dependencies: TransactionDependencies,
+    ) -> RpcResult<Self> {
+        let height = chain_info.tip_height.next().map_misc_error()?;
+        let parent_nsm_value_balance = nsm_value_balance_for_next_block(network, chain_info);
+        let transactions = zip317::select_mempool_transactions(
+            network,
+            height,
+            miner_params,
+            transactions,
+            dependencies,
+            Some(coinbase_cache),
+            parent_nsm_value_balance,
+        );
+        Ok(Self::new_internal(
+            network,
+            coinbase_cache,
+            miner_params,
+            chain_info,
+            long_poll_id,
+            transactions,
+            None,
+        ))
+    }
+
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
     pub fn all_capabilities() -> Vec<String> {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()
@@ -622,7 +654,11 @@ pub(crate) fn nsm_value_balance_for_next_block(
 /// the selected context, discarding old proof completions rather than evicting newer work.
 /// Gross fees remain distinct even when they round to the same miner payout.
 #[derive(Clone, Default)]
-pub(crate) struct CoinbaseCache(Arc<Mutex<CachedCoinbases>>);
+pub(crate) struct CoinbaseCache {
+    entries: Arc<Mutex<CachedCoinbases>>,
+    /// Serializes updater and fallback snapshots, including unfinished blocking construction.
+    pub(crate) build: Arc<tokio::sync::Mutex<()>>,
+}
 
 /// The context selected by the latest request and its bounded fee variants.
 #[derive(Default)]
@@ -635,7 +671,7 @@ impl CoinbaseCache {
     /// Selects the context before a template starts constructing either coinbase.
     fn select(&self, height: block::Height, parent_nsm_value_balance: Option<Amount<NonNegative>>) {
         let mut cache = self
-            .0
+            .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if cache.context != Some((height, parent_nsm_value_balance)) {
@@ -652,7 +688,7 @@ impl CoinbaseCache {
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Option<TransactionTemplate<amount::NegativeOrZero>> {
         let cache = self
-            .0
+            .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if cache.context != Some((height, parent_nsm_value_balance)) {
@@ -670,7 +706,7 @@ impl CoinbaseCache {
         coinbase: TransactionTemplate<amount::NegativeOrZero>,
     ) {
         let mut cache = self
-            .0
+            .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if *cache
