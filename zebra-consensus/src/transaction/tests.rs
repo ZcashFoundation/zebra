@@ -60,6 +60,77 @@ fn test_timeout() -> std::time::Duration {
     }
 }
 
+/// Returning one check's error must not abandon another check already running in Rayon.
+#[tokio::test]
+async fn failed_async_check_drains_dispatched_siblings() {
+    let (entered, started) = tokio::sync::oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let (fail, failure) = tokio::sync::oneshot::channel();
+    let mut checks = super::AsyncChecks::new();
+    checks.push(async move {
+        crate::primitives::spawn_fifo(move || {
+            let _ = entered.send(());
+            held.recv_timeout(test_timeout())
+                .expect("the test releases the worker");
+        })
+        .await?;
+        Ok(())
+    });
+    checks.push(async move {
+        failure.await?;
+        Err("controlled validation failure".into())
+    });
+    let mut checking = Box::pin(checks.check());
+    tokio::select! {
+        result = &mut checking => panic!("checks completed before dispatch: {result:?}"),
+        result = timeout(test_timeout(), started) => result.unwrap().unwrap(),
+    }
+    fail.send(()).unwrap();
+    let premature = futures::poll!(&mut checking);
+    release.send(()).unwrap();
+    assert!(
+        premature.is_pending(),
+        "an error must retain dispatched sibling work"
+    );
+    let error = timeout(test_timeout(), checking)
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.to_string(), "controlled validation failure");
+}
+
+/// Draining CPU checks must not turn state-service backpressure into an unbounded wait.
+#[tokio::test(start_paused = true)]
+async fn mempool_state_readiness_keeps_its_deadline() {
+    type Mempool = Buffer<
+        tower::util::BoxService<mempool::Request, mempool::Response, crate::BoxError>,
+        mempool::Request,
+    >;
+    let mut state = tower::limit::ConcurrencyLimit::new(
+        service_fn(|_| std::future::pending::<Result<zebra_state::Response, crate::BoxError>>()),
+        1,
+    );
+    let held = state
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::BestChainNextMedianTimePast);
+    let lookup = MempoolTxVerifier::<_, Mempool>::mempool_best_chain_next_median_time_past(
+        Timeout::new(state, super::UTXO_LOOKUP_TIMEOUT),
+    );
+    let result = timeout(
+        super::UTXO_LOOKUP_TIMEOUT + std::time::Duration::from_secs(1),
+        lookup,
+    )
+    .await
+    .expect("state readiness must use the existing state deadline");
+    assert!(matches!(
+        result,
+        Err(TransactionError::ValidateMempoolLockTimeError(_))
+    ));
+    drop(held);
+}
+
 /// Block siblings must not keep a failed proposal waiting indefinitely on state readiness.
 #[tokio::test(start_paused = true)]
 async fn block_state_readiness_keeps_its_deadline() {
