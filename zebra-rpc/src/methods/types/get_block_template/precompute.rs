@@ -33,10 +33,9 @@ use zebra_chain::{
     block::{self, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
-    serialization::{DateTime32, Duration32},
+    parameters::Network,
+    serialization::DateTime32,
     transaction::UnminedTxId,
-    work::difficulty::ParameterDifficulty,
 };
 use zebra_node_services::mempool::{self, MempoolChange, MempoolService};
 use zebra_state::{ReadRequest, ReadResponse, ReadState};
@@ -215,8 +214,28 @@ impl TemplateCache {
         TemplateChanges(self.0.subscribe())
     }
 
-    /// Publishes `template` as the precomputed template.
-    pub(crate) fn publish(&self, template: BlockTemplateResponse) {
+    /// Preserves the time component of work identity when only its usable upper bound grows.
+    ///
+    /// An unchanged parent, difficulty and lower bound makes the previous timestamp range a
+    /// subset of the new one. A Testnet difficulty transition changes difficulty or the lower
+    /// bound, so it must retain the new identity instead.
+    pub(crate) fn preserve_work_identity(&self, template: &mut BlockTemplateResponse) {
+        let cached = self.0.borrow();
+        if let Some(previous) = cached.as_ref().and_then(|state| state.template.as_ref()) {
+            if previous.previous_block_hash == template.previous_block_hash
+                && previous.height == template.height
+                && previous.bits == template.bits
+                && previous.min_time == template.min_time
+                && previous.max_time <= template.max_time
+            {
+                template.long_poll_id.max_timestamp = previous.long_poll_id.max_timestamp;
+            }
+        }
+    }
+
+    /// Publishes `template` without cancelling still-valid work after a clock-cap expansion.
+    pub(crate) fn publish(&self, mut template: BlockTemplateResponse) {
+        self.preserve_work_identity(&mut template);
         self.0.send_replace(Some(TemplateState {
             template: Some(Arc::new(template)),
             published_at: Instant::now(),
@@ -240,24 +259,7 @@ impl TemplateCache {
             return None;
         }
 
-        // Only an abbreviated standard-difficulty Testnet time range can become unprofitable.
-        // At the full 90-minute median-time cap, even a fresh build clamps to the same max_time.
-        // Regtest deliberately uses historical chain time rather than the wall clock.
-        if now > template.max_time
-            && !network.is_regtest()
-            && NetworkUpgrade::minimum_difficulty_spacing_for_height(
-                network,
-                Height(template.height),
-            )
-            .is_some()
-            && template.bits != network.target_difficulty_limit().to_compact()
-            && (!network.is_max_block_time_enforced(Height(template.height))
-                || template
-                    .max_time
-                    .saturating_duration_since(template.min_time)
-                    .seconds()
-                    < Duration32::from_minutes(90).seconds() - 1)
-        {
+        if template.needs_difficulty_refresh(network, now) {
             return None;
         }
 
