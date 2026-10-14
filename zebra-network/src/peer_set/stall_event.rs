@@ -1,4 +1,9 @@
 //! Events from peer services that update find-response stall tracking.
+//!
+//! Response futures retain only sender clones and connection identities, not
+//! [`ConnectionGuard`]s. Their lifetime therefore cannot delay closure reporting.
+//! These events retain the immediate response policy; deferred consumer feedback
+//! is represented separately by the stall tracker's existing feedback API.
 
 use tokio::sync::mpsc;
 
@@ -34,14 +39,12 @@ impl From<u64> for ConnectionId {
 
 /// Reports closure when the owning peer service is dropped, independently of responses.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct ConnectionGuard {
     peer: PeerSocketAddr,
     connection_id: ConnectionId,
     sender: mpsc::UnboundedSender<PeerStallEvent>,
 }
 
-#[allow(dead_code)]
 impl ConnectionGuard {
     /// Creates a guard that reports closure for `peer` and `connection_id` on drop.
     pub(crate) fn new(

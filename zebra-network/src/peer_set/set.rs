@@ -135,7 +135,8 @@ use crate::{
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
-        ConnectionId, InventoryChange, InventoryRegistry, PeerStallEvent, StallOutcome,
+        ConnectionGuard, ConnectionId, InventoryChange, InventoryRegistry, PeerStallEvent,
+        StallOutcome,
     },
     protocol::{
         external::{connection_limit_key, InventoryHash},
@@ -207,13 +208,13 @@ where
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
 
-    /// Receives stall/clear events from tracked routing futures in
-    /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
+    /// Receives response outcomes from [`Self::route_p2c`] and connection closures
+    /// from service-owned guards. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
     stall_event_rx: tokio_mpsc::UnboundedReceiver<PeerStallEvent>,
 
-    /// Producer clones handed to each tracked request's response wrapper.
+    /// Producer clones handed to connection guards and tracked response futures.
     stall_event_tx: tokio_mpsc::UnboundedSender<PeerStallEvent>,
 
     /// Identifies the admitted connection associated with each address's tracker.
@@ -751,7 +752,7 @@ where
                     trace!(?key, "got Change::Remove from Discover");
                     self.remove(&key);
                 }
-                Change::Insert(key, svc) => {
+                Change::Insert(key, mut svc) => {
                     // We add peers as unready, so that we:
                     // - always do the same checks on every ready peer, and
                     // - check for any errors that happened right after the handshake
@@ -788,7 +789,7 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
-                    self.track_connection(key);
+                    self.track_connection(key, &mut svc);
                     self.push_unready(key, svc);
                 }
             }
@@ -797,8 +798,8 @@ where
         result
     }
 
-    /// Assigns a fresh identity to an admitted connection and resets its address's stall history.
-    fn track_connection(&mut self, peer: PeerSocketAddr) {
+    /// Registers an admitted connection with fresh stall history and a closure guard.
+    fn track_connection(&mut self, peer: PeerSocketAddr, svc: &mut D::Service) {
         let connection_id = ConnectionId::from(self.next_connection_id);
 
         self.next_connection_id = self
@@ -806,9 +807,15 @@ where
             .checked_add(1)
             .expect("a peer set cannot admit u64::MAX connections");
 
-        // A replacement starts fresh even if the previous connection left tracking behind.
+        // A replacement must start fresh even if the old guard's event is queued.
         self.find_response_stalls.clear(peer);
         self.tracked_connections.insert(peer, connection_id);
+
+        svc.track_connection(ConnectionGuard::new(
+            peer,
+            connection_id,
+            self.stall_event_tx.clone(),
+        ));
     }
 
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
