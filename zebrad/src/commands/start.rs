@@ -481,8 +481,7 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
-        let rpc_impl =
-            rpc_impl.with_submitted_blocks(submitted_blocks.clone(), max_checkpoint_height);
+        let rpc_impl = rpc_impl.with_submitted_blocks(submitted_blocks.clone());
         let rpc_impl = rpc_impl.with_end_of_support_height(
             sync::end_of_support::end_of_support_height(&config.network.network),
         );
