@@ -248,9 +248,11 @@ before network delivery or pool job distribution; it also includes time until a 
 
 Announcement completion means every selected connection completed its local write, not that peers
 received, validated, or relayed the block. Failed attempts include write errors and timeouts.
-Successful durations include peer-readiness waits. While waiting for ready peers, only the latest
-mined block is kept; superseded blocks have no sample. Once dispatched, announcements complete
-independently without retries. Ordinary tip adverts are excluded.
+Successful durations include peer-readiness waits. While waiting for ready peers, a bounded number of
+mined blocks are kept, and the oldest is replaced without a sample when that queue is full. A failed
+announcement is retried once; each attempt records its outcome, and a successful retry's duration
+starts when gossip first received the block. Early adverts before commit and ordinary tip adverts
+are excluded.
 No peer count is exported because the broadcast response does not carry one.
 
 Watch increases in rejected submissions and failed announcements alongside rising announcement
