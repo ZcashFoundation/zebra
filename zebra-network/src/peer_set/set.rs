@@ -529,10 +529,7 @@ where
         // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
         // peers.
         //
-        // Each connected peer should become ready within a few minutes, or timeout, close the
-        // connection, and release its connection slot.
-        //
-        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
+        // Request-channel backpressure is bounded independently of the wire response timeout.
         let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
 
         // Check for failures in ready peers, removing newly errored or disconnected peers.
@@ -627,6 +624,14 @@ where
                         ?key,
                         duplicate_connection = self.cancel_handles.contains_key(&key),
                         "cancel handle was dropped, dropping service"
+                    );
+                }
+                Some(Err((key, UnreadyError::TimedOut))) => {
+                    debug!(?key, "service readiness timed out, dropping service");
+                    let cancel = self.cancel_handles.remove(&key);
+                    assert!(
+                        cancel.is_some(),
+                        "timed-out unready service has a cancel handle"
                     );
                 }
 
@@ -819,9 +824,15 @@ where
             }
             eligible
         });
-        for pending in self.unready_services.iter() {
-            let key = pending.key.as_ref().expect("unready services retain their key until completion");
-            let service = pending.service.as_ref()
+        for pending in Pin::new(&self.unready_services).iter_pin_ref() {
+            let pending = pending.get_ref();
+            let key = pending
+                .key
+                .as_ref()
+                .expect("unready services retain their key until completion");
+            let service = pending
+                .service
+                .as_ref()
                 .expect("unready services retain their client until completion");
             if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
                 self.find_response_stalls.clear(*key);
@@ -925,6 +936,7 @@ where
             key: Some(key),
             service: Some(svc),
             cancel: rx,
+            readiness_timeout: tokio::time::sleep(crate::constants::REQUEST_TIMEOUT),
             _req: PhantomData,
         });
 
