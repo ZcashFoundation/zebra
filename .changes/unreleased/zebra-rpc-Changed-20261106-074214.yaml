@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Return operational errors from `submitblock` for local admission pressure instead of consensus rejection results ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658)).
+time: 2026-11-06T07:42:14.178964336+01:00
