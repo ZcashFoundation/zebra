@@ -1662,6 +1662,12 @@ async fn verified_proposal() -> (
 
 #[tokio::test(flavor = "multi_thread")]
 async fn exact_proposal_commits_without_transaction_verification() {
+    check_proposal_commits(false).await;
+    check_proposal_commits(true).await;
+}
+
+/// Exercise production transaction and state verification for ordinary and mined cache paths.
+async fn check_proposal_commits(mined: bool) {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1746,6 +1752,41 @@ async fn exact_proposal_commits_without_transaction_verification() {
                 .call(Request::CheckProposal(Arc::new(proposal)))
                 .await
                 .unwrap();
+            if mined && height == Height(1) {
+                // A cached proposal never authorizes changed, invalid bytes to notify.
+                for oversized in [false, true] {
+                    let mut invalid = (*solved).clone();
+                    if oversized {
+                        let coinbase = invalid.transactions[0].clone();
+                        let count = usize::try_from(block::MAX_BLOCK_BYTES).unwrap()
+                            / coinbase.zcash_serialized_size()
+                            + 1;
+                        invalid.transactions = vec![coinbase; count];
+                    } else {
+                        Arc::make_mut(&mut invalid.header).time =
+                            Utc::now() + chrono::Duration::hours(3);
+                    }
+                    let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+                    let (validated, validation) = watch::channel(None);
+                    let error = verifier
+                        .ready()
+                        .await
+                        .unwrap()
+                        .call(Request::CommitMined(
+                            Arc::new(invalid),
+                            zs::MinedBlockNotifications::new(committed, validated),
+                        ))
+                        .await
+                        .unwrap_err();
+                    if oversized {
+                        assert!(matches!(error, VerifyBlockError::OversizedBlock));
+                    } else {
+                        assert!(matches!(error, VerifyBlockError::Time(_)));
+                    }
+                    assert!(validation.borrow().is_none());
+                    assert!(commits.try_recv().is_err());
+                }
+            }
             let cached = height != Height(3);
             let solved = if cached {
                 solved
@@ -1755,19 +1796,43 @@ async fn exact_proposal_commits_without_transaction_verification() {
                 Arc::new(changed)
             };
             calls.store(if cached { usize::MAX } else { 0 }, Ordering::SeqCst);
+            let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+            let (validated, validation) = watch::channel(None);
+            let request = if mined {
+                Request::CommitMined(
+                    solved.clone(),
+                    zs::MinedBlockNotifications::new(committed, validated),
+                )
+            } else {
+                Request::Commit(solved.clone())
+            };
+            assert_eq!(request, request.clone());
+            assert!(!request.is_proposal());
+            assert_eq!(request.block(), solved);
             assert_eq!(
-                verifier
-                    .ready()
-                    .await
-                    .unwrap()
-                    .call(Request::Commit(solved.clone()))
-                    .await
-                    .unwrap(),
+                verifier.ready().await.unwrap().call(request).await.unwrap(),
                 solved.hash()
             );
             if !cached {
                 assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
             }
+            assert_eq!(
+                *validation.borrow(),
+                (mined && cached).then(|| solved.clone()),
+                "only exact mined proposals can publish validated notifications",
+            );
+            if mined {
+                assert_eq!(
+                    commits
+                        .try_recv()
+                        .expect("the writer notifies before replying"),
+                    (solved.hash(), height),
+                );
+            }
+            assert!(
+                commits.try_recv().is_err(),
+                "no extra committed notifications"
+            );
             assert_eq!(
                 state
                     .clone()
@@ -1866,8 +1931,13 @@ async fn cached_proposal_still_requires_proof_of_work() {
             proposal_key_and_size(&invalid).0,
             proposal_key_and_size(&solved).0,
         );
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, validation) = watch::channel(None);
         let error = verifier
-            .oneshot(Request::Commit(Arc::new(invalid)))
+            .oneshot(Request::CommitMined(
+                Arc::new(invalid),
+                zs::MinedBlockNotifications::new(committed, validated),
+            ))
             .await
             .unwrap_err();
         assert_eq!(error.misbehavior_score(), 100);
@@ -1878,6 +1948,8 @@ async fn cached_proposal_still_requires_proof_of_work() {
                     source: BlockError::DifficultyFilter(..)
                 }
         ));
+        assert!(validation.borrow().is_none());
+        assert!(commits.try_recv().is_err());
     })
     .await
     .expect("invalid proof of work must not stall");

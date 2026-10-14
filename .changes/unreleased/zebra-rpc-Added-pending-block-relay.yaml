@@ -1,4 +1,9 @@
 project: zebra-rpc
-kind: Added
-body: "Added `SubmittedBlockCache` and `RpcImpl::with_submitted_blocks` to share locally validated pending mining submissions with peer serving and gossip."
+kind: Changed
+body: >-
+  Added `SubmittedBlockCache` and `RpcImpl::with_submitted_blocks` to share locally validated
+  pending mining submissions with peer serving and gossip. Locally submitted mined blocks
+  require available `SubmitBlockChannel` capacity before state changes; full or closed channels
+  reject admission. Committed notifications are queued before `submitblock` succeeds, without
+  guaranteeing delivery to peers.
 time: 2026-10-11T12:00:00.000000000+00:00

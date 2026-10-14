@@ -38,7 +38,7 @@ async fn await_utxos_preserves_order_for_queued_and_in_flight_outputs() {
     let (sender, _receiver) = tokio::sync::oneshot::channel();
     state
         .non_finalized_state_queued_blocks
-        .queue((blocks[0].clone(), sender, None));
+        .queue((blocks[0].clone(), sender, None, None));
     state.non_finalized_block_write_sent_hashes.add(&blocks[1]);
 
     let response = tokio::time::timeout(
@@ -81,7 +81,7 @@ async fn await_utxos_keeps_found_outputs_while_waiting_for_a_queued_block() {
     let (sender, _receiver) = tokio::sync::oneshot::channel();
     state
         .non_finalized_state_queued_blocks
-        .queue((blocks[1].clone(), sender, None));
+        .queue((blocks[1].clone(), sender, None, None));
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(10), lookup)
             .await

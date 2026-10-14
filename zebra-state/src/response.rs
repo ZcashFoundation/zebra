@@ -110,8 +110,10 @@ pub enum Response {
     /// Dropping the guard withdraws early work.
     MiningCandidate(Option<MiningCandidateGuard>),
 
-    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] and [`Request::CommitCheckpointVerifiedBlock`]
-    /// indicating that a block was successfully committed to the state.
+    /// Response to a block commit request indicating successful insertion into the state.
+    ///
+    /// For [`Request::CommitMinedBlock`] and [`Request::CommitMinedCheckpointVerifiedBlock`],
+    /// the state writer sends the committed notification before this response, even for side chains.
     Committed(block::Hash),
 
     /// Response to [`Request::InvalidateBlock`] indicating that a block was found and
