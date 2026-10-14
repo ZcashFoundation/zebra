@@ -834,24 +834,37 @@ where
         }
     }
 
-    /// Drains pending stall/clear events for the currently tracked connections and
-    /// disconnects peers that have exceeded the stall threshold. The peer's
+    /// Applies events only to the currently tracked connection at each address.
+    ///
+    /// Closure clears both stall counts and pending ordered responses. Response
+    /// outcomes disconnect peers that have exceeded the stall threshold. The peer's
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
         while let Poll::Ready(Some(event)) = self.stall_event_rx.poll_recv(cx) {
-            let PeerStallEvent::Response {
-                peer: addr,
-                connection_id,
-                outcome,
-            } = event
-            else {
-                continue;
+            let (addr, connection_id) = match &event {
+                PeerStallEvent::Response {
+                    peer,
+                    connection_id,
+                    ..
+                }
+                | PeerStallEvent::ConnectionClosed {
+                    peer,
+                    connection_id,
+                } => (*peer, *connection_id),
             };
-
             if self.tracked_connections.get(&addr) != Some(&connection_id) {
                 continue;
             }
+
+            let outcome = match event {
+                PeerStallEvent::ConnectionClosed { .. } => {
+                    self.tracked_connections.remove(&addr);
+                    self.find_response_stalls.clear(addr);
+                    continue;
+                }
+                PeerStallEvent::Response { outcome, .. } => outcome,
+            };
 
             match outcome {
                 StallOutcome::Stall => {

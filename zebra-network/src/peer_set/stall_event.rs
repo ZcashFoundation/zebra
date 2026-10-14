@@ -2,7 +2,7 @@
 
 use crate::PeerSocketAddr;
 
-/// An immediate response classification delivered to the peer set.
+/// A response classification or connection closure delivered to the peer set.
 #[derive(Debug)]
 pub(crate) enum PeerStallEvent {
     Response {
