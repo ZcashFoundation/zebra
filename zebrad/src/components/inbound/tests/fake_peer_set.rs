@@ -354,14 +354,19 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
-    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(
-            consensus_config,
-            &network,
-            state_service.clone(),
-            read_only_state_service,
-        )
-        .await;
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _groth16_download_handle,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        consensus_config,
+        &network,
+        state_service.clone(),
+        read_only_state_service,
+    )
+    .await;
 
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -969,6 +974,7 @@ async fn caches_getaddr_response() {
             _transaction_verifier,
             _groth16_download_handle,
             _max_checkpoint_height,
+            _prepared_blocks,
         ) = zebra_consensus::router::init_test(
             consensus_config.clone(),
             &network,
@@ -1105,14 +1111,19 @@ async fn setup(
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
-    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(
-            consensus_config.clone(),
-            &network,
-            state_service.clone(),
-            read_only_state_service.clone(),
-        )
-        .await;
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _groth16_download_handle,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        consensus_config.clone(),
+        &network,
+        state_service.clone(),
+        read_only_state_service.clone(),
+    )
+    .await;
 
     let mut peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
