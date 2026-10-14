@@ -117,6 +117,12 @@ pub enum CommitBlockError {
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
     WriteTaskExited,
+
+    /// The bounded orphan queue evicted this block before its parent became ready.
+    ///
+    /// This is local resource pressure, not a consensus failure; the request can be retried.
+    #[error("orphan block queue is full; block was not committed")]
+    OrphanQueueFull,
 }
 
 impl CommitBlockError {
@@ -136,7 +142,9 @@ impl CommitBlockError {
     pub fn is_auth_commitment_mismatch(&self) -> bool {
         match self {
             CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull => false,
         }
     }
 
@@ -149,18 +157,23 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => {
                 err.is_descendant_of_auth_commitment_mismatch()
             }
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull => false,
         }
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     ///
     /// Consensus-invalid subsidies and authorizing-data commitments score 100.
-    /// Duplicate requests, shutdowns, and rejected-ancestor descendants score 0.
+    /// Duplicate requests, shutdowns, orphan/notification admission failures, and rejected
+    /// descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => 0,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull => 0,
         }
     }
 }

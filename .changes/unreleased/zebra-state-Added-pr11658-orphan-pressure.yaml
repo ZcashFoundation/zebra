@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `CommitBlockError::OrphanQueueFull` to identify retryable local resource pressure when the bounded orphan queue cannot retain a block ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658)).
+time: 2026-11-05T06:34:10.92216435+01:00
