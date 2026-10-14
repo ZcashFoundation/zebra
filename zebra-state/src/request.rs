@@ -1548,7 +1548,7 @@ pub enum ReadRequest {
         height_range: RangeInclusive<block::Height>,
 
         /// The maximum number of transaction IDs to return, the first ones in chain order,
-        /// or `None` for no limit. The limit bounds the index scan, not just the response.
+        /// or `None` for no limit. The limit bounds the finalized index scan, not just the response.
         max_entries: Option<usize>,
     },
 
@@ -1572,7 +1572,7 @@ pub enum ReadRequest {
 
         /// The maximum number of utxos to return, or `None` for no limit.
         ///
-        /// The limit bounds the index scan, not just the response.
+        /// The limit bounds the finalized index scan, not just the response.
         max_entries: Option<usize>,
     },
 
