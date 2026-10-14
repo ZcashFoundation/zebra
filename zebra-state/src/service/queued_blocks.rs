@@ -23,13 +23,13 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// A queued checkpoint verified block, and its corresponding [`Result`] channel.
+/// A queued checkpoint-verified block, its result channel.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
 );
 
-/// A queued semantically verified block, and its corresponding [`Result`] channel.
+/// A queued semantic block, its result channel, and optional cached verdict.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
@@ -83,6 +83,8 @@ impl KnownUtxos {
             *owners -= 1;
             if *owners == 0 {
                 self.0.remove(outpoint);
+                // Removed payload charges must not leave the cache's high-water allocation behind.
+                self.0.shrink_to_fit();
             }
         }
     }
@@ -118,8 +120,13 @@ impl QueuedBlocks {
                 .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
-        // Count the block, and the copy of its outputs in `known_utxos`.
-        let bytes = new.0.retained_bytes() + new_outputs_retained_bytes(&new.0.new_outputs);
+        // Count the block, the copy of its outputs in `known_utxos`, and any cached verdict.
+        let bytes = new.0.retained_bytes()
+            + new_outputs_retained_bytes(&new.0.new_outputs)
+            + new
+                .2
+                .as_ref()
+                .map_or(0, |contextual| contextual.contextual_data_retained_bytes());
         self.queued_bytes += bytes;
         self.blocks.insert(new_hash, (new, bytes));
         self.by_height
