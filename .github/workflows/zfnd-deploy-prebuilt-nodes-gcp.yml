@@ -63,7 +63,7 @@ permissions:
 jobs:
   validate:
     name: Validate deployment inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Validate deployment contract
         env:
@@ -121,7 +121,7 @@ jobs:
   ensure-health-checks:
     name: Ensure health checks exist
     needs: [validate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: ${{ inputs.environment }}
     permissions:
       contents: read
@@ -198,7 +198,7 @@ jobs:
           || (inputs.environment == 'stage' && 'main' || github.ref_name) }}-${{ matrix.network }}-${{ matrix.zone }}
       cancel-in-progress: false
     needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     env:
       CACHED_DISK_NAME: >-
@@ -511,7 +511,7 @@ jobs:
 
   deploy-nodes-success:
     name: Deploy nodes success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: ${{ always() && needs.deploy-nodes.result != 'skipped' }}
     needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks, deploy-nodes]
     timeout-minutes: 1
@@ -528,7 +528,7 @@ jobs:
     # non-PR callers. No caller deploys on a pull_request today; this keeps that true
     # if one ever does.
     if: ${{ (failure() || cancelled()) && github.event.pull_request == null }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write

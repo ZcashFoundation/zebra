@@ -57,7 +57,7 @@ jobs:
   binary-version:
     name: Resolve release binary version
     if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -104,7 +104,7 @@ jobs:
 
   dockerhub-description:
     if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -122,7 +122,7 @@ jobs:
 
   release-binaries-success:
     name: Release binaries success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Only run for the official v-prefixed zebrad release tags.
     # `always()` keeps this aggregator running when `build` fails or is cancelled;
     # otherwise GitHub skips jobs with failed `needs`.
@@ -150,7 +150,7 @@ jobs:
     needs: [ build, binary-version, prepare-binaries, attach-binaries ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write
