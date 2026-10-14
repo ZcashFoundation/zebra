@@ -40,6 +40,9 @@ pub mod to_regex;
 pub use self::arguments::Arguments;
 use self::to_regex::{CollectRegexSet, RegexSetExt, ToRegexSet};
 
+/// Bound exit and output draining independently of an expired observation budget.
+const CHILD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// A demand-driven child pipe reader. Idle readers do not consume child output.
 ///
 /// Each read runs on an owned thread so synchronous harness methods can also be used inside
@@ -473,6 +476,7 @@ impl CommandExt for Command {
             command_path: command_path.to_string(),
             child: Some(child),
             process_group,
+            killed: false,
             stdout: None,
             stderr: None,
             failure_regexes: RegexSet::empty(),
@@ -548,6 +552,22 @@ impl TestStatus {
     }
 }
 
+/// Reap only after the owned group has been retired, without an unbounded process wait.
+fn reap_before_deadline(child: &mut Child, deadline: Instant) -> std::io::Result<ExitStatus> {
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                ErrorKind::TimedOut,
+                "test child cleanup deadline elapsed before exit",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// A test command child process.
 // TODO: split this struct into its own module (or multiple modules)
 #[derive(Debug)]
@@ -569,6 +589,9 @@ pub struct TestChild<T> {
 
     /// The group or job is retired before the leader is reaped.
     process_group: process_group::ProcessGroup,
+
+    /// Intentional termination switches exit waiting from observation to bounded cleanup.
+    killed: bool,
 
     /// The demand-driven standard output stream of the child process.
     pub stdout: Option<ChildOutput>,
@@ -593,15 +616,11 @@ pub struct TestChild<T> {
     /// If a line matches any ignore regex, the failure regex check is skipped for that line.
     ignore_regexes: RegexSet,
 
-    /// The deadline for command output reads and natural process exit.
-    ///
-    /// Can be reset directly, or through [`Self::with_timeout`].
-    pub deadline: Option<Instant>,
+    /// The observation deadline for command output reads and natural process exit.
+    deadline: Option<Instant>,
 
-    /// The timeout for this command to finish.
-    ///
-    /// Only used for debugging output.
-    pub timeout: Option<Duration>,
+    /// The configured observation duration, used only for debugging output.
+    timeout: Option<Duration>,
 
     /// If true, write child output directly to standard output,
     /// bypassing the Rust test harness output capture.
@@ -859,7 +878,8 @@ impl<T> TestChild<T> {
     /// If `ignore_exited` is `true`, log "can't kill an exited process" errors,
     /// rather than returning them.
     ///
-    /// Returns the result of the kill.
+    /// Returns the result of the kill. Subsequent exit waiting and output draining use
+    /// a separate one-second cleanup grace rather than the observation deadline.
     ///
     /// ## BUGS
     ///
@@ -896,6 +916,7 @@ impl<T> TestChild<T> {
         });
 
         kill_result.context_from(self.as_mut())?;
+        self.killed = true;
 
         Ok(())
     }
@@ -919,19 +940,25 @@ impl<T> TestChild<T> {
     /// If `ignore_exited` is `true`, log "can't kill an exited process" errors,
     /// rather than returning them.
     ///
-    /// Returns `Ok(output)`, or an error if the kill failed.
+    /// Returns `Ok(output)`, or an error if termination, reaping, or draining fails.
+    /// Exit and draining share a one-second cleanup grace, independent of the observation deadline.
     pub fn kill_and_return_output(&mut self, ignore_exited: bool) -> Result<String> {
         self.apply_failure_regexes_to_outputs();
+        let deadline = Instant::now() + CHILD_CLEANUP_TIMEOUT;
         let kill_result = self.kill(ignore_exited);
-        if kill_result.is_ok() {
+        self.start_output_drain(Some(deadline));
+        let cleanup_result = kill_result.and_then(|()| {
             if let Some(child) = self.child.as_mut() {
-                child.wait().wrap_err("reaping test child")?;
+                reap_before_deadline(child, deadline).wrap_err("reaping test child")?;
             }
-        }
-        // A descendant may still hold an inherited pipe. Cleanup must not wait for its EOF.
-        self.start_output_drain(Some(Instant::now() + Duration::from_secs(1)));
-        let (stdout, stderr, error) = self.finish_output_drain();
-        kill_result?;
+            Ok(())
+        });
+        let (stdout, stderr, read_error) = self.finish_output_drain();
+        let error = match (cleanup_result, read_error) {
+            (Err(cause), Some(error)) => Some(cause.wrap_err(error)),
+            (Err(cause), None) => Some(cause),
+            (Ok(()), error) => error,
+        };
         if let Some(error) = error {
             return Err(error)
                 .section(
@@ -956,6 +983,48 @@ impl<T> TestChild<T> {
         for output in [&self.stdout, &self.stderr].into_iter().flatten() {
             output.start_drain(deadline);
         }
+    }
+
+    /// Finish supervised drains, cancelling any remaining readers when cleanup expires.
+    fn finish_output_drain_before(
+        &mut self,
+        deadline: Instant,
+    ) -> (Vec<u8>, Vec<u8>, Option<Report>) {
+        let timed_out = loop {
+            let mut pending = false;
+            for output in [&mut self.stdout, &mut self.stderr].into_iter().flatten() {
+                if output.drained.is_none()
+                    && output.poll_drain().is_ok()
+                    && output.drained.is_none()
+                {
+                    pending = true;
+                }
+            }
+            if !pending {
+                break false;
+            }
+            if Instant::now() >= deadline {
+                for output in [&self.stdout, &self.stderr].into_iter().flatten() {
+                    let _ = output.cancelled.send(true);
+                }
+                break true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        let (stdout, stderr, error) = self.finish_output_drain();
+        let error = if timed_out {
+            let timeout = std::io::Error::new(
+                ErrorKind::TimedOut,
+                "test child cleanup deadline elapsed while draining output",
+            );
+            Some(match error {
+                Some(error) => error.wrap_err(timeout),
+                None => timeout.into(),
+            })
+        } else {
+            error
+        };
+        (stdout, stderr, error)
     }
 
     fn finish_output_drain(&mut self) -> (Vec<u8>, Vec<u8>, Option<Report>) {
@@ -1056,8 +1125,10 @@ impl<T> TestChild<T> {
 
     /// Waits for natural child exit while draining both remaining output streams.
     ///
-    /// Honors the command deadline, including after earlier log matches. On timeout or
-    /// reader error the owned group is killed and the leader reaped; errors include captured output.
+    /// The observation deadline bounds a live child, including after earlier log matches.
+    /// Intentional termination and draining after natural exit use a separate one-second cleanup
+    /// grace. On observation timeout or reader error the owned group is killed, with reaping and
+    /// remaining drains bounded by that grace; errors include captured output.
     /// Output already consumed by matchers is not included.
     #[spandoc::spandoc]
     pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
@@ -1067,7 +1138,9 @@ impl<T> TestChild<T> {
         };
         // Match std::process::Child::wait_with_output: a piped-input child needs EOF to exit.
         drop(child.stdin.take());
-        self.start_output_drain(self.deadline);
+        // Drains stay cancellable while this method supervises the observation/cleanup phases.
+        self.start_output_drain(None);
+        let cleanup_deadline = self.killed.then(|| Instant::now() + CHILD_CLEANUP_TIMEOUT);
         let mut status = loop {
             let read_error = [&mut self.stdout, &mut self.stderr]
                 .into_iter()
@@ -1079,26 +1152,29 @@ impl<T> TestChild<T> {
             match self.process_group.try_wait(&mut child) {
                 Ok(Some(status)) => break Ok(status),
                 Err(error) => break Err(Report::from(error)),
-                Ok(None) if self.past_deadline() => {
+                Ok(None)
+                    if cleanup_deadline
+                        .or(self.deadline)
+                        .is_some_and(|deadline| Instant::now() >= deadline) =>
+                {
                     break Err(eyre!("test child process deadline elapsed"));
                 }
                 Ok(None) => thread::sleep(Duration::from_millis(10)),
             }
         };
+        let cleanup_deadline =
+            cleanup_deadline.unwrap_or_else(|| Instant::now() + CHILD_CLEANUP_TIMEOUT);
         if status.is_err() {
             // Retire group ownership before reaping; never signal a reusable saved PID.
             let cleanup = self
                 .process_group
                 .kill(&mut child)
-                .and_then(|()| child.wait().map(|_| ()));
+                .and_then(|()| reap_before_deadline(&mut child, cleanup_deadline).map(|_| ()));
             if let Err(error) = cleanup {
                 status = status.map_err(|cause| cause.wrap_err(error));
             }
-            for output in [&self.stdout, &self.stderr].into_iter().flatten() {
-                let _ = output.cancelled.send(true);
-            }
         }
-        let (stdout, stderr, read_error) = self.finish_output_drain();
+        let (stdout, stderr, read_error) = self.finish_output_drain_before(cleanup_deadline);
         let status = match status {
             Ok(status) => status,
             Err(error) => {
@@ -1135,12 +1211,36 @@ impl<T> TestChild<T> {
         })
     }
 
-    /// Sets or resets the deadline for command output reads and natural process exit.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self.deadline = Some(Instant::now() + timeout);
+    /// Returns the current observation deadline, or `None` if no timeout was configured.
+    ///
+    /// Intentional termination and post-exit draining have an independent cleanup grace.
+    pub fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
 
-        self
+    /// Sets or resets the observation deadline for output reads and natural process exit.
+    ///
+    /// Updates already-created readers immediately. A zero duration expires the observation budget.
+    /// Intentional termination and post-exit draining retain their independent cleanup grace.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidInput`] if `timeout` cannot be represented by [`Instant`].
+    /// Overflow never disables the deadline. On error, the consumed child is dropped and cleaned up.
+    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self> {
+        let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+            std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "test child timeout exceeds Instant range",
+            )
+        })?;
+        self.timeout = Some(timeout);
+        self.deadline = Some(deadline);
+        for output in [&mut self.stdout, &mut self.stderr].into_iter().flatten() {
+            output.deadline = Some(deadline);
+        }
+
+        Ok(self)
     }
 
     /// Configures this test runner to forward stdout and stderr to the true stdout,
@@ -1894,16 +1994,16 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
         }
 
         source.apply_failure_regexes_to_outputs();
+        let deadline = Instant::now() + CHILD_CLEANUP_TIMEOUT;
+        source.start_output_drain(Some(deadline));
         if let Some(child) = source.child.as_mut() {
-            if let Err(error) = source
-                .process_group
-                .kill(child)
-                .and_then(|()| child.wait().map(|_| ()))
-            {
+            if let Err(error) = source.process_group.kill(child).and_then(|()| {
+                source.killed = true;
+                reap_before_deadline(child, deadline).map(|_| ())
+            }) {
                 self = self.wrap_err(error);
             }
         }
-        source.start_output_drain(Some(Instant::now() + Duration::from_secs(1)));
         let (stdout, stderr, error) = source.finish_output_drain();
         if let Some(error) = error {
             self = self.wrap_err(error);

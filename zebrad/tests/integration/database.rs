@@ -119,7 +119,7 @@ where
     // Start the first node
     let mut node1 = first_dir
         .spawn_child(args!["start"])?
-        .with_timeout(LAUNCH_DELAY);
+        .with_timeout(LAUNCH_DELAY)?;
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
@@ -131,13 +131,11 @@ where
     // Keep the conflicting resource held until node2 exits by itself.
     let output2 = node2
         .with_timeout(LAUNCH_DELAY)
+        .context_from(&mut node1)?
         .wait_with_output()
         .context_from(&mut node1)?;
     node1.kill(false).context_from(&output2)?;
-    let output1 = node1
-        .with_timeout(LAUNCH_DELAY)
-        .wait_with_output()
-        .context_from(&output2)?;
+    let output1 = node1.wait_with_output().context_from(&output2)?;
 
     // Make sure the first node was killed, rather than exiting with an error.
     output1
@@ -192,7 +190,7 @@ fn delete_old_databases() -> Result<()> {
     let mut child = run_dir
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
-        .with_timeout(LAUNCH_DELAY);
+        .with_timeout(LAUNCH_DELAY)?;
 
     // delete checker running
     child.expect_stdout_line_matches("checking for old database versions".to_string())?;

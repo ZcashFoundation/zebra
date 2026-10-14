@@ -30,7 +30,7 @@ use super::{
         DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
     config::testdir,
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, LAUNCH_DELAY, LIGHTWALLETD_STARTUP_DELAY},
+    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, LIGHTWALLETD_STARTUP_DELAY},
     sync::SYNC_FINISHED_REGEX,
     test_type::TestType,
 };
@@ -128,7 +128,7 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
 
     let mut lightwalletd = lightwalletd_dir
         .spawn_lightwalletd_child(lightwalletd_state_path, test_type, arguments)?
-        .with_timeout(startup_timeout)
+        .with_timeout(startup_timeout)?
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
     // Wait until `lightwalletd` has launched.
@@ -143,7 +143,7 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         .expect_stdout_line_matches(regex::escape("Starting lightwalletd process version"))?;
 
     // Now that lightwalletd has launched, restore the full timeout for the rest of the test.
-    let lightwalletd = lightwalletd.with_timeout(test_type.lightwalletd_timeout());
+    let lightwalletd = lightwalletd.with_timeout(test_type.lightwalletd_timeout())?;
 
     Ok(Some((lightwalletd, lightwalletd_rpc_port)))
 }
@@ -475,7 +475,7 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
         // This is a startup log, so bound it the same way `spawn_lightwalletd_for_rpc` bounds
         // the launch log, instead of leaving it on the full test timeout.
         let mut lightwalletd = lightwalletd
-            .with_timeout(LIGHTWALLETD_STARTUP_DELAY.min(test_type.lightwalletd_timeout()));
+            .with_timeout(LIGHTWALLETD_STARTUP_DELAY.min(test_type.lightwalletd_timeout()))?;
 
         if test_type.needs_zebra_cached_state() {
             lightwalletd.expect_stdout_line_matches(
@@ -490,7 +490,7 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
 
         // Restore the full timeout: reading a cached lightwalletd state from disk, and waiting
         // for Zebra to supply the next block, can both take much longer than the launch logs.
-        let mut lightwalletd = lightwalletd.with_timeout(test_type.lightwalletd_timeout());
+        let mut lightwalletd = lightwalletd.with_timeout(test_type.lightwalletd_timeout())?;
 
         if test_type.needs_lightwalletd_cached_state() {
             lightwalletd
@@ -620,20 +620,14 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
     if let Some(mut lightwalletd) = lightwalletd {
         lightwalletd.kill(false)?;
 
-        let lightwalletd_output = lightwalletd
-            .with_timeout(LAUNCH_DELAY)
-            .wait_with_output()?
-            .assert_failure()?;
+        let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
 
         lightwalletd_output
             .assert_was_killed()
             .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
     }
 
-    let zebrad_output = zebrad
-        .with_timeout(LAUNCH_DELAY)
-        .wait_with_output()?
-        .assert_failure()?;
+    let zebrad_output = zebrad.wait_with_output()?.assert_failure()?;
 
     zebrad_output
         .assert_was_killed()

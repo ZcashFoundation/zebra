@@ -51,7 +51,7 @@ fn live_mainnet_peer_handshake() -> Result<()> {
     let mut child = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
-        .with_timeout(LIVE_PEER_HANDSHAKE_TIMEOUT);
+        .with_timeout(LIVE_PEER_HANDSHAKE_TIMEOUT)?;
 
     let initial_peers_line = child
         .expect_stdout_line_matches("finished connecting to initial seed and disk cache peers")?;
@@ -282,7 +282,7 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 .with_exact_config(&config)?
                 .spawn_child(args!["start"])?
                 .bypass_test_capture(true)
-                .with_timeout(test_type.zebrad_timeout())
+                .with_timeout(test_type.zebrad_timeout())?
                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
             // Signal once node 1 is listening. A dial that lands before the listener
@@ -292,7 +292,7 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 "Opened Zcash protocol endpoint at {node1_listen_addr}"
             )))?;
             let mut zebrad_child =
-                zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY);
+                zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY)?;
             let _ = node1_listening_tx.send(());
 
             while !is_finished.load(Ordering::SeqCst) {
@@ -353,14 +353,14 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 .with_exact_config(&config)?
                 .spawn_child(args!["start"])?
                 .bypass_test_capture(true)
-                .with_timeout(test_type.zebrad_timeout())
+                .with_timeout(test_type.zebrad_timeout())?
                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
             zebrad_child.expect_stdout_line_matches(regex::escape(&format!(
                 "Opened RPC endpoint at {rpc_listen_addr}"
             )))?;
             let mut zebrad_child =
-                zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY);
+                zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY)?;
 
             while !is_finished.load(Ordering::SeqCst) {
                 zebrad_child.wait_for_stdout_line(Some("zebraB2".to_string()));

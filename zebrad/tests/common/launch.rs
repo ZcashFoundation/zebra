@@ -264,7 +264,7 @@ pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
-        .with_timeout(test_type.zebrad_timeout())
+        .with_timeout(test_type.zebrad_timeout())?
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
     Ok(Some((zebrad, config.rpc.listen_addr)))
@@ -343,7 +343,7 @@ where
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
-        .with_timeout(test_type.zebrad_timeout())
+        .with_timeout(test_type.zebrad_timeout())?
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
     Ok(Some(zebrad))

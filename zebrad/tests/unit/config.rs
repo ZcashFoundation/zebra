@@ -80,7 +80,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .path()
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
-        .with_timeout(LAUNCH_DELAY);
+        .with_timeout(LAUNCH_DELAY)?;
     child.expect_stdout_line_matches("Opened Zebra state cache at")?;
     child.kill(false)?;
     let output = child.wait_with_output()?;
@@ -224,11 +224,9 @@ fn persistent_mode_peer_cache() -> Result<()> {
     let mut peer = testdir()?
         .with_config(&mut peer_config)?
         .spawn_child(args!["start"])?
-        .with_timeout(LAUNCH_DELAY);
+        .with_timeout(LAUNCH_DELAY)?;
 
     let peer_addr = read_listen_addr_from_logs(&mut peer, OPENED_P2P_ENDPOINT_MSG)?;
-    // The peer must stay alive through the other node's cache-write observation window.
-    let mut peer = peer.with_timeout(PEER_CACHE_CREATION_TIMEOUT + LAUNCH_DELAY);
 
     // The node under test connects to the peer node, and to nothing else.
     let mut config = persistent_test_config(&Mainnet)?;
@@ -773,7 +771,7 @@ fn non_blocking_logger() -> Result<()> {
             let dir = testdir()?.with_config(&mut config)?;
             let mut child = dir
                 .spawn_child(args!["start"])?
-                .with_timeout(TINY_CHECKPOINT_TIMEOUT);
+                .with_timeout(TINY_CHECKPOINT_TIMEOUT)?;
 
             // Create an http client
             let client = RpcRequestClient::new_with_timeout(rpc_address, RPC_REQUEST_TIMEOUT);

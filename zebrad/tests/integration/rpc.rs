@@ -31,7 +31,9 @@ async fn metrics_endpoint() -> Result<()> {
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(args!["start"])?.with_timeout(LAUNCH_DELAY);
+    let mut child = dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
     child.expect_stdout_line_matches(regex::escape(&format!(
         "Opened metrics endpoint at {endpoint}"
     )))?;
@@ -42,12 +44,12 @@ async fn metrics_endpoint() -> Result<()> {
     // Test metrics endpoint
     let res = client.get(url).send().await;
 
-    let (res, child) = child.with_timeout(LAUNCH_DELAY).kill_on_error(res)?;
+    let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
 
     // Get the body of the response
     let body = res.bytes().await;
-    let (body, mut child) = child.with_timeout(LAUNCH_DELAY).kill_on_error(body)?;
+    let (body, mut child) = child.kill_on_error(body)?;
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
@@ -86,7 +88,9 @@ async fn tracing_endpoint() -> Result<()> {
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(args!["start"])?.with_timeout(LAUNCH_DELAY);
+    let mut child = dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
     child.expect_stdout_line_matches(regex::escape(&format!(
         "Opened tracing endpoint at {endpoint}"
     )))?;
@@ -96,29 +100,25 @@ async fn tracing_endpoint() -> Result<()> {
 
     // Test tracing endpoint
     let res = client.get(url_default).send().await;
-    let (res, child) = child.with_timeout(LAUNCH_DELAY).kill_on_error(res)?;
+    let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
 
     // Get the body of the response
     let body = res.bytes().await;
-    let (body, child) = child.with_timeout(LAUNCH_DELAY).kill_on_error(body)?;
+    let (body, child) = child.kill_on_error(body)?;
 
     // Set a filter and make sure it was changed
     let post = client.post(&url_filter).body("zebrad=debug").send().await;
-    let (_post, child) = child.with_timeout(LAUNCH_DELAY).kill_on_error(post)?;
+    let (_post, child) = child.kill_on_error(post)?;
 
     let tracing_res = client.get(url_filter).send().await;
 
-    let (tracing_res, child) = child
-        .with_timeout(LAUNCH_DELAY)
-        .kill_on_error(tracing_res)?;
+    let (tracing_res, child) = child.kill_on_error(tracing_res)?;
     assert!(tracing_res.status().is_success());
 
     // Get the body of the response
     let tracing_body = tracing_res.bytes().await;
-    let (tracing_body, mut child) = child
-        .with_timeout(LAUNCH_DELAY)
-        .kill_on_error(tracing_body)?;
+    let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
 
     child.kill(false)?;
 
@@ -191,7 +191,9 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     config.network.cache_dir = false.into();
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(args!["start"])?.with_timeout(LAUNCH_DELAY);
+    let mut child = dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
 
     // Wait until port is open.
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
@@ -205,7 +207,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     assert!(res.status().is_success());
 
     let body = res.bytes().await;
-    let (body, mut child) = child.with_timeout(LAUNCH_DELAY).kill_on_error(body)?;
+    let (body, mut child) = child.kill_on_error(body)?;
 
     let parsed: Value = serde_json::from_slice(&body)?;
 
@@ -246,7 +248,9 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
     config.network.cache_dir = false.into();
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(args!["start"])?.with_timeout(LAUNCH_DELAY);
+    let mut child = dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
 
     // Wait until port is open.
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
