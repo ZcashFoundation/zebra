@@ -1491,7 +1491,7 @@ async fn block_verification_does_not_use_mempool_verified_state() {
             responder.respond(response);
         }
     };
-    let ((_router, mempool_verifier, handles, _), ()) = timeout(test_timeout(), async {
+    let ((_router, mempool_verifier, handles, _, _), ()) = timeout(test_timeout(), async {
         futures::join!(initialize, startup_reads)
     })
     .await

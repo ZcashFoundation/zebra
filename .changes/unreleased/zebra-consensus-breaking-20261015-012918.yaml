@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: '`router::init` and `router::init_test` now return a fifth element, a `PreparedBlockCache` that shares the semantic verifier''s successful proposals; its `deserialize` selects a candidate by normalized header and transaction-section length, then compares exact bytes without a full-body hash pass. Matching proposals reuse parsed transactions while keeping the submitted header and normal consensus verification ([#11738](https://github.com/ZcashFoundation/zebra/issues/11738)).'
+time: 2026-10-15T01:29:18.470706335+02:00
