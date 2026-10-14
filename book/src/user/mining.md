@@ -123,8 +123,9 @@ INFO zebrad::components::sync::progress: finished initial sync to chain tip, usi
 
 Template requests share the updater's work during startup and refreshes, rather than starting a
 separate coinbase proof for each waiting miner. On-demand construction runs off the async executor
-and rechecks the committed parent and synchronization before returning.
-Long polls also recheck synchronization after waking.
+and rechecks the committed parent, synchronization, timestamp range and difficulty before returning.
+Long polls also recheck synchronization after waking. Expanding a clock-capped timestamp range does
+not cancel still-valid work; a genuine difficulty-boundary transition still replaces it.
 New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
 If the updater stops, cached work is refreshed at the normal mempool polling interval.
 Long polls continue observing shared template publications after switching to on-demand refresh.
