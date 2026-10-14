@@ -481,7 +481,7 @@ pub struct GenesisPeer {
     _network_handles: (
         tower::buffer::Buffer<tower::util::BoxService<Request, Response, BoxError>, Request>,
         Arc<std::sync::Mutex<AddressBook>>,
-        tokio::sync::mpsc::Sender<(zebra_network::PeerSocketAddr, u32)>,
+        tokio::sync::mpsc::Sender<zebra_network::MisbehaviorReport>,
     ),
 
     /// Runs the peer's network tasks.

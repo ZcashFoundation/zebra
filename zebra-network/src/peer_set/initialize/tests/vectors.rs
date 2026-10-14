@@ -50,7 +50,7 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -1566,9 +1566,10 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     // Ban the peer, using the same channel that block and transaction verification uses.
     misbehavior_tx
-        .send((
+        .send(MisbehaviorReport::new(
             PeerSocketAddr::from(SocketAddr::new(peer_ip.into(), ipv4_listen_addr.port())),
             constants::MAX_PEER_MISBEHAVIOR_SCORE,
+            "test misbehavior",
         ))
         .await
         .expect("misbehavior channel is open");

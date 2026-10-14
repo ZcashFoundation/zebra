@@ -26,7 +26,7 @@ use zebra_network::{
         ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
     },
     types::{MetaAddr, PeerServices},
-    AddressBook, InventoryResponse, PeerSocketAddr, Request, Response,
+    AddressBook, InventoryResponse, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
@@ -1230,7 +1230,7 @@ async fn setup_gossiped_block_misbehavior(
 ) -> (
     Inbound,
     MockService<Request, Response, PanicAssertion>,
-    tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+    tokio::sync::mpsc::Receiver<MisbehaviorReport>,
 ) {
     let network = Mainnet;
     let state_config = StateConfig::ephemeral();
@@ -1258,7 +1258,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
 ) -> (
     Inbound,
     MockService<Request, Response, PanicAssertion>,
-    tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
+    tokio::sync::mpsc::Receiver<MisbehaviorReport>,
 ) {
     let network = Mainnet;
 
@@ -1306,14 +1306,22 @@ async fn setup_gossiped_block_misbehavior_with_state(
 
 /// Repeatedly polls the [`Inbound`] service, so its gossiped block download cleanup loop
 /// drains any finished downloads, and returns the first misbehaviour report, if any.
+///
+/// Asserts that the report has a reason, so the ban can be explained in the logs.
 async fn poll_for_misbehavior_report(
     inbound: &mut Inbound,
-    misbehavior_rx: &mut tokio::sync::mpsc::Receiver<(PeerSocketAddr, u32)>,
-) -> Option<(PeerSocketAddr, u32)> {
+    misbehavior_rx: &mut tokio::sync::mpsc::Receiver<MisbehaviorReport>,
+) -> Option<MisbehaviorReport> {
     for _ in 0..60 {
         let _ = std::future::poll_fn(|cx| inbound.poll_ready(cx)).await;
 
         if let Ok(report) = misbehavior_rx.try_recv() {
+            assert!(
+                report.reason.starts_with("invalid gossiped block: "),
+                "misbehaviour reports must explain why the peer was scored, got: {:?}",
+                report.reason,
+            );
+
             return Some(report);
         }
 
@@ -1412,7 +1420,7 @@ async fn gossiped_block_router_error_scores_serving_peer() -> Result<(), BoxErro
     let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
 
     assert_eq!(
-        report,
+        report.as_ref().map(|report| (report.addr, report.score)),
         Some((peer, expected_score)),
         "a peer that serves a consensus-invalid gossiped block must be reported for misbehaviour",
     );
@@ -1452,7 +1460,7 @@ async fn gossiped_block_scores_serving_peer_not_advertiser() -> Result<(), BoxEr
     let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
 
     assert_eq!(
-        report,
+        report.as_ref().map(|report| (report.addr, report.score)),
         Some((serving_peer, expected_score)),
         "the peer that served the invalid block must be scored, not the advertiser",
     );
@@ -1709,9 +1717,15 @@ async fn gossiped_block_contradicted_behind_tip_height_scores_serving_peer() -> 
     let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
 
     assert_eq!(
-        report,
+        report.as_ref().map(|report| (report.addr, report.score)),
         Some((serving_peer, expected_score)),
         "the peer that served a parent-proven rewritten height must be reported for misbehaviour",
+    );
+    assert!(
+        report.as_ref().is_some_and(|report| report
+            .reason
+            .starts_with("invalid gossiped block: parent header contradicts coinbase height: ")),
+        "the reason must say the parent proved the height was rewritten, got: {report:?}",
     );
     assert_eq!(
         misbehavior_rx.try_recv().ok(),
@@ -1768,9 +1782,15 @@ async fn gossiped_block_contradicted_far_ahead_height_scores_serving_peer() -> R
     let report = poll_for_misbehavior_report(&mut inbound, &mut misbehavior_rx).await;
 
     assert_eq!(
-        report,
+        report.as_ref().map(|report| (report.addr, report.score)),
         Some((serving_peer, expected_score)),
         "the peer that served a parent-proven rewritten height must be reported for misbehaviour",
+    );
+    assert!(
+        report.as_ref().is_some_and(|report| report
+            .reason
+            .starts_with("invalid gossiped block: parent header contradicts coinbase height: ")),
+        "the reason must say the parent proved the height was rewritten, got: {report:?}",
     );
     assert!(
         verifier_called_rx.try_recv().is_err(),

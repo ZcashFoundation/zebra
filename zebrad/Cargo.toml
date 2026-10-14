@@ -281,7 +281,7 @@ hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
-insta = { workspace = true, features = ["json"] }
+insta = { workspace = true, features = ["json", "redactions"] }
 bytes = { workspace = true }
 http-body-util = { workspace = true }
 hyper-util = { workspace = true }

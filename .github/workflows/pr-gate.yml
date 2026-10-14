@@ -161,6 +161,27 @@ jobs:
           bash .github/scripts/validate-pr-changelogs.sh \
             "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
 
+  # Dry-runs the release batching over every pending fragment, so the set that separate PRs
+  # combine on the merge queue ref and on `main` is checked too.
+  changelog-fragments:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      # Pinned to the version release.yml batches with.
+      - uses: miniscruff/changie-action@3223cb29b92a0972dedc864ace3da01e04780ae4 # v3.0.1
+        with:
+          version: v1.25.2
+      - name: Check change fragments
+        run: |
+          projects="$(awk '/^projects:/ { p = 1; next } /^[^[:space:]#]/ { p = 0 } p && $1 == "key:" { print $2 }' .changie.yaml)"
+          for project in $projects; do
+            changie batch major --dry-run --project "$project" > /dev/null
+          done
+
   # No ruleset context pins this worker's display name; the ruleset requires `pr-gate-result`.
   release-readiness:
     name: Release readiness
@@ -277,7 +298,7 @@ jobs:
       github.event.label.name == 'release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null)
-    needs: [changes, semver-checks, changelog-gate, release-readiness]
+    needs: [changes, semver-checks, changelog-gate, changelog-fragments, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
