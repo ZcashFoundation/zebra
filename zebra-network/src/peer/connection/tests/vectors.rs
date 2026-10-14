@@ -45,11 +45,20 @@ use crate::{
 };
 
 #[derive(Default)]
-struct ConnectionStateRecorder {
+struct ConnectionMetricsRecorder {
+    counters: Mutex<HashMap<Key, Arc<AtomicU64>>>,
     gauges: Mutex<HashMap<String, Arc<AtomicU64>>>,
 }
 
-impl ConnectionStateRecorder {
+impl ConnectionMetricsRecorder {
+    fn counter(&self, key: Key) -> u64 {
+        self.counters
+            .lock()
+            .expect("test recorder mutex is unpoisoned")
+            .get(&key)
+            .map_or(0, |value| value.load(Ordering::Relaxed))
+    }
+
     fn state(&self, command: &str) -> f64 {
         let gauges = self
             .gauges
@@ -64,15 +73,22 @@ impl ConnectionStateRecorder {
     }
 }
 
-impl Recorder for ConnectionStateRecorder {
+impl Recorder for ConnectionMetricsRecorder {
     fn describe_counter(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
 
     fn describe_gauge(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
 
     fn describe_histogram(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
 
-    fn register_counter(&self, _key: &Key, _metadata: &Metadata<'_>) -> Counter {
-        Counter::noop()
+    fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
+        Counter::from_arc(
+            self.counters
+                .lock()
+                .expect("test recorder mutex is unpoisoned")
+                .entry(key.clone())
+                .or_default()
+                .clone(),
+        )
     }
 
     fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
@@ -108,7 +124,7 @@ impl Recorder for ConnectionStateRecorder {
 #[tokio::test]
 async fn connection_state_metrics_return_to_zero() {
     let _init_guard = zebra_test::init();
-    let recorder = ConnectionStateRecorder::default();
+    let recorder = ConnectionMetricsRecorder::default();
     let mut series_count = None;
 
     metrics::with_local_recorder(&recorder, || {
@@ -558,6 +574,61 @@ async fn empty_find_blocks_result_sends_no_inventory() {
     assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
+/// Dedicated block adverts preserve the ordinary request counter and cancellation labels.
+#[test]
+fn block_advert_request_metrics_include_cancellation() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let recorder = ConnectionMetricsRecorder::default();
+
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::pause();
+            tokio::time::timeout(Duration::from_secs(1), async {
+                let (mut connection, _client_tx, _service, mut outbound_messages, _error_slot) =
+                    new_test_connection();
+                let hash = block::Hash([1; 32]);
+                let (result, delivery) = tokio::sync::oneshot::channel();
+                let (_, message) = tokio::join!(
+                    connection.send_block_advert(crate::peer_set::BlockAdvert { hash, result }),
+                    outbound_messages.next(),
+                );
+                assert_eq!(
+                    message,
+                    Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+                );
+                delivery
+                    .await
+                    .expect("the completed write sends an acknowledgement")
+                    .expect("the connected test transport accepts the advert");
+
+                let (result, delivery) = tokio::sync::oneshot::channel();
+                drop(delivery);
+                connection
+                    .send_block_advert(crate::peer_set::BlockAdvert { hash, result })
+                    .await;
+                assert!(outbound_messages.try_recv().is_err());
+
+                assert_eq!(
+                    recorder.counter(Key::from_parts(
+                        "zebra.net.out.requests",
+                        &[("command", Request::AdvertiseBlock(hash, None).command())],
+                    )),
+                    1,
+                );
+                assert_eq!(
+                    recorder.counter(Key::from_parts(
+                        "zebra.net.out.requests.canceled",
+                        &[("command", Request::AdvertiseBlockToAll(hash).command())],
+                    )),
+                    1,
+                );
+                assert_eq!(recorder.counter(Key::from_name("peer.canceled")), 1);
+            })
+            .await
+            .expect("the local transport and canceled advert complete without remote responses");
+        });
+    });
+}
 /// Block adverts bypass pending responses without replacing their handlers or closing the client.
 #[tokio::test]
 async fn block_advert_while_awaiting_response() {
@@ -579,11 +650,18 @@ async fn block_advert_while_awaiting_response() {
 
         // Exercise the idle path before leaving an address request awaiting its response.
         let idle_hash = block::Hash([1; 32]);
-        block_advert_tx.try_send(idle_hash).unwrap();
+        let (result, idle_delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: idle_hash,
+                result,
+            })
+            .unwrap();
         assert_eq!(
             peer_outbound_messages.next().await,
             Some(Message::Inv(vec![InventoryHash::Block(idle_hash)]))
         );
+        idle_delivery.await.unwrap().unwrap();
 
         let (request_tx, mut request_rx) = oneshot::channel();
         client_tx
@@ -598,11 +676,18 @@ async fn block_advert_while_awaiting_response() {
         assert_eq!(peer_outbound_messages.next().await, Some(Message::GetAddr));
 
         let busy_hash = block::Hash([2; 32]);
-        block_advert_tx.try_send(busy_hash).unwrap();
+        let (result, busy_delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: busy_hash,
+                result,
+            })
+            .unwrap();
         assert_eq!(
             peer_outbound_messages.next().await,
             Some(Message::Inv(vec![InventoryHash::Block(busy_hash)]))
         );
+        busy_delivery.await.unwrap().unwrap();
         assert!(request_rx.try_recv().unwrap().is_none());
 
         // Closing only the advert channel must leave the original request alive.
@@ -648,7 +733,13 @@ async fn getblocks_response_precedes_ready_block_advert() {
                 stop: None,
             }))
             .unwrap();
-        block_advert_tx.try_send(advert_hash).unwrap();
+        let (result, _delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: advert_hash,
+                result,
+            })
+            .unwrap();
         let connection_task = tokio::spawn(connection.run(peer_rx));
 
         tokio::join!(

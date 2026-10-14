@@ -61,7 +61,7 @@
 //!   [`PeerSet::push_unready`]
 //! - disconnect from peers that have just responded and became outdated, in
 //!   [`PeerSet::poll_unready`]
-//! - disconnect from ready or busy peers that have become outdated, in
+//! - disconnect from ready or busy peers whose authorization was revoked, in
 //!   [`PeerSet::disconnect_from_ineligible_peers`]
 //!
 //! ## Network Coalescence
@@ -110,12 +110,11 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     prelude::*,
     stream::FuturesUnordered,
-    task::{noop_waker, AtomicWaker},
+    task::noop_waker,
 };
 use itertools::Itertools;
-use num_integer::div_ceil;
 use tokio::{
-    sync::{broadcast, mpsc as tokio_mpsc, watch, Notify},
+    sync::{broadcast, mpsc as tokio_mpsc, watch},
     task::JoinHandle,
 };
 use tower::{
@@ -127,7 +126,7 @@ use tower::{
 };
 use tracing_futures::Instrument;
 
-use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
@@ -143,11 +142,7 @@ use crate::{
         InventoryChange, InventoryRegistry,
     },
     protocol::{
-        external::{
-            connection_limit_key,
-            types::{PeerServices, Version},
-            InventoryHash,
-        },
+        external::{connection_limit_key, types::PeerServices, InventoryHash},
         internal::{Request, Response},
     },
     BanList, BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
@@ -230,59 +225,6 @@ enum InvRoute<K> {
 /// could take up a large amount of our bandwidth and retry limits.
 fn not_found_registry_error(hash: InventoryHash) -> BoxError {
     SharedPeerError::from(PeerError::NotFoundRegistry(vec![hash])).into()
-}
-
-/// A waker for peer events, queue deadlines, and cancellations while requests are queued.
-///
-/// Wakes the task that polls the peer set, and notifies the task that runs
-/// [`poll_peer_set_on_notify`]. The peer set is behind a [`tower::buffer::Buffer`], which only
-/// polls it when it has a request, so queued requests otherwise wouldn't be routed when a
-/// busy peer becomes ready or a find request's serving-only wait expires.
-#[derive(Default)]
-struct QueuedRequestWaker {
-    /// Notified when requests are queued, peers change, waits expire, or callers cancel.
-    notify: Notify,
-
-    /// The waker of the task that polls the peer set.
-    peer_set_waker: AtomicWaker,
-}
-
-impl std::task::Wake for QueuedRequestWaker {
-    fn wake(self: Arc<Self>) {
-        self.wake_by_ref();
-    }
-
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.notify.notify_one();
-        self.peer_set_waker.wake();
-    }
-}
-
-/// Polls `peer_set` with a [`Request::PollPeerSet`] each time `queued_request_waker` is notified,
-/// so queued requests are routed when peers become ready or their serving-only wait expires.
-///
-/// `peer_set` must be the service that wraps the [`PeerSet`] that owns `queued_request_waker`.
-/// See [`PeerSet::into_buffer`].
-///
-/// Only returns if the peer set fails.
-async fn poll_peer_set_on_notify<S>(
-    mut peer_set: S,
-    queued_request_waker: Arc<QueuedRequestWaker>,
-) -> Result<(), BoxError>
-where
-    S: Service<Request, Response = Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
-{
-    loop {
-        // Notifications while the peer set is being polled are combined into one poll, because
-        // `Notify` stores at most one permit.
-        //
-        // This wait has no timeout, because the peer set only notifies while requests are queued.
-        // The poll request can also wait a long time, while all peers are busy: then it is only
-        // routed once a peer becomes ready, which is exactly when queued requests can be routed.
-        queued_request_waker.notify.notified().await;
-        peer_set.ready().await?.call(Request::PollPeerSet).await?;
-    }
 }
 
 /// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
@@ -391,7 +333,17 @@ where
     inventory_registry: InventoryRegistry,
 
     /// Block advert channels and remote versions for every connected peer, including busy peers.
-    block_advert_senders: HashMap<D::Key, (Version, tokio_mpsc::Sender<block::Hash>)>,
+    block_advert_senders: watch::Sender<super::AdvertPeers>,
+
+    /// Coalesced discovery wakeups and bounded advert-maintenance completion requests.
+    maintenance_waker: Arc<super::PeerSetWaker>,
+    maintenance_tx: tokio_mpsc::Sender<tokio::sync::oneshot::Sender<()>>,
+    maintenance_rx: tokio_mpsc::Receiver<tokio::sync::oneshot::Sender<()>>,
+
+    /// Only waiters captured before reconciliation can complete afterward. Retain the fixed batch
+    /// across partial discovery drains; later arrivals remain in the bounded channel.
+    maintenance_batch:
+        [Option<tokio::sync::oneshot::Sender<()>>; crate::constants::PEERSET_BUFFER_SIZE],
 
     /// Inbound peer IPs that must always receive block inventory broadcasts.
     block_gossip_peer_ips: HashSet<IpAddr>,
@@ -418,19 +370,8 @@ where
     /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] expires, or once no busy peer might have the block.
     queued_inv_requests: VecDeque<QueuedInvRequest>,
 
-    /// Wakes the task that polls the peer set, and the task that runs
-    /// [`poll_peer_set_on_notify`], while requests are queued.
-    queued_request_waker: Arc<QueuedRequestWaker>,
-
-    /// The most recent sidecar broadcast (a block advert or a pushed
-    /// transaction) that has not been delivered to all connected zcashd-compat
-    /// sidecar peers, and the sidecar peers that are still owed it.
-    ///
-    /// A sidecar can be busy with another request when a broadcast is routed.
-    /// The request is queued here and delivered as soon as the sidecar is
-    /// ready again, so configured sidecars never miss block gossip. A newer
-    /// broadcast replaces an older undelivered one, even one of a different
-    /// kind.
+    /// The most recent pushed transaction owed to busy sidecars.
+    /// A newer transaction supersedes it. Block adverts use the separate acknowledged channels.
     queued_sidecar_broadcast: Option<(Request, HashSet<D::Key>)>,
 
     // Peer Tracking: Busy Peers
@@ -541,6 +482,8 @@ where
     ) -> Self {
         let (stall_event_tx, stall_event_rx) = tokio_mpsc::unbounded_channel();
         let (inv_failure_tx, inv_failure_rx) = tokio_mpsc::unbounded_channel();
+        let (maintenance_tx, maintenance_rx) =
+            tokio_mpsc::channel(crate::constants::PEERSET_BUFFER_SIZE);
         Self {
             // New peers
             discover,
@@ -564,12 +507,15 @@ where
             queued_find_requests: VecDeque::new(),
             queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
-            block_advert_senders: HashMap::new(),
+            block_advert_senders: watch::channel(HashMap::new()).0,
+            maintenance_waker: Arc::default(),
+            maintenance_tx,
+            maintenance_rx,
+            maintenance_batch: std::array::from_fn(|_| None),
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
             queued_inv_requests: VecDeque::new(),
-            queued_request_waker: Arc::default(),
             queued_sidecar_broadcast: None,
 
             // Busy peers
@@ -594,17 +540,26 @@ where
         }
     }
 
-    /// Returns a waker for peer events, which also notifies [`poll_peer_set_on_notify`] while
-    /// requests are queued.
-    fn peer_event_waker(&self, cx: &Context<'_>) -> Waker {
-        if self.queued_inv_requests.is_empty() && self.queued_find_requests.is_empty() {
-            return cx.waker().clone();
+    /// Return the independently bounded block advertiser for this peer set.
+    pub(crate) fn block_advertiser(&self) -> super::BlockAdvertiser<C>
+    where
+        C: Clone + Send + 'static,
+    {
+        super::BlockAdvertiser {
+            inner: tower::limit::ConcurrencyLimit::new(
+                super::AdvertisePeers {
+                    peers: self.block_advert_senders.subscribe(),
+                    bans: self.bans_receiver.clone(),
+                    minimum_version: self.minimum_peer_version.clone(),
+                    network: self.network.clone(),
+                    maintenance: tokio_util::sync::PollSender::new(self.maintenance_tx.clone()),
+                    wake: self.maintenance_waker.clone(),
+                    completion: None,
+                    maintained: false,
+                },
+                crate::constants::PEERSET_BUFFER_SIZE,
+            ),
         }
-
-        self.queued_request_waker
-            .peer_set_waker
-            .register(cx.waker());
-        Waker::from(self.queued_request_waker.clone())
     }
 
     /// Check background task handles to make sure they're still running.
@@ -686,7 +641,7 @@ where
     fn shut_down_tasks_and_channels(&mut self, cx: &mut Context<'_>) {
         // Drop services and cancel their background tasks.
         self.ready_services = HashMap::new();
-        self.block_advert_senders.clear();
+        self.block_advert_senders.send_modify(HashMap::clear);
 
         for (_peer_key, handle) in self.cancel_handles.drain() {
             let _ = handle.send(CancelClientWork);
@@ -792,7 +747,9 @@ where
 
                     if self.bans_receiver.borrow().is_banned(key.ip()) {
                         warn!(?key, "service is banned, dropping service");
-                        self.block_advert_senders.remove(&key);
+                        self.block_advert_senders.send_modify(|peers| {
+                            peers.remove(&key);
+                        });
                         std::mem::drop(svc);
                         let cancel = self.cancel_handles.remove(&key);
                         debug_assert!(
@@ -829,6 +786,9 @@ where
                 }
                 Some(Err((key, UnreadyError::TimedOut))) => {
                     debug!(?key, "service readiness timed out, dropping service");
+                    self.block_advert_senders.send_modify(|peers| {
+                        peers.remove(&key);
+                    });
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(
                         cancel.is_some(),
@@ -839,7 +799,9 @@ where
                 // Unready -> Errored
                 Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
-                    self.block_advert_senders.remove(&key);
+                    self.block_advert_senders.send_modify(|peers| {
+                        peers.remove(&key);
+                    });
 
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
@@ -883,7 +845,9 @@ where
                 Ok(()) => {
                     if self.bans_receiver.borrow().is_banned(key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
-                        self.block_advert_senders.remove(&key);
+                        self.block_advert_senders.send_modify(|peers| {
+                            peers.remove(&key);
+                        });
                         std::mem::drop(svc);
                         continue;
                     }
@@ -895,7 +859,9 @@ where
                 Err(error) => {
                     debug!(%error, "service failed while ready, dropping service");
 
-                    self.block_advert_senders.remove(&key);
+                    self.block_advert_senders.send_modify(|peers| {
+                        peers.remove(&key);
+                    });
                     std::mem::drop(svc);
                 }
             }
@@ -939,25 +905,19 @@ where
     ///
     /// If the peer connector channel is closed, returns an error.
     ///
-    /// Otherwise, returns `Ok` if it discovered at least one peer, or `Poll::Pending` if it didn't
-    /// discover any peers. Always registers a wakeup for new peers, even when it returns `Ok`.
-    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-        // Return pending if there are no peers in the list.
-        let mut result = Poll::Pending;
-
-        loop {
+    /// Returns true once pending discovery is drained. A connection-limit-sized batch bounds
+    /// each poll; exhausted batches schedule another poll before acknowledging maintenance.
+    fn poll_discover(&mut self, cx: &mut Context<'_>) -> Result<bool, BoxError> {
+        for _ in 0..self.peerset_total_connection_limit.max(1) {
             // If we've emptied the list, finish looping, otherwise process the new peer.
             let Poll::Ready(discovered) = Pin::new(&mut self.discover).poll_discover(cx) else {
-                break;
+                return Ok(true);
             };
 
             // If the change channel has a permanent error, return that error.
             let change = discovered
                 .ok_or("discovery stream closed")?
                 .map_err(Into::into)?;
-
-            // Otherwise we have successfully processed a peer.
-            result = Poll::Ready(Ok(()));
 
             // Process each change.
             match change {
@@ -1011,14 +971,23 @@ where
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
-                    self.block_advert_senders
-                        .insert(key, (svc.remote_version(), svc.block_advert_tx.clone()));
+                    self.block_advert_senders.send_modify(|peers| {
+                        peers.insert(
+                            key,
+                            (
+                                svc.remote_version(),
+                                is_sidecar,
+                                svc.block_advert_tx.clone(),
+                            ),
+                        );
+                    });
                     self.push_unready(key, svc);
                 }
             }
         }
 
-        result
+        cx.waker().wake_by_ref();
+        Ok(false)
     }
 
     /// Disconnects banned and outdated connections, whether ready or backpressured.
@@ -1032,7 +1001,9 @@ where
             let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
             if !eligible {
                 self.find_response_stalls.clear(*key);
-                self.block_advert_senders.remove(key);
+                self.block_advert_senders.send_modify(|peers| {
+                    peers.remove(key);
+                });
             }
             eligible
         });
@@ -1056,7 +1027,9 @@ where
                 .expect("unready services retain their client until completion");
             if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
                 self.find_response_stalls.clear(*key);
-                self.block_advert_senders.remove(key);
+                self.block_advert_senders.send_modify(|peers| {
+                    peers.remove(key);
+                });
                 if let Some(cancel) = self.cancel_handles.remove(key) {
                     let _ = cancel.send(CancelClientWork);
                 }
@@ -1136,7 +1109,9 @@ where
         self.find_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
-        self.block_advert_senders.remove(key);
+        self.block_advert_senders.send_modify(|peers| {
+            peers.remove(key);
+        });
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
             remaining_sidecars.remove(key);
             if remaining_sidecars.is_empty() {
@@ -1170,7 +1145,9 @@ where
         if svc.remote_version() >= self.minimum_peer_version.current() {
             self.ready_services.insert(key, svc);
         } else {
-            self.block_advert_senders.remove(&key);
+            self.block_advert_senders.send_modify(|peers| {
+                peers.remove(&key);
+            });
             std::mem::drop(svc);
         }
     }
@@ -1198,7 +1175,9 @@ where
             self.find_response_stalls.clear(key);
             // Reject delayed response events before the next peer-set poll.
             self.find_peer_queue.retain(|(addr, _)| *addr != key);
-            self.block_advert_senders.remove(&key);
+            self.block_advert_senders.send_modify(|peers| {
+                peers.remove(&key);
+            });
             // Cancel any request made to the service because it is using an outdated protocol
             // version.
             let _ = tx.send(CancelClientWork);
@@ -1700,7 +1679,7 @@ where
         });
 
         // Register peer, timer, and cancellation wakeups even if the response is never polled.
-        self.queued_request_waker.notify.notify_one();
+        self.maintenance_waker.notify.notify_one();
 
         async move {
             let response_fut = response_receiver
@@ -1807,7 +1786,7 @@ where
 
         // Poll the peer set again, so peer events wake `poll_peer_set_on_notify()` while this
         // request is queued.
-        self.queued_request_waker.notify.notify_one();
+        self.maintenance_waker.notify.notify_one();
 
         async move {
             let response = if let Some(deadline) = deadline {
@@ -1883,7 +1862,7 @@ where
 
         // Poll the newly busy peer's readiness future even if another peer stays ready.
         if routed_any && !self.queued_inv_requests.is_empty() {
-            self.queued_request_waker.notify.notify_one();
+            self.maintenance_waker.notify.notify_one();
         }
     }
 
@@ -1958,10 +1937,8 @@ where
 
     /// Broadcasts a request to sampled peers and all configured sidecars.
     ///
-    /// Used for requests that sidecars must always receive: block adverts and
-    /// pushed transactions. Connected sidecars that are busy with another
-    /// request are owed it: the request is queued and delivered by
-    /// [`Self::send_queued_sidecar_broadcast`] as soon as they are ready again.
+    /// Used for pushed transactions. Busy sidecars receive the latest queued transaction through
+    /// [`Self::send_queued_sidecar_broadcast`] when their ordinary service becomes ready.
     fn route_sidecar_broadcast(
         &mut self,
         req: Request,
@@ -1971,9 +1948,7 @@ where
         let selected_peers =
             self.select_sidecar_broadcast_peers(self.number_of_peers_to_broadcast());
 
-        // A newer broadcast supersedes any older undelivered one, even one of
-        // a different kind. Sidecars only need the latest block advert to stay
-        // live: they fetch any blocks in between over the same connection.
+        // Preserve the latest pushed transaction for busy sidecars.
         let busy_sidecars: HashSet<D::Key> = self
             .zcashd_compat_peer_keys
             .iter()
@@ -2032,17 +2007,7 @@ where
     /// Given a number of ready peers calculate to how many of them Zebra will
     /// actually send the request to. Return this number.
     pub(crate) fn number_of_peers_to_broadcast(&self) -> usize {
-        if self.network.is_regtest() {
-            // In regtest, we broadcast to all peers, so that we can test the
-            // peer set with a small number of peers.
-            self.ready_services.len()
-        } else {
-            // We are currently sending broadcast messages to a third of the total peers.
-            const PEER_FRACTION_TO_BROADCAST: usize = 3;
-
-            // Round up, so that if we have one ready peer, it gets the request.
-            div_ceil(self.ready_services.len(), PEER_FRACTION_TO_BROADCAST)
-        }
+        super::broadcast_peer_count(&self.network, self.ready_services.len())
     }
 
     /// Returns the list of addresses in the peer set.
@@ -2162,26 +2127,39 @@ where
     }
 }
 
+/// Keep the raw buffer non-owning: the external NetworkService aborts this task and its worker.
+async fn poll_peer_set_on_notify<S>(
+    mut peer_set: S,
+    wake: Arc<super::PeerSetWaker>,
+) -> Result<(), BoxError>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    loop {
+        wake.notify.notified().await;
+        peer_set.ready().await?.call(Request::PollPeerSet).await?;
+    }
+}
+
 impl<D, C> PeerSet<D, C>
 where
     D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin + Send + 'static,
     D::Error: Into<BoxError>,
     C: ChainTip + Send + 'static,
 {
-    /// Buffers the peer set and retains shutdown ownership only in external service handles.
-    ///
-    /// The worker and self-poller are aborted when the final external handle is dropped.
+    /// Own the buffer worker and its idle-discovery poller in external service handles.
     pub(crate) fn into_buffer(
         self,
         bound: usize,
     ) -> (crate::NetworkService, JoinHandle<Result<(), BoxError>>) {
-        let queued_request_waker = self.queued_request_waker.clone();
+        let wake = self.maintenance_waker.clone();
+        // Register discovery wakeups even if no ordinary request or advert is ever submitted.
+        wake.notify.notify_one();
         let (peer_set, worker) = Buffer::pair(BoxService::new(self), bound);
         let worker = tokio::spawn(worker.in_current_span());
-        let poll_task = tokio::spawn(
-            poll_peer_set_on_notify(peer_set.clone(), queued_request_waker).in_current_span(),
-        );
-
+        let poll_task =
+            tokio::spawn(poll_peer_set_on_notify(peer_set.clone(), wake).in_current_span());
         let network = crate::NetworkService::new(
             peer_set,
             vec![worker.abort_handle(), poll_task.abort_handle()],
@@ -2210,22 +2188,32 @@ where
         // task. If there are no ready peers, and no new peers, network requests will pause until:
         // - an unready peer becomes ready, or
         // - a new peer arrives.
+        self.maintenance_waker.worker.register(cx.waker());
+        let peer_waker = Waker::from(self.maintenance_waker.clone());
+        let mut peer_cx = Context::from_waker(&peer_waker);
 
-        // Peer events, find deadlines, and cancellations also notify the queued request task,
-        // so the peer set gets polled even when the buffer has no other requests.
-        let peer_event_waker = self.peer_event_waker(cx);
-        let mut peer_cx = Context::from_waker(&peer_event_waker);
-        // Events can change queued candidates even without a readiness transition. Register
-        // their wakeups with the notification task as well as the Buffer worker.
+        // Capture before observing discovery or revocation. Requests arriving during this pass
+        // need a subsequent pass, even if the current discovery poll reports a drained stream.
+        for completed in &mut self.maintenance_batch {
+            if completed.is_none() {
+                let Ok(waiter) = self.maintenance_rx.try_recv() else {
+                    break;
+                };
+                *completed = Some(waiter);
+            }
+        }
+
+        // Drain stall events first, so disconnects free up slots that
+        // `poll_discover` can fill in the same poll cycle.
         self.drain_stall_events(&mut peer_cx);
 
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
         // available/useful peers.
-        let _poll_pending_or_ready: Poll<()> = self.poll_discover(&mut peer_cx)?;
+        let discovery_drained = self.poll_discover(&mut peer_cx)?;
 
         // These tasks don't provide new peers or newly ready peers.
-        let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
+        let _poll_pending: Poll<()> = self.poll_background_errors(&mut peer_cx)?;
         let _poll_pending_or_ready: Poll<()> =
             self.inventory_registry.poll_inventory(&mut peer_cx)?;
         // Register failures after rotation so they survive a full interval before aging.
@@ -2249,6 +2237,20 @@ where
 
         // Waiting block requests still take priority over broadcasts.
         self.route_queued_inv_requests(&mut peer_cx);
+
+        // Advert fanout waits for reconciliation, not for ordinary peer request readiness.
+        if discovery_drained {
+            for completed in &mut self.maintenance_batch {
+                if let Some(completed) = completed.take() {
+                    let _ = completed.send(());
+                }
+            }
+            if !self.maintenance_rx.is_empty() {
+                // Earlier notifications may have driven this pass while its captured batch
+                // was still full. Schedule the remaining waiters even with an idle Buffer.
+                peer_waker.wake_by_ref();
+            }
+        }
 
         if ready_peers.is_pending() {
             // # Correctness
@@ -2311,23 +2313,12 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
-            Request::AdvertiseBlockToAll(hash) => {
-                let minimum_version = self.minimum_peer_version.current();
-                let bans = self.bans_receiver.borrow();
-                for (key, (version, sender)) in &self.block_advert_senders {
-                    // Busy peers are not disconnected on upgrades until their services become ready.
-                    if *version >= minimum_version && !bans.is_banned(key.ip()) {
-                        // Drop full-channel adverts: slow peers receive later tip gossip.
-                        let _ = sender.try_send(hash);
-                    }
-                }
-                future::ready(Ok(Response::Nil)).boxed()
+            Request::AdvertiseBlockToAll(_) | Request::AdvertiseBlock(_, _) => {
+                future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
             }
 
             // Broadcasts that must always reach the configured zcashd-compat sidecar peers
-            Request::AdvertiseBlock(_, _) | Request::PushTransaction(_, _) => {
-                self.route_sidecar_broadcast(req)
-            }
+            Request::PushTransaction(_, _) => self.route_sidecar_broadcast(req),
 
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
