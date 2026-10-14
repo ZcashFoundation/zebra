@@ -5,9 +5,11 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
+    time::Instant,
 };
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};
+use indexmap::IndexMap;
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 use tokio::{
@@ -124,6 +126,7 @@ struct PeerSetBuilder<D, C> {
     demand_signal: Option<mpsc::Sender<MorePeers>>,
     handle_rx: Option<tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>>,
     inv_stream: Option<broadcast::Receiver<InventoryChange>>,
+    bans_receiver: Option<watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>>,
     address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
     minimum_peer_version: Option<MinimumPeerVersion<C>>,
     max_conns_per_ip: Option<usize>,
@@ -165,10 +168,22 @@ impl<D, C> PeerSetBuilder<D, C> {
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
+            bans_receiver: self.bans_receiver,
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
             max_conns_per_ip: self.max_conns_per_ip,
             block_gossip_peer_ips: self.block_gossip_peer_ips,
+        }
+    }
+
+    /// Uses the provided ban-update receiver when constructing the [`PeerSet`].
+    pub fn with_bans_receiver(
+        self,
+        bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
+    ) -> Self {
+        Self {
+            bans_receiver: Some(bans_receiver),
+            ..self
         }
     }
 
@@ -183,6 +198,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
+            bans_receiver: self.bans_receiver,
             address_book: self.address_book,
             minimum_peer_version: Some(minimum_peer_version),
             max_conns_per_ip: self.max_conns_per_ip,
@@ -203,6 +219,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
+            bans_receiver: self.bans_receiver,
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
             max_conns_per_ip: Some(max_conns_per_ip),
@@ -242,7 +259,9 @@ where
             .unwrap_or_else(|| guard.create_inventory_receiver());
 
         let address_metrics = guard.prepare_address_book(self.address_book);
-        let (_bans_sender, bans_receiver) = tokio::sync::watch::channel(Default::default());
+        let bans_receiver = self
+            .bans_receiver
+            .unwrap_or_else(|| watch::channel(Arc::new(IndexMap::new())).1);
 
         let peer_set = PeerSet::new(
             &config,
