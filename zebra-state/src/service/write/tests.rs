@@ -389,6 +389,7 @@ fn commit_response_precedes_the_replaced_snapshot_drop() {
             child.clone().prepare(),
             rsp_tx,
             None,
+            None,
         )))
         .unwrap();
     drop(queued);

@@ -127,8 +127,9 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                             let checkpoint_verified = CheckpointVerifiedBlock::from(block);
                             let (rsp_tx, mut rsp_rx) = oneshot::channel();
                             let error = state.commit_finalized(
-                                (checkpoint_verified, rsp_tx),
+                                (checkpoint_verified, rsp_tx, None),
                                 note_commitment_trees.clone(),
+                                None,
                             ).expect_err("Must fail commitment check");
                             let response_error = rsp_rx.try_recv().unwrap().unwrap_err();
                             prop_assert_eq!(error.inner(), response_error.inner());
@@ -141,8 +142,9 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                 let expected_tip = ChainTipBlock::from(checkpoint_verified.clone());
                 let (rsp_tx, mut rsp_rx) = oneshot::channel();
                 let (tip, trees) = state.commit_finalized(
-                    (checkpoint_verified, rsp_tx),
+                    (checkpoint_verified, rsp_tx, None),
                     note_commitment_trees.take(),
+                    None,
                 ).unwrap();
                 prop_assert_eq!(tip, expected_tip);
                 prop_assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), block_hash);

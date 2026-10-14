@@ -258,3 +258,90 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 
     Ok(())
 }
+
+/// Local submissions retain checkpoint validation and notify only after the real state commit.
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_checkpoint_notifications_follow_commit() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let (router, state) = verifiers_from_network(Network::Mainnet).await;
+        let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, validation) = tokio::sync::watch::channel(None);
+        let notifications = zs::MinedBlockNotifications::new(committed.clone(), validated);
+
+        let mut invalid = (*genesis).clone();
+        invalid.transactions.push(invalid.transactions[0].clone());
+        assert!(router
+            .clone()
+            .oneshot(Request::CommitMined(
+                Arc::new(invalid),
+                notifications.clone()
+            ))
+            .await
+            .is_err());
+        assert!(commits.try_recv().is_err());
+        assert!(validation.borrow().is_none());
+
+        // Capacity is checked by the real writer before mutation; the checkpoint can be retried.
+        let occupied = (block::Hash([0; 32]), Height(0));
+        committed.try_send(occupied).unwrap();
+        let error = router
+            .clone()
+            .oneshot(Request::CommitMined(genesis.clone(), notifications.clone()))
+            .await
+            .unwrap_err();
+        let error = error
+            .downcast_ref::<RouterError>()
+            .expect("the router returns its production error type");
+        assert!(!error.is_duplicate_request());
+        assert_eq!(error.misbehavior_score(), 0);
+        assert_eq!(
+            state
+                .clone()
+                .oneshot(zs::Request::Block(genesis.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(None),
+        );
+        assert_eq!(commits.try_recv().unwrap(), occupied);
+        assert!(validation.borrow().is_none());
+
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(Request::CommitMined(genesis.clone(), notifications.clone()))
+                .await
+                .unwrap(),
+            genesis.hash(),
+        );
+        assert_eq!(
+            commits
+                .try_recv()
+                .expect("the writer notifies before replying"),
+            (genesis.hash(), Height(0)),
+        );
+        assert!(validation.borrow().is_none());
+        assert_eq!(
+            state
+                .oneshot(zs::Request::Block(genesis.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(Some(genesis.clone())),
+        );
+
+        assert!(router
+            .oneshot(Request::CommitMined(genesis, notifications))
+            .await
+            .unwrap_err()
+            .downcast_ref::<RouterError>()
+            .expect("the router returns its production error type")
+            .is_duplicate_request());
+        assert!(commits.try_recv().is_err());
+        assert!(validation.borrow().is_none());
+    })
+    .await
+    .expect("checkpointed local submissions must not stall");
+}
