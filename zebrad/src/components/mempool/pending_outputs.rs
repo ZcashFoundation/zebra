@@ -58,6 +58,12 @@ impl PendingOutputs {
         self.0.retain(|_, chan| chan.receiver_count() > 0);
     }
 
+    /// Returns the retained channel count for cancellation-accounting tests.
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+
     /// Clears the inner [`HashMap`] of queued pending output requests.
     pub fn clear(&mut self) {
         self.0.clear();
