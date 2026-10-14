@@ -52,11 +52,12 @@ impl Eq for MiningCandidateGuard {}
 #[derive(Clone, Debug)]
 pub struct MiningCandidateChanges(
     pub(crate) tokio::sync::watch::Receiver<Option<crate::service::MiningCandidate>>,
+    pub(crate) Option<crate::ReadStateService>,
 );
 
 impl Default for MiningCandidateChanges {
     fn default() -> Self {
-        Self(tokio::sync::watch::channel(None).1)
+        Self(tokio::sync::watch::channel(None).1, None)
     }
 }
 
@@ -69,17 +70,23 @@ impl PartialEq for MiningCandidateChanges {
 impl Eq for MiningCandidateChanges {}
 
 impl MiningCandidateChanges {
-    /// Returns whether `hash` is still published, unexpired, and owned by a live verifier.
+    /// Returns whether `hash` is live, unexpired, and still extends the committed best tip.
     ///
     /// Check after selecting cached work: a detached chain-info response can outlive its guard.
     pub fn is_current(&self, hash: block::Hash) -> bool {
         self.0
             .borrow()
             .as_ref()
-            .is_some_and(|(_, info, cancelled, deadline)| {
+            .is_some_and(|(parent, info, cancelled, deadline)| {
                 info.tip_hash == hash
                     && cancelled.has_changed().is_ok()
                     && tokio::time::Instant::now() < *deadline
+                    && self
+                        .1
+                        .as_ref()
+                        .and_then(|state| state.best_tip())
+                        .map(|(_, hash)| hash)
+                        == Some(*parent)
             })
     }
 

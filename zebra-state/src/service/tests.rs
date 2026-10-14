@@ -35,8 +35,8 @@ use crate::{
         StateService,
     },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse, Request,
-    Response, SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse,
+    Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
@@ -461,6 +461,83 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
     })
     .await
     .expect("candidate expiry must not release the slot before verification finishes");
+}
+
+/// A live verifier cannot authorize a candidate after its sibling becomes the committed tip.
+#[tokio::test]
+async fn mining_candidate_is_withdrawn_when_a_sibling_commits() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested chain info");
+        };
+        let sibling = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let mut candidate = (*sibling).clone();
+        let header = Arc::make_mut(&mut candidate.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        header.nonce = [1; 32].into();
+        let candidate = Arc::new(candidate);
+        let hash = candidate.hash();
+        let ReadResponse::MiningCandidateChanges(mut changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state returns the requested candidate subscription");
+        };
+        let Response::MiningCandidate(Some(guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(candidate))
+            .await
+            .unwrap()
+        else {
+            panic!("the subscription enables candidate publication");
+        };
+        changes.changed().await;
+        assert!(changes.is_current(hash));
+        // Hold the publication independently of the withdrawal task to exercise final authorization.
+        let (_publication, receiver) = tokio::sync::watch::channel(changes.0.borrow().clone());
+        let mut detached = changes.clone();
+        detached.0 = receiver;
+        state
+            .clone()
+            .oneshot(Request::CommitCheckpointVerifiedBlock(sibling.into()))
+            .await
+            .unwrap();
+        assert!(
+            !detached.is_current(hash),
+            "authorization must consult committed state even before withdrawal is observed"
+        );
+        changes.changed().await;
+        assert!(
+            changes.0.borrow().is_none(),
+            "the obsolete publication must be withdrawn"
+        );
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .unwrap(),
+            ReadResponse::MiningCandidate(None)
+        ));
+        drop(guard);
+    })
+    .await
+    .expect("sibling commitment must withdraw the candidate before its verifier finishes");
 }
 
 #[test]
