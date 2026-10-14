@@ -35,8 +35,8 @@ use crate::{
         StateService,
     },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse, Request,
-    Response, SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse,
+    Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
