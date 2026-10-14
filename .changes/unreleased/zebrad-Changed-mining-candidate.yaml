@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: 'Mining work can extend newly received blocks before transaction and contextual validation finish. Early work is coinbase-only, expires after 30 seconds, and is disabled once NSM reissuance activates. A live candidate is not replaced by concurrent submissions, and expiry does not reopen its slot before verification finishes. Long polls recheck cached child work immediately when its parent commits, and new candidates interrupt template retry backoff.'
+body: 'Mining work can extend newly received blocks before transaction and contextual validation finish. Early work is coinbase-only, expires after 30 seconds, and is disabled once NSM reissuance activates. A live candidate is not replaced by concurrent submissions, and expiry does not reopen its slot before verification finishes. A candidate is withdrawn when its parent is no longer the committed best tip. Long polls recheck cached child work immediately when its parent commits, and new candidates interrupt template retry backoff.'
 time: 2026-10-11T00:00:00Z

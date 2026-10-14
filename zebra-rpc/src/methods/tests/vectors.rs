@@ -4227,6 +4227,7 @@ async fn getblocktemplate_fallback_rechecks_committed_tip() {
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::Tip => ReadResponse::Tip(Some((context.tip_height, context.tip_hash))),
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
                 other => panic!("unexpected state request: {other:?}"),
             }))
         }
@@ -4321,6 +4322,7 @@ async fn fallback_completion(
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context),
                 ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
                 other => panic!("unexpected state request: {other:?}"),
             }))
         }
@@ -4411,7 +4413,8 @@ async fn getblocktemplate_fallback_builds_off_executor() {
 #[tokio::test(start_paused = true)]
 async fn getblocktemplate_fallback_coalesces_with_updater() {
     let _init_guard = zebra_test::init();
-    for with_updater in [true, false] {
+    for (initialized, with_updater) in [(false, true), (true, true), (false, false), (true, false)]
+    {
         let network = Network::Mainnet;
         let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
         let hash = Hash([1; 32]);
@@ -4434,6 +4437,10 @@ async fn getblocktemplate_fallback_coalesces_with_updater() {
                     }
                     Ok::<_, BoxError>(match request {
                         ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected state request: {other:?}"),
                     })
                 }
@@ -4452,6 +4459,9 @@ async fn getblocktemplate_fallback_coalesces_with_updater() {
             tip,
             sync,
         );
+        if initialized {
+            rpc.gbt.template_cache().unwrap().clear();
+        }
         let (events, _) = broadcast::channel(1);
         let updater = with_updater.then(|| {
             rpc.spawn_block_template_updater(&MempoolTxSubscriber::new(events))
@@ -4480,7 +4490,7 @@ async fn getblocktemplate_fallback_coalesces_with_updater() {
         }
         assert_eq!(
             builds, 1,
-            "callers must share builds; updater: {with_updater}"
+            "callers must share builds; initialized: {initialized}, updater: {with_updater}"
         );
     }
 }
@@ -4576,6 +4586,10 @@ async fn getblocktemplate_refreshes_after_fallback_publication_or_updater_exit()
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                ReadRequest::MiningCandidateChanges => {
+                    ReadResponse::MiningCandidateChanges(Default::default())
+                }
                 other => panic!("unexpected state request: {other:?}"),
             }))
         });
@@ -4768,6 +4782,10 @@ async fn getblocktemplate_reports_updater_failure_and_recovers() {
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                ReadRequest::MiningCandidateChanges => {
+                    ReadResponse::MiningCandidateChanges(Default::default())
+                }
                 other => panic!("unexpected state request: {other:?}"),
             }))
         }
@@ -4841,6 +4859,10 @@ async fn fresh_publication_retention(network: Network, cross_difficulty_boundary
         std::future::ready(Ok::<_, BoxError>(match request {
             ReadRequest::ChainInfo => ReadResponse::ChainInfo(context_rx.borrow().clone()),
             ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+            ReadRequest::MiningCandidateChanges => {
+                ReadResponse::MiningCandidateChanges(Default::default())
+            }
             other => panic!("unexpected state request: {other:?}"),
         }))
     });
@@ -5436,7 +5458,9 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
             else {
                 panic!("state must return a candidate subscription");
             };
+            // Keep the writer alive so closing its tip channel cannot withdraw the candidate.
             let zebra_state::Response::MiningCandidate(Some(guard)) = state
+                .clone()
                 .oneshot(zebra_state::Request::MiningCandidate(candidate))
                 .await
                 .unwrap()
@@ -5444,6 +5468,10 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
                 panic!("the candidate subscription enables early work");
             };
             candidates.changed().await;
+            assert!(
+                candidates.is_current(candidate_hash),
+                "the live candidate must extend the committed parent before testing withdrawal"
+            );
             let guard = Arc::new(tokio::sync::watch::Sender::new(Some(guard)));
             let withdraw_on_read = Arc::new(AtomicBool::new(false));
 
@@ -5717,6 +5745,10 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
                         chain_value_pools: Default::default(),
                     }),
                     ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                    ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                    ReadRequest::MiningCandidateChanges => {
+                        ReadResponse::MiningCandidateChanges(Default::default())
+                    }
                     other => panic!("unexpected read state request: {other:?}"),
                 });
             }
