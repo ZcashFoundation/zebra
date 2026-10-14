@@ -18,24 +18,26 @@ use crate::{
     error::{CommitBlockError, CommitCheckpointVerifiedError},
     request::{block_retained_bytes, output_retained_bytes},
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
-    KnownBlock, NonFinalizedState, SemanticallyVerifiedBlock,
+    KnownBlock, MinedBlockNotifications, NonFinalizedState, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// A queued checkpoint-verified block, its result channel.
+/// A queued checkpoint-verified block, its result channel, and optional mined notifications.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
+    Option<MinedBlockNotifications>,
 );
 
-/// A queued semantic block, its result channel, and optional cached verdict.
+/// A queued semantic block, its result channel, optional cached verdict, and mined notifications.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
     // During queueing, the first field owns the cached result's new outputs.
     Option<Box<ContextuallyVerifiedBlock>>,
+    Option<MinedBlockNotifications>,
 );
 
 /// One existing checkpoint download budget per supported non-finalized fork.
@@ -137,7 +139,7 @@ impl QueuedBlocks {
                 .last_key_value()
                 .and_then(|(_, hashes)| hashes.iter().next())
                 .expect("an over-limit queue contains an indexed block");
-            let (_, sender, _) = self.remove(&hash);
+            let (_, sender, _, _) = self.remove(&hash);
             let _ = sender.send(Err(CommitBlockError::OrphanQueueFull.into()));
         }
         self.update_metrics();
@@ -218,7 +220,7 @@ impl QueuedBlocks {
             }
             let (_, hashes) = self.by_height.pop_first().expect("first height exists");
             for hash in hashes {
-                let (expired_block, expired_sender, _) = self.remove(&hash);
+                let (expired_block, expired_sender, _, _) = self.remove(&hash);
                 // Receiver closure does not cancel accepted work.
                 let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
                     Some(expired_block.height.into()),

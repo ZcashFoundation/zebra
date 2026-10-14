@@ -288,12 +288,15 @@ impl FinalizedState {
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order.
+    /// Runs on the blocking state writer; mined commit notifications precede the response.
+    /// The caller must reserve `committed_permit` for mined blocks before calling this method.
     pub fn commit_finalized(
         &mut self,
         ordered_block: QueuedCheckpointVerified,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        committed_permit: Option<tokio::sync::mpsc::OwnedPermit<(block::Hash, block::Height)>>,
     ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (checkpoint_verified, rsp_tx) = ordered_block;
+        let (checkpoint_verified, rsp_tx, _) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
             prev_note_commitment_trees,
@@ -311,6 +314,9 @@ impl FinalizedState {
             metrics::gauge!("zcash.chain.verified.block.height")
                 .set(checkpoint_verified.height.0 as f64);
             metrics::counter!("zcash.chain.verified.block.total").increment(1);
+            if let Some(permit) = committed_permit {
+                permit.send((checkpoint_verified.hash, checkpoint_verified.height));
+            }
         } else {
             metrics::counter!("state.checkpoint.error.block.count").increment(1);
             metrics::gauge!("state.checkpoint.error.block.height")

@@ -537,6 +537,26 @@ impl ContextuallyVerifiedBlock {
         self.received_time = Some(received_time);
     }
 
+    /// Converts an exact successful proposal result, rebound to its solved block, into a mined commit.
+    ///
+    /// The caller must first verify solved proof of work, current time, serialized size, and exact
+    /// proposal equality except nonce and solution. Moves the output map into the queue metadata.
+    pub fn into_mined_request(mut self, notifications: MinedBlockNotifications) -> Request {
+        let block = SemanticallyVerifiedBlock {
+            block: self.block.clone(),
+            hash: self.hash,
+            height: self.height,
+            new_outputs: std::mem::take(&mut self.new_outputs),
+            transaction_hashes: self.transaction_hashes.clone(),
+            received_time: self.received_time,
+        };
+        Request::CommitMinedBlock {
+            block,
+            contextual: Some(Box::new(self)),
+            notifications,
+        }
+    }
+
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
@@ -923,6 +943,93 @@ impl MappedRequest for AwaitUtxoRequest {
     }
 }
 
+/// State-owned relay notifications for a locally mined block.
+///
+/// Once queued, these senders live with the commit rather than its response future. The single
+/// state writer reserves a slot without waiting immediately before processing the commit. A full or
+/// closed channel rejects the mined request before mutation or early relay, without blocking other
+/// writes. An ordinary same-hash replacement retains the observer as best-effort: unavailable
+/// notification capacity cannot reject that ordinary commit. Otherwise, after success (including
+/// side-chain commits), the writer inserts the notification before replying. Channel insertion does
+/// not guarantee peer delivery; subsequent receiver closure cannot turn a successful commit into an
+/// error. Dropping a response future alone never changes notification requirements.
+#[derive(Clone, Debug)]
+pub struct MinedBlockNotifications {
+    pub(crate) committed: tokio::sync::mpsc::Sender<(block::Hash, block::Height)>,
+    pub(crate) validated: tokio::sync::watch::Sender<Option<Arc<Block>>>,
+    /// Whether notification capacity is required by the current commit request.
+    required: bool,
+}
+
+impl MinedBlockNotifications {
+    /// Creates notifications using the existing bounded committed channel and validated-body watch.
+    ///
+    /// No channel capacity is reserved while a queued block waits for its parent. The validated
+    /// watch is updated only for an exact successful proposal result after live parent, local
+    /// invalidation, and current header-time checks, immediately before applying the block.
+    pub fn new(
+        committed: tokio::sync::mpsc::Sender<(block::Hash, block::Height)>,
+        validated: tokio::sync::watch::Sender<Option<Arc<Block>>>,
+    ) -> Self {
+        Self {
+            committed,
+            validated,
+            required: true,
+        }
+    }
+
+    /// Retains a superseded mined observer without imposing its requirements on an ordinary commit.
+    ///
+    /// Use only when an ordinary same-hash request supersedes the mined request, not when its
+    /// response future is dropped. Healthy observers still receive the commit; a full or closed
+    /// channel no longer rejects it. Capacity is checked only at the writer's commit boundary.
+    pub fn allow_ordinary_commit(&mut self) {
+        self.required = false;
+    }
+
+    /// Reserves only at the writer's commit boundary, never while waiting for a queued parent.
+    pub(crate) fn try_reserve_committed(
+        &self,
+    ) -> Result<
+        Option<tokio::sync::mpsc::OwnedPermit<(block::Hash, block::Height)>>,
+        crate::CommitBlockError,
+    > {
+        let result = self
+            .committed
+            .clone()
+            .try_reserve_owned()
+            .map_err(|error| match error {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    crate::CommitBlockError::MinedBlockNotificationFull
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    crate::CommitBlockError::MinedBlockNotificationClosed
+                }
+            });
+        match result {
+            Ok(permit) => Ok(Some(permit)),
+            Err(error) if !self.required => {
+                tracing::warn!(
+                    ?error,
+                    "superseded mined notification observer unavailable; continuing ordinary commit"
+                );
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl PartialEq for MinedBlockNotifications {
+    fn eq(&self, other: &Self) -> bool {
+        self.committed.same_channel(&other.committed)
+            && self.validated.same_channel(&other.validated)
+            && self.required == other.required
+    }
+}
+
+impl Eq for MinedBlockNotifications {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
@@ -960,6 +1067,42 @@ pub enum Request {
     ///
     /// [0]: (crate::error::CommitSemanticallyVerifiedError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
+
+    /// Commits a locally mined block with state-owned relay notifications.
+    ///
+    /// Uses the queue, cancellation, error, and response semantics of
+    /// [`Request::CommitSemanticallyVerifiedBlock`]. Replacing a queued request retains its block
+    /// and cached verdict. An ordinary replacement retains its notifications as best-effort:
+    /// healthy observers still receive the commit, but full or closed channels cannot reject the
+    /// ordinary request. Another mined replacement installs its own required notifications.
+    ///
+    /// A full or closed required notification channel returns an operational
+    /// [`crate::CommitBlockError`] before mutation or early relay. Successful required notifications
+    /// are inserted before the response; ordinary commits do not require notification capacity.
+    CommitMinedBlock {
+        /// The solved block after semantic validation.
+        block: SemanticallyVerifiedBlock,
+        /// An exact successful proposal result rebound to this solved block, if available.
+        ///
+        /// The caller must check solved proof of work, current time, and serialized size.
+        /// Only this path can publish a validated body before applying it to the live state.
+        contextual: Option<Box<ContextuallyVerifiedBlock>>,
+        /// Notifications owned by the queued block, independent of its caller.
+        notifications: MinedBlockNotifications,
+    },
+
+    /// Commits a locally mined checkpoint-verified block with durable commit notification.
+    ///
+    /// Uses [`Request::CommitCheckpointVerifiedBlock`] semantics and never publishes an early
+    /// validated-body notification. Notifications survive cancellation of the response future.
+    /// Full or closed required notification channels reject before mutation. An ordinary same-hash
+    /// replacement retains the observer as best-effort, as with [`Request::CommitMinedBlock`].
+    CommitMinedCheckpointVerifiedBlock {
+        /// The block verified against a checkpoint.
+        block: CheckpointVerifiedBlock,
+        /// Notifications owned by the queued block, independent of its caller.
+        notifications: MinedBlockNotifications,
+    },
 
     /// Commit a checkpointed block to the state, skipping most but not all
     /// contextual validation.
@@ -1236,6 +1379,10 @@ impl Request {
             Request::MiningCandidate(_) => "mining_candidate",
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
+            Request::CommitMinedBlock { .. } => "commit_mined_block",
+            Request::CommitMinedCheckpointVerifiedBlock { .. } => {
+                "commit_mined_checkpoint_verified_block"
+            }
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
@@ -1852,6 +1999,8 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::CommitSemanticallyVerifiedBlock(_)
             | Request::CommitContextuallyVerifiedBlock(_)
+            | Request::CommitMinedBlock { .. }
+            | Request::CommitMinedCheckpointVerifiedBlock { .. }
             | Request::MiningCandidate(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)

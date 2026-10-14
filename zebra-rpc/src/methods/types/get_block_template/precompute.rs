@@ -37,7 +37,6 @@ use zebra_chain::{
     parameters::Network,
     serialization::{DateTime32, Duration32},
     transaction::UnminedTxId,
-    work::difficulty::CompactDifficulty,
 };
 use zebra_consensus::{router::service_trait::BlockVerifierService, Request as VerifyRequest};
 use zebra_node_services::mempool::{self, MempoolChange, MempoolService};
@@ -218,25 +217,6 @@ impl TemplateCache {
             });
             state.error = Some(error);
         });
-    }
-
-    /// Returns the history root only for the published parent, height, and difficulty.
-    pub(crate) fn chain_history_root(
-        &self,
-        parent: block::Hash,
-        height: Height,
-        difficulty: CompactDifficulty,
-    ) -> Option<block::ChainHistoryMmrRootHash> {
-        self.0
-            .borrow()
-            .as_ref()
-            .and_then(|state| state.template.as_ref())
-            .filter(|template| {
-                template.previous_block_hash == parent
-                    && template.height == height.0
-                    && template.bits == difficulty
-            })
-            .map(|template| template.default_roots.chain_history_root)
     }
 
     /// Subscribes to the templates [`run()`] publishes from now on.

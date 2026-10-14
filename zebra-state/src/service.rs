@@ -57,8 +57,8 @@ use crate::{
         watch_receiver::WatchReceiver,
     },
     AwaitUtxoError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
-    KnownBlock, ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
-    StateInitError,
+    KnownBlock, MinedBlockNotifications, ReadRequest, ReadResponse, Request, Response,
+    SemanticallyVerifiedBlock, StateInitError,
 };
 
 pub(crate) type MiningCandidate = (
@@ -521,6 +521,7 @@ impl StateService {
     fn queue_and_commit_to_finalized_state(
         &mut self,
         checkpoint_verified: CheckpointVerifiedBlock,
+        notifications: Option<MinedBlockNotifications>,
     ) -> oneshot::Receiver<Result<block::Hash, CommitCheckpointVerifiedError>> {
         // # Correctness & Performance
         //
@@ -538,9 +539,20 @@ impl StateService {
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        let queued = (checkpoint_verified, rsp_tx);
+        let mut queued = (checkpoint_verified, rsp_tx, notifications);
 
         if self.block_write_sender.finalized.is_some() {
+            if let Some(previous) = self
+                .finalized_state_queued_blocks
+                .get_mut(&queued_prev_hash)
+            {
+                if queued.0.hash == previous.0.hash && queued.2.is_none() {
+                    queued.2 = previous.2.take();
+                    if let Some(observer) = &mut queued.2 {
+                        observer.allow_ordinary_commit();
+                    }
+                }
+            }
             // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
@@ -696,7 +708,7 @@ impl StateService {
         queued: QueuedCheckpointVerified,
         error: impl Into<CommitCheckpointVerifiedError>,
     ) {
-        let (finalized, rsp_tx) = queued;
+        let (finalized, rsp_tx, _) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
@@ -719,7 +731,7 @@ impl StateService {
         queued: QueuedSemanticallyVerified,
         error: impl Into<CommitSemanticallyVerifiedError>,
     ) {
-        let (finalized, rsp_tx, _) = queued;
+        let (finalized, rsp_tx, _, _) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
@@ -739,6 +751,7 @@ impl StateService {
         &mut self,
         semantically_verified: SemanticallyVerifiedBlock,
         contextual: Option<Box<crate::ContextuallyVerifiedBlock>>,
+        notifications: Option<MinedBlockNotifications>,
     ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
@@ -779,13 +792,18 @@ impl StateService {
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
         // it with the newer request.
-        let rsp_rx = if let Some((_, old_rsp_tx, _)) = self
+        let rsp_rx = if let Some((_, old_rsp_tx, _, old_notifications)) = self
             .non_finalized_state_queued_blocks
             .get_mut(&semantically_verified.hash)
         {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(old_rsp_tx, &mut rsp_tx);
+            if notifications.is_some() {
+                *old_notifications = notifications;
+            } else if let Some(observer) = old_notifications {
+                observer.allow_ordinary_commit();
+            }
             let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
                 Some(semantically_verified.hash.into()),
                 KnownBlock::Queue,
@@ -798,6 +816,7 @@ impl StateService {
                 semantically_verified,
                 rsp_tx,
                 contextual,
+                notifications,
             ));
             rsp_rx
         };
@@ -888,7 +907,7 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in queued_children {
-                    let (SemanticallyVerifiedBlock { hash, .. }, _, _) = queued_child;
+                    let (SemanticallyVerifiedBlock { hash, .. }, _, _, _) = queued_child;
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
@@ -1082,7 +1101,7 @@ impl Service<Request> for StateService {
     fn call(&mut self, req: Request) -> Self::Future {
         req.count_metric();
         let span = Span::current();
-        let (req, contextual) = match req {
+        let (req, contextual, notifications) = match req {
             Request::CommitContextuallyVerifiedBlock(mut contextual) => {
                 // Move the output map into the queue's shared semantic metadata, without copying it.
                 let prepared = SemanticallyVerifiedBlock {
@@ -1096,9 +1115,27 @@ impl Service<Request> for StateService {
                 (
                     Request::CommitSemanticallyVerifiedBlock(prepared),
                     Some(contextual),
+                    None,
                 )
             }
-            req => (req, None),
+            Request::CommitMinedBlock {
+                block,
+                contextual,
+                notifications,
+            } => (
+                Request::CommitSemanticallyVerifiedBlock(block),
+                contextual,
+                Some(notifications),
+            ),
+            Request::CommitMinedCheckpointVerifiedBlock {
+                block,
+                notifications,
+            } => (
+                Request::CommitCheckpointVerifiedBlock(block),
+                None,
+                Some(notifications),
+            ),
+            req => (req, None, None),
         };
 
         match req {
@@ -1194,6 +1231,7 @@ impl Service<Request> for StateService {
                         self.queue_and_commit_to_non_finalized_state(
                             semantically_verified,
                             contextual,
+                            notifications,
                         )
                     })
                 });
@@ -1220,7 +1258,11 @@ impl Service<Request> for StateService {
                 .instrument(span)
                 .boxed()
             }
-            Request::CommitContextuallyVerifiedBlock(_) => unreachable!("normalized above"),
+            Request::CommitContextuallyVerifiedBlock(_)
+            | Request::CommitMinedBlock { .. }
+            | Request::CommitMinedCheckpointVerifiedBlock { .. } => {
+                unreachable!("normalized above")
+            }
 
             // Uses finalized_state_queued_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
@@ -1248,7 +1290,7 @@ impl Service<Request> for StateService {
                 //
                 // This method doesn't block, access the database, or perform CPU-intensive tasks,
                 // so we can run it directly in the tokio executor's Future threads.
-                let rsp_rx = self.queue_and_commit_to_finalized_state(finalized);
+                let rsp_rx = self.queue_and_commit_to_finalized_state(finalized, notifications);
 
                 // TODO:
                 //   - check for panics in the block write task here,

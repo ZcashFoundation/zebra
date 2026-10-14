@@ -5944,9 +5944,9 @@ async fn rpc_submitblock_resource_pressure_is_operational() {
     }
 }
 
-/// Only template-parent bodies authenticated by their header can be relayed before verification.
+/// Bodies without an exact successful proposal verdict wait for normal validation before relay.
 #[tokio::test]
-async fn rpc_submitblock_early_relay_authentication() {
+async fn rpc_submitblock_requires_validated_early_relay() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(30), async {
         let network = Parameters::build()
@@ -6014,6 +6014,14 @@ async fn rpc_submitblock_early_relay_authentication() {
         assert_eq!(altered_tx.hash(), tx.hash());
         let mut altered = block.clone();
         altered.transactions[index] = altered_tx;
+        let mut recommitted = altered.clone();
+        Arc::make_mut(&mut recommitted.header).commitment_bytes = <[u8; 32]>::from(
+            block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &template.default_roots.chain_history_root,
+                &recommitted.auth_data_root(),
+            ),
+        )
+        .into();
         let mut other_parent = block.clone();
         Arc::make_mut(&mut other_parent.header).previous_block_hash = Hash([7; 32]);
         let mut bad_merkle = block.clone();
@@ -6040,7 +6048,7 @@ async fn rpc_submitblock_early_relay_authentication() {
         );
         queue.abort();
         let cache = crate::SubmittedBlockCache::default();
-        let mut rpc = rpc.with_submitted_blocks(cache.clone(), Height(0));
+        let mut rpc = rpc.with_submitted_blocks(cache.clone());
         let normal_network = rpc.network.clone();
         let delayed_nu5 = Parameters::build()
             .with_disable_pow(true)
@@ -6066,20 +6074,19 @@ async fn rpc_submitblock_early_relay_authentication() {
         rpc.gbt.template_cache().unwrap().publish(template);
         let mut pending = cache.subscribe();
         pending.borrow_and_update();
-        for (candidate, checkpointed, delay_nu5, early) in [
-            (pre_nu5, false, true, false),
-            (altered, false, false, false),
-            (other_parent, false, false, false),
-            (bad_merkle, false, false, false),
-            (block.clone(), true, false, false),
-            (block, false, false, true),
+        for (candidate, delay_nu5) in [
+            (pre_nu5, true),
+            (altered, false),
+            (recommitted, false),
+            (other_parent, false),
+            (bad_merkle, false),
+            (block, false),
         ] {
             rpc.network = if delay_nu5 {
                 delayed_nu5.clone()
             } else {
                 normal_network.clone()
             };
-            rpc.gbt.max_checkpoint_height = if checkpointed { height } else { Height(0) };
             let candidate = Arc::new(candidate);
             let hash = candidate.hash();
             let call = tokio::spawn({
@@ -6088,21 +6095,29 @@ async fn rpc_submitblock_early_relay_authentication() {
                 async move { rpc.submit_block(HexData(bytes), None).await }
             });
             let verification = verifier
-                .expect_request(zebra_consensus::Request::Commit(candidate.clone()))
+                .expect_request_that(|request| {
+                    matches!(request, zebra_consensus::Request::CommitMined(block, _) if block == &candidate)
+                })
                 .await;
-            assert_eq!(cache.get(&hash).is_some(), early);
-            assert_eq!(pending.has_changed().unwrap(), early);
+            assert!(
+                cache.get(&hash).is_none(),
+                "no body is served before a verdict"
+            );
+            assert!(
+                !pending.has_changed().unwrap(),
+                "no inventory precedes a verdict"
+            );
             assert!(!call.is_finished());
             assert!(committed.try_recv().is_err());
             verification.respond(hash);
             assert_eq!(call.await.unwrap().unwrap(), SubmitBlockResponse::Accepted);
-            assert_eq!(committed.recv().await, Some((hash, height)));
-            assert_eq!(cache.get(&hash).is_some(), early);
+            // A mock verifier has no state writer: the RPC must not invent a committed event.
+            assert!(committed.try_recv().is_err());
             pending.borrow_and_update();
         }
     })
     .await
-    .expect("submission authentication test must finish");
+    .expect("submission eligibility test must finish");
 }
 
 #[tokio::test(start_paused = true)]
