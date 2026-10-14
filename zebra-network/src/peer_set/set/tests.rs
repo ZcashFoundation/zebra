@@ -117,6 +117,7 @@ impl PeerVersions {
 }
 
 /// Discover one peer advertising `start_height`, and return its request harness.
+#[cfg(test)]
 fn mock_peer_discovery_with_start_height(
     start_height: block::Height,
 ) -> (
@@ -133,6 +134,7 @@ fn mock_peer_discovery_with_start_height(
 
     (discovery, harness)
 }
+
 /// A helper builder type for creating test [`PeerSet`] instances.
 ///
 /// This helps to reduce repeated boilerplate code. Fields that are not set are configured to use

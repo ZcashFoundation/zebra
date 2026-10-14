@@ -2124,7 +2124,6 @@ fn peer_set_routes_queued_block_request_to_serving_peer_once_ready() {
             "block request should wait while a serving peer is busy",
         );
 
-
         // Let the serving peer take its queued requests, so it becomes ready again.
         assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
         assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));

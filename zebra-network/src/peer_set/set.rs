@@ -690,7 +690,8 @@ where
 
     /// Checks for newly ready, disconnects from outdated peers, and polls ready peer errors.
     fn poll_peers(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-        // Bans and protocol upgrades invalidate busy connections too.
+        // Busy connections must remain eligible too: neither a ban nor an upgrade waits for
+        // their request channel to regain capacity.
         self.disconnect_from_ineligible_peers();
 
         // Check for newly ready peers, including newly added peers (which are added as unready).
@@ -996,30 +997,18 @@ where
     fn disconnect_from_ineligible_peers(&mut self) {
         let minimum_version = self.minimum_peer_version.current();
         let bans = self.bans_receiver.borrow();
-        self.ready_services.retain(|key, service| {
-            let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
-            if !eligible {
-                self.find_response_stalls.clear(*key);
+        self.find_peer_queue.retain(|(key, info)| {
+            if !bans.is_banned(key.ip()) && info.remote.version >= minimum_version {
+                return true;
             }
-            eligible
+
+            self.find_response_stalls.clear(*key);
+            self.ready_services.remove(key);
+            if let Some(cancel) = self.cancel_handles.remove(key) {
+                let _ = cancel.send(CancelClientWork);
+            }
+            false
         });
-        for pending in Pin::new(&self.unready_services).iter_pin_ref() {
-            let pending = pending.get_ref();
-            let key = pending
-                .key
-                .as_ref()
-                .expect("unready services retain their key until completion");
-            let service = pending
-                .service
-                .as_ref()
-                .expect("unready services retain their client until completion");
-            if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
-                self.find_response_stalls.clear(*key);
-                if let Some(cancel) = self.cancel_handles.remove(key) {
-                    let _ = cancel.send(CancelClientWork);
-                }
-            }
-        }
     }
 
     /// Takes a ready service by key.
@@ -1663,7 +1652,7 @@ where
     /// Queued requests are only routed when the peer set is polled. While requests are queued,
     /// peer events notify [`poll_peer_set_on_notify`], which polls the peer set.
     ///
-    /// Reconsiders candidates on every poll, including advertisements and removals.
+    /// Reconsiders candidates on every poll, including advertisements, failures and removals.
     fn route_queued_inv_requests(&mut self, cx: &mut Context<'_>) {
         // Register caller cancellation too, so an expired operation releases its queue entry
         // even when no connection or inventory event follows it.
@@ -2094,6 +2083,8 @@ where
         // so the peer set gets polled even when the buffer has no other requests.
         let peer_event_waker = self.peer_event_waker(cx);
         let mut peer_cx = Context::from_waker(&peer_event_waker);
+        // Events can change queued candidates even without a readiness transition. Register
+        // their wakeups with the notification task as well as the Buffer worker.
         self.drain_stall_events(&mut peer_cx);
 
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
@@ -2155,8 +2146,12 @@ where
             if self.poll_peers(&mut peer_cx)?.is_pending() {
                 return Poll::Pending;
             }
+            // A peer can recover capacity while the first queued request is dispatched.
+            // Do not expose that capacity to the Buffer's held request before queued work.
+            self.route_queued_find_requests(&mut peer_cx);
             self.route_queued_inv_requests(&mut peer_cx);
             if self.ready_services.is_empty() {
+                // Newly inserted readiness futures need a first poll even with an idle Buffer.
                 cx.waker().wake_by_ref();
                 Poll::Pending
             } else {
