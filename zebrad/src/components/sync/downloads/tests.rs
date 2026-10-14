@@ -177,7 +177,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             .expect("valid prefix checkpoint commits");
     }
 
-    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height) =
+    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height, _prepared_blocks) =
         zebra_consensus::router::init_test(
             zebra_consensus::Config::default(),
             &network,
