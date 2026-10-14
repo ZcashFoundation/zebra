@@ -1333,6 +1333,12 @@ where
                             return None;
                         };
                         if candidates.is_current(candidate.tip_hash) {
+                            types::get_block_template::check_synced_to_tip(
+                                &self.network,
+                                self.latest_chain_tip.clone(),
+                                self.gbt.sync_status(),
+                            )
+                            .ok()?;
                             return Some(template);
                         }
                     }

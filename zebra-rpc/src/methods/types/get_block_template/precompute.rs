@@ -19,7 +19,8 @@ use std::{
     time::Duration,
 };
 
-use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use jsonrpsee::core::RpcResult;
+use jsonrpsee_types::ErrorObjectOwned;
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
@@ -34,7 +35,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
-    serialization::DateTime32,
+    serialization::{DateTime32, Duration32},
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::service_trait::BlockVerifierService, Request as VerifyRequest};
@@ -58,7 +59,9 @@ mod tests;
 /// Maximum duration of one cache/state wait before rechecking synchronization and updater ownership.
 pub(crate) const NEW_TIP_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// The same bounded cache wait for a miner address with a shielded component.
+/// The same bounded cache/state wait for a miner whose coinbase requires a shielded proof.
+///
+/// A timeout does not release a live updater's ownership or start an independent proof.
 pub(crate) const SHIELDED_NEW_TIP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long `getblocktemplate` waits for [`run()`] to publish a template for the current chain
@@ -89,10 +92,11 @@ const BUILD_WAITING_FOR_PERMIT: u8 = 1;
 /// Blocking work owns its permit independently and must be allowed to finish.
 const BUILD_STARTED: u8 = 2;
 
-/// A block template for the block after the current chain tip, shared between [`run()`] and the
+/// A block template for the current mining parent, shared between [`run()`] and the
 /// `getblocktemplate` RPC.
 ///
-/// No updater work yet is `None`; invalidated work awaiting a rebuild is `Some(None)`.
+/// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
+/// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
 pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<AtomicBool>);
 
@@ -327,6 +331,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
     let Some(_updater) = cache.claim_updater() else {
         return;
     };
+    // A fallback that started before this updater retains ownership until its blocking work
+    // finishes. Once active, this updater is the sole default-template builder.
+    drop(coinbase_cache.build.lock().await);
 
     // Dropping the updater also cancels its single validation worker.
     let mut validation = tokio::task::JoinSet::new();
@@ -349,7 +356,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
-    // Retain interrupted builds rather than detaching their CPU-heavy coinbase proofs.
+    // Retain snapshots across temporary candidates and retain every started proof. Cancel obsolete
+    // tip snapshots and mutex waiters before asking a replacement build to acquire the same mutex.
+    let full_build_phase = AtomicU8::new(BUILD_FETCHING);
     let mut full_build = None;
 
     loop {
@@ -376,7 +385,6 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         candidate_changes.mark_seen();
 
         if let Some(info) = mining_candidate(read_state.clone()).await {
-            // ponytail: Testnet may use tip work for 30s; refresh context at difficulty boundaries.
             if let Ok(height) = info.tip_height.next() {
                 store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
             }
@@ -391,15 +399,28 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             )
             .await
             {
-                cache.publish(template);
+                let now = DateTime32::now();
+                if !template.needs_difficulty_refresh(&network, now) {
+                    let refresh_at_boundary = template.needs_difficulty_refresh(
+                        &network,
+                        template
+                            .max_time
+                            .saturating_add(Duration32::from_seconds(1)),
+                    );
+                    let until_boundary = template.max_time.saturating_duration_since(now).to_std()
+                        + Duration::from_secs(1);
+                    cache.publish(template);
+                    let mut tip_change = latest_chain_tip.clone();
+                    tokio::select! {
+                        _ = candidate_changes.changed() => {}
+                        result = tip_change.best_tip_changed() => if result.is_err() { return; },
+                        _ = sleep(until_boundary), if refresh_at_boundary => {}
+                    }
+                    cache.clear();
+                    continue;
+                }
             }
-            let mut tip_change = latest_chain_tip.clone();
-            tokio::select! {
-                _ = candidate_changes.changed() => {}
-                result = tip_change.best_tip_changed() => if result.is_err() { return; }
-            }
-            cache.clear();
-            continue;
+            // The committed parent remains usable while a candidate's difficulty context expires.
         }
 
         // If we have no template for the current tip, publish a coinbase-only one immediately, so
@@ -438,6 +459,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         // Interruptions aren't counted, so a rejected candidate doesn't delay mempool refreshes.
         let resumed = Instant::now();
         let (awaited, building) = full_build.get_or_insert_with(|| {
+            full_build_phase.store(BUILD_FETCHING, Ordering::Release);
             (
                 Duration::ZERO,
                 Box::pin(build(
@@ -447,16 +469,29 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     read_state.clone(),
                     Some(mempool.clone()),
                     None,
-                    None,
+                    Some(&full_build_phase),
                 )),
             )
         });
-        let built = tokio::select! {
-            built = building => built,
-            _ = candidate_changes.changed() => {
-                *awaited += resumed.elapsed();
-                continue;
+        let mut tip_change = latest_chain_tip.clone();
+        let (built, tip_changed) = tokio::select! {
+            biased;
+            result = tip_change.best_tip_changed() => {
+                if result.is_err() {
+                    return;
+                }
+                (None, true)
             }
+            _ = candidate_changes.changed() => (None, false),
+            built = building => (Some(built), false),
+        };
+        let Some(built) = built else {
+            *awaited += resumed.elapsed();
+            let phase = full_build_phase.load(Ordering::Acquire);
+            if phase == BUILD_WAITING_FOR_PERMIT || (tip_changed && phase != BUILD_STARTED) {
+                full_build = None;
+            }
+            continue;
         };
         let build_duration = *awaited + resumed.elapsed();
         full_build = None;
@@ -616,8 +651,9 @@ async fn validate_templates(
             .0
             .borrow_and_update()
             .as_ref()
+            .filter(|state| state.error.is_none())
             .and_then(|state| state.template.clone());
-        let Some(template) = template.filter(|t| !t.transactions.is_empty()) else {
+        let Some(template) = template.filter(|template| !template.transactions.is_empty()) else {
             continue;
         };
         let network = network.clone();
@@ -812,8 +848,7 @@ async fn store_precomputed_coinbase(
     coinbase_cache.select(height, None);
 
     match coinbase.await {
-        // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that
-        // ZIP-317 transaction selection needs for its size and sigop limits.
+        // Reuse this proof when publishing the next height's coinbase-only template.
         Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), None, coinbase),
         Err(error) => tracing::warn!(?error, "precomputed coinbase transaction task failed"),
     }

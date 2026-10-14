@@ -858,6 +858,131 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     .expect("background validation must not stall publication");
 }
 
+/// A retained full build must not reserve the mutex ahead of its candidate replacement.
+#[tokio::test]
+async fn candidate_interrupts_a_queued_build_permit_without_deadlock() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let network = Network::new_regtest(Default::default());
+        let genesis = zebra_chain::block::genesis::regtest_genesis_block();
+        let tip_hash = genesis.hash();
+        let (state, read_state, tip, _tip_changes) =
+            zebra_state::populated_state([genesis], &network).await;
+        let candidate_read = Arc::new(tokio::sync::Notify::new());
+        let observed_state = tower::service_fn({
+            let read_state = read_state.clone();
+            let candidate_read = candidate_read.clone();
+            move |request| {
+                let read_state = read_state.clone();
+                let candidate_read = candidate_read.clone();
+                async move {
+                    let response = read_state.oneshot(request).await?;
+                    if matches!(&response, ReadResponse::MiningCandidate(Some(_))) {
+                        candidate_read.notify_one();
+                    }
+                    Ok::<_, zebra_state::BoxError>(response)
+                }
+            }
+        });
+        let snapshot_started = Arc::new(tokio::sync::Notify::new());
+        let snapshot_returned = Arc::new(tokio::sync::Notify::new());
+        let (release_snapshot, snapshot_released) = watch::channel(false);
+        let mempool = tower::service_fn({
+            let snapshot_started = snapshot_started.clone();
+            let snapshot_returned = snapshot_returned.clone();
+            move |request| {
+                assert!(matches!(request, mempool::Request::FullTransactions));
+                snapshot_started.notify_one();
+                let snapshot_returned = snapshot_returned.clone();
+                let mut snapshot_released = snapshot_released.clone();
+                async move {
+                    while !*snapshot_released.borrow_and_update() {
+                        snapshot_released.changed().await.unwrap();
+                    }
+                    snapshot_returned.notify_one();
+                    Ok::<_, zebra_state::BoxError>(mempool::Response::FullTransactions {
+                        transactions: vec![],
+                        transaction_dependencies: Default::default(),
+                        last_seen_tip_hash: tip_hash,
+                    })
+                }
+            }
+        });
+        let miner = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .unwrap(),
+        );
+        let coinbases = CoinbaseCache::default();
+        let cache = TemplateCache::default();
+        let mut publications = cache.subscribe();
+        let (_events, events) = broadcast::channel(1);
+        let updater = tokio::spawn(run(
+            network.clone(),
+            miner,
+            coinbases.clone(),
+            cache.clone(),
+            mempool,
+            events,
+            observed_state,
+            tip,
+            MockSyncStatus::default(),
+            zebra_test::mock_service::MockService::build().for_unit_tests(),
+        ));
+        let initial = loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &network, DateTime32::now()) {
+                break template;
+            }
+            publications.changed().await;
+        };
+        snapshot_started.notified().await;
+        let permit = coinbases.build.clone().lock_owned().await;
+        release_snapshot.send_replace(true);
+        snapshot_returned.notified().await;
+        // On this current-thread runtime the updater continues from the returned snapshot to
+        // its queued mutex acquisition before this test can observe the notification.
+        let candidate = Arc::new(
+            proposal_block_from_template(&initial, BlockTemplateTimeSource::CurTime, &network)
+                .unwrap(),
+        );
+        let candidate_hash = candidate.hash();
+        // Keep the original state buffer alive: dropping its last sender closes the write/tip
+        // channels and stops the updater before it can observe the candidate.
+        let zebra_state::Response::MiningCandidate(Some(_candidate_guard)) = state
+            .clone()
+            .oneshot(zebra_state::Request::MiningCandidate(candidate))
+            .await
+            .unwrap()
+        else {
+            panic!("the real candidate subscription enables early work");
+        };
+        candidate_read.notified().await;
+        // The replacement has now reached the same mutex. Releasing it must not hand ownership
+        // to a retained future that the updater no longer polls.
+        drop(permit);
+        let candidate_work = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(template) =
+                    cache.template_for_tip(candidate_hash, &network, DateTime32::now())
+                {
+                    break template;
+                }
+                publications.changed().await;
+            }
+        })
+        .await;
+        updater.abort();
+        let candidate_work =
+            candidate_work.expect("the candidate must acquire released build capacity");
+        assert_eq!(candidate_work.height, 2);
+        assert_eq!(candidate_work.previous_block_hash, candidate_hash);
+    })
+    .await
+    .expect("the queued-acquisition regression must finish before candidate expiry");
+}
+
 /// Pending transaction verification permits early work; rejection restores the committed parent.
 #[tokio::test]
 async fn pending_verification_publishes_early_work_and_failure_restores_the_tip() {
