@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Mined and submitted block adverts can reach busy peers once another peer is ready, without waiting for those busy peers to answer earlier requests. Peers below the current minimum protocol version do not receive new adverts ([#11705](https://github.com/ZcashFoundation/zebra/issues/11705)).
+body: 'Block adverts reach eligible busy peers without waiting for ordinary requests to become ready. Readiness waits for an eligible peer, retaining only the latest mined block while disconnected. Broadcasts acknowledge completed local writes; full queues, revoked connections, and write failures are not treated as successful delivery ([#11839](https://github.com/ZcashFoundation/zebra/pull/11839)).'
 time: 2026-10-13T02:53:16+02:00

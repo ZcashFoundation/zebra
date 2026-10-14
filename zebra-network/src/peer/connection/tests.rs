@@ -82,7 +82,15 @@ fn new_test_connection<A>() -> (
 
     let connection = Connection::new(
         mock_inbound_service.clone(),
-        (client_rx, block_advert_rx),
+        (
+            client_rx,
+            block_advert_rx,
+            crate::peer::MinimumPeerVersion::new(
+                zebra_chain::chain_tip::NoChainTip,
+                &zebra_chain::parameters::Network::Mainnet,
+            ),
+            tokio::sync::watch::channel(crate::BanList::default()).1,
+        ),
         shared_error_slot.clone(),
         peer_tx,
         ActiveConnectionCounter::new_counter().track_connection(),

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`init` and `init_with_block_gossip_peer_ips` return a fourth result, `BlockAdvertiser`, which callers must use for outbound block advertisements instead of the ordinary network service. Readiness waits for an eligible connected peer, independently of ordinary request readiness. Its bounded fanout reaches eligible busy peers and succeeds only after every selected local transport write completes; full queues, revoked connections, and write failures return errors. `PeerError` adds `AdvertRequiresDedicatedService` and `AdvertAuthorizationRevoked`; downstream exhaustive matches must handle both variants ([#11839](https://github.com/ZcashFoundation/zebra/pull/11839)).'
+time: 2026-10-13T02:53:16+02:00

@@ -17,6 +17,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::{self, Block},
+    chain_tip::{ChainTip, NoChainTip},
     serialization::SerializationError,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -29,10 +30,10 @@ use crate::{
     meta_addr::MetaAddr,
     peer::{
         connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
-        ConnectionInfo, ErrorSlot, InProgressClientRequest, MustUseClientResponseSender, PeerError,
-        SharedPeerError,
+        ConnectionInfo, ErrorSlot, InProgressClientRequest, MinimumPeerVersion,
+        MustUseClientResponseSender, PeerError, SharedPeerError,
     },
-    peer_set::ConnectionTracker,
+    peer_set::{BlockAdvert, ConnectionTracker},
     protocol::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{InventoryResponse, Request, Response},
@@ -548,7 +549,7 @@ impl From<Request> for InboundMessage {
 }
 
 /// The channels, services, and associated state for a peer connection.
-pub struct Connection<S, Tx>
+pub struct Connection<S, Tx, C = NoChainTip>
 where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
@@ -586,7 +587,11 @@ where
     pub(super) client_rx: ClientRequestReceiver,
 
     /// Receives block adverts independently of the current request's response.
-    pub(super) block_advert_rx: tokio::sync::mpsc::Receiver<block::Hash>,
+    pub(super) block_advert_rx: tokio::sync::mpsc::Receiver<BlockAdvert>,
+
+    /// Live authorization, rechecked immediately before advert writes.
+    minimum_peer_version: MinimumPeerVersion<C>,
+    bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
 
     /// A slot for an error shared between the Connection and the Client that uses it.
     ///
@@ -625,13 +630,13 @@ where
     last_overload_time: Option<Instant>,
 }
 
-impl<S, Tx> fmt::Debug for Connection<S, Tx>
+impl<S, Tx, C> fmt::Debug for Connection<S, Tx, C>
 where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // skip the channels, they don't tell us anything useful
-        f.debug_struct(std::any::type_name::<Connection<S, Tx>>())
+        f.debug_struct(std::any::type_name::<Self>())
             .field("connection_info", &self.connection_info)
             .field("state", &self.state)
             .field("request_timer", &self.request_timer)
@@ -644,16 +649,18 @@ where
     }
 }
 
-impl<S, Tx> Connection<S, Tx>
+impl<S, Tx, C> Connection<S, Tx, C>
 where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Return a new connection from its channels, services, shared state, and metadata.
     pub(crate) fn new(
         inbound_service: S,
-        (client_rx, block_advert_rx): (
+        (client_rx, block_advert_rx, minimum_peer_version, bans_receiver): (
             futures::channel::mpsc::Receiver<ClientRequest>,
-            tokio::sync::mpsc::Receiver<block::Hash>,
+            tokio::sync::mpsc::Receiver<BlockAdvert>,
+            MinimumPeerVersion<C>,
+            tokio::sync::watch::Receiver<crate::BanList>,
         ),
         error_slot: ErrorSlot,
         peer_tx: Tx,
@@ -671,6 +678,8 @@ where
             svc: inbound_service,
             client_rx: client_rx.into(),
             block_advert_rx,
+            minimum_peer_version,
+            bans_receiver,
             error_slot,
             peer_tx: peer_tx.into(),
             connection_tracker,
@@ -681,10 +690,11 @@ where
     }
 }
 
-impl<S, Tx> Connection<S, Tx>
+impl<S, Tx, C> Connection<S, Tx, C>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
     S::Error: Into<BoxError>,
+    C: ChainTip,
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
     /// Consume this `Connection` to form a spawnable future containing its event loop.
@@ -997,14 +1007,47 @@ where
         self.shutdown_async(error).await;
     }
 
-    /// Write an unsolicited block advert without replacing an in-flight response handler.
-    async fn send_block_advert(&mut self, hash: block::Hash) {
-        if let Err(error) = self
+    /// Acknowledge only completed local writes, after rechecking live authorization.
+    async fn send_block_advert(&mut self, advert: BlockAdvert) {
+        if advert.result.is_closed() {
+            metrics::counter!("peer.canceled").increment(1);
+            metrics::counter!(
+                "zebra.net.out.requests.canceled",
+                "command" => "AdvertiseBlock",
+            )
+            .increment(1);
+            return;
+        }
+
+        metrics::counter!(
+            "zebra.net.out.requests",
+            "command" => "AdvertiseBlock",
+        )
+        .increment(1);
+
+        let address = self.connection_info.connected_addr.get_transient_addr();
+        let version = self.connection_info.remote.version;
+        let minimum = &mut self.minimum_peer_version;
+        let bans = &self.bans_receiver;
+        let delivery = self
             .peer_tx
-            .send(Message::Inv(vec![InventoryHash::Block(hash)]))
-            .await
-        {
-            self.fail_with(error).await;
+            .send_authorized(
+                Message::Inv(vec![InventoryHash::Block(advert.hash)]),
+                || {
+                    version >= minimum.current()
+                        && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
+                },
+            )
+            .await;
+        match delivery {
+            Ok(()) => {
+                let _ = advert.result.send(Ok(()));
+            }
+            Err(error) => {
+                let error = SharedPeerError::from(error);
+                let _ = advert.result.send(Err(error.clone().into()));
+                self.fail_with(error).await;
+            }
         }
     }
 
@@ -1192,14 +1235,8 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseBlock(hash, _) | AdvertiseBlockToAll(hash)) => {
-                self
-                    .peer_tx
-                    .send(Message::Inv(vec![hash.into()]))
-                    .await
-                    .map(|()|
-                         Handler::Finished(Ok(Response::Nil))
-                    )
+            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _)) => {
+                Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
             }
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
@@ -1718,7 +1755,7 @@ fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> 
     raw_drop_probability.clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY)
 }
 
-impl<S, Tx> Connection<S, Tx>
+impl<S, Tx, C> Connection<S, Tx, C>
 where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {
@@ -1853,7 +1890,7 @@ where
     }
 }
 
-impl<S, Tx> Drop for Connection<S, Tx>
+impl<S, Tx, C> Drop for Connection<S, Tx, C>
 where
     Tx: Sink<Message, Error = SerializationError> + Unpin,
 {

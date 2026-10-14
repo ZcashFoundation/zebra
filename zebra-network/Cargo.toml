@@ -68,7 +68,7 @@ futures = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["sync", "time"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
-tower = { workspace = true, features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { workspace = true, features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer", "limit"] }
 
 metrics = { workspace = true }
 tracing-futures = { workspace = true }
