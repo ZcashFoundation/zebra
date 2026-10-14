@@ -29,19 +29,21 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{Future, FutureExt, TryFutureExt};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt, TryFutureExt};
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing::instrument;
 
 use zebra_chain::{
     amount::{self},
     block::{self, Block},
+    diagnostic::task::CheckForPanics,
     parameters::{
         checkpoint::list::CheckpointList, subsidy::SubsidyError, Network,
         GENESIS_PREVIOUS_BLOCK_HASH,
     },
+    serialization::ZcashSerialize,
     transparent,
     work::equihash,
 };
@@ -195,6 +197,11 @@ where
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 
+    /// Accepted commit tasks are supervised independently of request futures.
+    commit_task_sender: tokio::sync::mpsc::UnboundedSender<JoinHandle<()>>,
+    /// The application takes this handle into its ongoing task ownership.
+    pub(crate) commit_task_handle: Option<JoinHandle<()>>,
+
     /// A queue of unverified blocks.
     ///
     /// Contains a list of unverified blocks at each block height. In most cases,
@@ -344,6 +351,21 @@ where
             progress_from_tip(&checkpoint_list, initial_tip);
 
         let (sender, receiver) = mpsc::channel();
+        let (commit_task_sender, mut commit_tasks) =
+            tokio::sync::mpsc::unbounded_channel::<JoinHandle<()>>();
+        let commit_task_handle = tokio::spawn(async move {
+            let mut pending = FuturesUnordered::new();
+            loop {
+                tokio::select! {
+                    Some(task) = commit_tasks.recv() => pending.push(task),
+                    Some(result) = pending.next(), if !pending.is_empty() => {
+                        // Propagate panics; a cancelled task means the runtime is shutting down.
+                        let _ = result.panic_if_task_has_panicked();
+                    }
+                    else => break,
+                }
+            }
+        });
         let mut previous_height = 0;
         let maximum_gap = checkpoint_list
             .iter()
@@ -371,6 +393,8 @@ where
             network: network.clone(),
             initial_tip_hash,
             state_service,
+            commit_task_sender,
+            commit_task_handle: Some(commit_task_handle),
             queued: BTreeMap::new(),
             retained_blocks: Arc::new(AtomicUsize::new(0)),
             retained_block_limit,
@@ -394,6 +418,19 @@ where
         }
 
         verifier
+    }
+
+    /// Standalone verifiers retain supervision until the application takes ownership.
+    fn check_commit_tasks(&mut self) {
+        if let Some(result) = self
+            .commit_task_handle
+            .as_mut()
+            .and_then(|handle| handle.now_or_never())
+        {
+            // The supervisor only ends when the runtime cancels it during shutdown.
+            self.commit_task_handle = None;
+            let _ = result.panic_if_task_has_panicked();
+        }
     }
 
     /// Update diagnostics for queued blocks.
@@ -721,6 +758,13 @@ where
         let height = block
             .coinbase_height()
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
+
+        // Network decoding enforces this limit, but internal Arc<Block> callers bypass decoding.
+        let block_size = u64::try_from(block.zcash_serialized_size())
+            .map_err(|_| VerifyBlockError::OversizedBlock)?;
+        if block_size > block::MAX_BLOCK_BYTES {
+            return Err(VerifyBlockError::OversizedBlock.into());
+        }
 
         if self.network.disable_pow() {
             crate::block::check::difficulty_threshold_is_valid(
@@ -1442,11 +1486,14 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.check_commit_tasks();
         Poll::Ready(Ok(()))
     }
 
     #[instrument(name = "checkpoint", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
+        self.check_commit_tasks();
+
         // Reset the verifier back to the state tip if requested
         // (e.g. due to an error when committing a block to the state)
         let mut requeued = false;
@@ -1497,7 +1544,9 @@ where
         // We accomplish this by spawning a new task containing the
         // commit-if-verified logic. This task will always execute, except if
         // the program is interrupted, in which case there is no longer a
-        // checkpoint verifier to keep in sync with the state.
+        // checkpoint verifier to keep in sync with the state. The task is
+        // supervised by `commit_task_handle`, so its panics stop the node even
+        // when the caller has dropped the response future.
         //
         // # State Commit Failures
         //
@@ -1514,7 +1563,7 @@ where
         // state, and it would reject the blocks it is missing.
         let state_service = self.state_service.clone();
         let reset_sender = self.reset_sender.clone();
-        let commit_checkpoint_verified = tokio::spawn(async move {
+        let commit_checkpoint_verified = async move {
             loop {
                 let Verified {
                     mut block,
@@ -1629,21 +1678,25 @@ where
 
                 return result;
             }
+        };
+        let (result_tx, result_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = result_tx.send(commit_checkpoint_verified.await);
         });
+        // The supervisor is only gone during shutdown; the task still runs and reports its result.
+        let _ = self.commit_task_sender.send(task);
 
         async move {
-            let result = commit_checkpoint_verified.await;
-            // Avoid a panic on shutdown
+            let result = result_rx.await;
+            // Avoid a misleading error on shutdown
             //
-            // When `zebrad` is terminated using Ctrl-C, the `commit_checkpoint_verified` task
-            // can return a `JoinError::Cancelled`. We expect task cancellation on shutdown,
-            // so we don't need to panic here. The persistent state is correct even when the
-            // task is cancelled, because block data is committed inside transactions, in
-            // height order.
+            // When `zebrad` is terminated using Ctrl-C, the commit task can be cancelled. The
+            // persistent state is correct even when the task is cancelled, because block data is
+            // committed inside transactions, in height order.
             if zebra_chain::shutdown::is_shutting_down() {
                 Err(VerifyCheckpointError::ShuttingDown)
             } else {
-                result.expect("commit_checkpoint_verified should not panic")
+                result.unwrap_or(Err(VerifyCheckpointError::Dropped))
             }
         }
         .boxed()
