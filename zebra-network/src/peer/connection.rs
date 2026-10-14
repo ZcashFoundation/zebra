@@ -47,6 +47,10 @@ mod peer_tx;
 #[cfg(test)]
 mod tests;
 
+/// The maximum number of block hashes kept from a `FindBlocks` response, matching the
+/// `MAX_FIND_BLOCK_HASHES_RESULTS` limit that Zebra and zcashd apply when serving `getblocks`.
+const MAX_FIND_BLOCKS_RESPONSE_HASHES: usize = 500;
+
 #[derive(Debug)]
 pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
@@ -404,8 +408,12 @@ impl Handler {
                     .iter()
                     .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
+                // Truncate rather than reject: zcashd can add one extra hash to a full
+                // 500-hash response, and a peer can always send 500 junk hashes anyway.
                 Handler::Finished(Ok(Response::BlockHashes(
-                    block_hashes(&items[..]).collect(),
+                    block_hashes(&items[..])
+                        .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
+                        .collect(),
                 )))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
