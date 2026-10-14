@@ -35,7 +35,7 @@ use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
-    block::{Request, SemanticBlockVerifier, VerifyBlockError},
+    block::{PreparedBlockCache, Request, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
     transaction, BoxError, Config,
@@ -274,7 +274,7 @@ where
 ///
 /// Returns a block verifier, mempool transaction verifier,
 /// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
-/// and the maximum configured checkpoint verification height.
+/// the maximum configured checkpoint verification height, and the shared prepared-block decoder.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
 /// to verify blocks for is specified by `network`.
@@ -313,6 +313,7 @@ pub async fn init<S, ReadState, Mempool>(
     >,
     BackgroundTaskHandles,
     Height,
+    PreparedBlockCache,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -443,6 +444,7 @@ where
 
     let block =
         SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+    let prepared_blocks = block.prepared_blocks();
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,
@@ -461,6 +463,7 @@ where
         mempool_transaction,
         task_handles,
         max_checkpoint_height,
+        prepared_blocks,
     )
 }
 
@@ -506,6 +509,7 @@ pub async fn init_test<S, ReadState>(
     >,
     BackgroundTaskHandles,
     Height,
+    PreparedBlockCache,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,

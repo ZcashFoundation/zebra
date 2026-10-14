@@ -907,13 +907,13 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             zebra_consensus::transaction::BlockTxVerifier::new(&network, state.clone()),
             1,
         );
+        let semantic = SemanticBlockVerifier::new(&network, state.clone(), transactions);
+        let prepared_blocks = semantic.prepared_blocks();
         let real_verifier = Buffer::new(
             BoxService::new(
-                SemanticBlockVerifier::new(&network, state.clone(), transactions).map_err(
-                    |source| zebra_consensus::RouterError::Block {
-                        source: Box::new(source),
-                    },
-                ),
+                semantic.map_err(|source| zebra_consensus::RouterError::Block {
+                    source: Box::new(source),
+                }),
             ),
             1,
         );
@@ -985,7 +985,9 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             Some(committed_sender),
         );
         queue.abort();
-        let rpc = rpc.with_submitted_blocks(cache.clone());
+        let rpc = rpc
+            .with_submitted_blocks(cache.clone())
+            .with_prepared_blocks(prepared_blocks);
         let mempool_changes =
             mempool::MempoolTxSubscriber::new(tokio::sync::broadcast::channel(1).0);
         let updater = rpc.spawn_block_template_updater(&mempool_changes).unwrap();
