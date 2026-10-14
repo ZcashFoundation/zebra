@@ -42,8 +42,8 @@ For the full requirements, see [Tier 2 platform policy](target-tier-policies.md#
 
 | platform                   | os                                                                                              | notes       | rust                                                                           | artifacts |
 | -------------------------- | ----------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------ | --------- |
-| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
-| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit beta | [latest beta release](https://github.com/rust-lang/rust/blob/beta/src/version) | N/A       |
+| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-26.04](https://github.com/actions/virtual-environments#available-environments)  | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
+| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-26.04](https://github.com/actions/virtual-environments#available-environments)  | 64-bit beta | [latest beta release](https://github.com/rust-lang/rust/blob/beta/src/version) | N/A       |
 
 > **Note:** Linux is tested on both stable and beta Rust to catch potential regressions early.
 
