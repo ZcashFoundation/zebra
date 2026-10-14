@@ -3164,6 +3164,12 @@ where
                 let error = box_error
                     .downcast::<RouterError>()
                     .map(|boxed_chain_error| *boxed_chain_error);
+                if let Ok(error) = &error {
+                    if error.is_resource_pressure() {
+                        // Queue pressure and range recovery are not consensus rejections.
+                        return Err(ErrorObject::owned(0, error.to_string(), None::<()>));
+                    }
+                }
 
                 tracing::info!(
                     ?error,

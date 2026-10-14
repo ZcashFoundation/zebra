@@ -134,6 +134,25 @@ impl From<VerifyBlockError> for RouterError {
 }
 
 impl RouterError {
+    /// Returns `true` when local retention pressure or failed-range recovery permits retrying
+    /// the same body without downloading it again.
+    ///
+    /// These operational failures do not establish that the block or its serving peer is invalid.
+    pub fn is_resource_pressure(&self) -> bool {
+        match self {
+            RouterError::Checkpoint { source } => {
+                matches!(
+                    **source,
+                    VerifyCheckpointError::QueuedLimit | VerifyCheckpointError::RangeAborted { .. }
+                )
+            }
+            RouterError::Block { source } => matches!(
+                **source,
+                VerifyBlockError::Commit(zebra_state::CommitBlockError::OrphanQueueFull)
+            ),
+        }
+    }
+
     /// Returns `true` if this is definitely a duplicate request.
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
@@ -160,8 +179,8 @@ impl RouterError {
     /// See [`zebra_state::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
     pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
         match self {
-            // The finalized state drops the descendants of a failed block instead of
-            // rejecting them with an error.
+            // Checkpoint suffixes use RangeAborted and the operational same-body retry path,
+            // without attributing the failed ancestor's invalidity to their serving peers.
             RouterError::Checkpoint { .. } => false,
             RouterError::Block { source, .. } => source.is_descendant_of_auth_commitment_mismatch(),
         }

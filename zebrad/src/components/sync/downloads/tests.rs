@@ -582,3 +582,119 @@ async fn download_deadline_includes_readiness_and_response() {
         assert_eq!(Instant::now() - started, budget);
     }
 }
+
+/// Queue pressure and failed-range recovery retry the body without another peer request.
+#[tokio::test(start_paused = true)]
+async fn checkpoint_and_orphan_pressure_retry_without_redownload() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let block = block_1();
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+
+    for error in [
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::QueuedLimit),
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::RangeAborted {
+            failed_hash: block.header.previous_block_hash,
+        }),
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Commit(
+            zs::CommitBlockError::OrphanQueueFull,
+        )),
+    ] {
+        assert!(error.is_resource_pressure());
+        assert_eq!(error.misbehavior_score(), 0);
+        verifier
+            .expect_request(zebra_consensus::Request::Commit(block.clone()))
+            .await
+            .respond_error(error.into());
+    }
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await
+        .respond(hash);
+    assert_eq!(downloads.next().await.unwrap().unwrap(), (Height(1), hash));
+    assert!(downloads.is_empty());
+    network.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
+
+/// Retrying admission must not grant another full verification deadline.
+#[tokio::test(start_paused = true)]
+async fn resource_pressure_retry_keeps_original_verify_deadline() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
+    let block = block_1();
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+    let first_request = verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await;
+    let started = tokio::time::Instant::now();
+    first_request.respond_error(
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::QueuedLimit)
+            .into(),
+    );
+    let pending = verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await;
+    let error = downloads.next().await.unwrap().unwrap_err();
+    assert!(matches!(
+        error,
+        BlockDownloadVerifyError::ValidationRequestError { error, .. }
+            if error.is::<tower::timeout::error::Elapsed>()
+    ));
+    assert_eq!(started.elapsed(), super::BLOCK_VERIFY_TIMEOUT);
+    pending.respond(hash);
+    network.expect_no_requests().await;
+}
+
+/// Cancellation removes the existing download task, including its pressure backoff and body.
+#[tokio::test(start_paused = true)]
+async fn cancelling_pressure_retry_releases_downloaded_body() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
+    let block = block_1();
+    let body = Arc::downgrade(&block);
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await
+        .respond_error(
+            zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::QueuedLimit)
+                .into(),
+        );
+    drop(block);
+    downloads.cancel_all();
+    tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, async {
+        while body.strong_count() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelling pressure retries must release their retained downloaded body");
+    assert!(downloads.is_empty());
+    verifier.expect_no_requests().await;
+    network.expect_no_requests().await;
+}

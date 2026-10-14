@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: 'Added `VerifyCheckpointError::RangeAborted { failed_hash }` for uncommitted suffixes of failed checkpoint ranges; exhaustive matches must handle this retryable operational result. Removed `VerifyCheckpointError::Tip`: recovery-query failures no longer replace the original block commit error.'
+time: 2026-10-14T22:41:55.308981828+02:00

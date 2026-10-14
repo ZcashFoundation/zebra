@@ -18,7 +18,8 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_network::{AddressBook, InventoryResponse, Request, Response};
-use zebrad::{components::sync, config::ZebradConfig};
+use zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+use zebrad::config::ZebradConfig;
 
 use color_eyre::eyre::eyre;
 use zebra_test::{args, prelude::*};
@@ -95,8 +96,9 @@ pub const FINISH_FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(72 * 60 * 60)
 ///
 /// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
 /// so that the sync is faster. This can increase the RAM needed for tests.
+// The 1,000-block default and its three-window lookahead fit in u32.
 pub const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height =
-    Height(3 * sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
+    Height(3 * DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
 
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -259,8 +261,7 @@ pub fn sync_until_with_peers(
     // Use the default lookahead limit if we're syncing lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
     if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
-        config.sync.checkpoint_verify_concurrency_limit =
-            sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+        config.sync.checkpoint_verify_concurrency_limit = DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
     }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
@@ -402,7 +403,7 @@ pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<Zebr
     // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
     // But the extra downloaded blocks shouldn't slow down the test that much,
     // and testing with the defaults gives us better test coverage.
-    config.sync.checkpoint_verify_concurrency_limit = sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+    config.sync.checkpoint_verify_concurrency_limit = DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
     Ok(config)
 }

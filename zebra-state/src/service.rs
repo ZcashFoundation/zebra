@@ -835,6 +835,10 @@ impl StateService {
                 .prune_by_height(finalized_tip_height);
         }
 
+        // Ready parents and descendants take priority over retained orphans. There is no await
+        // between insertion, dispatch, and trimming, so only the incoming block is transiently extra.
+        self.non_finalized_state_queued_blocks.prune_overflow();
+
         rsp_rx
     }
 

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: '`VerifyCheckpointError::RangeAborted` identifies an uncommitted checkpoint suffix without attributing its ancestor failure to the serving peer. `RouterError::is_resource_pressure` includes these same-body retryable recovery results.'
+time: 2026-10-14T22:41:55.308976868+02:00
