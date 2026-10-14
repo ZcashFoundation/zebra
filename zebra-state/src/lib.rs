@@ -49,7 +49,8 @@ pub use error::{
 };
 pub use request::{
     AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
-    HashOrHeight, MappedRequest, ReadRequest, Request, SemanticallyVerifiedBlock,
+    HashOrHeight, MappedRequest, MinedBlockNotifications, ReadRequest, Request,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]

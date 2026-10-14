@@ -74,7 +74,7 @@ impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
     }
 }
 
-/// Up to four authenticated pending submissions, available to inbound peers for 90 seconds.
+/// Up to four locally validated pending submissions, available to inbound peers for 90 seconds.
 #[derive(Clone, Debug)]
 pub struct SubmittedBlockCache {
     entries: Arc<watch::Sender<VecDeque<(block::Hash, block::Height, Arc<Block>, Instant)>>>,
@@ -91,7 +91,7 @@ impl Default for SubmittedBlockCache {
 }
 
 impl SubmittedBlockCache {
-    /// Returns an unexpired body unless verification definitively rejected it.
+    /// Returns an unexpired, validated body unless its commit definitively failed.
     pub fn get(&self, hash: &block::Hash) -> Option<Arc<Block>> {
         let now = Instant::now();
         self.entries
@@ -143,7 +143,7 @@ impl SubmittedBlockCache {
     }
 }
 
-/// A submit block channel, used to inform the gossip task about mined blocks.
+/// Bounded state-owned committed notifications, independent of the submitting RPC's lifetime.
 pub struct SubmitBlockChannel {
     /// The channel sender
     sender: mpsc::Sender<(block::Hash, block::Height)>,
@@ -154,12 +154,12 @@ pub struct SubmitBlockChannel {
 impl SubmitBlockChannel {
     /// Creates a new submit block channel
     pub fn new() -> Self {
-        /// How many unread messages the submit block channel should buffer before rejecting sends.
+        /// Maximum queued committed notifications, before commit-ready mined requests fail admission.
         ///
-        /// This should be large enough to usually avoid rejecting sends. This channel is used by
-        /// the block hash gossip task, which waits for a ready peer in the peer set while
-        /// processing messages from this channel and could be much slower to gossip block hashes
-        /// than it is to commit blocks and produce new block templates.
+        /// State reserves without waiting immediately before mutation, not while waiting for an
+        /// absent parent. A full or closed channel leaves the block uncommitted and ordinary state
+        /// writes unaffected. Once reserved, a successful commit inserts its notification before
+        /// replying; insertion is not a guarantee of gossip consumption or peer delivery.
         const SUBMIT_BLOCK_CHANNEL_CAPACITY: usize = 10_000;
 
         let (sender, receiver) = mpsc::channel(SUBMIT_BLOCK_CHANNEL_CAPACITY);

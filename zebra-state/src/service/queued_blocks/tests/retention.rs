@@ -2,6 +2,8 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use tokio::sync::{mpsc, watch};
+
 use zebra_chain::{
     amount::DeferredPoolBalanceChange,
     block::{Block, Height},
@@ -15,7 +17,7 @@ use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
     service::{queued_blocks::QueuedBlocks, StateService},
     tests::FakeChainHelper,
-    Config, ContextuallyVerifiedBlock, SemanticallyVerifiedBlock, MAX_BLOCK_REORG_HEIGHT,
+    Config, ContextuallyVerifiedBlock, MinedBlockNotifications, Request, MAX_BLOCK_REORG_HEIGHT,
 };
 
 async fn orphan_state() -> (StateService, Arc<Block>) {
@@ -25,7 +27,7 @@ async fn orphan_state() -> (StateService, Arc<Block>) {
         .zcash_deserialize_into::<Arc<Block>>()
         .unwrap();
     state
-        .queue_and_commit_to_finalized_state(genesis.into())
+        .queue_and_commit_to_finalized_state(genesis.into(), None)
         .await
         .unwrap()
         .unwrap();
@@ -113,9 +115,9 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         let mut orphans = orphan_blocks(&child, MAX_BLOCK_REORG_HEIGHT);
         let highest = orphans.pop().unwrap();
         let mut evicted =
-            state.queue_and_commit_to_non_finalized_state(highest.clone().prepare(), None);
+            state.queue_and_commit_to_non_finalized_state(highest.clone().prepare(), None, None);
         for orphan in orphans {
-            drop(state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None));
+            drop(state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None));
         }
         assert_eq!(
             state.non_finalized_state_queued_blocks.blocks.len(),
@@ -132,9 +134,12 @@ async fn orphan_receiver_drop_retention_is_bounded() {
             .commit_block(child.clone().prepare(), &state.read_service.db)
             .unwrap();
         let contextual = proposal_state.best_tip_block().unwrap().clone();
+        let (committed, mut commits) = mpsc::channel(1);
+        let (validated, bodies) = watch::channel(None);
         drop(state.queue_and_commit_to_non_finalized_state(
             child.clone().prepare(),
             Some(Box::new(contextual)),
+            Some(MinedBlockNotifications::new(committed.clone(), validated)),
         ));
 
         let queue = &state.non_finalized_state_queued_blocks;
@@ -159,22 +164,24 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         assert!(!error.inner().is_duplicate_request());
         assert!(!error.inner().is_auth_commitment_mismatch());
         assert!(!error.inner().is_descendant_of_auth_commitment_mismatch());
+        assert_eq!(
+            committed.capacity(),
+            1,
+            "orphans must not hold relay permits"
+        );
+        assert!(commits.try_recv().is_err());
+        assert!(bodies.borrow().is_none());
 
         assert_eq!(
             state
-                .queue_and_commit_to_non_finalized_state(parent.prepare(), None)
+                .queue_and_commit_to_non_finalized_state(parent.prepare(), None, None)
                 .await
                 .unwrap()
                 .unwrap(),
             child.header.previous_block_hash,
         );
-        while !state
-            .read_service
-            .latest_non_finalized_state()
-            .any_chain_contains(&child.hash())
-        {
-            tokio::task::yield_now().await;
-        }
+        assert_eq!(commits.recv().await, Some((child.hash(), Height(2))));
+        assert_eq!(*bodies.borrow(), Some(child.clone()));
         assert!(state
             .read_service
             .latest_non_finalized_state()
@@ -191,7 +198,7 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         );
         assert_eq!(
             state
-                .queue_and_commit_to_non_finalized_state(ordinary.clone().prepare(), None)
+                .queue_and_commit_to_non_finalized_state(ordinary.clone().prepare(), None, None)
                 .await
                 .unwrap()
                 .unwrap(),
@@ -214,33 +221,40 @@ async fn full_orphan_queue_does_not_block_ready_parent() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let (mut state, parent) = orphan_state().await;
         let child = parent.make_fake_child();
-        drop(state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None));
+        let (committed, mut commits) = mpsc::channel(1);
+        let (validated, bodies) = watch::channel(None);
+        drop(state.queue_and_commit_to_non_finalized_state(
+            child.clone().prepare(),
+            None,
+            Some(MinedBlockNotifications::new(committed.clone(), validated)),
+        ));
         for orphan in orphan_blocks(&child, MAX_BLOCK_REORG_HEIGHT - 1) {
-            drop(state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None));
+            drop(state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None));
         }
         assert_eq!(
             state.non_finalized_state_queued_blocks.blocks.len(),
             usize::try_from(MAX_BLOCK_REORG_HEIGHT).unwrap(),
         );
         assert_indexes(&state.non_finalized_state_queued_blocks);
-        // Duplicate replacement still occupies one slot.
-        drop(state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None));
+        assert_eq!(committed.capacity(), 1);
+        assert!(commits.try_recv().is_err());
+        assert!(bodies.borrow().is_none());
+        // Duplicate replacement is still one slot and preserves accepted mined notifications.
+        drop(state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None));
         state
-            .queue_and_commit_to_non_finalized_state(parent.prepare(), None)
+            .queue_and_commit_to_non_finalized_state(parent.prepare(), None, None)
             .await
             .unwrap()
             .unwrap();
-        while !state
-            .read_service
-            .latest_non_finalized_state()
-            .any_chain_contains(&child.hash())
-        {
-            tokio::task::yield_now().await;
-        }
+        assert_eq!(commits.recv().await, Some((child.hash(), Height(2))));
         assert!(state
             .read_service
             .latest_non_finalized_state()
             .any_chain_contains(&child.hash()));
+        assert!(
+            bodies.borrow().is_none(),
+            "uncached blocks cannot relay early"
+        );
         assert!(!state.non_finalized_state_queued_blocks.has(child.hash()));
         assert_indexes(&state.non_finalized_state_queued_blocks);
         let ordinary = child.make_fake_child();
@@ -251,7 +265,7 @@ async fn full_orphan_queue_does_not_block_ready_parent() {
             "filler orphans must not become ready when the ordinary successor arrives",
         );
         state
-            .queue_and_commit_to_non_finalized_state(ordinary.clone().prepare(), None)
+            .queue_and_commit_to_non_finalized_state(ordinary.clone().prepare(), None, None)
             .await
             .unwrap()
             .unwrap();
@@ -344,6 +358,8 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
             submissions * child.zcash_serialized_size() < budget,
             "block wire bytes alone must not trigger this regression",
         );
+        let (committed, mut commits) = mpsc::channel(1);
+        let (validated, bodies) = watch::channel(None);
         for nonce in 0..submissions {
             let mut block = child.clone();
             let mut nonce_bytes = [0; 32];
@@ -351,15 +367,22 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
             Arc::make_mut(&mut Arc::make_mut(&mut block).header).nonce = nonce_bytes.into();
             let mut cached = contextual.clone();
             cached.rebind(block, std::time::Instant::now());
-            let prepared = SemanticallyVerifiedBlock {
-                block: cached.block.clone(),
-                hash: cached.hash,
-                height: cached.height,
-                new_outputs: std::mem::take(&mut cached.new_outputs),
-                transaction_hashes: cached.transaction_hashes.clone(),
-                received_time: cached.received_time,
+            let Request::CommitMinedBlock {
+                block,
+                contextual,
+                notifications,
+            } = cached.into_mined_request(MinedBlockNotifications::new(
+                committed.clone(),
+                validated.clone(),
+            ))
+            else {
+                unreachable!("into_mined_request always creates a mined commit");
             };
-            drop(state.queue_and_commit_to_non_finalized_state(prepared, Some(Box::new(cached))));
+            drop(state.queue_and_commit_to_non_finalized_state(
+                block,
+                contextual,
+                Some(notifications),
+            ));
         }
         drop(contextual);
 
@@ -391,6 +414,9 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
             .blocks
             .values()
             .any(|(queued, _)| queued.0.new_outputs.contains_key(outpoint))));
+        assert_eq!(committed.capacity(), 1);
+        assert!(commits.try_recv().is_err());
+        assert!(bodies.borrow().is_none());
 
         state
             .non_finalized_state_queued_blocks
@@ -398,7 +424,7 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
         assert!(state.non_finalized_state_queued_blocks.blocks.is_empty());
         assert_indexes(&state.non_finalized_state_queued_blocks);
         let next = parent.make_fake_child();
-        drop(state.queue_and_commit_to_non_finalized_state(next.clone().prepare(), None));
+        drop(state.queue_and_commit_to_non_finalized_state(next.clone().prepare(), None, None));
         assert!(state.non_finalized_state_queued_blocks.has(next.hash()));
         assert_indexes(&state.non_finalized_state_queued_blocks);
     })
@@ -415,16 +441,16 @@ fn orphan_charge_is_released_on_duplicate_dequeue_and_drain() {
     let child = parent.make_fake_child();
     let mut queue = QueuedBlocks::default();
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    queue.queue((parent.clone().prepare(), sender, None));
+    queue.queue((parent.clone().prepare(), sender, None, None));
     drop(receiver);
     let parent_bytes = queue.queued_bytes;
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    queue.queue((parent.clone().prepare(), sender, None));
+    queue.queue((parent.clone().prepare(), sender, None, None));
     drop(receiver);
     assert_eq!(queue.queued_bytes, parent_bytes);
     assert_indexes(&queue);
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    queue.queue((child.clone().prepare(), sender, None));
+    queue.queue((child.clone().prepare(), sender, None, None));
     drop(receiver);
     let child_bytes = queue.queued_bytes - parent_bytes;
     assert!(child_bytes > 0);
@@ -451,7 +477,7 @@ fn orphan_accounting_overflow_rejects_without_retention() {
         ..Default::default()
     };
     let (sender, mut receiver) = tokio::sync::oneshot::channel();
-    queue.queue((block.prepare(), sender, None));
+    queue.queue((block.prepare(), sender, None, None));
     assert_eq!(
         receiver.try_recv().unwrap().unwrap_err().inner(),
         &crate::CommitBlockError::OrphanQueueFull,
@@ -461,4 +487,227 @@ fn orphan_accounting_overflow_rejects_without_retention() {
     assert!(queue.by_height.is_empty());
     assert!(queue.known_utxos.0.is_empty());
     assert_eq!(queue.queued_bytes, usize::MAX);
+}
+
+async fn ordinary_replacement_ignores_superseded_mined_channel(closed: bool) {
+    let (mut state, parent) = orphan_state().await;
+    let child = parent.make_fake_child();
+    let (committed, mut commits) = mpsc::channel(1);
+    let (validated, bodies) = watch::channel(None);
+    if closed {
+        commits.close();
+    } else {
+        committed.try_send((parent.hash(), Height(1))).unwrap();
+    }
+    let older = state.queue_and_commit_to_non_finalized_state(
+        child.clone().prepare(),
+        None,
+        Some(MinedBlockNotifications::new(committed, validated)),
+    );
+    let queued_bytes = state.non_finalized_state_queued_blocks.queued_bytes;
+    let ordinary =
+        state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None);
+    assert!(older
+        .await
+        .unwrap()
+        .unwrap_err()
+        .inner()
+        .is_duplicate_request());
+    assert_eq!(
+        state.non_finalized_state_queued_blocks.queued_bytes,
+        queued_bytes
+    );
+    assert_indexes(&state.non_finalized_state_queued_blocks);
+    state
+        .queue_and_commit_to_non_finalized_state(parent.clone().prepare(), None, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ordinary.await.unwrap().expect(
+            "an ordinary replacement must not inherit a superseded mined notification requirement",
+        ),
+        child.hash(),
+    );
+    assert!(state
+        .read_service
+        .latest_non_finalized_state()
+        .any_chain_contains(&child.hash()));
+    if !closed {
+        assert_eq!(commits.try_recv().unwrap(), (parent.hash(), Height(1)));
+    }
+    assert!(
+        commits.try_recv().is_err(),
+        "the superseded request must not receive a commit"
+    );
+    assert!(bodies.borrow().is_none());
+    assert_indexes(&state.non_finalized_state_queued_blocks);
+    let next = child.make_fake_child();
+    state
+        .queue_and_commit_to_non_finalized_state(next.clone().prepare(), None, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.best_tip(), Some((Height(3), next.hash())));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ordinary_duplicate_does_not_inherit_full_mined_channel() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        ordinary_replacement_ignores_superseded_mined_channel(false),
+    )
+    .await
+    .expect("ordinary replacement must progress despite the superseded full mined channel");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ordinary_duplicate_does_not_inherit_closed_mined_channel() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        ordinary_replacement_ignores_superseded_mined_channel(true),
+    )
+    .await
+    .expect("ordinary replacement must progress despite the superseded closed mined channel");
+}
+
+async fn ordinary_checkpoint_replacement_ignores_superseded_mined_channel(closed: bool) {
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+    let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let child = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let (committed, mut commits) = mpsc::channel(1);
+    let (validated, bodies) = watch::channel(None);
+    if closed {
+        commits.close();
+    } else {
+        committed.try_send((genesis.hash(), Height(0))).unwrap();
+    }
+    let older = state.queue_and_commit_to_finalized_state(
+        child.clone().into(),
+        Some(MinedBlockNotifications::new(committed, validated)),
+    );
+    let ordinary = state.queue_and_commit_to_finalized_state(child.clone().into(), None);
+    assert!(older
+        .await
+        .unwrap()
+        .unwrap_err()
+        .inner()
+        .is_duplicate_request());
+    assert_eq!(state.finalized_state_queued_blocks.len(), 1);
+    state
+        .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ordinary.await.unwrap().expect(
+            "an ordinary checkpoint replacement must not inherit a superseded mined requirement",
+        ),
+        child.hash(),
+    );
+    assert_eq!(state.read_service.db.finalized_tip_hash(), child.hash());
+    if !closed {
+        assert_eq!(commits.try_recv().unwrap(), (genesis.hash(), Height(0)));
+    }
+    assert!(commits.try_recv().is_err());
+    assert!(bodies.borrow().is_none());
+    assert!(state.finalized_state_queued_blocks.is_empty());
+    let next = child.make_fake_child();
+    state
+        .queue_and_commit_to_finalized_state(next.clone().into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.read_service.db.finalized_tip_hash(), next.hash());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ordinary_checkpoint_duplicate_does_not_inherit_full_mined_channel() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        ordinary_checkpoint_replacement_ignores_superseded_mined_channel(false),
+    )
+    .await
+    .expect("ordinary checkpoint replacement must progress despite the superseded full channel");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ordinary_checkpoint_duplicate_does_not_inherit_closed_mined_channel() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        ordinary_checkpoint_replacement_ignores_superseded_mined_channel(true),
+    )
+    .await
+    .expect("ordinary checkpoint replacement must progress despite the superseded closed channel");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn newer_mined_duplicate_restores_required_notifications() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = orphan_state().await;
+        let child = parent.make_fake_child();
+        let (committed, mut commits) = mpsc::channel(1);
+        let (validated, bodies) = watch::channel(None);
+        committed.try_send((parent.hash(), Height(1))).unwrap();
+        let notifications = MinedBlockNotifications::new(committed, validated);
+        let older = state.queue_and_commit_to_non_finalized_state(
+            child.clone().prepare(),
+            None,
+            Some(notifications.clone()),
+        );
+        let ordinary =
+            state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None);
+        assert!(older
+            .await
+            .unwrap()
+            .unwrap_err()
+            .inner()
+            .is_duplicate_request());
+        let mined = state.queue_and_commit_to_non_finalized_state(
+            child.clone().prepare(),
+            None,
+            Some(notifications),
+        );
+        assert!(ordinary
+            .await
+            .unwrap()
+            .unwrap_err()
+            .inner()
+            .is_duplicate_request());
+        state
+            .queue_and_commit_to_non_finalized_state(parent.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            mined.await.unwrap().unwrap_err().inner(),
+            &crate::CommitBlockError::MinedBlockNotificationFull,
+        );
+        assert!(!state
+            .read_service
+            .latest_non_finalized_state()
+            .any_chain_contains(&child.hash()));
+        assert!(bodies.borrow().is_none());
+        assert_eq!(commits.try_recv().unwrap(), (parent.hash(), Height(1)));
+        state
+            .queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.best_tip(), Some((Height(2), child.hash())));
+    })
+    .await
+    .expect(
+        "a newer mined request must restore required admission without poisoning ordinary retry",
+    );
 }

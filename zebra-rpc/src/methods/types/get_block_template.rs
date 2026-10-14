@@ -20,7 +20,7 @@ use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::{mpsc, watch};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
@@ -55,7 +55,6 @@ use crate::{
         default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::{MapError, OkOrError},
-    SubmitBlockChannel,
 };
 
 use constants::{
@@ -781,9 +780,8 @@ where
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
 
-    /// A channel to send successful block submissions to the block gossip task,
-    /// so they can be advertised to peers.
-    mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
+    /// Optional committed-notification channel passed into state-owned submission metadata.
+    mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
 
     /// Caches the most recently built coinbase transaction, so short-polling miners don't re-run
     /// the shielded-coinbase proof on every request within a block.
@@ -799,9 +797,6 @@ where
 
     /// Pending bodies shared with inbound peers.
     pub(crate) submitted_blocks: crate::SubmittedBlockCache,
-
-    /// Checkpoint requests can replace duplicates, so only fully verified heights relay early.
-    pub(crate) max_checkpoint_height: block::Height,
 }
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
@@ -821,12 +816,10 @@ where
             miner_params: MinerParams::new(net, conf).ok(),
             block_verifier_router,
             sync_status,
-            mined_block_sender: mined_block_sender
-                .unwrap_or(SubmitBlockChannel::default().sender()),
+            mined_block_sender,
             coinbase_cache: CoinbaseCache::default(),
             template_cache: Some(precompute::TemplateCache::default()),
             submitted_blocks: Default::default(),
-            max_checkpoint_height: net.checkpoint_list().max_height(),
         }
     }
 
@@ -871,13 +864,19 @@ where
         self.block_verifier_router.clone()
     }
 
-    /// Advertises the mined block.
-    pub fn advertise_mined_block(
+    /// Transfers notification ownership to consensus/state, rather than the RPC response future.
+    pub(crate) fn mined_block_notifications(
         &self,
-        block: block::Hash,
-        height: block::Height,
-    ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
-        self.mined_block_sender.try_send((block, height))
+    ) -> Option<(
+        zebra_state::MinedBlockNotifications,
+        watch::Receiver<Option<Arc<Block>>>,
+    )> {
+        let committed = self.mined_block_sender.clone()?;
+        let (validated, receiver) = watch::channel(None);
+        Some((
+            zebra_state::MinedBlockNotifications::new(committed, validated),
+            receiver,
+        ))
     }
 
     /// Randomizes the coinbase data, if miner parameters are set.

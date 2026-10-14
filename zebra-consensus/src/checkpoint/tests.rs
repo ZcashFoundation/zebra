@@ -1120,6 +1120,7 @@ async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Repor
             child: Some(QueuedBlock {
                 block: checked_block_2,
                 tx,
+                notifications: None,
                 retained: RetainedBlockPermit(Arc::new(AtomicUsize::new(1))),
             }),
         })
@@ -1152,4 +1153,54 @@ async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Repor
     );
 
     Ok(())
+}
+
+/// A queued local child retains its notification when the caller drops before checkpoint validation.
+#[tokio::test(flavor = "multi_thread")]
+async fn mined_checkpoint_retains_notification_after_caller_drop() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let genesis =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
+                .unwrap();
+        let child =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+                .unwrap();
+        let state = zs::init_test(&Mainnet).await;
+        let mut verifier = CheckpointVerifier::from_list(
+            [
+                (block::Height(0), genesis.hash()),
+                (block::Height(1), child.hash()),
+            ],
+            &Mainnet,
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let (validated, validation) = tokio::sync::watch::channel(None);
+        let notifications = zs::MinedBlockNotifications::new(committed, validated);
+
+        drop(verifier.verify(child.clone(), Some(notifications)));
+        assert_eq!(
+            verifier.oneshot(genesis.clone()).await.unwrap(),
+            genesis.hash(),
+            "the missing parent is admitted independently of its queued child",
+        );
+        assert_eq!(
+            commits.recv().await.unwrap(),
+            (child.hash(), block::Height(1)),
+            "the existing commit owner retains notifications after the caller drops",
+        );
+        assert!(validation.borrow().is_none());
+        assert_eq!(
+            state
+                .oneshot(zs::Request::Block(child.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(Some(child)),
+        );
+    })
+    .await
+    .expect("checkpoint notifications must survive caller cancellation");
 }
