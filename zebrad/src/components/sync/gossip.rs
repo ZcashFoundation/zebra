@@ -1,8 +1,11 @@
-//! A task that gossips committed tips and validated submitted blocks to peers.
+//! A task that gossips committed tips and consensus-validated submitted blocks to peers.
 //!
 //! [`block::Hash`]: zebra_chain::block::Hash
 
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashSet, VecDeque},
+    time::Duration,
+};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use thiserror::Error;
@@ -20,7 +23,7 @@ use crate::{
 
 use BlockGossipError::*;
 
-/// Bound concurrent broadcasts while continuing to coalesce incoming block notifications.
+/// Bound pending plus in-flight committed inventory, independently of producer channel capacity.
 const MAX_IN_FLIGHT_BROADCASTS: usize = 16;
 
 /// Allow the committing RPC task to enqueue its mined-block notification before tip fallback.
@@ -46,20 +49,16 @@ pub enum BlockGossipError {
     PeerSetReadiness(zn::BoxError),
 }
 
-/// Run continuously, gossiping committed tips and validated submitted blocks.
+/// Run continuously, gossiping committed tips and consensus-validated submitted blocks.
 ///
-/// Once the state has reached the chain tip, broadcast the [`block::Hash`]es
-/// of newly verified blocks to eligible connected peers, including busy peers.
+/// Latest best-chain tips are coalesced while syncing. Every independent committed submission gets
+/// an initial all-peer attempt and up to one retry, spaced by the existing response timeout. New
+/// submissions can exhaust the oldest pending retry at capacity, never an unattempted submission.
+/// Exhaustion is reported explicitly; latest-tip recovery continues until delivery or supersession.
 ///
-/// Blocks are only gossiped if they are:
-/// - on the best chain, and
-/// - the most recent block verified since the last gossip.
-///
-/// In particular, if a lot of blocks are committed at the same time,
-/// gossips will be disabled or skipped until the state reaches the latest tip.
-///
-/// Pending submissions use ordinary gossip fanout before verification completes. Only committed
-/// mined blocks use all-peer delivery, so early adverts cannot replace their deferred advertisements.
+/// Trusted validated-body notifications use sampled fanout before the commit reply. Only committed
+/// mined blocks use all-peer delivery, so early adverts cannot replace their pending
+/// advertisements.
 ///
 /// [`block::Hash`]: zebra_chain::block::Hash
 pub async fn gossip_best_tip_block_hashes<ZN>(
@@ -79,10 +78,14 @@ where
     // so broadcasts don't delay the syncer too long
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
     let mut submitted_receiver = submitted_blocks.subscribe();
+    let committed_capacity = mined_block_receiver.as_ref().map_or(0, |receiver| {
+        receiver.max_capacity().min(MAX_IN_FLIGHT_BROADCASTS)
+    });
 
     let mut broadcasts = FuturesUnordered::new();
     let mut mined_in_flight = HashSet::new();
-    let mut pending_mined = None;
+    let mut pending_mined: VecDeque<((block::Hash, block::Height), tokio::time::Instant, bool)> =
+        VecDeque::with_capacity(committed_capacity);
     let mut pending_early = None;
     let mut pending_tip = None;
     let mut tip_ready_at = tokio::time::Instant::now();
@@ -95,24 +98,32 @@ where
 
         let tip = pending_tip
             .filter(|(hash, _)| !mined_in_flight.contains(hash))
-            .map(|block| (block, BroadcastKind::Tip));
+            .map(|block| (block, BroadcastKind::Tip, false));
+        let now = tokio::time::Instant::now();
+        let next_retry = pending_mined.iter().map(|(_, at, _)| *at).min();
+        let oldest_retry = pending_mined.iter().position(|(_, _, retried)| *retried);
         let next = pending_mined
-            .map(|block| (block, BroadcastKind::Mined))
+            .iter()
+            .find(|(_, _, retried)| !retried)
+            .or_else(|| pending_mined.iter().find(|(_, at, _)| *at <= now))
+            .map(|(block, _, retried)| (*block, BroadcastKind::Mined, *retried))
             // Early submissions must not postpone a committed tip that is ready to gossip.
             .or_else(|| {
                 tip.filter(|_| {
                     tokio::time::Instant::now() >= tip_ready_at && sync_status.is_close_to_tip()
                 })
             })
-            .or_else(|| pending_early.map(|block| (block, BroadcastKind::Early)))
+            .or_else(|| pending_early.map(|block| (block, BroadcastKind::Early, false)))
             .or(tip);
 
         tokio::select! {
             biased;
 
             // Complete mined broadcasts before considering submissions or their tip fallback.
-            Some((hash, kind, result)) = broadcasts.next(), if !broadcasts.is_empty() => {
+            Some((block, kind, retried, result)) = broadcasts.next(), if !broadcasts.is_empty() => {
+                let (hash, _) = block;
                 let result: Result<zn::Response, BoxError> = result;
+                let retried: bool = retried;
                 if kind == BroadcastKind::Mined {
                     mined_in_flight.remove(&hash);
                     if result.is_ok() {
@@ -124,14 +135,43 @@ where
                             chain_state.mark_last_change_hash(hash);
                         }
                     }
-                    // On failure, leave the committed tip pending for the ordinary broadcast.
+                    else if !retried {
+                        pending_mined.push_back((block, tokio::time::Instant::now() + TIPS_RESPONSE_TIMEOUT, true));
+                    }
+                }
+                if let Err(error) = result {
+                    if kind == BroadcastKind::Tip
+                        && chain_state.latest_chain_tip().best_tip_hash() == Some(hash)
+                    {
+                        pending_tip = Some(block);
+                        tip_ready_at = tokio::time::Instant::now() + TIPS_RESPONSE_TIMEOUT;
+                    }
+                    if kind == BroadcastKind::Mined && retried {
+                        warn!(?hash, %error, "committed block advertisement exhausted its retry");
+                    } else {
+                        debug!(?hash, ?kind, %error, "block advertisement was not delivered");
+                    }
                 }
             }
 
-            Some(block) = recv_mined_block(&mut mined_block_receiver) => {
+            Some(block) = recv_mined_block(&mut mined_block_receiver),
+                if pending_mined.len() + mined_in_flight.len() < committed_capacity
+                    || oldest_retry.is_some() => {
                 debug!(hash = ?block.0, height = ?block.1, "received mined block for broadcast");
-                if !mined_in_flight.contains(&block.0) {
-                    pending_mined = Some(block);
+                if !mined_in_flight.contains(&block.0)
+                    && !pending_mined.iter().any(|(pending, _, _)| pending.0 == block.0)
+                {
+                    if pending_mined.len() + mined_in_flight.len() == committed_capacity {
+                        let ((hash, _), _, _) = pending_mined
+                            .remove(oldest_retry.expect("a full queue only receives with a pending retry"))
+                            .expect("the oldest pending retry is still queued");
+                        debug!(
+                            ?hash,
+                            error = "retry capacity reclaimed for a new committed block",
+                            "committed block advertisement exhausted its retry"
+                        );
+                    }
+                    pending_mined.push_back((block, tokio::time::Instant::now(), false));
                 }
                 // Do not let a superseded early advert replace mined inventory for busy peers.
                 pending_early = None;
@@ -142,15 +182,18 @@ where
                 tip_ready_at = tokio::time::Instant::now() + WAIT_FOR_BLOCK_SUBMISSION_DELAY;
             }
 
+            _ = async { tokio::time::sleep_until(next_retry.expect("guarded by retry deadline")).await; },
+                if next_retry.is_some_and(|at| at > now) => {}
+
             ready = async {
-                if matches!(next, Some((_, BroadcastKind::Tip))) {
+                if matches!(next, Some((_, BroadcastKind::Tip, _))) {
                     tokio::time::sleep_until(tip_ready_at).await;
                     sync_status.wait_until_close_to_tip().await.map_err(SyncStatus)?;
                 }
                 broadcast_network.ready().await.map(|_| ()).map_err(PeerSetReadiness)
             }, if next.is_some() && broadcasts.len() < MAX_IN_FLIGHT_BROADCASTS => {
                 ready?;
-                let ((hash, height), kind) = next.expect("readiness is polled with a pending broadcast");
+                let ((hash, height), kind, retried) = next.expect("readiness is polled with a pending broadcast");
                 let is_block_submission = kind != BroadcastKind::Tip;
                 let log_msg = match kind {
                     BroadcastKind::Mined => "sending mined block broadcast",
@@ -166,7 +209,7 @@ where
 
                 match kind {
                     BroadcastKind::Mined => {
-                        pending_mined = None;
+                        pending_mined.retain(|(block, _, _)| block.0 != hash);
                         mined_in_flight.insert(hash);
                     }
                     BroadcastKind::Early => {
@@ -186,10 +229,10 @@ where
                 };
                 let broadcast = broadcast_network.call(request);
                 // Poll broadcasts concurrently with readiness and incoming notifications.
-                broadcasts.push(async move { (hash, kind, broadcast.await) });
+                broadcasts.push(async move { ((hash, height), kind, retried, broadcast.await) });
             }
 
-            early = recv_submitted_block(&mut submitted_receiver), if pending_mined.is_none() => {
+            early = recv_submitted_block(&mut submitted_receiver), if pending_mined.is_empty() => {
                 pending_early = Some(early);
             }
         }
