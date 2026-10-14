@@ -834,7 +834,7 @@ where
         }
     }
 
-    /// Drains pending stall/clear events from tracked routing futures and
+    /// Drains pending stall/clear events for the currently tracked connections and
     /// disconnects peers that have exceeded the stall threshold. The peer's
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
@@ -842,8 +842,13 @@ where
         while let Poll::Ready(Some(event)) = self.stall_event_rx.poll_recv(cx) {
             let PeerStallEvent::Response {
                 peer: addr,
+                connection_id,
                 outcome,
             } = event;
+
+            if self.tracked_connections.get(&addr) != Some(&connection_id) {
+                continue;
+            }
 
             match outcome {
                 StallOutcome::Stall => {
@@ -1107,7 +1112,7 @@ where
         .boxed()
     }
 
-    /// Reports a find response's stall outcome.
+    /// Reports a find response's stall outcome using the connection identity captured now.
     fn track_find_response(
         &self,
         peer: PeerSocketAddr,
@@ -1115,11 +1120,20 @@ where
     ) -> ResponseFuture {
         let stall_sender = self.stall_event_tx.clone();
 
+        let connection_id = *self
+            .tracked_connections
+            .get(&peer)
+            .expect("routed peers have been admitted with a connection identity");
+
         async move {
             let result = request_handler.await;
 
             if let Some(outcome) = classify_find_response(&result) {
-                let _ = stall_sender.send(PeerStallEvent::Response { peer, outcome });
+                let _ = stall_sender.send(PeerStallEvent::Response {
+                    peer,
+                    connection_id,
+                    outcome,
+                });
             }
 
             result.map_err(Into::into)

@@ -7,6 +7,7 @@ use crate::PeerSocketAddr;
 pub(crate) enum PeerStallEvent {
     Response {
         peer: PeerSocketAddr,
+        connection_id: ConnectionId,
         outcome: StallOutcome,
     },
 }
