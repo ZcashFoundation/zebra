@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Bounded orphan retention is shared by ordinary and cached block commits, with commit-ready parents dispatched before eviction.
+time: 2026-10-14T20:27:46.895491768+02:00
