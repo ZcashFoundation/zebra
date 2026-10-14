@@ -3,4 +3,4 @@
 mod gossip;
 mod network_checkpoint;
 mod timing;
-mod vectors;
+pub(super) mod vectors;

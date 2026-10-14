@@ -21,7 +21,7 @@ use tokio::{
     task::JoinHandle,
     time::{timeout, timeout_at, Instant},
 };
-use tower::{hedge, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -69,18 +69,6 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// Bounds a drop path that also fires for honest old blocks. Timing out is treated as "no proof",
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
-
-#[derive(Copy, Clone, Debug)]
-pub(super) struct AlwaysHedge;
-
-impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
-    fn can_retry(&self, _req: &Request) -> bool {
-        true
-    }
-    fn clone_request(&self, req: &Request) -> Option<Request> {
-        Some(req.clone())
-    }
-}
 
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
