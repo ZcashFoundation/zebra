@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Added `Request::CommitMined` to carry state-owned mining notifications through validation and commit. Update exhaustive matches on `Request` to handle the new variant.
+time: 2026-10-19T13:13:48.146973728+02:00

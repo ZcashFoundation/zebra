@@ -1,4 +1,4 @@
-//! A task that gossips committed tips and authenticated submitted blocks to peers.
+//! A task that gossips committed tips and validated submitted blocks to peers.
 //!
 //! [`block::Hash`]: zebra_chain::block::Hash
 
@@ -34,7 +34,7 @@ pub enum BlockGossipError {
     PeerSetReadiness(zn::BoxError),
 }
 
-/// Run continuously, gossiping committed tips and authenticated submitted blocks.
+/// Run continuously, gossiping committed tips and validated submitted blocks.
 ///
 /// Once the state has reached the chain tip, broadcast the [`block::Hash`]es
 /// of newly verified blocks to eligible connected peers, including busy peers.

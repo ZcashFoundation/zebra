@@ -282,33 +282,6 @@ async fn a_subscription_reports_a_template_published_before_the_wait() {
         .expect("a template published before the wait should still end it");
 }
 
-/// Relay authentication binds the submitted context to a currently published template.
-#[test]
-fn relay_history_root_binds_template_height_and_difficulty() {
-    let cache = TemplateCache::default();
-    let template = template();
-    let parent = template.previous_block_hash;
-    let height = Height(template.height);
-    let bits = template.bits;
-    let history_root = template.default_roots.chain_history_root;
-    assert_eq!(cache.chain_history_root(parent, height, bits), None);
-    cache.publish(template);
-    assert_eq!(
-        cache.chain_history_root(parent, height, bits),
-        Some(history_root)
-    );
-    assert_eq!(
-        cache.chain_history_root(parent, height.next().unwrap(), bits),
-        None
-    );
-    assert_eq!(
-        cache.chain_history_root(parent, height, CompactDifficulty::default()),
-        None
-    );
-    cache.clear();
-    assert_eq!(cache.chain_history_root(parent, height, bits), None);
-}
-
 /// Checks that a subscription reports each later publish, so a long poll that loops keeps waiting
 /// on templates it hasn't seen rather than on the one it just read.
 #[tokio::test]

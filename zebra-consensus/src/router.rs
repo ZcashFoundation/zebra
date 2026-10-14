@@ -62,6 +62,8 @@ const VERIFIER_BUFFER_BOUND: usize = 5;
 
 /// The block verifier router routes requests to either the checkpoint verifier or the
 /// semantic block verifier, depending on the maximum checkpoint height.
+/// Locally mined blocks use the same checkpoint policy, carrying their notifications to the
+/// state writer on either path. Checkpoint verification never publishes early validated events.
 ///
 /// # Correctness
 ///
@@ -246,9 +248,17 @@ where
                 .boxed()
             }
 
-            Some(height) if height <= self.max_checkpoint_height => {
-                self.checkpoint.call(block).map_err(Into::into).boxed()
-            }
+            Some(height) if height <= self.max_checkpoint_height => match request {
+                Request::CommitMined(_, notifications) => self
+                    .checkpoint
+                    .verify(block, Some(notifications))
+                    .map_err(Into::into)
+                    .boxed(),
+                Request::Commit(_) => self.checkpoint.call(block).map_err(Into::into).boxed(),
+                Request::CheckProposal(_) => {
+                    unreachable!("proposals below the checkpoint were rejected")
+                }
+            },
             // This also covers blocks with no height, which the block verifier
             // will reject immediately.
             _ => self.block.call(request).map_err(Into::into).boxed(),
