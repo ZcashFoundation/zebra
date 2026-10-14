@@ -148,15 +148,11 @@ pub struct LongPollId {
     /// so we choose a 1 in 2^32 chance of missing a block change.
     pub(crate) tip_hash_checksum: u32,
 
-    /// The max time in the same template as this long poll ID.
+    /// The timestamp-range identity, initially the template's maximum timestamp.
     ///
-    /// If the max time is reached, a new template must be provided.
-    /// Old work is no longer valid.
-    ///
-    /// Ideally, a new template should be provided at least one target block interval before
-    /// the max time. This avoids wasted work.
-    ///
-    /// Zcash times are limited to 32 bits by the consensus rules.
+    /// Publication preserves this component while the range only expands for the same parent,
+    /// difficulty and lower bound. A genuine difficulty-boundary transition gets a new component.
+    /// Serving checks the template's actual current range separately; this is not a deadline.
     pub(crate) max_timestamp: u32,
 
     // Fields that allow old work:
@@ -206,8 +202,8 @@ impl LongPollId {
     /// Old shares may be valid if only the mempool transactions have changed,
     /// because newer transactions don't have to be included in the old shares.
     ///
-    /// But if the chain tip has changed, the block header has changed, so old shares are invalid.
-    /// (And if the max time has changed on testnet, the block header has changed.)
+    /// A changed parent or timestamp-range identity invalidates retention. Harmless clock-cap
+    /// expansions preserve the latter when published; difficulty transitions do not.
     pub fn submit_old(&self, old_long_poll_id: &LongPollId) -> bool {
         self.tip_height == old_long_poll_id.tip_height
             && self.tip_hash_checksum == old_long_poll_id.tip_hash_checksum

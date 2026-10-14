@@ -11,7 +11,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, Duration32},
     transaction::{Transaction, VerifiedUnminedTx},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
 };
 use zebra_state::GetBlockTemplateChainInfo;
 
