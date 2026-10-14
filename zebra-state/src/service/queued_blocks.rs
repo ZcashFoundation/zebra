@@ -5,6 +5,7 @@ use std::{
     iter, mem,
 };
 
+use multimap::MultiMap;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
@@ -44,33 +45,31 @@ pub struct QueuedBlocks {
     known_utxos: KnownUtxos,
 }
 
-/// UTXOs created by queued or sent blocks, with the number of those blocks that create each one.
+/// UTXOs created by queued or sent blocks, one entry per block that creates each one.
 ///
 /// Blocks with the same transaction create the same outpoints, so an outpoint is only
 /// forgotten when the last block that creates it is removed.
 #[derive(Debug, Default)]
-struct KnownUtxos(HashMap<transparent::OutPoint, (transparent::Utxo, usize)>);
+struct KnownUtxos(MultiMap<transparent::OutPoint, transparent::Utxo>);
 
 impl KnownUtxos {
     /// Records that one more block creates `outpoint`.
     fn insert(&mut self, outpoint: transparent::OutPoint, utxo: transparent::Utxo) {
-        let entry = self.0.entry(outpoint).or_insert((utxo.clone(), 0));
-        entry.0 = utxo;
-        entry.1 += 1;
+        self.0.insert(outpoint, utxo);
     }
 
     /// Records that one fewer block creates `outpoint`, and forgets it when none do.
     fn remove(&mut self, outpoint: &transparent::OutPoint) {
-        if let Some(entry) = self.0.get_mut(outpoint) {
-            entry.1 -= 1;
-            if entry.1 == 0 {
+        if let Some(utxos) = self.0.get_vec_mut(outpoint) {
+            utxos.pop();
+            if utxos.is_empty() {
                 self.0.remove(outpoint);
             }
         }
     }
 
     fn get(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        self.0.get(outpoint).map(|(utxo, _)| utxo.clone())
+        self.0.get(outpoint).cloned()
     }
 
     #[cfg(test)]
@@ -263,7 +262,6 @@ impl QueuedBlocks {
     /// Doesn't update the metrics, because it is only used when the state is being dropped.
     pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedSemanticallyVerified> {
         self.known_utxos.0.clear();
-        self.known_utxos.0.shrink_to_fit();
         self.by_parent.clear();
         self.by_parent.shrink_to_fit();
         self.by_height.clear();
@@ -413,7 +411,6 @@ impl SentHashes {
         });
 
         self.sent.shrink_to_fit();
-        self.known_utxos.0.shrink_to_fit();
         self.bufs.shrink_to_fit();
 
         self.update_metrics_for_cache();

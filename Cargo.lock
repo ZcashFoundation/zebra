@@ -7615,6 +7615,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "mset",
+ "multimap",
  "once_cell",
  "proptest",
  "proptest-derive",
