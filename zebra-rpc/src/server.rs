@@ -130,13 +130,18 @@ impl RpcServer {
         // The largest RPC request is submitblock, which sends a full block
         // as a hex string (2x MAX_BLOCK_BYTES) plus a small JSON-RPC wrapper.
         let max_request_body_size = (MAX_BLOCK_BYTES as usize) * 2 + 1024;
+        let max_response_body_size = usize::try_from(conf.max_response_body_size)?;
         let http_middleware_layer = if conf.enable_cookie_auth {
             let cookie = Cookie::default();
             cookie::write_to_disk(&cookie, &conf.cookie_dir)
                 .expect("Zebra must be able to write the auth cookie to the disk");
-            HttpRequestMiddlewareLayer::new(Some(cookie), max_request_body_size)
+            HttpRequestMiddlewareLayer::new(
+                Some(cookie),
+                max_request_body_size,
+                max_response_body_size,
+            )
         } else {
-            HttpRequestMiddlewareLayer::new(None, max_request_body_size)
+            HttpRequestMiddlewareLayer::new(None, max_request_body_size, max_response_body_size)
         };
 
         let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);

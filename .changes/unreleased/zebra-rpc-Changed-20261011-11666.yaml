@@ -1,4 +1,4 @@
 project: zebra-rpc
-kind: Changed
-body: 'The exported HTTP compatibility middleware now upgrades homogeneous versionless and JSON-RPC 1.0 batches with non-null IDs, returning responses in the same version. Converted batches must fit the request body size limit. Other batches pass through unchanged.'
+kind: breaking
+body: 'The exported HTTP compatibility middleware upgrades homogeneous versionless and JSON-RPC 1.0 batches with explicit IDs, returning responses in the same version. Other batches pass through unchanged. `HttpRequestMiddleware::new` and `HttpRequestMiddlewareLayer::new` now require a `max_response_body_size: usize` argument after the request limit; pass the same response limit configured on the JSON-RPC server. Converted bodies respect these limits; response conversion overflow returns a legacy-formatted oversized-response error, retaining the upstream error-envelope exception.'
 time: 2026-10-11T00:00:00Z
