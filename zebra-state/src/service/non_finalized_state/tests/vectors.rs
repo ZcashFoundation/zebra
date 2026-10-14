@@ -608,6 +608,10 @@ fn cached_proposal_respects_block_and_parent_invalidation() {
         .unwrap();
     state.invalidate_block(solved.hash()).unwrap();
 
+    let (committed, _commits) = tokio::sync::mpsc::channel(1);
+    let (validated, bodies) = tokio::sync::watch::channel(None);
+    let notifications = crate::MinedBlockNotifications::new(committed, validated);
+
     let normal_error = state
         .commit_block(solved.clone().prepare(), &finalized_state)
         .unwrap_err();
@@ -618,11 +622,16 @@ fn cached_proposal_respects_block_and_parent_invalidation() {
         }
     );
     assert_eq!(
-        state.commit_prevalidated_contextual(cached.clone(), &finalized_state),
+        state.commit_prevalidated_contextual(
+            cached.clone(),
+            &finalized_state,
+            Some(&notifications),
+        ),
         Err(normal_error),
     );
     assert_eq!(state.best_tip().unwrap().1, parent.hash());
     assert!(!state.any_chain_contains(&solved.hash()));
+    assert!(bodies.borrow().is_none());
 
     // A different solved hash is not itself invalidated, but cannot restore its removed parent.
     let mut sibling = (*solved).clone();
@@ -643,11 +652,12 @@ fn cached_proposal_respects_block_and_parent_invalidation() {
         crate::ValidateContextError::NotReadyToBeCommitted
     );
     assert_eq!(
-        state.commit_prevalidated_contextual(cached, &finalized_state),
+        state.commit_prevalidated_contextual(cached, &finalized_state, Some(&notifications)),
         Err(normal_error),
     );
     assert_eq!(state.best_tip().unwrap().1, other_root.hash());
     assert!(!state.any_chain_contains(&parent.hash()));
+    assert!(bodies.borrow().is_none());
 }
 
 /// Reject invalidating the only root before changing either live chains or invalidation records.
