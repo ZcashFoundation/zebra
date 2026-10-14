@@ -386,11 +386,18 @@ async fn block_advert_while_awaiting_response() {
 
         // Exercise the idle path before leaving an address request awaiting its response.
         let idle_hash = block::Hash([1; 32]);
-        block_advert_tx.try_send(idle_hash).unwrap();
+        let (result, idle_delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: idle_hash,
+                result,
+            })
+            .unwrap();
         assert_eq!(
             peer_outbound_messages.next().await,
             Some(Message::Inv(vec![InventoryHash::Block(idle_hash)]))
         );
+        idle_delivery.await.unwrap().unwrap();
 
         let (request_tx, mut request_rx) = oneshot::channel();
         client_tx
@@ -405,11 +412,18 @@ async fn block_advert_while_awaiting_response() {
         assert_eq!(peer_outbound_messages.next().await, Some(Message::GetAddr));
 
         let busy_hash = block::Hash([2; 32]);
-        block_advert_tx.try_send(busy_hash).unwrap();
+        let (result, busy_delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: busy_hash,
+                result,
+            })
+            .unwrap();
         assert_eq!(
             peer_outbound_messages.next().await,
             Some(Message::Inv(vec![InventoryHash::Block(busy_hash)]))
         );
+        busy_delivery.await.unwrap().unwrap();
         assert!(request_rx.try_recv().unwrap().is_none());
 
         // Closing only the advert channel must leave the original request alive.
@@ -455,7 +469,13 @@ async fn getblocks_response_precedes_ready_block_advert() {
                 stop: None,
             }))
             .unwrap();
-        block_advert_tx.try_send(advert_hash).unwrap();
+        let (result, _delivery) = tokio::sync::oneshot::channel();
+        block_advert_tx
+            .try_send(crate::peer_set::BlockAdvert {
+                hash: advert_hash,
+                result,
+            })
+            .unwrap();
         let connection_task = tokio::spawn(connection.run(peer_rx));
 
         tokio::join!(
