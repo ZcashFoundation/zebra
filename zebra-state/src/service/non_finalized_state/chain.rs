@@ -1826,12 +1826,15 @@ impl Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
 
-        // for each transaction in block
-        for (transaction_index, (transaction, transaction_hash)) in block
+        // Apply fee-paying transactions before coinbase credits, preserving their original locations.
+        // Coinbase outputs cannot be spent in this block because they are immature.
+        let transactions = block
             .transactions
             .iter()
-            .zip(transaction_hashes.iter().cloned())
-            .enumerate()
+            .zip(transaction_hashes.iter().copied())
+            .enumerate();
+        for (transaction_index, (transaction, transaction_hash)) in
+            transactions.clone().skip(1).chain(transactions.take(1))
         {
             let inputs = transaction.inputs();
             let outputs = transaction.outputs();
@@ -1890,10 +1893,9 @@ impl Chain {
                 "transactions must be unique within a single chain"
             );
 
-            // add the utxos this produced
-            self.update_chain_tip_with(&(&outputs, &transaction_hash, new_outputs))?;
-            // delete the utxos this consumed
+            // Debit before credit so intermediate address balances remain in range.
             self.update_chain_tip_with(&(&inputs, &transaction_hash, spent_outputs))?;
+            self.update_chain_tip_with(&(&outputs, &transaction_hash, new_outputs))?;
         }
 
         // update the chain value pool balances
@@ -2004,17 +2006,27 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
 
-        // for each transaction in block
-        for (transaction, transaction_hash) in
-            block.transactions.iter().zip(transaction_hashes.iter())
-        {
+        let transactions = block.transactions.iter().zip(transaction_hashes.iter());
+        let mut transactions = transactions.clone().skip(1).chain(transactions.take(1));
+        // Finalization advances the balance baseline in application order. Tip rollback undoes
+        // application in reverse order, including removing coinbase credits before restoring fees.
+        while let Some((transaction, transaction_hash)) = match position {
+            RevertPosition::Root => transactions.next(),
+            RevertPosition::Tip => transactions.next_back(),
+        } {
             let inputs = transaction.inputs();
             let outputs = transaction.outputs();
 
-            // remove the utxos this produced
-            self.revert_chain_with(&(&outputs, transaction_hash, new_outputs), position);
-            // reset the utxos this consumed
-            self.revert_chain_with(&(&inputs, transaction_hash, spent_outputs), position);
+            match position {
+                RevertPosition::Root => {
+                    self.revert_chain_with(&(&inputs, transaction_hash, spent_outputs), position);
+                    self.revert_chain_with(&(&outputs, transaction_hash, new_outputs), position);
+                }
+                RevertPosition::Tip => {
+                    self.revert_chain_with(&(&outputs, transaction_hash, new_outputs), position);
+                    self.revert_chain_with(&(&inputs, transaction_hash, spent_outputs), position);
+                }
+            }
 
             // TODO: move this to the history tree UpdateWith.revert...()?
             // remove `transaction.hash` from `tx_loc_by_hash`
