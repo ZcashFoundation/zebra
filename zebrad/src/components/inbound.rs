@@ -228,7 +228,7 @@ pub struct Inbound {
     /// Some services are unavailable until Zebra has completed setup.
     setup: Setup,
 
-    /// Authenticated submitted bodies available before state commit.
+    /// Submitted bodies published by trusted state validation, available before commit completes.
     submitted_blocks: zebra_rpc::SubmittedBlockCache,
 }
 
@@ -249,7 +249,10 @@ impl Inbound {
         }
     }
 
-    /// Shares authenticated pending submissions with the RPC service.
+    /// Shares the cache populated by trusted validated-body notifications with the RPC service.
+    ///
+    /// Merely submitting or authenticating a block does not make it available here. Cache misses
+    /// continue through the ordinary state lookup.
     pub fn with_submitted_blocks(mut self, cache: zebra_rpc::SubmittedBlockCache) -> Self {
         self.submitted_blocks = cache;
         self

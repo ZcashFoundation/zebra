@@ -315,10 +315,30 @@ impl WriteBlockWorkerTask {
                 continue;
             }
 
-            // Try committing the block
-            match finalized_state
-                .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
+            let committed_permit = match ordered_block
+                .2
+                .as_ref()
+                .map(crate::MinedBlockNotifications::try_reserve_committed)
+                .transpose()
             {
+                Ok(permit) => permit.flatten(),
+                Err(error) => {
+                    // Publish the reset before replying so an immediate retry can make progress.
+                    let _ = invalid_block_reset_sender.send((
+                        finalized_state.db.finalized_tip_height(),
+                        finalized_state.db.finalized_tip_hash(),
+                    ));
+                    let _ = ordered_block.1.send(Err(error.into()));
+                    continue;
+                }
+            };
+
+            // Try committing the block
+            match finalized_state.commit_finalized(
+                ordered_block,
+                prev_finalized_note_commitment_trees.take(),
+                committed_permit,
+            ) {
                 Ok((finalized, note_commitment_trees)) => {
                     let tip_block = ChainTipBlock::from(finalized);
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
@@ -378,7 +398,8 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx, contextual)) = queued_child_and_rsp_tx else {
+            let Some((queued_child, rsp_tx, contextual, notifications)) = queued_child_and_rsp_tx
+            else {
                 update_latest_chain_channels(
                     non_finalized_state,
                     &finalized_state.db,
@@ -390,8 +411,28 @@ impl WriteBlockWorkerTask {
             };
 
             let child_hash = queued_child.hash;
+            let child_height = queued_child.height;
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
+
+            // Never wait for relay capacity or reserve it while a block is queued for its parent.
+            // Admission failure is operational, not evidence that this block or its children are invalid.
+            let committed_permit = if parent_error.is_none() {
+                match notifications
+                    .as_ref()
+                    .map(crate::MinedBlockNotifications::try_reserve_committed)
+                    .transpose()
+                {
+                    Ok(permit) => permit.flatten(),
+                    Err(error) => {
+                        let _ = non_finalized_rejected_sender.send(child_hash);
+                        let _ = rsp_tx.send(Err(error.into()));
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
 
             // If the parent block was marked as rejected, also reject all its children.
             //
@@ -406,7 +447,11 @@ impl WriteBlockWorkerTask {
                 Err(parent_error.for_descendant(parent_hash))
             } else if let Some(mut contextual) = contextual {
                 contextual.new_outputs = queued_child.new_outputs;
-                non_finalized_state.commit_prevalidated_contextual(*contextual, &finalized_state.db)
+                non_finalized_state.commit_prevalidated_contextual(
+                    *contextual,
+                    &finalized_state.db,
+                    notifications.as_ref(),
+                )
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
                 validate_and_commit_non_finalized(
@@ -466,6 +511,12 @@ impl WriteBlockWorkerTask {
                 backup_dir_path.as_deref(),
             )
             .expect("just successfully inserted a non-finalized block above");
+
+            // Ownership stays in this writer even if the caller dropped its response future.
+            // Notify side-chain commits too, using the committed block rather than the best tip.
+            if let Some(permit) = committed_permit {
+                permit.send((child_hash, child_height));
+            }
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));

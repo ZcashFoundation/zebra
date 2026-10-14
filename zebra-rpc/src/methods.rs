@@ -1065,14 +1065,9 @@ where
         (rpc_impl, rpc_tx_queue_task_handle)
     }
 
-    /// Shares pending bodies with inbound peers and sets the router's checkpoint cutoff.
-    pub fn with_submitted_blocks(
-        mut self,
-        cache: crate::SubmittedBlockCache,
-        max_checkpoint_height: Height,
-    ) -> Self {
+    /// Shares locally validated pending bodies with inbound peers.
+    pub fn with_submitted_blocks(mut self, cache: crate::SubmittedBlockCache) -> Self {
         self.gbt.submitted_blocks = cache;
-        self.gbt.max_checkpoint_height = max_checkpoint_height;
         self
     }
 
@@ -3202,69 +3197,39 @@ where
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
         let block = Arc::new(block);
-        let chain_history_root = self.gbt.template_cache().and_then(|cache| {
-            cache.chain_history_root(
-                block.header.previous_block_hash,
-                height,
-                block.header.difficulty_threshold,
-            )
-        });
-        let mut relayed = false;
-        if let Some(chain_history_root) =
-            chain_history_root.filter(|_| height > self.gbt.max_checkpoint_height)
-        {
-            let network = self.network.clone();
-            let candidate = block.clone();
-            let authenticated = tokio::task::spawn_blocking(move || {
-                if !network.disable_pow()
-                    && (zebra_consensus::difficulty_is_valid(
-                        &candidate.header,
-                        &network,
-                        &height,
-                        &block_hash,
-                    )
-                    .is_err()
-                        || zebra_consensus::equihash_solution_is_valid(&candidate.header).is_err())
-                {
-                    return false;
-                }
-                let hashes = candidate
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.hash())
-                    .collect::<Vec<_>>();
-                if zebra_consensus::merkle_root_validity(&network, &candidate, &hashes).is_err() {
-                    return false;
-                }
-                // Before NU5, only legacy transaction IDs authenticate authorizing data.
-                if NetworkUpgrade::current(&network, height) < NetworkUpgrade::Nu5 {
-                    candidate.transactions.iter().all(|tx| tx.version() <= 4)
-                } else {
-                    *candidate.header.commitment_bytes
-                        == <[u8; 32]>::from(
-                            block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-                                &chain_history_root,
-                                &candidate.auth_data_root(),
-                            ),
-                        )
-                }
-            })
-            .await
-            .map_misc_error()?;
-            if authenticated {
-                self.gbt
-                    .submitted_blocks
-                    .insert(block_hash, height, block.clone());
-                relayed = true;
-            }
-        }
-
-        let block_verifier_router_response = block_verifier_router
+        let (request, validated) = match self.gbt.mined_block_notifications() {
+            Some((notifications, validated)) => (
+                zebra_consensus::Request::CommitMined(block, notifications),
+                Some(validated),
+            ),
+            None => (zebra_consensus::Request::Commit(block), None),
+        };
+        let verification = block_verifier_router
             .ready()
             .await
             .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::Commit(block))
-            .await;
+            .call(request);
+        tokio::pin!(verification);
+        let mut relayed = false;
+        let block_verifier_router_response = if let Some(mut validated) = validated {
+            tokio::select! {
+                biased;
+                changed = validated.changed() => {
+                    // Only the state writer emits this event, for an exact successful proposal
+                    // after solved PoW, size/time and live parent/invalidation checks.
+                    if changed.is_ok() {
+                        if let Some(block) = validated.borrow_and_update().clone() {
+                            self.gbt.submitted_blocks.insert(block_hash, height, block);
+                            relayed = true;
+                        }
+                    }
+                    verification.await
+                }
+                result = &mut verification => result,
+            }
+        } else {
+            verification.await
+        };
 
         let chain_error = match block_verifier_router_response {
             // Currently, this match arm returns `null` (Accepted) for blocks committed
@@ -3275,10 +3240,6 @@ where
             // The difference is important to miners, because they want to mine on the best chain.
             Ok(hash) => {
                 tracing::info!(?hash, ?height, "submit block accepted");
-
-                self.gbt
-                    .advertise_mined_block(hash, height)
-                    .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
 
                 return Ok(SubmitBlockResponse::Accepted);
             }
@@ -3297,6 +3258,30 @@ where
                     }
                 }
                 use zebra_consensus::{error::TransactionError, VerifyBlockError};
+                let notification_error = match &error {
+                    Ok(RouterError::Block { source }) => match source.as_ref() {
+                        VerifyBlockError::Commit(error) => Some(error),
+                        _ => None,
+                    },
+                    Ok(RouterError::Checkpoint { source }) => match source.as_ref() {
+                        zebra_consensus::VerifyCheckpointError::CommitCheckpointVerified(error) => {
+                            error
+                                .downcast_ref::<zebra_state::CommitCheckpointVerifiedError>()
+                                .map(zebra_state::CommitCheckpointVerifiedError::inner)
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(
+                    error @ (zebra_state::CommitBlockError::MinedBlockNotificationFull
+                    | zebra_state::CommitBlockError::MinedBlockNotificationClosed),
+                ) = notification_error
+                {
+                    // Capacity is checked before mutation. This is a retryable operational error,
+                    // never a consensus rejection or a failure reported after a successful commit.
+                    return Err(ErrorObject::owned(0, error.to_string(), None::<()>));
+                }
                 // Another submission can still commit after duplicate or operational failures.
                 let inconclusive = match &error {
                     Ok(error) if error.is_duplicate_request() => true,
@@ -3320,8 +3305,8 @@ where
                     },
                     _ => false,
                 };
-                // Unknown transaction errors include invalid scripts, so they cannot justify
-                // continuing to serve an unverified body.
+                // Operational failures do not invalidate an already validated body. Definitive
+                // commit failures still withdraw it from the pending-body cache.
                 if relayed && !timed_out && !inconclusive {
                     self.gbt.submitted_blocks.remove(block_hash);
                     tracing::warn!(?block_hash, ?height, ?error, "early-relayed block rejected");
