@@ -58,6 +58,35 @@ fn test_timeout() -> std::time::Duration {
     }
 }
 
+/// Block siblings must not keep a failed proposal waiting indefinitely on state readiness.
+#[tokio::test(start_paused = true)]
+async fn block_state_readiness_keeps_its_deadline() {
+    let mut state = tower::limit::ConcurrencyLimit::new(
+        service_fn(|_| std::future::pending::<Result<zebra_state::Response, crate::BoxError>>()),
+        1,
+    );
+    let held = state.ready().await.unwrap().call(zebra_state::Request::Tip);
+    let lookup = BlockTxVerifier::lookup_utxo(
+        Timeout::new(state, super::UTXO_LOOKUP_TIMEOUT),
+        transparent::OutPoint {
+            hash: Hash([0; 32]),
+            index: 0,
+        },
+        0,
+    );
+    let result = timeout(
+        super::UTXO_LOOKUP_TIMEOUT + std::time::Duration::from_secs(1),
+        lookup,
+    )
+    .await
+    .expect("block state readiness must use the existing state deadline");
+    assert!(matches!(
+        result,
+        Err(TransactionError::TransparentInputNotFound)
+    ));
+    drop(held);
+}
+
 #[test]
 fn v5_transactions_basic_check() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
