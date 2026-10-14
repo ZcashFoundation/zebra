@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reuse parsed transactions when submitted block bytes match a validated mining proposal except for nonce and solution; compare exact bytes after header and length checks without an extra full-body hash pass, retaining full decoding on misses and normal proof-of-work and state checks ([#11738](https://github.com/ZcashFoundation/zebra/issues/11738)).
+time: 2026-10-15T01:29:18.481520722+02:00
