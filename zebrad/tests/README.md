@@ -35,9 +35,10 @@ zebrad/tests/
 
 ## Keeping the gate bounded
 
-- `default` and `ci` retain the unit/integration scope and terminate a test attempt
-  after three minutes. Use dedicated profiles for long stateful and E2E checks.
-  The CI command still includes `--run-ignored=all`.
+- `default` and `ci` retain the unit/integration scope and use a conservative
+  twenty-minute outer backstop, above the in-test deadlines and cleanup allowance.
+  Use dedicated profiles for long stateful and E2E checks. The CI command still
+  includes `--run-ignored=all`.
 - Local startup, configuration, conflict, and RPC checks disable public seeders
   and peer-cache loading. Wait for the resource or response being tested, not a
   fixed startup sleep. Only tests that actually contact public peers belong in
@@ -45,7 +46,10 @@ zebrad/tests/
 - Use paused Tokio time for in-memory timer tests. Do not auto-advance time past
   real socket or database work; synchronize those tests on observable progress.
 - `TestChild::with_timeout` bounds quiet or partial-line reads and natural
-  process exit. Reset it when moving from a short startup phase to a longer
-  observation phase, and before explicit cleanup after separately bounded HTTP
-  or RPC operations. The `wait_with_output` method drains both remaining streams,
-  including after earlier log matches; already-consumed lines are not returned.
+  process exit. It returns an error for a duration that cannot fit in `Instant`;
+  use `?` to propagate that error. Reset it when moving from a short startup phase
+  to a longer observation phase; inspect the current budget with `deadline()`.
+  Explicit termination and post-exit draining use an independent one-second
+  cleanup grace, so separately bounded HTTP or RPC operations do not require a
+  cleanup-only timeout reset. The `wait_with_output` method drains both remaining
+  streams, including after earlier log matches; already-consumed lines are not returned.

@@ -95,6 +95,25 @@ jobs:
       - name: Run unit tests
         run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
+  run-zebra-test-windows:
+    name: zebra-test Windows 1.97.0
+    needs: changes
+    if: needs.changes.outputs.unit_tests == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: 1.97.0
+          cache-key: unit-tests-1.97.0-zebra-test-windows
+          cache-on-failure: true
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run zebra-test on Windows
+        run: cargo test --locked -p zebra-test
+
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
@@ -125,6 +144,7 @@ jobs:
     needs:
       - changes
       - run-unit-tests
+      - run-zebra-test-windows
       - check-no-git-dependencies
     timeout-minutes: 30
     steps:
@@ -132,4 +152,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: run-unit-tests, check-no-git-dependencies
+          allowed-skips: run-unit-tests, run-zebra-test-windows, check-no-git-dependencies
