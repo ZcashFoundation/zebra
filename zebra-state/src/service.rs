@@ -1715,11 +1715,13 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::TransactionIdsByAddresses {
                 addresses,
                 height_range,
+                max_entries,
             } => read::transparent_tx_ids(
                 state.latest_best_chain(),
                 &state.db,
                 addresses,
                 height_range,
+                max_entries,
             )
             .map(ReadResponse::AddressesTransactionIds),
 

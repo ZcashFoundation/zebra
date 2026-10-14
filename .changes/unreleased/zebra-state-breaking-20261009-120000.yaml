@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: '`ReadRequest::TransactionIdsByAddresses` takes an optional `max_entries`, which bounds the address index scan and returns the first transaction IDs in chain order ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).'
+time: 2026-10-09T12:00:00.000000000Z
