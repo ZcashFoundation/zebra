@@ -1086,18 +1086,7 @@ where
             self.push_unready(p2c_key, svc);
 
             if track_stalls {
-                let stall_tx = self.stall_event_tx.clone();
-                return async move {
-                    let result = fut.await;
-                    if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send(PeerStallEvent::Response {
-                            peer: p2c_key,
-                            outcome,
-                        });
-                    }
-                    result.map_err(Into::into)
-                }
-                .boxed();
+                return self.track_find_response(p2c_key, fut);
             }
 
             return fut.map_err(Into::into).boxed();
@@ -1115,6 +1104,26 @@ where
             Err(SharedPeerError::from(PeerError::NoReadyPeers))
         }
         .map_err(Into::into)
+        .boxed()
+    }
+
+    /// Reports a find response's stall outcome.
+    fn track_find_response(
+        &self,
+        peer: PeerSocketAddr,
+        request_handler: <D::Service as tower::Service<Request>>::Future,
+    ) -> ResponseFuture {
+        let stall_sender = self.stall_event_tx.clone();
+
+        async move {
+            let result = request_handler.await;
+
+            if let Some(outcome) = classify_find_response(&result) {
+                let _ = stall_sender.send(PeerStallEvent::Response { peer, outcome });
+            }
+
+            result.map_err(Into::into)
+        }
         .boxed()
     }
 
