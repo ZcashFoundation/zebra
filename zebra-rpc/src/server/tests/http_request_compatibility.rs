@@ -4,6 +4,7 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use bytes::Bytes;
@@ -14,14 +15,25 @@ use jsonrpsee::{
     server::{stop_channel, HttpBody, HttpRequest, HttpResponse, ServerBuilder},
     RpcModule,
 };
-use jsonrpsee_types::{ErrorObject, Id, Response, ResponsePayload};
+use jsonrpsee_types::{
+    error::{
+        OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG, TOO_BIG_BATCH_RESPONSE_CODE,
+        TOO_BIG_BATCH_RESPONSE_MSG,
+    },
+    ErrorObject, Id, Response, ResponsePayload,
+};
 use proptest::prelude::*;
-use serde_json::{json, Value};
+use serde_json::{json, value::RawValue, Value};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    time::timeout,
+};
 use tower::{service_fn, Service, ServiceExt};
 
 use crate::server::http_request_compatibility::{
     is_canonical_json_rpc_2_request, reencode_response, response_to_version, splice_response,
-    HttpRequestMiddleware, JsonRpcRequest, JsonRpcVersion,
+    HttpRequestMiddleware, HttpRequestMiddlewareLayer, JsonRpcRequest, JsonRpcVersion,
 };
 
 /// A body that always returns an error, simulating a TCP RST during body collection.
@@ -72,7 +84,12 @@ async fn request_body_error_returns_err_instead_of_panic() {
         .body(error_body)
         .expect("valid request");
 
-    let mut middleware = HttpRequestMiddleware::new(MockRpcService, None, 2_097_152);
+    let mut middleware = HttpRequestMiddleware::new(
+        MockRpcService,
+        None,
+        2_097_152,
+        usize::try_from(crate::config::rpc::Config::default().max_response_body_size).unwrap(),
+    );
     let result = middleware.call(request).await;
 
     assert!(
@@ -93,7 +110,12 @@ async fn oversized_request_body_is_rejected() {
         .body(body)
         .expect("valid request");
 
-    let mut middleware = HttpRequestMiddleware::new(MockRpcService, None, limit);
+    let mut middleware = HttpRequestMiddleware::new(
+        MockRpcService,
+        None,
+        limit,
+        usize::try_from(crate::config::rpc::Config::default().max_response_body_size).unwrap(),
+    );
     let result = middleware.call(request).await;
 
     assert!(result.is_err(), "oversized request body should be rejected");
@@ -103,7 +125,7 @@ async fn oversized_request_body_is_rejected() {
 #[test]
 fn rewrite_keeps_null_request_id() {
     let rewrite = |request: &str| {
-        let request: JsonRpcRequest = serde_json::from_str(request).expect("valid request");
+        let request: JsonRpcRequest<'_> = serde_json::from_str(request).expect("valid request");
         serde_json::to_value(request.into_2()).expect("serializable")
     };
 
@@ -126,7 +148,12 @@ async fn round_trip(request: &str, response: &'static str) -> (String, String) {
             Ok::<_, BoxError>(HttpResponse::new(HttpBody::from(response)))
         }
     });
-    let mut middleware = HttpRequestMiddleware::new(inner, None, 2_097_152);
+    let mut middleware = HttpRequestMiddleware::new(
+        inner,
+        None,
+        2_097_152,
+        usize::try_from(crate::config::rpc::Config::default().max_response_body_size).unwrap(),
+    );
 
     let response = middleware
         .ready()
@@ -303,10 +330,10 @@ fn assert_splice_matches_reencode(body: &Bytes) {
         let spliced = splice_response(body, version);
         assert_eq!(
             spliced.as_deref().map(String::from_utf8_lossy),
-            Some(String::from_utf8_lossy(&reencode_response(
-                body.clone(),
-                version
-            ))),
+            Some(String::from_utf8_lossy(
+                &reencode_response(body.clone(), version, usize::MAX)
+                    .expect("unlimited conversion succeeds")
+            )),
             "{version:?} {}",
             String::from_utf8_lossy(&body[..body.len().min(200)]),
         );
@@ -404,8 +431,10 @@ fn unexpected_layouts_fall_back_to_reencoding() {
         for version in CONVERTED {
             assert_eq!(splice_response(&body, version), None, "{body:?}");
             assert_eq!(
-                response_to_version(body.clone(), version),
-                reencode_response(body.clone(), version)
+                response_to_version(body.clone(), version, usize::MAX)
+                    .expect("unlimited conversion succeeds"),
+                reencode_response(body.clone(), version, usize::MAX)
+                    .expect("unlimited conversion succeeds")
             );
         }
     }
@@ -586,7 +615,7 @@ proptest! {
     #[test]
     fn pass_through_requests_read_like_re_encoded_ones(body in any_request_body()) {
         if is_canonical_json_rpc_2_request(&body) {
-            let request: JsonRpcRequest =
+            let request: JsonRpcRequest<'_> =
                 serde_json::from_slice(&body).expect("canonical requests are valid requests");
             let re_encoded = serde_json::to_vec(&request.into_2()).expect("serializable");
             prop_assert_eq!(jsonrpsee_reads(&body), jsonrpsee_reads(&re_encoded));
@@ -597,27 +626,55 @@ proptest! {
 
 /// Sends a request through the middleware and the real JSON-RPC dispatcher.
 async fn rpc_response(body: &str) -> Value {
+    let bytes = rpc_response_bytes(
+        body,
+        crate::config::rpc::Config::default().max_response_body_size,
+    )
+    .await
+    .expect("request succeeds");
+    serde_json::from_slice(&bytes).expect("the dispatcher returns JSON")
+}
+
+/// Collects the real dispatcher's response after compatibility conversion.
+async fn rpc_response_bytes(body: &str, max_response_body_size: u32) -> Result<Bytes, BoxError> {
+    let response = rpc_http_response(body, max_response_body_size).await?;
+    Ok(response.into_body().collect().await?.to_bytes())
+}
+
+/// Keeps the real dispatcher's response limit independent from the request limit.
+async fn rpc_http_response(
+    body: &str,
+    max_response_body_size: u32,
+) -> Result<HttpResponse, BoxError> {
     let mut module = RpcModule::new(());
     module
         .register_method("echo", |params, _, _| params.one::<Value>())
         .expect("the method name is unique");
+    module
+        .register_method("echo_raw", |params, _, _| params.one::<Box<RawValue>>())
+        .expect("the method name is unique");
+    module
+        .register_method("raw_error", |params, _, _| {
+            let data = params.one::<Box<RawValue>>()?;
+            Err::<(), _>(ErrorObject::owned(-32000, "raw error", Some(data)))
+        })
+        .expect("the method name is unique");
     let (stop_handle, _server_handle) = stop_channel();
     let service = ServerBuilder::default()
+        .max_response_body_size(max_response_body_size)
         .to_service_builder()
         .build(module, stop_handle);
-    let mut middleware = HttpRequestMiddleware::new(service, None, 2_097_152);
+    let mut middleware = HttpRequestMiddleware::new(
+        service,
+        None,
+        2_097_152,
+        usize::try_from(max_response_body_size).expect("response limits fit in usize"),
+    );
     let request = HttpRequest::builder()
         .method("POST")
         .body(HttpBody::from(body.to_owned()))
         .expect("the request has a valid method and body");
-    let response = middleware.call(request).await.expect("request succeeds");
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .expect("response body can be collected")
-        .to_bytes();
-    serde_json::from_slice(&bytes).expect("the dispatcher returns JSON")
+    middleware.call(request).await
 }
 
 #[tokio::test]
@@ -648,7 +705,12 @@ async fn legacy_batch_rewrite_respects_request_body_limit() {
             .method("POST")
             .body(HttpBody::from(body.to_owned()))
             .expect("the request has a valid method and body");
-        let mut middleware = HttpRequestMiddleware::new(MockRpcService, None, limit);
+        let mut middleware = HttpRequestMiddleware::new(
+            MockRpcService,
+            None,
+            limit,
+            usize::try_from(crate::config::rpc::Config::default().max_response_body_size).unwrap(),
+        );
         assert_eq!(
             middleware.call(request).await.is_ok(),
             limit == rewritten.len(),
@@ -668,6 +730,18 @@ async fn two_point_zero_batches_preserve_null_ids() {
             rpc_response(body).await,
             json!([{"jsonrpc":"2.0","result":"called","id":null}])
         );
+    }
+    for body in [
+        r#"{"jsonrpc":"2.0","method":"echo","params":["notification"]}"#,
+        r#"[{"jsonrpc":"2.0","method":"echo","params":["notification"]}]"#,
+    ] {
+        assert!(rpc_response_bytes(
+            body,
+            crate::config::rpc::Config::default().max_response_body_size,
+        )
+        .await
+        .expect("notifications succeed")
+        .is_empty());
     }
 }
 
@@ -701,6 +775,249 @@ async fn single_and_batch_responses_preserve_the_request_version() {
     }
 }
 
+/// Legacy envelopes must fit the configured limit after conversion, not just before it.
+#[tokio::test]
+async fn legacy_response_rewrite_respects_response_body_limit() {
+    for version in [None, Some("1.0")] {
+        let mut requests = json!([
+            {"method":"echo","params":["first"],"id":0},
+            {"method":"echo","params":[null],"id":null},
+            {"method":"missing","params":[],"id":2}
+        ]);
+        let mut expected = json!([
+            {"result":"first","id":0,"error":null},
+            {"result":null,"id":null,"error":null},
+            {"result":null,"error":{"code":-32601,"message":"Method not found"},"id":2}
+        ]);
+        let original = json!([
+            {"jsonrpc":"2.0","result":"first","id":0},
+            {"jsonrpc":"2.0","result":null,"id":null},
+            {"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":2}
+        ]);
+        for index in 0..3 {
+            if let Some(version) = version {
+                requests[index]["jsonrpc"] = json!(version);
+                expected[index]["jsonrpc"] = json!(version);
+            }
+        }
+
+        for index in [3, 0, 1, 2] {
+            let (request, expected, original) = if index == 3 {
+                (&requests, &expected, &original)
+            } else {
+                (&requests[index], &expected[index], &original[index])
+            };
+            let request = request.to_string();
+            let original_len = original.to_string().len();
+            let rewritten_len = expected.to_string().len();
+            let limit = u32::try_from(original_len.max(rewritten_len))
+                .expect("small response fixtures fit in u32");
+            let response = rpc_response_bytes(&request, limit)
+                .await
+                .expect("both response envelopes fit the configured limit");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&response).expect("response is JSON"),
+                *expected,
+                "version {version:?}, case {index}"
+            );
+            assert_eq!(response.len(), rewritten_len);
+        }
+    }
+}
+
+/// Conversion overflow must return a legacy RPC error over HTTP, not close the connection.
+#[tokio::test]
+async fn legacy_response_overflow_returns_http_error() {
+    let requests = json!([
+        {"jsonrpc":"2.0","method":"echo","params":["first"],"id":"pool\"\\id"},
+        {"jsonrpc":"2.0","method":"echo","params":[null],"id":null},
+        {"jsonrpc":"2.0","method":"missing","params":[],"id":2}
+    ]);
+    let original = json!([
+        {"jsonrpc":"2.0","result":"first","id":"pool\"\\id"},
+        {"jsonrpc":"2.0","result":null,"id":null},
+        {"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":2}
+    ]);
+    for index in [3, 0, 1, 2] {
+        let (request, expected) = if index == 3 {
+            (&requests, &original)
+        } else {
+            (&requests[index], &original[index])
+        };
+        let limit = expected.to_string().len();
+        let mut legacy = request.clone();
+        if let Some(batch) = legacy.as_array_mut() {
+            for request in batch {
+                request["jsonrpc"] = json!("1.0");
+            }
+        } else {
+            legacy["jsonrpc"] = json!("1.0");
+        }
+
+        let mut module = RpcModule::new(());
+        module
+            .register_method("echo", |params, _, _| params.one::<Value>())
+            .expect("the method name is unique");
+        let middleware = tower::ServiceBuilder::new()
+            .layer(HttpRequestMiddlewareLayer::new(None, 2_097_152, limit));
+        let server = timeout(
+            Duration::from_secs(5),
+            ServerBuilder::default()
+                .http_only()
+                .set_http_middleware(middleware)
+                .max_response_body_size(u32::try_from(limit).expect("small response fixture"))
+                .build("127.0.0.1:0"),
+        )
+        .await
+        .expect("binding the local HTTP server must finish")
+        .expect("the local HTTP server binds");
+        let address = server.local_addr().expect("the server has a bound address");
+        let handle = server.start(module);
+        let responses = timeout(Duration::from_secs(5), async {
+            let mut responses = Vec::new();
+            for request in [request.to_string(), legacy.to_string()] {
+                let mut stream = TcpStream::connect(address).await?;
+                let request = format!(
+                    "POST / HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{request}",
+                    request.len()
+                );
+                stream.write_all(request.as_bytes()).await?;
+                let mut response = Vec::new();
+                stream.read_to_end(&mut response).await?;
+                responses.push(response);
+            }
+            Ok::<_, std::io::Error>(responses)
+        })
+        .await;
+        handle.stop().expect("the server is still running");
+        timeout(Duration::from_secs(5), handle.stopped())
+            .await
+            .expect("the local HTTP server must stop");
+
+        let responses = responses
+            .expect("HTTP requests must finish")
+            .expect("HTTP connections can be read");
+        let (code, message, id) = if index == 3 {
+            (
+                TOO_BIG_BATCH_RESPONSE_CODE,
+                TOO_BIG_BATCH_RESPONSE_MSG,
+                Value::Null,
+            )
+        } else {
+            (
+                OVERSIZED_RESPONSE_CODE,
+                OVERSIZED_RESPONSE_MSG,
+                expected["id"].clone(),
+            )
+        };
+        let error = json!({
+            "jsonrpc":"1.0",
+            "id":id,
+            "result":null,
+            "error":{
+                "code":code,
+                "message":message,
+                "data":format!("Exceeded max limit of {limit}")
+            }
+        });
+        for (response, expected) in responses.iter().zip([expected, &error]) {
+            let response = std::str::from_utf8(response).expect("HTTP response is UTF-8");
+            let (headers, body) = response
+                .split_once("\r\n\r\n")
+                .expect("conversion overflow must return an HTTP response, not disconnect");
+            assert!(headers.starts_with("HTTP/1.1 200 "), "{headers}");
+            assert_eq!(
+                serde_json::from_str::<Value>(body).expect("HTTP body is a JSON-RPC response"),
+                *expected,
+                "case {index}"
+            );
+        }
+    }
+}
+
+/// jsonrpsee's oversized-response errors remain deliverable even above a small configured limit.
+#[tokio::test]
+async fn legacy_response_limits_preserve_oversized_error_envelopes() {
+    for limit in [64, 140] {
+        for version in [None, Some("1.0")] {
+            let mut request = json!({"method":"echo","params":["x".repeat(limit)],"id":null});
+            if let Some(version) = version {
+                request["jsonrpc"] = json!(version);
+            }
+            // Two oversized method responses force the aggregate batch error at either limit.
+            for (request, code) in [
+                (request.to_string(), OVERSIZED_RESPONSE_CODE),
+                (
+                    json!([&request, &request]).to_string(),
+                    TOO_BIG_BATCH_RESPONSE_CODE,
+                ),
+            ] {
+                let response = rpc_http_response(&request, u32::try_from(limit).unwrap())
+                    .await
+                    .expect("the dispatcher's oversized-error envelope is still deliverable");
+                assert_eq!(response.status(), hyper::StatusCode::OK);
+                let bytes = response.into_body().collect().await.unwrap().to_bytes();
+                let response: Value = serde_json::from_slice(&bytes).expect("response is JSON");
+                assert_eq!(
+                    response["error"]["code"], code,
+                    "version {version:?}, limit {limit}"
+                );
+                assert_eq!(response.get("result"), Some(&Value::Null));
+                assert_eq!(response.get("id"), Some(&Value::Null));
+                assert_eq!(
+                    response.get("jsonrpc"),
+                    version.map(|version| json!(version)).as_ref()
+                );
+            }
+        }
+    }
+}
+
+/// Legacy normalization changes only envelopes, not raw parameters, results, or error data.
+#[tokio::test]
+async fn compatibility_preserves_raw_payloads() {
+    let payload = r#"{ "same": 1e+02, "same": "\u0061", "nested": [ true, null ] }"#;
+    let limit = crate::config::rpc::Config::default().max_response_body_size;
+    for prefix in [
+        "",
+        r#""jsonrpc":"1.0","#,
+        r#""jsonrpc":"\u0031.0","#,
+        r#""jsonrpc":"2.0","#,
+    ] {
+        for method in ["echo_raw", "raw_error"] {
+            let request =
+                format!(r#"{{{prefix}"method":"{method}","params":[{payload}],"id":null}}"#);
+            let batch_request = format!("[{request}]");
+            for (request, batch) in [(&request, false), (&batch_request, true)] {
+                // Single 2.0 calls that aren't canonical are re-encoded, see
+                // `non_canonical_json_rpc_2_is_re_encoded`. 2.0 batches still pass through.
+                if prefix.contains("2.0") && !batch {
+                    continue;
+                }
+                let bytes = rpc_response_bytes(request, limit)
+                    .await
+                    .expect("request succeeds");
+                let response = if batch {
+                    serde_json::from_slice::<Vec<&RawValue>>(&bytes).expect("batch response")[0]
+                } else {
+                    serde_json::from_slice::<&RawValue>(&bytes).expect("single response")
+                };
+                let fields: std::collections::BTreeMap<&str, &RawValue> =
+                    serde_json::from_str(response.get()).expect("response fields");
+                let actual = if method == "echo_raw" {
+                    fields["result"]
+                } else {
+                    let error: std::collections::BTreeMap<&str, &RawValue> =
+                        serde_json::from_str(fields["error"].get()).expect("error fields");
+                    error["data"]
+                };
+                assert_eq!(actual.get(), payload, "{request}");
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn unsupported_batches_keep_normal_server_errors() {
     for body in [
@@ -710,6 +1027,9 @@ async fn unsupported_batches_keep_normal_server_errors() {
         r#"[{"jsonrpc":"3.0","method":"echo","params":[],"id":0}]"#,
         r#"[[null,"echo",[],1]]"#,
         r#"[{"method":"missing","method":"echo","params":["called"],"id":1}]"#,
+        r#"[{"jsonrpc":"1.0","jsonrpc":"1.0","method":"echo","params":["called"],"id":1}]"#,
+        r#"[{"method":"echo","params":[],"params":["called"],"id":1}]"#,
+        r#"[{"method":"echo","params":["called"],"id":null,"id":1}]"#,
     ] {
         let response = rpc_response(body).await;
         let response = response.as_array().map_or(&response, |batch| &batch[0]);
