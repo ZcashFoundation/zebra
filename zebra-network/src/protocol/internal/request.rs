@@ -216,9 +216,8 @@ pub enum Request {
     /// [`Request::BlocksByHash`] against the "inbound" service passed to
     /// [`init`](crate::init).
     ///
-    /// The peer set routes this request specially, sending it to *a fraction of*
-    /// the available peers. See [`number_of_peers_to_broadcast()`](crate::PeerSet::number_of_peers_to_broadcast)
-    /// for more details.
+    /// Outbound block adverts use [`crate::BlockAdvertiser`], which samples peers and always
+    /// includes configured sidecars independently of ordinary request readiness.
     ///
     /// The second field is the address of the peer that sent us this `inv`:
     /// `Some(addr)` when the advertisement was relayed from a remote peer,
@@ -228,18 +227,18 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Nil`](super::Response::Nil).
+    /// Outbound success acknowledges local writes to every selected peer, not remote receipt.
+    /// Inbound handlers return [`Response::Nil`](super::Response::Nil) after accepting inventory.
     AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
 
     /// Advertise a block to every connected, non-banned peer.
     ///
-    /// Once the peer set accepts this request, adverts bypass pending peer responses.
-    /// Each peer has a bounded advert channel; full channels drop the advert because later tip
-    /// gossip lets slow peers catch up. Used for mined and submitted blocks.
+    /// Use [`crate::BlockAdvertiser`], not the ordinary peer service. Each peer has a bounded
+    /// advert channel; full or closed queues, revoked authorization, and write errors are failures.
     ///
     /// # Returns
     ///
-    /// The peer set returns [`Response::Nil`](super::Response::Nil) without waiting for peer writes.
+    /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
     AdvertiseBlockToAll(block::Hash),
 
     /// Request the contents of this node's mempool.
@@ -249,12 +248,11 @@ pub enum Request {
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
 
-    /// Polls the peer set, so it routes requests that are waiting for a busy peer to become ready.
+    /// Drive local peer-set maintenance without sending a request to a remote peer.
     ///
-    /// The peer set is only polled when it has a request to route. It sends itself this request
-    /// from a background task when a busy peer might have become ready. It is never sent to peers.
-    ///
-    /// # Returns
+    /// The network-owned idle poller routes queued discovery and inventory requests when peers,
+    /// deadlines, or cancellations change. Advert maintenance is acknowledged independently of
+    /// ordinary readiness.
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]

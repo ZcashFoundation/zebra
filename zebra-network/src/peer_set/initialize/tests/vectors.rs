@@ -1541,7 +1541,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
         ..Config::default()
     };
 
-    let (mut peer_set, address_book, misbehavior_tx) = init(
+    let (mut peer_set, address_book, misbehavior_tx, _advertiser) = init(
         config,
         peers_inbound_service,
         NoChainTip,
@@ -2167,7 +2167,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _advertiser) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2233,7 +2233,7 @@ where
         ..default_config
     };
 
-    let (peer_service, address_book, _) = init(
+    let (peer_service, address_book, _, _advertiser) = init(
         config,
         inbound_service,
         NoChainTip,

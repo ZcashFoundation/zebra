@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: '`Request::AdvertiseBlockToAll` uses bounded advert channels to reach busy peers once the peer set is ready, without waiting for their pending responses or peer writes. Adverts exclude peers below the current minimum protocol version ([#11705](https://github.com/ZcashFoundation/zebra/issues/11705)).'
-time: 2026-10-13T02:53:16+02:00

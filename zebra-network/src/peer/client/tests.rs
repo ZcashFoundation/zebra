@@ -19,7 +19,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use zebra_chain::block::{self, Height};
+use zebra_chain::block::Height;
 
 use crate::{
     constants,
@@ -42,7 +42,7 @@ mod vectors;
 pub struct ClientTestHarness {
     client_request_receiver: Option<mpsc::Receiver<ClientRequest>>,
     /// Receives response-free block adverts from the mocked connection.
-    pub(crate) block_advert_receiver: tokio::sync::mpsc::Receiver<block::Hash>,
+    pub(crate) block_advert_receiver: tokio::sync::mpsc::Receiver<crate::peer_set::BlockAdvert>,
     shutdown_receiver: Option<oneshot::Receiver<CancelHeartbeatTask>>,
     #[allow(dead_code)]
     inv_receiver: Option<broadcast::Receiver<InventoryChange>>,
@@ -89,6 +89,19 @@ impl ClientTestHarness {
     /// Gets the remote peer protocol version reported by the [`Client`].
     pub fn remote_version(&self) -> Version {
         self.remote_version
+    }
+
+    /// Acknowledge a mock connection's queued advert; real-write tests use `Connection::run`.
+    pub(crate) fn receive_block_advert(&mut self) -> zebra_chain::block::Hash {
+        let advert = self
+            .block_advert_receiver
+            .try_recv()
+            .expect("an advert was queued");
+        advert
+            .result
+            .send(Ok(()))
+            .expect("the advertiser is awaiting delivery");
+        advert.hash
     }
 
     /// Returns true if the [`Client`] instance still wants connection heartbeats to be sent.
