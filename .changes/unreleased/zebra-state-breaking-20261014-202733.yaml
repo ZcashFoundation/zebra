@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `CommitBlockError::OrphanQueueFull`; exhaustive matches must handle this retryable orphan-queue resource error.
+time: 2026-10-14T20:27:33.696722711+02:00
