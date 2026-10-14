@@ -623,19 +623,29 @@ where
                 let verifier = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?;
                 let mut pressure_error = None;
+                let mut orphan_retry_delay = RESOURCE_PRESSURE_RETRY_DELAY;
                 let verification = async {
                     loop {
                         let result = verifier
                             .call(zebra_consensus::Request::Commit(block.clone()))
                             .await;
-                        let pressure = result.as_ref().err()
+                        let retry_delay = match result.as_ref().err()
                             .and_then(|error| error.downcast_ref::<zebra_consensus::RouterError>())
-                            .is_some_and(zebra_consensus::RouterError::is_resource_pressure);
-                        if !pressure {
-                            return result;
-                        }
+                        {
+                            Some(zebra_consensus::RouterError::Block { source })
+                                if matches!(source.as_ref(), zebra_consensus::VerifyBlockError::Commit(
+                                    zs::CommitBlockError::OrphanQueueFull
+                                )) =>
+                            {
+                                let delay = orphan_retry_delay;
+                                orphan_retry_delay = (delay * 2).min(Duration::from_secs(60));
+                                delay
+                            }
+                            Some(error) if error.is_resource_pressure() => RESOURCE_PRESSURE_RETRY_DELAY,
+                            _ => return result,
+                        };
                         pressure_error = result.err();
-                        tokio::time::sleep(RESOURCE_PRESSURE_RETRY_DELAY).await;
+                        tokio::time::sleep(retry_delay).await;
                         verifier.ready().await?;
                     }
                 };

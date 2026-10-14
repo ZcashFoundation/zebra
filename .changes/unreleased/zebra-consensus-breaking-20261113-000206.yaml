@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Applications consuming router::BackgroundTaskHandles must also supervise checkpoint_commit_handle so accepted checkpoint commit panics remain fatal after request cancellation ([#12287](https://github.com/ZcashFoundation/zebra/pull/12287)).
+time: 2026-11-13T00:02:06.727540646+01:00

@@ -259,7 +259,7 @@ where
 /// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, mempool transaction verifier,
-/// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
+/// a [`BackgroundTaskHandles`] with state checkpoint checking and accepted-commit supervision,
 /// and the maximum configured checkpoint verification height.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
@@ -420,7 +420,12 @@ where
 
     let block =
         SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
-    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
+    let mut checkpoint =
+        CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
+    let checkpoint_commit_handle = checkpoint
+        .commit_task_handle
+        .take()
+        .expect("new checkpoint verifier owns its commit supervision");
     let router = BlockVerifierRouter {
         checkpoint,
         max_checkpoint_height,
@@ -431,6 +436,7 @@ where
 
     let task_handles = BackgroundTaskHandles {
         state_checkpoint_verify_handle,
+        checkpoint_commit_handle,
     };
 
     (
@@ -464,6 +470,10 @@ pub struct BackgroundTaskHandles {
     /// A handle to the state checkpoint verify task.
     /// Finishes when all the checkpoints are verified, or when the state tip is reached.
     pub state_checkpoint_verify_handle: JoinHandle<()>,
+    /// Supervises accepted checkpoint commits, including commits with cancelled callers.
+    ///
+    /// This ongoing task must be polled to propagate state invariant panics.
+    pub checkpoint_commit_handle: JoinHandle<()>,
 }
 
 /// Calls [`init`] with a closed mempool setup channel for conciseness in tests.

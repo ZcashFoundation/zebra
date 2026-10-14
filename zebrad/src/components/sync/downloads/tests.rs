@@ -987,6 +987,50 @@ async fn checkpoint_and_orphan_pressure_retry_without_redownload() {
     state.expect_no_requests().await;
 }
 
+/// Repeated orphan retention pressure must not repeatedly redo full contextual validation.
+#[tokio::test(start_paused = true)]
+async fn orphan_pressure_retries_back_off_within_original_deadline() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, _, mut state) = mock_downloads(Height(0));
+    let mut verifier: MockVerifier = MockService::build()
+        .with_max_request_delay(super::BLOCK_VERIFY_TIMEOUT)
+        .for_unit_tests();
+    downloads.verifier = verifier.clone();
+    let block = block_1();
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+
+    let started = tokio::time::Instant::now();
+    let mut attempts = 0;
+    let error = loop {
+        tokio::select! {
+            result = downloads.next() => break result.unwrap().unwrap_err(),
+            request = verifier.expect_request(zebra_consensus::Request::Commit(block.clone())) => {
+                attempts += 1;
+                request.respond_error(zebra_consensus::RouterError::from(
+                    zebra_consensus::VerifyBlockError::Commit(zs::CommitBlockError::OrphanQueueFull),
+                ).into());
+            }
+        }
+    };
+    assert_eq!(attempts, 17);
+    assert_eq!(started.elapsed(), super::BLOCK_VERIFY_TIMEOUT);
+    assert!(matches!(
+        error,
+        BlockDownloadVerifyError::ValidationRequestError { error, .. }
+            if error.is::<tower::timeout::error::Elapsed>()
+    ));
+    network.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
+
 /// Retrying admission must not grant another full verification deadline.
 #[tokio::test(start_paused = true)]
 async fn resource_pressure_retry_keeps_original_verify_deadline() {

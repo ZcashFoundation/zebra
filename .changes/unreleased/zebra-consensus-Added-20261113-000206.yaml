@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: router::BackgroundTaskHandles::checkpoint_commit_handle owns supervision of accepted checkpoint commits independently of cancelled response futures ([#12287](https://github.com/ZcashFoundation/zebra/pull/12287)).
+time: 2026-11-13T00:02:06.730243165+01:00

@@ -755,7 +755,11 @@ impl StartCmd {
         // startup tasks
         let BackgroundTaskHandles {
             mut state_checkpoint_verify_handle,
+            mut checkpoint_commit_handle,
         } = consensus_task_handles;
+
+        let checkpoint_commit_handle_fused = (&mut checkpoint_commit_handle).fuse();
+        pin!(checkpoint_commit_handle_fused);
 
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
@@ -843,6 +847,13 @@ impl StartCmd {
                     .expect("unexpected panic in the end of support task")
                     .map(|_| info!("end of support task exited")),
 
+                checkpoint_commit_result = &mut checkpoint_commit_handle_fused => {
+                    checkpoint_commit_result
+                        .expect("unexpected panic committing checkpoint-verified blocks");
+                    info!("checkpoint commit supervision exited");
+                    Ok(())
+                }
+
                 // We also expect the state checkpoint verify task to finish.
                 state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
                     state_checkpoint_verify_result
@@ -911,6 +922,7 @@ impl StartCmd {
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
         miner_task_handle.abort();
+        checkpoint_commit_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
         } else if let Some(zcashd_compat_shutdown_timeout) = zcashd_compat_shutdown_timeout {
