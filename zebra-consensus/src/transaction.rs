@@ -687,10 +687,11 @@ where
             .clone()
             .oneshot(zs::Request::BestChainNextMedianTimePast);
 
-        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = query
+        let response = tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
             .await
             .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?
-        {
+            .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?;
+        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = response {
             Ok(median_time_past)
         } else {
             unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
@@ -735,9 +736,11 @@ where
                     .clone()
                     .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
-                    .await
-                    .map_err(|_| TransactionError::TransparentInputNotFound)?
+                let zebra_state::Response::UnspentBestChainUtxo(utxo) =
+                    tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
+                        .await
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
                 else {
                     unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                 };
@@ -759,7 +762,10 @@ where
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
 
-                let output = match query.await {
+                let response = tokio::time::timeout(MEMPOOL_OUTPUT_LOOKUP_TIMEOUT, query)
+                    .await
+                    .map_err(|_| TransactionError::TransparentInputNotFound)?;
+                let output = match response {
                     Ok(mempool::Response::UnspentOutput(output)) => output,
                     Ok(_) => unreachable!("UnspentOutput always responds with UnspentOutput"),
                     Err(err) => {
@@ -1572,17 +1578,17 @@ impl AsyncChecks {
 
     /// Wait until all checks in the set finish.
     ///
-    /// If any of the checks fail, this method immediately returns the error and cancels all other
-    /// checks by dropping them.
+    /// Preserve the first error, but drain dispatched siblings before releasing their work owner.
     async fn check(mut self) -> Result<(), BoxError> {
-        // Wait for all asynchronous checks to complete
-        // successfully, or fail verification if they error.
+        let mut first_error = None;
         while let Some(check) = self.0.next().await {
             tracing::trace!(?check, remaining = self.0.len());
-            check?;
+            if let Err(error) = check {
+                first_error.get_or_insert(error);
+            }
         }
 
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 }
 
