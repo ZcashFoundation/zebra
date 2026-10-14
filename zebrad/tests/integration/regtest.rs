@@ -1622,7 +1622,10 @@ async fn internal_miner_discards_stale_solution() {
         sync_status.set_is_close_to_tip(true);
         let rpc = rpc.clone();
         let old_template = template_receiver.borrow().clone().unwrap();
-        let submission = tokio::spawn(async move { submit_mined_block(&old_template, &rpc).await });
+        let submission = tokio::spawn(async move {
+            let mut last_accepted = None;
+            submit_mined_block(&old_template, &rpc, &mut last_accepted).await
+        });
         let request = read_state
             .expect_request(zebra_state::ReadRequest::Tip)
             .await;
