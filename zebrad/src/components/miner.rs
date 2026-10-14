@@ -22,6 +22,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
+    parameters::Network,
     serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
@@ -58,6 +59,32 @@ pub const BLOCK_TEMPLATE_REFRESH_LIMIT: Duration = Duration::from_secs(2);
 /// This should be slightly longer than `BLOCK_TEMPLATE_REFRESH_LIMIT` to allow for template
 /// generation.
 pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
+
+/// Public networks do not extend the previous locally accepted block.
+fn mining_parent_is_allowed(
+    network: &Network,
+    parent: &block::Hash,
+    last_accepted: Option<&block::Hash>,
+) -> bool {
+    last_accepted != Some(parent)
+        || (!matches!(network, Network::Mainnet) && !network.is_default_testnet())
+}
+
+/// Compares an observed template update with the solver's current header.
+fn mining_template_changed(
+    receiver: &mut WatchReceiver<Option<Arc<Block>>>,
+    observed_change: bool,
+    old_header: &block::Header,
+) -> bool {
+    if !observed_change {
+        return false;
+    }
+
+    receiver.mark_as_seen();
+    receiver.borrow_mapped(|template| {
+        template.as_ref().map(|block| block.header.as_ref()) != Some(old_header)
+    })
+}
 
 /// Waits for new work, or until the committed tip should be checked again.
 ///
@@ -173,7 +200,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
+    // ponytail: one solver; share its accepted-block guard before enabling parallel solvers.
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -441,6 +468,8 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
+    let mut last_accepted = None;
+
     // Shut down the task when the template sender is dropped, or Zebra shuts down.
     while template_receiver.has_changed().is_ok() && !is_shutting_down() {
         // Get the latest block template, and mark the current value as seen.
@@ -477,8 +506,14 @@ where
             sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
             continue;
         };
-        if tip? != Some(template.header.previous_block_hash) {
-            // ponytail: committed parents only; accept live candidates when state exposes them.
+        if tip? != Some(template.header.previous_block_hash)
+            || !mining_parent_is_allowed(
+                rpc.network(),
+                &template.header.previous_block_hash,
+                last_accepted.as_ref(),
+            )
+        {
+            // Wait for a committed parent; public work must also leave our last accepted block.
             wait_for_committed_parent(&mut template_receiver).await?;
             continue;
         }
@@ -494,14 +529,10 @@ where
             // if something irrelevant to the block data changes, the time was within 1 second, or
             // there is a spurious channel change.
             Ok(has_changed) => {
-                cancel_receiver.mark_as_seen();
-
                 // We only need to check header equality, because the block data is bound to the
                 // header.
                 if !cancel_rpc.internal_mining_is_enabled()
-                    || (has_changed
-                        && Some(old_header)
-                            != cancel_receiver.cloned_watch_data().map(|b| *b.header))
+                    || mining_template_changed(&mut cancel_receiver, has_changed, &old_header)
                 {
                     Err(SolverCancelled)
                 } else {
@@ -545,17 +576,17 @@ where
         // Submit the newly mined blocks to the verifiers.
         let mut any_success = false;
         for block in blocks {
-            match submit_mined_block(&block, &rpc).await {
+            match submit_mined_block(&block, &rpc, &mut last_accepted).await {
                 Ok(None) => continue,
-                Ok(Some(success)) => {
+                Ok(Some((hash, success))) => {
                     info!(
                         ?height,
-                        hash = ?block.hash(),
+                        ?hash,
                         ?solver_id,
                         ?success,
                         "successfully mined a new block",
                     );
-                    any_success = true;
+                    any_success |= matches!(success, SubmitBlockResponse::Accepted);
                 }
                 Err(error) => info!(
                     ?height,
@@ -590,12 +621,14 @@ where
     Ok(())
 }
 
-/// Submits a solved block, or returns `None` if its parent is stale, mining is paused,
-/// or the state tip read times out.
+/// Submits a solved block, returning its hash and RPC outcome, or `None` for ineligible work.
+///
+/// Only acceptance updates `last_accepted`; rejection must not prevent another attempt.
 pub async fn submit_mined_block<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>(
     block: &Block,
     rpc: &RpcImpl<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>,
-) -> Result<Option<SubmitBlockResponse>, Report>
+    last_accepted: &mut Option<block::Hash>,
+) -> Result<Option<(block::Hash, SubmitBlockResponse)>, Report>
 where
     Mempool: MempoolService,
     State: StateService,
@@ -608,7 +641,14 @@ where
     let Ok(tip) = timeout(BLOCK_TEMPLATE_WAIT_TIME, rpc.read_committed_tip()).await else {
         return Ok(None);
     };
-    if tip? != Some(block.header.previous_block_hash) || !rpc.internal_mining_is_enabled() {
+    if tip? != Some(block.header.previous_block_hash)
+        || !rpc.internal_mining_is_enabled()
+        || !mining_parent_is_allowed(
+            rpc.network(),
+            &block.header.previous_block_hash,
+            last_accepted.as_ref(),
+        )
+    {
         return Ok(None);
     }
 
@@ -616,7 +656,12 @@ where
         .zcash_serialize_to_vec()
         .expect("serializing to Vec never fails");
 
-    Ok(Some(rpc.submit_block(HexData(data), None).await?))
+    let response = rpc.submit_block(HexData(data), None).await?;
+    let hash = block.hash();
+    if matches!(response, SubmitBlockResponse::Accepted) {
+        *last_accepted = Some(hash);
+    }
+    Ok(Some((hash, response)))
 }
 
 /// Mines one or more blocks based on `template`. Calculates equihash solutions, checks difficulty,
