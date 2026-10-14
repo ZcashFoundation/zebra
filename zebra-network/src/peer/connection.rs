@@ -1061,6 +1061,14 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
+            (AwaitingRequest, BlockDownload { hash, .. }) => self
+                .peer_tx
+                .send(Message::GetData(vec![hash.into()]))
+                .await
+                .map(|()| Handler::BlocksByHash {
+                    blocks: Vec::with_capacity(1),
+                    pending_hashes: HashSet::from([hash]),
+                }),
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
                     .peer_tx

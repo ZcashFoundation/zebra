@@ -29,7 +29,7 @@ use zebra_chain::{
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
-use crate::components::sync::MIN_CONCURRENCY_LIMIT;
+use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, MIN_CONCURRENCY_LIMIT};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -45,7 +45,7 @@ const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 ///
 /// Peers legitimately serve blocks that are genuinely far ahead of the tip while Zebra is catching
 /// up, and blocks that are genuinely older than the finalized tip, so this error is returned for
-/// every such drop. But a peer can also answer a [`BlocksByHash`](zn::Request::BlocksByHash) request
+/// every such drop. But a peer can also answer a [`BlockDownload`](zn::Request::BlockDownload) request
 /// with a canonical header and a rewritten coinbase height, because the coinbase scriptSig is
 /// excluded from the V5 transaction ID and therefore from the block hash (ZIP-244). The initial hash
 /// check still passes, so the forged height reaches these drops before consensus validation, and the
@@ -88,7 +88,7 @@ impl HeightLimitError {
 ///
 /// # Security
 ///
-/// A peer can answer a `BlocksByHash` request with a canonical header and a rewritten coinbase
+/// A peer can answer a `BlockDownload` request with a canonical header and a rewritten coinbase
 /// height, because the coinbase scriptSig is excluded from the V5 transaction ID and therefore from
 /// the block hash (ZIP-244). The hash check passes, so the forged height reaches the height limit
 /// drops before consensus validation. Peers also legitimately serve blocks that are genuinely far
@@ -298,9 +298,8 @@ where
     /// Initialize a new download stream with the provided `network`, `verifier`, and `state` services.
     /// The `latest_chain_tip` must be linked to the provided `state` service.
     ///
-    /// The [`Downloads`] stream is agnostic to the network policy, so retry and
-    /// timeout limits should be applied to the `network` service passed into
-    /// this constructor.
+    /// The download deadline covers network readiness and the response. Any retry policy
+    /// should be applied to `network` without a separate timeout that includes queued requests.
     pub fn new(
         full_verify_concurrency_limit: usize,
         network: ZN,
@@ -326,10 +325,9 @@ where
 
     /// Queue a block for download and verification.
     ///
-    /// When `advertiser` is `Some`, its IP is tracked in
-    /// [`Self::in_flight_ips`] and used to enforce the one-download-per-IP
-    /// cap; `None` bypasses per-IP accounting (for example when Zebra
-    /// triggers the download internally).
+    /// When `advertiser` is `Some`, it is passed to the network as a known block source,
+    /// and its IP is tracked in [`Self::in_flight_ips`] to enforce the one-download-per-IP cap.
+    /// `None` bypasses per-IP accounting (for example when Zebra triggers the download internally).
     #[instrument(skip(self, hash), fields(hash = %hash))]
     pub fn download_and_verify(
         &mut self,
@@ -398,11 +396,14 @@ where
             }
             .map_err(|e| (e, None))?;
 
-            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = network
-                .oneshot(zn::Request::BlocksByHash(std::iter::once(hash).collect()))
-                .await
-                .map_err(|e| (e, None))?
-            {
+            let response = timeout(
+                zn::constants::REQUEST_TIMEOUT + BLOCK_DOWNLOAD_TIMEOUT,
+                network.oneshot(zn::Request::BlockDownload { hash, advertiser }),
+            )
+            .await
+            .map_err(|e| (BoxError::from(e), None))?
+            .map_err(|e| (e, None))?;
+            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = response {
                 assert_eq!(
                     blocks.len(),
                     1,

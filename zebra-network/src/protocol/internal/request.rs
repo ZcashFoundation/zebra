@@ -72,6 +72,31 @@ pub enum Request {
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
 
+    /// Download one block from a connected peer, waiting for eligible peer capacity.
+    ///
+    /// This outbound-only request is used by sync and gossip downloaders. Unlike
+    /// [`Request::BlocksByHash`], temporary lack of capacity does not cause a local refusal.
+    /// Callers must bound the entire readiness and response operation with a deadline.
+    /// The peer's response timeout starts only when the request is dispatched.
+    ///
+    /// A known advertiser is preferred even if its advertisement was lost from the inventory
+    /// registry. Missing-inventory reports, prior failures, and connection eligibility still apply.
+    /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
+    ///
+    /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
+    /// Inbound `getdata` messages are always decoded as [`Request::BlocksByHash`], never this variant.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Blocks`](super::Response::Blocks) containing the requested block,
+    /// or an error if the download fails.
+    BlockDownload {
+        /// The hash of the block to download.
+        hash: block::Hash,
+        /// A connected peer known to have advertised this block, if any.
+        advertiser: Option<PeerSocketAddr>,
+    },
+
     /// Request transactions by their unmined transaction ID.
     ///
     /// v4 transactions use a legacy transaction ID, and
@@ -240,6 +265,7 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
+            Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -274,6 +300,7 @@ impl Request {
             Request::Ping(_) => "Ping",
 
             Request::BlocksByHash(_) => "BlocksByHash",
+            Request::BlockDownload { .. } => "BlockDownload",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",
@@ -292,16 +319,16 @@ impl Request {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Request::BlocksByHash(_) | Request::TransactionsById(_)
+            Request::BlockDownload { .. } | Request::BlocksByHash(_) | Request::TransactionsById(_)
         )
     }
 
     /// Returns the block hash inventory downloads from the request, if any.
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
-        if let Request::BlocksByHash(block_hashes) = self {
-            block_hashes.clone()
-        } else {
-            HashSet::new()
+        match self {
+            Request::BlockDownload { hash, .. } => HashSet::from([*hash]),
+            Request::BlocksByHash(block_hashes) => block_hashes.clone(),
+            _ => HashSet::new(),
         }
     }
 

@@ -152,22 +152,12 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 
 /// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
 pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
-/// How long a block request that no ready peer can serve waits in the peer set for a busy peer
-/// that might have the block, before the peer set refuses it.
+/// How long a single-hash [`Request::BlocksByHash`](crate::Request::BlocksByHash) waits for
+/// eligible busy capacity before returning a local refusal.
 ///
-/// The request is routed to the first of those busy peers that becomes ready. Refusing instantly
-/// lets callers exhaust their retries in microseconds while every block-serving peer is busy with
-/// other downloads, which stalls the syncer (the dropped block is only re-requested after the sync
-/// restarts). Block downloads typically finish in under a second, so a busy block-serving peer
-/// usually becomes ready well within this timeout.
-///
-/// Waiting counts towards the caller's own download timeout, so this timeout is much shorter than
-/// [`REQUEST_TIMEOUT`]. But a busy peer can take up to [`REQUEST_TIMEOUT`] to become ready again,
-/// so the syncer's retries must keep waiting for longer than that. It makes 16 attempts for a
-/// missing block, with zebrad's `BLOCK_DOWNLOAD_RETRY_LIMIT` and `MAX_BLOCK_REOBTAIN_RETRIES`, so
-/// this timeout gives it about 24 seconds. zebrad's timing tests check this. A malicious list of
-/// fake block hashes drains more slowly for the same reason, bounded by the download concurrency
-/// limit.
+/// Sync and gossip downloaders use [`Request::BlockDownload`](crate::Request::BlockDownload)
+/// instead: capacity waits do not consume peer attempts, and the caller bounds the complete
+/// readiness and response operation. The connection's [`REQUEST_TIMEOUT`] starts at wire dispatch.
 pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// The default peer address crawler interval.

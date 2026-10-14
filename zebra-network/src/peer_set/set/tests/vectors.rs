@@ -29,7 +29,7 @@ use zebra_chain::{
 use crate::{
     constants::{
         CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
-        INVENTORY_BUSY_PEER_WAIT_TIMEOUT, REQUEST_TIMEOUT,
+        INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
     },
     peer::{
         ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
@@ -1506,7 +1506,11 @@ fn peer_set_refuses_queued_block_request_after_wait_timeout() {
                 .is_err(),
             "refusal should wait while a serving peer is busy",
         );
-        assert_not_found_registry(queued_fut.await);
+        assert_not_found_registry(
+            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                .await
+                .expect("queued refusal must complete within its bounded wait"),
+        );
 
         // Once the serving peer is ready again, the refused request isn't routed to it.
         assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
@@ -1518,6 +1522,46 @@ fn peer_set_refuses_queued_block_request_after_wait_timeout() {
 
         assert_eq!(received_request(&mut handles[0]), None);
         assert_eq!(received_request(&mut handles[1]), None);
+    });
+}
+
+/// Queue expiration starts at admission, even if the response future has never been polled.
+#[test]
+fn peer_set_expires_unpolled_queued_block_requests() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async {
+        for poll_before_ready in [true, false] {
+            let (mut peers, _peer_guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&SERVING_AND_NON_SERVING);
+            let _busy = make_serving_peer_busy(&mut peers, addrs[0]).await;
+            let mut queued = peers.ready().await.unwrap().call(block_request(2));
+            assert_eq!(peers.queued_inv_requests.len(), 1);
+            tokio::time::advance(INVENTORY_BUSY_PEER_WAIT_TIMEOUT + Duration::from_millis(1)).await;
+
+            if poll_before_ready {
+                assert_not_found_registry(
+                    timeout(Duration::from_millis(1), &mut queued)
+                        .await
+                        .expect("a delayed first poll must not start another queue wait"),
+                );
+            }
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+            assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+            peers.ready().await.unwrap();
+            assert!(peers.queued_inv_requests.is_empty());
+            assert_eq!(received_request(&mut handles[0]), None);
+            assert_eq!(received_request(&mut handles[1]), None);
+            if !poll_before_ready {
+                assert_not_found_registry(
+                    queued
+                        .now_or_never()
+                        .expect("dispatch must refuse an expired entry before its first poll"),
+                );
+            }
+        }
     });
 }
 
@@ -1589,60 +1633,6 @@ fn peer_set_routes_block_to_non_serving_peer_without_serving_peers() {
             received, 4,
             "block requests should still be routed to non-serving peers if no serving peer is connected",
         );
-    });
-}
-
-/// Check that the syncer's retries give a busy serving peer time to recover, even if it only
-/// recovers just before its request would time out, and while the peer set is idle between retries.
-#[test]
-fn peer_set_wait_budget_outlasts_busy_serving_peer() {
-    let (runtime, _init_guard) = zebra_test::init_async();
-    let _guard = runtime.enter();
-
-    // CORRECTNESS: This test does not depend on external resources that could really timeout.
-    tokio::time::pause();
-
-    runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
-            peer_set_with_services(&SERVING_AND_NON_SERVING);
-
-        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
-
-        let recovery = REQUEST_TIMEOUT - Duration::from_secs(2);
-        let started = tokio::time::Instant::now();
-        let mut drained = false;
-        let mut routed = false;
-
-        // zebrad makes up to 16 attempts for a missing block, see its `ensure_timeouts_consistent`
-        // test. The serving peer recovers just before its request would time out.
-        for _attempt in 0..16 {
-            if !drained && started.elapsed() >= recovery {
-                assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
-                assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
-                drained = true;
-            }
-
-            let peer_ready = peer_set
-                .ready()
-                .await
-                .expect("peer set service is always ready");
-            let fut = peer_ready.call(block_request(2));
-
-            // Only check the serving peer after it recovers: receiving its queued requests would
-            // make it ready.
-            if drained && received_request(&mut handles[0]) == Some(block_request(2)) {
-                routed = true;
-                break;
-            }
-            assert_not_found_registry(fut.await);
-        }
-
-        assert!(
-            routed,
-            "the block request should reach the serving peer within the syncer's 16 attempts, elapsed: {:?}",
-            started.elapsed(),
-        );
-        assert_eq!(received_request(&mut handles[1]), None);
     });
 }
 

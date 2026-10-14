@@ -1,5 +1,7 @@
 //! Consumer-visible eligibility and scheduling regressions from the auxiliary review.
 
+use futures::FutureExt as _;
+
 use super::*;
 
 #[test]
@@ -9,7 +11,8 @@ fn queued_block_ignores_banned_or_outdated_busy_peer() {
     tokio::time::pause();
 
     runtime.block_on(async {
-        for ban in [true, false] {
+        for (ban, fallback_missing) in [(true, false), (false, false), (true, true), (false, true)]
+        {
             let serving_addr: PeerSocketAddr = "127.0.0.1:1".parse().unwrap();
             let fallback_addr: PeerSocketAddr = "127.0.0.2:1".parse().unwrap();
             let (serving, _serving_handle) = ClientTestHarness::build()
@@ -26,13 +29,24 @@ fn queued_block_ignores_banned_or_outdated_busy_peer() {
             ])
             .chain(stream::pending());
             let (minimum, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-            let (mut peers, _guard) = PeerSetBuilder::new()
+            let (mut peers, mut peer_guard) = PeerSetBuilder::new()
                 .with_discover(discovery)
                 .with_minimum_peer_version(minimum)
                 .build();
             let (bans_tx, bans_rx) = watch::channel(crate::BanList::default());
             peers.bans_receiver = bans_rx;
             let _busy = make_serving_peer_busy(&mut peers, serving_addr).await;
+            if fallback_missing {
+                send_inventory(
+                    &mut peer_guard,
+                    InventoryStatus::new_missing(
+                        InventoryHash::Block(block::Hash([2; 32])),
+                        fallback_addr,
+                    ),
+                );
+            }
+            let download = peers.ready().await.unwrap().call(block_request(2));
+            assert_eq!(peers.queued_inv_requests.len(), 1);
 
             if ban {
                 bans_tx.send_modify(|bans| {
@@ -43,16 +57,25 @@ fn queued_block_ignores_banned_or_outdated_busy_peer() {
                     NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet),
                 );
             }
-            let _download = timeout(Duration::from_secs(1), peers.ready())
+            timeout(INVENTORY_BUSY_PEER_WAIT_TIMEOUT / 4, peers.ready())
                 .await
-                .expect("a usable fallback remains connected")
-                .expect("fallback is ready")
-                .call(block_request(2));
-            assert_eq!(
-                received_request(&mut fallback_handle),
-                Some(block_request(2)),
-                "a busy ineligible connection must not suppress a usable fallback (ban={ban})"
-            );
+                .expect("eligibility changes must reconsider the existing queue promptly")
+                .expect("fallback remains ready");
+            assert!(peers.queued_inv_requests.is_empty());
+            if fallback_missing {
+                assert_not_found_registry(
+                    download
+                        .now_or_never()
+                        .expect("no eligible candidate must refuse the queued request immediately"),
+                );
+                assert_eq!(received_request(&mut fallback_handle), None);
+            } else {
+                assert_eq!(
+                    received_request(&mut fallback_handle),
+                    Some(block_request(2)),
+                    "removing a busy candidate must reroute the queued request (ban={ban})"
+                );
+            }
         }
     });
 }

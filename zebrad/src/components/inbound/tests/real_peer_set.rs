@@ -175,11 +175,18 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         ),
     };
 
-    // Send a request via the connected peer, via a local TCP connection, to the inbound service
-    let response = connected_peer_service
-        .clone()
-        .oneshot(Request::BlocksByHash(iter::once(test_block).collect()))
-        .await;
+    // Outbound downloads use getdata on the wire, decoded as BlocksByHash by the inbound service.
+    let response = timeout(
+        2 * zebra_network::constants::REQUEST_TIMEOUT,
+        connected_peer_service
+            .clone()
+            .oneshot(Request::BlockDownload {
+                hash: test_block,
+                advertiser: None,
+            }),
+    )
+    .await
+    .expect("wire download readiness and response must remain bounded");
     if let Err(missing_error) = response.as_ref() {
         let missing_error = missing_error
             .downcast_ref::<SharedPeerError>()
@@ -192,7 +199,7 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         assert_eq!(missing_error.inner_debug(), expected.inner_debug());
     } else {
         unreachable!(
-            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+            "peer::Connection should map missing `BlockDownload` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
              actual result: {:?}",
             response
         )
