@@ -2347,7 +2347,7 @@ async fn canonical_header_modified_body_is_retried(checkpoint_sync: bool) {
             _ => unreachable!("a forged body must fail before transaction or state verification"),
         })
     });
-    let (router, _mempool, tasks, max_checkpoint_height) = zebra_consensus::router::init_test(
+    let (router, _mempool, tasks, max_checkpoint_height, _) = zebra_consensus::router::init_test(
         ConsensusConfig { checkpoint_sync },
         &Network::Mainnet,
         state,
