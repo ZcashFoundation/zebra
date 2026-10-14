@@ -19,7 +19,8 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{
-        default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir,
+        default_test_config, os_assigned_rpc_port_config, random_known_rpc_port_config,
+        read_listen_addr_from_logs, testdir,
     },
     launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
@@ -107,23 +108,30 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         .into(),
     );
 
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    // All-features builds compile out INFO logs, including the OS-assigned-port announcement.
+    // Use the existing known-unused-port fixture rather than blocking on that diagnostic.
+    let mut config = random_known_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
+    let rpc_address = config
+        .rpc
+        .listen_addr
+        .expect("the RPC fixture configures a listener");
 
     let mut zebrad = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
 
-    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
-
     let client = RpcRequestClient::new(rpc_address);
     wait_for_mempool_activation(&client).await?;
 
     // Get an initial template, and take the long poll id a miner would hold work against.
-    let mut initial_template: BlockTemplateResponse = client
-        .json_result_from_call("getblocktemplate", "[]")
-        .await
-        .map_err(|err| eyre!(err))?;
+    let mut initial_template: BlockTemplateResponse = tokio::time::timeout(
+        LONG_POLL_RESPONSE_TIMEOUT,
+        client.json_result_from_call("getblocktemplate", "[]"),
+    )
+    .await
+    .map_err(|_| eyre!("initial getblocktemplate stalled before any block was generated"))?
+    .map_err(|err| eyre!(err))?;
 
     // The template updater can replace the startup template without a tip change, for example
     // when its first build raced the genesis block commit. A long poll may return for such a
@@ -166,7 +174,9 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
     };
 
     // Invalidate the template by advancing the tip from a second client.
-    client.generate(1).await?;
+    tokio::time::timeout(LONG_POLL_RESPONSE_TIMEOUT, client.generate(1))
+        .await
+        .map_err(|_| eyre!("generate stalled before advancing the chain tip"))??;
     let tip_changed_at = std::time::Instant::now();
 
     let new_template = tokio::time::timeout(LONG_POLL_RESPONSE_TIMEOUT, long_poll)
@@ -201,13 +211,16 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         let proposal_block = proposal_block_from_template(&new_template, time_source, &network)?;
         let proposal_data = hex::encode(proposal_block.zcash_serialize_to_vec()?);
 
-        let proposal_result: BlockProposalResponse = client
-            .json_result_from_call(
+        let proposal_result: BlockProposalResponse = tokio::time::timeout(
+            LONG_POLL_RESPONSE_TIMEOUT,
+            client.json_result_from_call(
                 "getblocktemplate",
                 format!(r#"[{{"mode":"proposal","data":"{proposal_data}"}}]"#),
-            )
-            .await
-            .map_err(|err| eyre!(err))?;
+            ),
+        )
+        .await
+        .map_err(|_| eyre!("proposal validation stalled for time source {time_source:?}"))?
+        .map_err(|err| eyre!(err))?;
 
         assert_eq!(
             proposal_result,
