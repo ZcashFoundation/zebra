@@ -332,6 +332,10 @@ pub struct Mempool {
 }
 
 impl Mempool {
+    /// Builds the mempool using a non-owning outbound network handle.
+    ///
+    /// Pass [`zn::NetworkService::background_service`] because the network's inbound handler
+    /// retains the mempool and must not keep its own network alive.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         network: &Network,

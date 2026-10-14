@@ -2,11 +2,17 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{iter, net::SocketAddr};
+use std::{iter, net::SocketAddr, time::Duration};
 
 use futures::FutureExt;
 use indexmap::IndexSet;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    io::AsyncReadExt,
+    net::{TcpListener, TcpSocket},
+    sync::oneshot,
+    task::JoinHandle,
+    time::timeout,
+};
 use tower::{
     buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt,
 };
@@ -594,6 +600,104 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
     Ok(())
 }
 
+/// The real inbound and mempool services must not keep their own network running.
+#[tokio::test]
+async fn dropping_network_owner_stops_real_inbound_consumers() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let (
+        connected_peer,
+        inbound,
+        network,
+        mempool,
+        _state,
+        _block_verifier,
+        _tx_verifier,
+        block_gossip,
+        tx_gossip,
+        listen_addr,
+    ) = timeout(
+        Duration::from_secs(30),
+        setup(Some(Response::Peers(Vec::new()))),
+    )
+    .await
+    .expect("the real local network fixture must initialize");
+    let shutdown_bound = Duration::from_secs(5);
+
+    // These fixture tasks are independent external owners, unlike Inbound and Mempool.
+    block_gossip.abort();
+    tx_gossip.abort();
+    timeout(shutdown_bound, async {
+        let _ = tokio::join!(block_gossip, tx_gossip);
+    })
+    .await
+    .expect("the independent gossip owners must stop");
+
+    let last_owner = network.clone();
+    drop(network);
+    timeout(shutdown_bound, last_owner.clone().oneshot(Request::Peers))
+        .await
+        .expect("dropping one owning clone must preserve request routing")
+        .expect("the connected peer must still respond");
+    timeout(
+        shutdown_bound,
+        connected_peer.clone().oneshot(Request::Peers),
+    )
+    .await
+    .expect("the real inbound handler must answer requests")
+    .expect("the inbound and mempool setup must remain healthy");
+
+    // Receiving the local Version proves this second connection is inside a real pending
+    // handshake, rather than merely sitting in the listener's accept queue.
+    // Use a distinct source IP: the connected peer already occupies the default per-IP limit.
+    let pending_socket = TcpSocket::new_v4().unwrap();
+    pending_socket.bind("127.0.0.2:0".parse().unwrap()).unwrap();
+    let mut pending_handshake = timeout(shutdown_bound, pending_socket.connect(listen_addr))
+        .await
+        .unwrap()
+        .unwrap();
+    timeout(shutdown_bound, pending_handshake.read_exact(&mut [0; 1]))
+        .await
+        .expect("the listener must start the pending handshake")
+        .unwrap();
+    let background = last_owner.background_service();
+    drop(last_owner);
+
+    timeout(shutdown_bound, async {
+        let listener_closed = async {
+            loop {
+                match TcpListener::bind(listen_addr).await {
+                    Ok(listener) => break listener,
+                    Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => panic!("unexpected listener rebind failure: {error}"),
+                }
+            }
+        };
+        let peer_closed = async {
+            while connected_peer.clone().oneshot(Request::Peers).await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        let pending_closed = async {
+            tokio::io::copy(&mut pending_handshake, &mut tokio::io::sink())
+                .await
+                .expect("aborting a pending handshake must close its TCP stream");
+        };
+        let (_listener, (), ()) = tokio::join!(listener_closed, peer_closed, pending_closed);
+        assert!(background.oneshot(Request::Peers).await.is_err());
+    })
+    .await
+    .expect("listener, connected client, and pending handshake must stop with the runtime alive");
+
+    // Keep the real consumer services alive through the shutdown assertion.
+    drop((inbound, mempool));
+}
+
 /// Setup a real Zebra network stack, with a connected peer using a real isolated network stack.
 ///
 /// The isolated peer responds to every request with `isolated_peer_response`.
@@ -614,10 +718,7 @@ async fn setup(
         >,
     >,
     // outbound peer set (only has the connected peer)
-    Buffer<
-        BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
-        zebra_network::Request,
-    >,
+    zebra_network::NetworkService,
     Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
@@ -709,7 +810,7 @@ async fn setup(
     let (mut mempool_service, transaction_subscriber) = Mempool::new(
         &network,
         &mempool_config,
-        peer_set.clone(),
+        peer_set.background_service(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
@@ -731,7 +832,7 @@ async fn setup(
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
-        block_download_peer_set: peer_set.clone(),
+        block_download_peer_set: peer_set.background_service(),
         block_verifier: buffered_block_verifier,
         mempool: mempool_service.clone(),
         state: state_service.clone(),
