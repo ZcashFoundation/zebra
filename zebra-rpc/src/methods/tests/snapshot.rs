@@ -231,7 +231,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_suffix(format!("{}_{}", network_string(network), blocks.len() - 1));
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, _, _) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         network,
         state.clone(),

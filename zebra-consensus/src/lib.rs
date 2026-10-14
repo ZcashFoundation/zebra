@@ -55,7 +55,8 @@ pub use block::SemanticBlockVerifier;
 
 pub use block::check::no_duplicate_transparent_spends;
 pub use block::{
-    check::body_matches_header, Request, ShieldedActionCounts, VerifyBlockError, MAX_BLOCK_SIGOPS,
+    check::body_matches_header, PreparedBlockCache, Request, ShieldedActionCounts,
+    VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
 pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
