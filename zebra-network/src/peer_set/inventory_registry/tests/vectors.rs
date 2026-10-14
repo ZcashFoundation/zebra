@@ -392,3 +392,74 @@ async fn inv_registry_failed_peers_limit() {
         "the oldest failed hash should be removed",
     );
 }
+
+/// N12: refreshing a tracked hash must protect it from eviction at the hash cap.
+#[tokio::test]
+async fn repeated_failure_refreshes_hash_eviction_order() {
+    let (mut registry, _sender) = new_inv_registry();
+    let peer = "1.1.1.1:1".parse().expect("the test peer address is valid");
+    let hash = |index: usize| {
+        let mut bytes = [0; 32];
+        bytes[..4].copy_from_slice(
+            &u32::try_from(index)
+                .expect("the inventory cap fits in u32")
+                .to_le_bytes(),
+        );
+        InventoryHash::Block(block::Hash(bytes))
+    };
+    for index in 0..MAX_INV_PER_MAP {
+        registry.register_failed(hash(index), peer);
+    }
+    registry.register_failed(hash(0), peer);
+    registry.register_failed(hash(MAX_INV_PER_MAP), peer);
+
+    assert_eq!(registry.failed_current.len(), MAX_INV_PER_MAP);
+    assert_eq!(
+        registry.failed_peers(hash(0)).copied().collect::<Vec<_>>(),
+        vec![peer],
+        "a repeated failure refreshes the oldest tracked hash",
+    );
+    assert_eq!(
+        registry.failed_peers(hash(1)).count(),
+        0,
+        "the least recently failed hash is evicted instead",
+    );
+    assert_eq!(
+        registry
+            .failed_peers(hash(MAX_INV_PER_MAP))
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![peer],
+    );
+}
+
+/// N12: refreshing a tracked peer must protect it from eviction at the per-hash cap.
+#[tokio::test]
+async fn repeated_failure_refreshes_peer_eviction_order() {
+    let (mut registry, _sender) = new_inv_registry();
+    let hash = InventoryHash::Block(block::Hash([0; 32]));
+    let peer = |index: usize| -> PeerSocketAddr {
+        SocketAddr::new(
+            [1, 1, 1, 1].into(),
+            u16::try_from(index + 1).expect("the peer cap fits in a port"),
+        )
+        .into()
+    };
+    for index in 0..MAX_PEERS_PER_INV {
+        registry.register_failed(hash, peer(index));
+    }
+    registry.register_failed(hash, peer(0));
+    registry.register_failed(hash, peer(MAX_PEERS_PER_INV));
+
+    let failed: Vec<_> = registry.failed_peers(hash).copied().collect();
+    assert_eq!(failed.len(), MAX_PEERS_PER_INV);
+    assert!(
+        failed.contains(&peer(0)),
+        "a repeated failure refreshes the oldest peer"
+    );
+    assert!(
+        !failed.contains(&peer(1)),
+        "the least recently failed peer is evicted instead"
+    );
+    assert!(failed.contains(&peer(MAX_PEERS_PER_INV)));
+}

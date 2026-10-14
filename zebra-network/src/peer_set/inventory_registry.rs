@@ -100,8 +100,8 @@ pub struct InventoryRegistry {
 
     /// Map tracking peers that failed to return inventory in the current interval period.
     ///
-    /// A failure is a request that timed out or was dropped, not a `notfound` response, which is
-    /// tracked as missing inventory. So a failed peer might still have the inventory.
+    /// A failure is a completed peer error or response timeout, not caller cancellation or a
+    /// `notfound` response. Missing inventory is tracked separately; failed peers might still have it.
     ///
     /// Failures are tracked separately from inventory statuses, so a peer can't clear its failure
     /// by advertising the inventory again.
@@ -221,13 +221,9 @@ impl InventoryRegistry {
         let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);
         // # Security
         //
-        // If the rotation time is late, execute as many ticks as needed to catch up.
-        // This is a tradeoff between memory usage and quickly accessing remote data
-        // under heavy load. Bursting prioritises lower memory usage.
-        //
-        // Skipping or delaying could keep peer inventory in memory for a longer time,
-        // further increasing memory load or delays due to virtual memory swapping.
-        interval.set_missed_tick_behavior(time::MissedTickBehavior::Burst);
+        // Delay missed ticks so newly registered inventory survives a full interval.
+        // Per-map caps bound memory use even when polling is delayed.
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         Self {
             current: Default::default(),
@@ -266,8 +262,13 @@ impl InventoryRegistry {
     ///
     /// Failures expire after the registry rotates twice, like inventory statuses.
     pub fn register_failed(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {
+        if let Some(index) = self.failed_current.get_index_of(&hash) {
+            self.failed_current
+                .move_index(index, self.failed_current.len() - 1);
+        }
         let failed_peers = self.failed_current.entry(hash).or_default();
-        failed_peers.insert(peer);
+        let (index, _) = failed_peers.insert_full(peer);
+        failed_peers.move_index(index, failed_peers.len() - 1);
 
         // # Security
         //
@@ -280,6 +281,16 @@ impl InventoryRegistry {
         if self.failed_current.len() > MAX_INV_PER_MAP {
             // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
             self.failed_current.shift_remove_index(0);
+        }
+    }
+
+    /// Clears failures from previous connections that used `peer`'s transient address.
+    pub fn clear_peer_failures(&mut self, peer: PeerSocketAddr) {
+        for failures in [&mut self.failed_current, &mut self.failed_prev] {
+            failures.retain(|_, peers| {
+                peers.shift_remove(&peer);
+                !peers.is_empty()
+            });
         }
     }
 
@@ -354,12 +365,8 @@ impl InventoryRegistry {
         //
         // # Security
         //
-        // Only rotate one inventory per peer request, to give the next inventory
-        // time to gather some peer advertisements. This is a tradeoff between
-        // memory usage and quickly accessing remote data under heavy load.
-        //
-        // This prevents a burst edge case where all inventory is emptied after
-        // two interval ticks are delayed.
+        // Rotate before registering new inventory. Missed ticks restart the interval, so
+        // repeated polls cannot immediately age out new advertisements or failures.
         if Pin::new(&mut self.interval).poll_next(cx).is_ready() {
             self.rotate();
             result = Poll::Ready(Ok(()));

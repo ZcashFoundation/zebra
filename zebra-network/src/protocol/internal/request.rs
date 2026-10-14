@@ -80,7 +80,7 @@ pub enum Request {
     /// The peer's response timeout starts only when the request is dispatched.
     ///
     /// A known advertiser is preferred even if its advertisement was lost from the inventory
-    /// registry. Missing-inventory reports and connection eligibility still apply.
+    /// registry. Missing-inventory reports, prior failures, and connection eligibility still apply.
     /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].

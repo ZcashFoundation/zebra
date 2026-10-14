@@ -277,34 +277,6 @@ where
     }
 }
 
-/// Reports a block request that a peer failed to answer to the peer set, when it is dropped,
-/// unless the peer returned the block or answered `notfound`.
-///
-/// Failures are reported on drop, because the caller's own timeout can drop the response future
-/// before the peer connection's request timeout fails it.
-struct InvFailureReporter {
-    /// Sends the failure to the peer set.
-    failure_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, InventoryHash)>,
-
-    /// The peer the request was routed to.
-    peer: PeerSocketAddr,
-
-    /// The requested block.
-    hash: InventoryHash,
-
-    /// True if the peer returned the block, or answered `notfound`, which is tracked as missing
-    /// inventory instead.
-    answered: bool,
-}
-
-impl Drop for InvFailureReporter {
-    fn drop(&mut self) {
-        if !self.answered {
-            let _ = self.failure_tx.send((self.peer, self.hash));
-        }
-    }
-}
-
 /// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
 /// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
 /// the stall tracker can be updated and the peer disconnected if needed.
@@ -315,6 +287,8 @@ enum StallOutcome {
 }
 
 type StallEvent = (PeerSocketAddr, Arc<ConnectionInfo>, StallOutcome);
+
+type InvFailureEvent = (PeerSocketAddr, Arc<ConnectionInfo>, InventoryHash);
 
 /// Empty replies are valid when the locator reaches the remote tip. Neither a local wall-clock
 /// estimate nor an untrusted, frozen handshake height proves otherwise. Fair discovery routing
@@ -368,15 +342,15 @@ where
     /// Producer clones handed to each tracked request's response wrapper.
     stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
 
-    /// Receives block requests that peers failed to answer, from [`InvFailureReporter`]s, and
-    /// records them in the [`InventoryRegistry`].
+    /// Receives completed block request errors from response futures and records them in the
+    /// [`InventoryRegistry`]. Caller cancellation is not evidence of a peer failure.
     ///
     /// Each routed block request sends at most one failure, so the channel is limited by the
     /// number of block requests in flight.
-    inv_failure_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, InventoryHash)>,
+    inv_failure_rx: tokio_mpsc::UnboundedReceiver<InvFailureEvent>,
 
-    /// Producer clones handed to each block request's [`InvFailureReporter`].
-    inv_failure_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, InventoryHash)>,
+    /// Producer clones handed to each block request's response future.
+    inv_failure_tx: tokio_mpsc::UnboundedSender<InvFailureEvent>,
 
     // Peer Tracking: Ready Peers
     //
@@ -1025,6 +999,7 @@ where
                     } else {
                         self.serving_peer_keys.remove(&key);
                     }
+                    self.inventory_registry.clear_peer_failures(key);
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
@@ -1068,6 +1043,13 @@ where
         }
     }
 
+    /// Whether an event belongs to the currently connected incarnation of an address.
+    fn is_current_connection(&self, addr: PeerSocketAddr, info: &Arc<ConnectionInfo>) -> bool {
+        self.find_peer_queue
+            .iter()
+            .any(|(key, current)| *key == addr && Arc::ptr_eq(current, info))
+    }
+
     /// Drains pending stall/clear events from tracked routing futures and
     /// disconnects peers that have exceeded the stall threshold. The peer's
     /// TCP connection is closed when its service is dropped; address book and
@@ -1077,11 +1059,7 @@ where
             self.stall_event_rx.poll_recv(cx)
         {
             // A delayed response from an old connection must not affect its replacement.
-            if !self
-                .find_peer_queue
-                .iter()
-                .any(|(key, info)| *key == addr && Arc::ptr_eq(info, &connection_info))
-            {
+            if !self.is_current_connection(addr, &connection_info) {
                 continue;
             }
             match outcome {
@@ -1105,8 +1083,12 @@ where
     /// otherwise a peer that falsely claims to serve blocks, and withholds them, could get every
     /// retry for a block.
     fn drain_inv_failures(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((peer, hash))) = self.inv_failure_rx.poll_recv(cx) {
-            self.inventory_registry.register_failed(hash, peer);
+        while let Poll::Ready(Some((peer, connection_info, hash))) =
+            self.inv_failure_rx.poll_recv(cx)
+        {
+            if self.is_current_connection(peer, &connection_info) {
+                self.inventory_registry.register_failed(hash, peer);
+            }
         }
     }
 
@@ -1449,6 +1431,7 @@ where
             }),
             _ => None,
         };
+
         let advertising_peers: Vec<PeerSocketAddr> = self
             .inventory_registry
             .advertising_peers(hash)
@@ -1512,19 +1495,19 @@ where
         //
         // Downloaders carry their known advertiser separately from this lossy registry.
         //
-        // Only connected advertisers count, so a peer can't advertise a block and disconnect to
-        // keep it treated as recent.
+        // A disconnected or failed advertiser must not enable speculative non-serving fallback.
         let is_advertised = advertising_peers
             .iter()
-            .any(|addr| self.has_peer_with_addr(*addr));
+            .any(|addr| self.has_peer_with_addr(*addr) && !has_failed(addr));
         let busy_peer_might_have = |failed: bool| {
             self.cancel_handles.keys().any(|key| {
                 !missing_peer_list.contains(key)
                     && has_failed(key) == failed
-                    && (is_advertised || self.serving_peer_keys.contains(key))
+                    && (failed || is_advertised || self.serving_peer_keys.contains(key))
             })
         };
         let other_busy_peer_might_have = busy_peer_might_have(false);
+
         // Waiting for a busy serving peer is better than asking a non-serving peer, which would
         // most likely answer `notfound` for a historic block, and get marked as missing it.
         if is_advertised || !other_busy_peer_might_have {
@@ -1571,28 +1554,32 @@ where
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
-        let fut = self.call_ready_peer(key, req);
-
         // Transaction requests don't wait for busy peers, so there is no preference to lose.
         if !matches!(hash, InventoryHash::Block(_)) {
-            return fut;
+            return self.call_ready_peer(key, req);
         }
 
-        let mut failure_reporter = InvFailureReporter {
-            failure_tx: self.inv_failure_tx.clone(),
-            peer: key,
-            hash,
-            answered: false,
-        };
+        let connection_info = self
+            .ready_services
+            .get(&key)
+            .expect("inventory routing selected a ready connection")
+            .connection_info()
+            .clone();
+        let fut = self.call_ready_peer(key, req);
 
+        let failure_tx = self.inv_failure_tx.clone();
         async move {
             let result = fut.await;
-            failure_reporter.answered = match &result {
-                Ok(_) => true,
-                Err(error) => error
+            if let Err(error) = &result {
+                let missing = error
                     .downcast_ref::<SharedPeerError>()
-                    .is_some_and(|error| error.inner_debug().contains("NotFoundResponse")),
-            };
+                    .is_some_and(|error| error.inner_debug().contains("NotFoundResponse"));
+                if !missing {
+                    // Only a completed peer error, including its response timeout, is failure
+                    // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
+                    let _ = failure_tx.send((key, connection_info, hash));
+                }
+            }
             result
         }
         .boxed()
@@ -2215,7 +2202,6 @@ where
         // Events can change queued candidates even without a readiness transition. Register
         // their wakeups with the notification task as well as the Buffer worker.
         self.drain_stall_events(&mut peer_cx);
-        self.drain_inv_failures(&mut peer_cx);
 
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
@@ -2226,6 +2212,8 @@ where
         let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
         let _poll_pending_or_ready: Poll<()> =
             self.inventory_registry.poll_inventory(&mut peer_cx)?;
+        // Register failures after rotation so they survive a full interval before aging.
+        self.drain_inv_failures(&mut peer_cx);
 
         let ready_peers = self.poll_peers(&mut peer_cx)?;
 

@@ -149,7 +149,8 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 
 
 /// Zebra rotates its peer inventory registry every time this interval elapses.
 ///
-/// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
+/// Available, missing, and failed inventory entries expire after two rotations. Delayed polling
+/// restarts this interval instead of replaying missed rotations.
 pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
 /// How long a single-hash [`Request::BlocksByHash`](crate::Request::BlocksByHash) waits for

@@ -48,6 +48,9 @@ use tokio::sync::watch;
 
 use super::{mock_peer_discovery_with_start_height, PeerSetBuilder, PeerSetGuard, PeerVersions};
 
+#[path = "failure_reviews.rs"]
+mod failure_reviews;
+
 #[path = "eligibility_reviews.rs"]
 mod eligibility_reviews;
 
@@ -2590,49 +2593,23 @@ fn peer_set_ignores_disconnected_advertisers() {
     });
 }
 
-/// How a mock peer fails a block request, in the failed block request tests.
-#[derive(Copy, Clone, Debug)]
-enum BlockRequestFailure {
-    /// The peer connection's request timeout fails the request.
-    Timeout,
-
-    /// The caller drops the request, for example when its own timeout expires first.
-    Dropped,
-}
-
-/// Sends a block request to the first peer, which must be the only serving peer, then fails it
-/// with `failure`.
+/// Sends a block request to the only serving peer, then completes it with a response timeout.
 async fn fail_serving_peer_block_request<D, C>(
     peer_set: &mut PeerSet<D, C>,
     handles: &mut [ClientTestHarness],
-    failure: BlockRequestFailure,
 ) where
     D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
-    let peer_ready = peer_set
-        .ready()
-        .await
-        .expect("peer set service is always ready");
-    let fut = peer_ready.call(block_request(2));
-
-    let ClientRequest { request, tx, .. } = handles[0]
-        .try_to_receive_outbound_client_request()
-        .request()
-        .expect("block request should be routed to the serving peer");
-    assert_eq!(request, block_request(2));
-
-    match failure {
-        BlockRequestFailure::Timeout => {
-            let _ = tx.send(Err(SharedPeerError::from(
-                PeerError::ConnectionReceiveTimeout,
-            )));
-            fut.await
-                .expect_err("the serving peer should fail the request");
-        }
-        BlockRequestFailure::Dropped => std::mem::drop(fut),
-    }
+    respond_to_request(
+        peer_set,
+        &mut handles[0],
+        block_request(2),
+        Err(PeerError::ConnectionReceiveTimeout.into()),
+    )
+    .await
+    .expect_err("the serving peer should fail the request");
 }
 
 /// Check that a block request isn't routed to a serving peer that just failed to return that
@@ -2643,50 +2620,48 @@ async fn fail_serving_peer_block_request<D, C>(
 /// retry for the block.
 #[test]
 fn peer_set_routes_block_retry_away_from_failed_serving_peer() {
-    for failure in [BlockRequestFailure::Timeout, BlockRequestFailure::Dropped] {
-        let (runtime, _init_guard) = zebra_test::init_async();
-        let _guard = runtime.enter();
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
 
-        // CORRECTNESS: This test does not depend on external resources that could really timeout.
-        tokio::time::pause();
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
 
-        runtime.block_on(async move {
-            let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
-                peer_set_with_services(&SERVING_AND_NON_SERVING);
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
+            peer_set_with_services(&SERVING_AND_NON_SERVING);
 
-            fail_serving_peer_block_request(&mut peer_set, &mut handles, failure).await;
+        fail_serving_peer_block_request(&mut peer_set, &mut handles).await;
 
-            let peer_ready = peer_set
-                .ready()
-                .await
-                .expect("peer set service is always ready");
-            let _retry_fut = peer_ready.call(block_request(2));
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _retry_fut = peer_ready.call(block_request(2));
 
-            assert_eq!(
-                received_request(&mut handles[0]),
-                None,
-                "{failure:?}: the retry should not be routed to the serving peer that failed it",
-            );
-            assert_eq!(
-                received_request(&mut handles[1]),
-                Some(block_request(2)),
-                "{failure:?}: the retry should be routed to the non-serving peer",
-            );
+        assert_eq!(
+            received_request(&mut handles[0]),
+            None,
+            "the retry should not be routed to the serving peer that failed it",
+        );
+        assert_eq!(
+            received_request(&mut handles[1]),
+            Some(block_request(2)),
+            "the retry should be routed to the non-serving peer",
+        );
 
-            // Other blocks still prefer the serving peer.
-            let peer_ready = peer_set
-                .ready()
-                .await
-                .expect("peer set service is always ready");
-            let _other_fut = peer_ready.call(block_request(3));
+        // Other blocks still prefer the serving peer.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        let _other_fut = peer_ready.call(block_request(3));
 
-            assert_eq!(
-                received_request(&mut handles[0]),
-                Some(block_request(3)),
-                "{failure:?}: other blocks should still be routed to the serving peer",
-            );
-        });
-    }
+        assert_eq!(
+            received_request(&mut handles[0]),
+            Some(block_request(3)),
+            "other blocks should still be routed to the serving peer",
+        );
+    });
 }
 
 /// Check that a block request is still routed to a peer that failed to return that block, if no
@@ -2703,8 +2678,7 @@ fn peer_set_retries_block_with_failed_peer_as_last_resort() {
         let (mut peer_set, _peer_set_guard, _addrs, mut handles, _best_tip) =
             peer_set_with_services(&[PeerServices::NODE_NETWORK]);
 
-        fail_serving_peer_block_request(&mut peer_set, &mut handles, BlockRequestFailure::Timeout)
-            .await;
+        fail_serving_peer_block_request(&mut peer_set, &mut handles).await;
 
         let peer_ready = peer_set
             .ready()
@@ -2740,8 +2714,7 @@ fn peer_set_waits_for_busy_failed_peer_as_last_resort() {
             InventoryStatus::new_missing(InventoryHash::Block(block::Hash([2; 32])), addrs[1]),
         );
 
-        fail_serving_peer_block_request(&mut peer_set, &mut handles, BlockRequestFailure::Dropped)
-            .await;
+        fail_serving_peer_block_request(&mut peer_set, &mut handles).await;
         let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
 
         let peer_ready = peer_set
