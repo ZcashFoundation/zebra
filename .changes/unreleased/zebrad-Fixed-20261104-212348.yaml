@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Keep accepting mined blocks while peers are unavailable by retaining the newest pending block announcements.
+time: 2026-11-04T21:23:48.285069107+01:00
