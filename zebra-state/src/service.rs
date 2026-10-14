@@ -33,6 +33,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, CountedHeader, HeightDiff},
+    chain_tip::ChainTip,
     diagnostic::CodeTimer,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
@@ -204,6 +205,9 @@ pub(crate) struct StateService {
     ///
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
+
+    /// Wakes candidate withdrawal when the committed best tip changes.
+    latest_chain_tip: LatestChainTip,
 
     /// Bounds early-work computations and keeps a live candidate from being replaced.
     mining_candidate_slot: Arc<Semaphore>,
@@ -515,6 +519,7 @@ impl StateService {
             last_prune: Instant::now(),
             read_service: read_service.clone(),
             metrics_exporter: None,
+            latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
             mining_candidate_lifetime: MINING_CANDIDATE_LIFETIME,
             max_finalized_queue_height: f64::NAN,
@@ -1303,7 +1308,7 @@ impl ReadStateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        read::best_tip(&self.latest_non_finalized_state(), &self.db)
+        read::tip(self.latest_best_chain(), &self.db)
     }
 
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
@@ -1405,6 +1410,7 @@ impl Service<Request> for StateService {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 };
                 let state = self.read_service.clone();
+                let mut tip_change = self.latest_chain_tip.clone();
                 // Published work reserves the slot until verification ends, even after expiry.
                 let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
                 let deadline = tokio::time::Instant::now() + self.mining_candidate_lifetime;
@@ -1443,7 +1449,10 @@ impl Service<Request> for StateService {
                             },
                         },
                     };
-                    if cancelled.is_closed() || tokio::time::Instant::now() >= deadline {
+                    if cancelled.is_closed()
+                        || tokio::time::Instant::now() >= deadline
+                        || state.best_tip().map(|(_, hash)| hash) != Some(parent)
+                    {
                         cancelled.send_modify(|permit| *permit = None);
                         return;
                     }
@@ -1456,6 +1465,13 @@ impl Service<Request> for StateService {
                     tokio::select! {
                         _ = cancelled.closed() => {}
                         _ = tokio::time::sleep_until(deadline) => {}
+                        _ = async {
+                            while state.best_tip().map(|(_, hash)| hash) == Some(parent) {
+                                if tip_change.best_tip_changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        } => {}
                     }
                     state.mining_candidate.send_if_modified(|candidate| {
                         if candidate
@@ -1829,7 +1845,8 @@ impl Service<ReadRequest> for ReadStateService {
         let state = self.clone();
 
         if let ReadRequest::MiningCandidateChanges = req {
-            let changes = crate::MiningCandidateChanges(self.mining_candidate.subscribe());
+            let changes =
+                crate::MiningCandidateChanges(self.mining_candidate.subscribe(), Some(state));
             return async move { Ok(ReadResponse::MiningCandidateChanges(changes)) }.boxed();
         }
 
