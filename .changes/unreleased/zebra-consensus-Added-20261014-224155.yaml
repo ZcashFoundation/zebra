@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: 'Added `RouterError::is_resource_pressure` to identify retryable local admission pressure.'
+time: 2026-10-14T22:41:55.308976868+02:00

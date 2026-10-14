@@ -10,6 +10,7 @@
 use std::{
     collections::VecDeque,
     future::Future,
+    io::{self, Write},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -433,11 +434,10 @@ where
             // Hash only when populating the cache or when there is something to reuse.
             let proposal_key = if request.is_proposal() || !proposals.borrow().is_empty() {
                 let block = block.clone();
-                let (key, size) = tokio::task::spawn_blocking(move || {
-                    (proposal_key(&block), block.zcash_serialized_size())
-                })
-                .await
-                .expect("proposal hashing serializes an already-decoded block into an infallible writer");
+                let (key, size) =
+                    tokio::task::spawn_blocking(move || proposal_key_and_size(&block))
+                        .await
+                        .expect("proposal hashing serializes an already-decoded block into an infallible writer");
                 if u64::try_from(size).expect("block sizes fit u64") > block::MAX_BLOCK_BYTES {
                     return Err(VerifyBlockError::OversizedBlock);
                 }
@@ -673,14 +673,27 @@ where
     }
 }
 
-/// Hash all wire bytes except nonce and solution, without allocating a serialized block.
-fn proposal_key(block: &block::Block) -> [u8; 32] {
+/// Hash wire bytes with normalized nonce and solution, counting the actual block size in one pass.
+fn proposal_key_and_size(block: &block::Block) -> ([u8; 32], usize) {
+    struct Writer(sha256d::Writer, usize);
+    impl Write for Writer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let len = self.0.write(buf)?;
+            self.1 += len;
+            Ok(len)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.0.flush()
+        }
+    }
+
     let header = block::Header {
         nonce: [0; 32].into(),
         solution: equihash::Solution::Common([0; 1344]),
         ..*block.header
     };
-    let mut writer = sha256d::Writer::default();
+    let mut writer = Writer(sha256d::Writer::default(), 0);
     header
         .zcash_serialize(&mut writer)
         .expect("hash writers cannot fail");
@@ -688,5 +701,10 @@ fn proposal_key(block: &block::Block) -> [u8; 32] {
         .transactions
         .zcash_serialize(&mut writer)
         .expect("hash writers cannot fail");
-    writer.finish()
+    // The key always hashes a Common solution, but Regtest's actual wire solution is shorter.
+    if matches!(block.header.solution, equihash::Solution::Regtest(_)) {
+        writer.1 -=
+            equihash::Solution::SERIALIZED_SIZE - equihash::Solution::REGTEST_SERIALIZED_SIZE;
+    }
+    (writer.0.finish(), writer.1)
 }

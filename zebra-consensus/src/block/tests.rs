@@ -1635,6 +1635,10 @@ async fn exact_proposal_commits_without_transaction_verification() {
             .await
             .unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
+        let transaction_verifier = Buffer::new(
+            transaction::BlockTxVerifier::new(&network, state.clone()),
+            1,
+        );
         let transactions = tower::service_fn({
             let calls = calls.clone();
             move |request: tx::BlockRequest| {
@@ -1643,16 +1647,12 @@ async fn exact_proposal_commits_without_transaction_verification() {
                     usize::MAX,
                     "a cache hit must not call the transaction verifier"
                 );
-                std::future::ready(Ok::<_, BoxError>(tx::BlockResponse {
-                    tx_id: request.transaction.unmined_id(),
-                    miner_fee: None,
-                    sigops: 0,
-                }))
+                transaction_verifier.clone().oneshot(request)
             }
         });
         let mut verifier = SemanticBlockVerifier::new(&network, state.clone(), transactions);
-        // Exercise both a finalized parent and a non-finalized parent, including history leaves.
-        for height in [Height(1), Height(2)] {
+        // Cache hits extend finalized and non-finalized parents; changed time forces full checks.
+        for height in [Height(1), Height(2), Height(3)] {
             let zs::ReadResponse::ChainInfo(info) = read_state
                 .clone()
                 .oneshot(zs::ReadRequest::ChainInfo)
@@ -1703,7 +1703,15 @@ async fn exact_proposal_commits_without_transaction_verification() {
                 .call(Request::CheckProposal(Arc::new(proposal)))
                 .await
                 .unwrap();
-            calls.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+            let cached = height != Height(3);
+            let solved = if cached {
+                solved
+            } else {
+                let mut changed = (*solved).clone();
+                Arc::make_mut(&mut changed.header).time += chrono::Duration::seconds(1);
+                Arc::new(changed)
+            };
+            calls.store(if cached { usize::MAX } else { 0 }, Ordering::SeqCst);
             assert_eq!(
                 verifier
                     .ready()
@@ -1714,6 +1722,9 @@ async fn exact_proposal_commits_without_transaction_verification() {
                     .unwrap(),
                 solved.hash()
             );
+            if !cached {
+                assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
+            }
             assert_eq!(
                 state
                     .clone()
@@ -1736,13 +1747,21 @@ async fn cached_proposal_still_requires_proof_of_work() {
         calls.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
         let mut invalid = (*solved).clone();
         Arc::make_mut(&mut invalid.header).solution = equihash::Solution::for_proposal();
-        assert_eq!(proposal_key(&invalid), proposal_key(&solved));
+        assert_eq!(
+            proposal_key_and_size(&invalid).0,
+            proposal_key_and_size(&solved).0,
+        );
+        let error = verifier
+            .oneshot(Request::Commit(Arc::new(invalid)))
+            .await
+            .unwrap_err();
+        assert_eq!(error.misbehavior_score(), 100);
         assert!(matches!(
-            verifier.oneshot(Request::Commit(Arc::new(invalid))).await,
-            Err(VerifyBlockError::Equihash { .. })
-                | Err(VerifyBlockError::Block {
+            error,
+            VerifyBlockError::Equihash { .. }
+                | VerifyBlockError::Block {
                     source: BlockError::DifficultyFilter(..)
-                })
+                }
         ));
     })
     .await
@@ -1770,7 +1789,7 @@ async fn changed_proposals_require_transaction_verification() {
                     .any(|tx| tx.version() == 5 && !tx.is_coinbase() && tx.has_transparent_inputs())
             })
             .expect("vectors contain a V5 transparent spend");
-        let key = proposal_key(&original);
+        let key = proposal_key_and_size(&original).0;
         for change in 0..4 {
             let mut block = original.clone();
             match change {
@@ -1812,7 +1831,7 @@ async fn changed_proposals_require_transaction_verification() {
             }
             Arc::make_mut(&mut block.header).merkle_root =
                 block.transactions.iter().map(|tx| tx.hash()).collect();
-            assert_ne!(proposal_key(&block), key);
+            assert_ne!(proposal_key_and_size(&block).0, key);
             let count = block.transactions.len();
             let calls = Arc::new(AtomicUsize::new(0));
             let transactions = tower::service_fn({
@@ -2059,4 +2078,23 @@ fn proposal_cache_spent_outputs_share_the_byte_bound() {
         [7; 32],
         "retain the newest proposal"
     );
+}
+
+#[test]
+fn proposal_key_counts_actual_wire_size() {
+    let _init_guard = zebra_test::init();
+    let mainnet: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    for block in [mainnet, block::genesis::regtest_genesis_block()] {
+        let (key, size) = proposal_key_and_size(&block);
+        assert_eq!(size, block.zcash_serialized_size());
+        let mut normalized = (*block).clone();
+        let header = Arc::make_mut(&mut normalized.header);
+        header.nonce = [0; 32].into();
+        header.solution = equihash::Solution::for_proposal();
+        let (normalized_key, normalized_size) = proposal_key_and_size(&normalized);
+        assert_eq!(key, normalized_key);
+        assert_eq!(normalized_size, normalized.zcash_serialized_size());
+    }
 }
