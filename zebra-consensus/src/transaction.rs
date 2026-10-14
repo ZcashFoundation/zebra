@@ -432,13 +432,16 @@ where
         input_idx: usize,
     ) -> Result<(usize, transparent::OutPoint, transparent::Utxo), TransactionError> {
         tracing::trace!(?outpoint, "awaiting outpoint lookup");
-        let response = state
-            .oneshot(zebra_state::Request::AwaitUtxo(outpoint))
-            .await
-            .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
-                Ok(_) => TransactionError::TransparentInputNotFound,
-                Err(boxed_error) => TransactionError::from(boxed_error),
-            })?;
+        let response = tokio::time::timeout(
+            UTXO_LOOKUP_TIMEOUT,
+            state.oneshot(zebra_state::Request::AwaitUtxo(outpoint)),
+        )
+        .await
+        .map_err(|_| TransactionError::TransparentInputNotFound)?
+        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+            Ok(_) => TransactionError::TransparentInputNotFound,
+            Err(boxed_error) => TransactionError::from(boxed_error),
+        })?;
 
         let zebra_state::Response::Utxo(utxo) = response else {
             unreachable!("AwaitUtxo always responds with Utxo")
