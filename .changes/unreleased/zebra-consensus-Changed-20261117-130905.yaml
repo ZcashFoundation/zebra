@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Ordinary duplicate checkpoint requests retain mined-block observers as best-effort, including observers returned by late child recovery ([#11670](https://github.com/ZcashFoundation/zebra/pull/11670)).
+time: 2026-11-17T13:09:05.995063625+01:00
