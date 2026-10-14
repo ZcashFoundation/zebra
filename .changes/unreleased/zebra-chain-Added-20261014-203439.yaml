@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added shared `MAX_TIPS_RESPONSE_HASH_COUNT` and `DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT` constants for matching synchronization and checkpoint admission bounds.
+time: 2026-10-14T20:34:39.514872381+02:00

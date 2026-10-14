@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Checkpoint admission bounds queued and committing work together and rejects oversized internally constructed blocks. Reservations survive cancellation and unchecked-child recovery. `RouterError::is_resource_pressure` identifies local queue pressure without classifying the block as invalid.
+time: 2026-10-14T20:34:39.515118815+02:00
