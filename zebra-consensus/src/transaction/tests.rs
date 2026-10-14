@@ -3136,7 +3136,8 @@ fn v4_with_small_order_rk_sapling_spend() {
         let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase()
+                transaction.version() == 4
+                    && !transaction.is_coinbase()
                     && transaction.inputs().is_empty()
                     && transaction.joinsplit_count() == 0
             })
@@ -3179,7 +3180,8 @@ fn v4_with_small_order_epk_sapling_output() {
         let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase()
+                transaction.version() == 4
+                    && !transaction.is_coinbase()
                     && transaction.inputs().is_empty()
                     && transaction.joinsplit_count() == 0
             })
@@ -3253,6 +3255,48 @@ async fn v5_with_sapling_spends() {
     }
 }
 
+/// Test that a V5 transaction with a small-order Sapling spend `rk` parses but fails verification.
+/// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
+/// `check_spend` — pinned here at its new layer.
+#[tokio::test]
+async fn v5_with_small_order_rk_sapling_spend() {
+    let _init_guard = zebra_test::init();
+
+    // Only Mainnet: the Testnet vectors have no V5 Sapling-only spend without transparent inputs.
+    for net in [Network::Mainnet] {
+        // Mutation also invalidates Orchard signatures, and either pool can report first.
+        let mut tx = v5_transactions(net.block_iter())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_orchard_shielded_data()
+            })
+            .find(|tx| tx.sapling_spends_count() > 0)
+            .expect("V5 tx with Sapling spends");
+
+        let height = tx.expiry_height().expect("expiry height");
+
+        // Parsing must accept the small-order rk; only verification may reject it.
+        set_first_sapling_spend_rk(&mut tx, small_order_point_bytes());
+
+        let verifier = BlockTxVerifier::new(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
+
+        assert_eq!(
+            verifier
+                .oneshot(BlockRequest {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
+            Err(TransactionError::SaplingVerificationFailed)
+        );
+    }
+}
+
 /// Test if a V5 transaction with a duplicate Sapling spend is rejected by the verifier.
 #[tokio::test]
 async fn v5_with_duplicate_sapling_spends() {
@@ -3291,44 +3335,6 @@ async fn v5_with_duplicate_sapling_spends() {
     }
 }
 
-/// Test that a V5 transaction with a small-order Sapling spend `rk` parses but fails verification.
-/// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
-/// `check_spend` — pinned here at its new layer.
-#[tokio::test]
-async fn v5_with_small_order_rk_sapling_spend() {
-    let _init_guard = zebra_test::init();
-
-    for net in Network::iter() {
-        let mut tx = v5_transactions(net.block_iter())
-            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
-            .find(|tx| tx.sapling_spends_count() > 0)
-            .expect("V5 tx with Sapling spends");
-
-        let height = tx.expiry_height().expect("expiry height");
-
-        // Parsing must accept the small-order rk; only verification may reject it.
-        set_first_sapling_spend_rk(&mut tx, small_order_point_bytes());
-
-        let verifier = BlockTxVerifier::new(
-            &net,
-            service_fn(|_| async { unreachable!("State service should not be called") }),
-        );
-
-        assert_eq!(
-            verifier
-                .oneshot(BlockRequest {
-                    transaction_hash: tx.hash(),
-                    transaction: Arc::new(tx),
-                    known_utxos: Arc::new(HashMap::new()),
-                    height,
-                    time: DateTime::<Utc>::MAX_UTC,
-                })
-                .await,
-            Err(TransactionError::SaplingVerificationFailed)
-        );
-    }
-}
-
 /// Test that a V5 transaction with a small-order Sapling output `epk` parses but fails verification.
 /// Rejected at parse time before the `zcash_primitives` refactor, now by `sapling-crypto`'s
 /// `check_output` — pinned here at its new layer.
@@ -3339,7 +3345,9 @@ async fn v5_with_small_order_epk_sapling_output() {
     // Only Mainnet: the Testnet vectors have no V5 tx with Sapling outputs and no transparent inputs.
     for net in [Network::Mainnet] {
         let mut tx = v5_transactions(net.block_iter())
-            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_orchard_shielded_data()
+            })
             .find(|tx| tx.sapling_outputs().next().is_some())
             .expect("V5 tx with Sapling outputs");
 

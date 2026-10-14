@@ -176,11 +176,12 @@ impl Service<BatchControl<Item>> for Verifier {
                     .ok_or(TransactionError::SaplingVerificationFailed);
 
                 async move {
-                    bundle_check.map_err(BoxError::from)?;
-
                     rx.changed()
                         .await
                         .map_err(|_| BoxError::from("verifier was dropped without flushing"))?;
+                    // Even a failed bundle check can leave work in the batch. Keep its
+                    // caller until the bounded batch worker has finished that work.
+                    bundle_check.map_err(BoxError::from)?;
 
                     // We use a new channel for each batch, so we always get the correct
                     // batch result here.
@@ -239,10 +240,9 @@ pub fn verify_single(
     item: Item,
 ) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send>> {
     async move {
-        let mut verifier = Verifier::default();
-
-        let check = verifier
-            .batch
+        // Unlike the shared verifier, a single-item batch must not spawn work from Drop.
+        let mut batch = BatchValidator::default();
+        let check = batch
             .check_bundle(item.bundle, item.sighash.into())
             .then_some(())
             .ok_or(TransactionError::SaplingVerificationFailed);
@@ -251,7 +251,7 @@ pub fn verify_single(
         let is_valid = tokio::task::spawn_blocking(move || {
             let (spend_vk, output_vk) = SAPLING.verifying_keys();
 
-            mem::take(&mut verifier.batch).validate(&spend_vk, &output_vk, rand::rng())
+            batch.validate(&spend_vk, &output_vk, rand::rng())
         })
         .await
         .map_err(|_| BoxError::from("Sapling bundle validation thread panicked"))?;
