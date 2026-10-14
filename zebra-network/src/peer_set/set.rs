@@ -1876,7 +1876,7 @@ where
         }
     }
 
-    /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
+    /// Routes the same request to up to `max_peers` ready peers.
     ///
     /// `max_peers` must be at least one, and at most the number of ready peers.
     fn route_multiple(
@@ -1897,7 +1897,7 @@ where
         self.send_multiple(req, selected_peers)
     }
 
-    /// Sends the same request to the provided ready peers, ignoring return values.
+    /// Sends to ready peers, reporting block-advert failures after every selected peer finishes.
     ///
     /// # Security
     ///
@@ -1911,23 +1911,42 @@ where
         req: Request,
         peers: Vec<D::Key>,
     ) -> <Self as tower::Service<Request>>::Future {
-        let futs = FuturesUnordered::new();
+        let require_success = matches!(
+            req,
+            Request::AdvertiseBlock(..) | Request::AdvertiseBlockToAll(_)
+        );
+        let mut futs = FuturesUnordered::new();
         for key in peers {
             let mut svc = self
                 .take_ready_service(&key)
                 .expect("selected peers are ready");
-            futs.push(svc.call(req.clone()).map_err(|_| ()));
+            futs.push(svc.call(req.clone()).map_err(BoxError::from));
             self.push_unready(key, svc);
         }
 
         async move {
-            let results = futs.collect::<Vec<Result<_, _>>>().await;
+            let mut first_error = None;
+            let mut succeeded = 0;
+            let mut failed = 0;
+            while let Some(result) = futs.next().await {
+                match result {
+                    Ok(_) => succeeded += 1,
+                    Err(error) => {
+                        failed += 1;
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
             tracing::debug!(
-                ok.len = results.iter().filter(|r| r.is_ok()).count(),
-                err.len = results.iter().filter(|r| r.is_err()).count(),
+                ok.len = succeeded,
+                err.len = failed,
                 "sent peer request to multiple peers"
             );
-            Ok(Response::Nil)
+            if require_success {
+                first_error.map_or(Ok(Response::Nil), Err)
+            } else {
+                Ok(Response::Nil)
+            }
         }
         .boxed()
     }
@@ -2012,7 +2031,7 @@ where
         }
     }
 
-    /// Broadcasts the same request to all ready peers, ignoring return values.
+    /// Broadcasts to ready and queued peers, retaining every delivery future until completion.
     fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         let ready_peers = self.ready_services.keys().copied().collect();
         let send_multiple_fut = self.send_multiple(req.clone(), ready_peers);
@@ -2021,9 +2040,26 @@ where
         };
 
         async move {
-            let _ = send_multiple_fut.await?;
-            while queued_broadcast_fut_receiver.recv().await.is_some() {}
-            Ok(Response::Nil)
+            let mut pending = FuturesUnordered::new();
+            pending.push(send_multiple_fut);
+            let mut receiving = true;
+            let mut first_error = None;
+            while receiving || !pending.is_empty() {
+                tokio::select! {
+                    delivery = queued_broadcast_fut_receiver.recv(), if receiving => {
+                        match delivery {
+                            Some(delivery) => pending.push(delivery),
+                            None => receiving = false,
+                        }
+                    }
+                    result = pending.next(), if !pending.is_empty() => {
+                        if let Some(Err(error)) = result {
+                            first_error.get_or_insert(error);
+                        }
+                    }
+                }
+            }
+            first_error.map_or(Ok(Response::Nil), Err)
         }
         .boxed()
     }
@@ -2043,7 +2079,11 @@ where
             let unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
             let queued = (req.clone(), sender, unready_peers);
 
-            // Drop the existing queued broadcast all request, if any.
+            // Supersession is not successful delivery of the displaced block.
+            if let Some((_, previous, _)) = self.queued_broadcast_all.take() {
+                let _ =
+                    previous.send(async { Err("block broadcast was superseded".into()) }.boxed());
+            }
             self.queued_broadcast_all = Some(queued);
 
             Some(receiver)

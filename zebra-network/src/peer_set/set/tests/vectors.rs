@@ -2856,3 +2856,71 @@ fn peer_set_waits_for_busy_failed_peer_as_last_resort() {
         );
     });
 }
+
+/// Deferred delivery futures must run, drain siblings, and report supersession as failure.
+#[test]
+fn broadcast_all_drains_deferred_deliveries_and_reports_supersession() {
+    let peer_versions = PeerVersions {
+        peer_versions: vec![Version::min_specified_for_upgrade(
+            &Network::Mainnet,
+            NetworkUpgrade::Nu6_2,
+        )],
+    };
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .build();
+        let peer_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        peer_set.ready().await.expect("mock peer is ready");
+        let service = peer_set
+            .take_ready_service(&peer_addr)
+            .expect("mock peer is ready");
+        peer_set.push_unready(peer_addr, service);
+        let mut broadcast =
+            peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([41; 32])));
+        let (_, sender, _) = peer_set.queued_broadcast_all.take().unwrap();
+        let (entered, mut started) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        assert!(sender
+            .send(async { Err("controlled delivery failure".into()) }.boxed())
+            .is_ok());
+        assert!(sender
+            .send(
+                async move {
+                    let _ = entered.send(());
+                    released
+                        .await
+                        .expect("the test releases the deferred delivery");
+                    Ok(Response::Nil)
+                }
+                .boxed()
+            )
+            .is_ok());
+        drop(sender);
+        assert!(futures::poll!(&mut broadcast).is_pending());
+        started
+            .try_recv()
+            .expect("the deferred delivery future was polled");
+        release.send(()).unwrap();
+        let error = timeout(Duration::from_secs(1), broadcast)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.to_string(), "controlled delivery failure");
+
+        let displaced = peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([42; 32])));
+        let replacement =
+            peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([43; 32])));
+        assert!(timeout(Duration::from_secs(1), displaced)
+            .await
+            .unwrap()
+            .is_err());
+        drop(replacement);
+    });
+}
