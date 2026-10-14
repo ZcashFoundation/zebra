@@ -1060,7 +1060,10 @@ impl Service<Request> for Mempool {
                 Request::CheckForVerifiedTransactions => {
                     trace!(?req, "got mempool request");
 
-                    // all the work for this request is done in poll_ready
+                    // Queue checks also reap abandoned waiters when the chain tip stalls.
+                    storage.pending_outputs.prune();
+
+                    // Verified transactions were collected in poll_ready.
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
 
