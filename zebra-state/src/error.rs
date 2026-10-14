@@ -139,6 +139,14 @@ pub enum CommitBlockError {
     #[non_exhaustive]
     WriteTaskExited,
 
+    /// The bounded mined-block notification channel has no free slot before committing.
+    #[error("mined block notification channel is full; block was not committed")]
+    MinedBlockNotificationFull,
+
+    /// The mined-block notification consumer closed its channel before committing.
+    #[error("mined block notification channel is closed; block was not committed")]
+    MinedBlockNotificationClosed,
+
     /// The bounded orphan queue evicted this block before its parent became ready.
     ///
     /// This is local resource pressure, not a consensus failure; the request can be retried.
@@ -165,7 +173,9 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
             CommitBlockError::Duplicate { .. }
             | CommitBlockError::WriteTaskExited
-            | CommitBlockError::OrphanQueueFull => false,
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
@@ -180,7 +190,9 @@ impl CommitBlockError {
             }
             CommitBlockError::Duplicate { .. }
             | CommitBlockError::WriteTaskExited
-            | CommitBlockError::OrphanQueueFull => false,
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
@@ -194,7 +206,9 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
             CommitBlockError::Duplicate { .. }
             | CommitBlockError::WriteTaskExited
-            | CommitBlockError::OrphanQueueFull => 0,
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => 0,
         }
     }
 }
