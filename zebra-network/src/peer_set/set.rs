@@ -135,7 +135,7 @@ use crate::{
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
-        InventoryChange, InventoryRegistry, PeerStallEvent, StallOutcome,
+        ConnectionId, InventoryChange, InventoryRegistry, PeerStallEvent, StallOutcome,
     },
     protocol::{
         external::{connection_limit_key, InventoryHash},
@@ -215,6 +215,12 @@ where
 
     /// Producer clones handed to each tracked request's response wrapper.
     stall_event_tx: tokio_mpsc::UnboundedSender<PeerStallEvent>,
+
+    /// Identifies the admitted connection associated with each address's tracker.
+    tracked_connections: HashMap<PeerSocketAddr, ConnectionId>,
+
+    /// Allocates connection identities that are never reused within this peer set.
+    next_connection_id: u64,
 
     // Peer Tracking: Ready Peers
     //
@@ -375,6 +381,8 @@ where
             find_response_stalls: FindResponseStallTracker::new(),
             stall_event_rx,
             stall_event_tx,
+            tracked_connections: HashMap::new(),
+            next_connection_id: 0,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -780,12 +788,27 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
+                    self.track_connection(key);
                     self.push_unready(key, svc);
                 }
             }
         }
 
         result
+    }
+
+    /// Assigns a fresh identity to an admitted connection and resets its address's stall history.
+    fn track_connection(&mut self, peer: PeerSocketAddr) {
+        let connection_id = ConnectionId::from(self.next_connection_id);
+
+        self.next_connection_id = self
+            .next_connection_id
+            .checked_add(1)
+            .expect("a peer set cannot admit u64::MAX connections");
+
+        // A replacement starts fresh even if the previous connection left tracking behind.
+        self.find_response_stalls.clear(peer);
+        self.tracked_connections.insert(peer, connection_id);
     }
 
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
@@ -842,6 +865,7 @@ where
     /// Drops the service, cancelling any pending request or response to that peer.
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
+        self.tracked_connections.remove(key);
         self.find_response_stalls.clear(*key);
         self.zcashd_compat_peer_keys.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
