@@ -2998,10 +2998,16 @@ where
                 }
                 check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
                 let now = self.template_clock_now();
+                if template.needs_difficulty_refresh(&self.network, now) {
+                    continue;
+                }
                 (template.cur_time, template.max_time) =
                     template.clamped_time_range(now).ok_or_misc_error(
                         "local clock moved backwards while building the block template",
                     )?;
+                if let Some(cache) = self.gbt.template_cache() {
+                    cache.preserve_work_identity(&mut template);
+                }
                 template.submit_old = client_long_poll_id.as_ref().map(|old_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_id)
                 });
