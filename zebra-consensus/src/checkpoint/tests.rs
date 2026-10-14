@@ -19,6 +19,7 @@ use crate::{error::TransactionError, router::RouterError};
 
 use super::*;
 
+mod commit_tasks;
 mod queue_pressure;
 
 /// The timeout we apply to each verify future during testing.
@@ -1396,6 +1397,38 @@ fn chain_with_checkpoints(
         .collect();
 
     (chain, checkpoints)
+}
+
+/// Internal callers bypass network decoding, so the verifier enforces the block size limit.
+#[tokio::test]
+async fn oversized_internal_blocks_are_rejected() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let (mut chain, checkpoints) = chain_with_checkpoints(4, &[0, 4]);
+    let oversized = Arc::make_mut(&mut chain[1]);
+    let coinbase = Arc::make_mut(&mut oversized.transactions[0]);
+    let mut outputs = coinbase.outputs();
+    outputs[0].lock_script =
+        transparent::Script::new(&vec![0; usize::try_from(block::MAX_BLOCK_BYTES)?]);
+    coinbase.set_outputs(outputs);
+    let merkle_root = oversized.transactions.iter().map(|tx| tx.hash()).collect();
+    Arc::make_mut(&mut oversized.header).merkle_root = merkle_root;
+
+    let mut verifier = CheckpointVerifier::from_list(
+        checkpoints.clone(),
+        &network_without_pow(),
+        Some(checkpoints[0]),
+        MockService::build().for_unit_tests(),
+    )
+    .map_err(|e| eyre!(e))?;
+
+    assert!(matches!(
+        verifier.queue_block(chain[1].clone()),
+        Err(VerifyCheckpointError::VerifyBlock(
+            VerifyBlockError::OversizedBlock
+        ))
+    ));
+    Ok(())
 }
 
 /// When the queue is out of memory, a block replaces the highest queued blocks that aren't linked
