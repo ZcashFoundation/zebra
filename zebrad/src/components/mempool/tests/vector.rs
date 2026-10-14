@@ -2630,3 +2630,54 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
         "a transaction from the same IP on a different port must share the per-peer bucket, got {result:?}"
     );
 }
+
+/// Queue checks reap abandoned output channels without waiting for a new block.
+#[tokio::test]
+async fn stalled_tip_queue_check_prunes_abandoned_output_waiters() {
+    let network = Network::Mainnet;
+    let (mut mempool, _peers, _state, _tip_changes, _verifier, mut recent_syncs, _changes) =
+        timeout(Duration::from_secs(30), setup(&network, u64::MAX, true))
+            .await
+            .expect("the ephemeral state initializes within the test deadline");
+    mempool.enable(&mut recent_syncs).await;
+
+    let live_outpoint = OutPoint::from_usize(zebra_chain::transaction::Hash([0x31; 32]), 0);
+    let live_waiter = mempool
+        .ready()
+        .await
+        .expect("enabled mempool accepts output requests")
+        .call(Request::AwaitOutput(live_outpoint));
+
+    for round in 0..2 {
+        for index in 0..8 {
+            let outpoint = OutPoint::from_usize(
+                zebra_chain::transaction::Hash([0x32; 32]),
+                round * 8 + index,
+            );
+            let abandoned = mempool
+                .ready()
+                .await
+                .expect("enabled mempool accepts output requests")
+                .call(Request::AwaitOutput(outpoint));
+            drop(abandoned);
+        }
+        mempool.dummy_call().await;
+        assert_eq!(
+            mempool.storage().pending_outputs.len(),
+            1,
+            "queue checks retain only the live waiter while the chain tip remains fixed"
+        );
+    }
+
+    let expected = transparent::Output::new(Amount::zero(), transparent::Script::new(&[]));
+    mempool
+        .storage()
+        .pending_outputs
+        .respond(&live_outpoint, expected.clone());
+    let response = timeout(Duration::from_secs(1), live_waiter)
+        .await
+        .expect("pruning must preserve the live receiver")
+        .expect("live output request receives its matching output");
+    assert!(matches!(response, Response::UnspentOutput(output) if output == expected));
+    assert_eq!(mempool.storage().pending_outputs.len(), 0);
+}
