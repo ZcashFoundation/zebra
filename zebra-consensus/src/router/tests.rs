@@ -56,6 +56,7 @@ async fn verifiers_from_network(
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = crate::router::init_test(
         Config::default(),
         &network,
@@ -164,6 +165,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = super::init_test(config.clone(), &network, state, read_state).await;
 
     // Add a timeout layer
