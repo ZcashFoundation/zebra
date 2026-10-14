@@ -373,7 +373,7 @@ where
 
     /// Find requests waiting for a serving peer, in request order.
     ///
-    /// After [`FIND_BUSY_PEER_WAIT_TIMEOUT`], any ready peer can receive the request.
+    /// After [`FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`], any ready peer can receive the request.
     queued_find_requests: VecDeque<QueuedFindRequest>,
 
     /// Wakes the peer set at the next unexpired queued find request deadline.
@@ -1345,7 +1345,8 @@ where
             if is_find_request && !self.serving_peer_keys.contains(&peer_key) {
                 metrics::counter!(
                     "zcash.net.peer_set.find_fallback",
-                    "reason" => "no_serving_peer"
+                    "reason" => "no_serving_peer",
+                    "network" => network_kind_label(&self.network)
                 )
                 .increment(1);
             }
@@ -1359,8 +1360,12 @@ where
                 return self.queue_find_request(req);
             }
             if let Some(peer_key) = self.select_ready_find_peer(true) {
-                metrics::counter!("zcash.net.peer_set.find_fallback", "reason" => "queue_full")
-                    .increment(1);
+                metrics::counter!(
+                    "zcash.net.peer_set.find_fallback",
+                    "reason" => "queue_full",
+                    "network" => network_kind_label(&self.network)
+                )
+                .increment(1);
                 return self.call_ready_peer(peer_key, req);
             }
         }
@@ -1645,7 +1650,11 @@ where
 
     /// Waits for a serving peer, falling back to any ready peer once the bounded wait expires.
     fn queue_find_request(&mut self, request: Request) -> ResponseFuture {
-        metrics::counter!("zcash.net.peer_set.find_queued").increment(1);
+        metrics::counter!(
+            "zcash.net.peer_set.find_queued",
+            "network" => network_kind_label(&self.network)
+        )
+        .increment(1);
         let (response_sender, response_receiver) = oneshot::channel();
         self.queued_find_requests.push_back(QueuedFindRequest {
             request,
@@ -1693,8 +1702,12 @@ where
                     } else {
                         "expired"
                     };
-                    metrics::counter!("zcash.net.peer_set.find_fallback", "reason" => reason)
-                        .increment(1);
+                    metrics::counter!(
+                        "zcash.net.peer_set.find_fallback",
+                        "reason" => reason,
+                        "network" => network_kind_label(&self.network)
+                    )
+                    .increment(1);
                 }
                 let response_fut = self.call_ready_peer(peer, queued.request);
                 // A concurrent cancellation drops the response future, cancelling peer work.

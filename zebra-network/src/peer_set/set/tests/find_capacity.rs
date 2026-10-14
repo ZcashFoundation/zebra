@@ -4,7 +4,6 @@ use super::*;
 use crate::peer_set::set::MAX_QUEUED_FIND_REQUESTS;
 
 #[test]
-
 fn peer_set_frees_queue_slot_of_cancelled_find() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
