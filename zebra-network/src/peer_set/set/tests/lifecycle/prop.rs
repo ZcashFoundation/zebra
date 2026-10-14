@@ -5,11 +5,59 @@ use std::time::Duration;
 use proptest::prelude::*;
 use tokio::time::timeout;
 
-use crate::{peer::PeerError, peer_set::stall_tracker::FIND_RESPONSE_STALL_THRESHOLD};
+use crate::{
+    peer::PeerError,
+    peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerStallEvent},
+};
 
 use super::{FindRequestKind, TestScenario};
 
 proptest! {
+    /// A closure event for the tracked connection clears its identity and stall history.
+    #[test]
+    fn matching_connection_closure_clears_tracking(
+        request_kind in any::<FindRequestKind>(),
+        initial_stalls in 1..FIND_RESPONSE_STALL_THRESHOLD,
+    ) {
+        let (runtime, _test_guard) = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut test = TestScenario::new(request_kind);
+
+            let mut original = test.connect();
+            test.ready()
+                .await
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+
+            let connection_id = *test
+                .peer_set
+                .tracked_connections
+                .get(&test.address)
+                .ok_or_else(|| TestCaseError::fail("the admitted connection must be tracked"))?;
+
+            test.stall_without_disconnecting(&mut original, initial_stalls).await?;
+
+            // Inject the event to test cleanup independently of service-owned guards.
+            test.peer_set
+                .stall_event_tx
+                .send(PeerStallEvent::ConnectionClosed {
+                    peer: test.address,
+                    connection_id,
+                })
+                .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            test.poll();
+
+            prop_assert!(
+                !test.peer_set.tracked_connections.contains_key(&test.address),
+                "a matching closure event must remove the tracked connection identity",
+            );
+
+            test.assert_fresh_stall_allowance()?;
+
+            Ok(())
+        })?;
+    }
+
     /// A response future from a removed connection cannot stall its replacement.
     #[test]
     fn delayed_old_response_cannot_stall_replacement(

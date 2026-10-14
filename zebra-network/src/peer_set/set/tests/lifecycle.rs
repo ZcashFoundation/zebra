@@ -18,7 +18,7 @@ use zebra_test::prelude::eyre::{self, eyre};
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientTestHarness, MinimumPeerVersion, TrackedClient},
-    peer_set::PeerSet,
+    peer_set::{stall_tracker::FIND_RESPONSE_STALL_THRESHOLD, PeerSet},
     PeerSocketAddr, Request, Response,
 };
 
@@ -97,6 +97,31 @@ impl TestScenario {
         self.ready().await?;
 
         Ok(self.peer_set.call(self.request_kind.request()))
+    }
+
+    /// Checks that a full fresh allowance is needed to reach the stall threshold.
+    ///
+    /// Records stalls directly, exhausting the allowance without routing requests
+    /// or disconnecting the peer.
+    fn assert_fresh_stall_allowance(&mut self) -> Result<(), TestCaseError> {
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+            prop_assert!(
+                !self
+                    .peer_set
+                    .find_response_stalls
+                    .record_stall(self.address),
+                "cleanup must restore the full stall allowance",
+            );
+        }
+
+        prop_assert!(
+            self.peer_set
+                .find_response_stalls
+                .record_stall(self.address),
+            "fresh stalls must reach the threshold after cleanup",
+        );
+
+        Ok(())
     }
 
     /// Processes `stall_count` empty responses, checking that each leaves `peer` connected.
