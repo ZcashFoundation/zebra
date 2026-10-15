@@ -1155,7 +1155,7 @@ where
         };
 
         if cache.is_empty() && !cache.updater_is_running() {
-            return cache.build_error().map_or(Ok(None), Err);
+            return Ok(None);
         }
 
         // Subscribe before the first read below. A template published between reading the cache
@@ -1182,8 +1182,27 @@ where
                 self.gbt.sync_status(),
             )?;
             let Some(template) = self.precomputed_template_for_state_tip(cache).await else {
-                if let Some(error) = cache.build_error() {
-                    return Err(error);
+                if let Some((error_tip, error)) = cache.build_error() {
+                    let current_tip = tokio::time::timeout(
+                        precompute::SNAPSHOT_TIMEOUT,
+                        precompute::state_tip_hash(self.read_state.clone()),
+                    )
+                    .await
+                    .map_misc_error()??;
+                    if current_tip == error_tip {
+                        return Err(error);
+                    }
+                    if error_tip.is_none() {
+                        // A failed snapshot has no parent identity. Recheck it instead of
+                        // replaying an error from before genesis, while still reporting
+                        // current state failures.
+                        tokio::time::timeout(
+                            precompute::SNAPSHOT_TIMEOUT,
+                            types::get_block_template::fetch_chain_info(self.read_state.clone()),
+                        )
+                        .await
+                        .map_misc_error()??;
+                    }
                 }
                 if cache.updater_is_running() {
                     tokio::select! {
