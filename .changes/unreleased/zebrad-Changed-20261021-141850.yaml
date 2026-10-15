@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Removed dependency on tracing-test ([#11728](https://github.com/ZcashFoundation/zebra/pull/11728)).
+time: 2026-10-21T14:18:50.796294996+02:00
