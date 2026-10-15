@@ -214,6 +214,42 @@ async fn gossip_broadcasts_latest_mined_block_when_peers_become_ready() {
     gossip_task.abort();
 }
 
+/// Ready peers receive every queued committed block, including independent side-chain blocks.
+#[tokio::test(start_paused = true)]
+async fn gossip_preserves_queued_mined_blocks_when_peers_are_ready() {
+    let _init_guard = zebra_test::init();
+    let (_chain_tip_sender, _latest_chain_tip, chain_tip_change) =
+        ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let channel = SubmitBlockChannel::new();
+    let mined_block_sender = channel.sender();
+    let blocks = [mined_block(1), mined_block(2)];
+    for block in blocks {
+        mined_block_sender
+            .try_send(block)
+            .expect("channel has capacity for both committed blocks");
+    }
+
+    let gossip_task = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        chain_tip_change,
+        peer_set,
+        Some(channel.receiver()),
+        Default::default(),
+    ));
+    for (hash, _) in blocks {
+        assert_eq!(
+            tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+                .await
+                .expect("ready peers receive each committed block"),
+            Some(zn::Request::AdvertiseBlockToAll(hash)),
+        );
+    }
+    gossip_task.abort();
+}
+
 /// A chain tip change that happens while there are no ready peers is broadcast when peers
 /// become ready, without waiting for another tip change.
 #[tokio::test(start_paused = true)]
