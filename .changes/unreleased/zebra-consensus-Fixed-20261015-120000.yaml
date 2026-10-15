@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: "`tx_transparent_coinbase_spends_maturity()` computes the transaction's coinbase spend restriction once instead of once per spent outpoint, removing an O(inputs × outputs) cost."
+time: 2026-10-15T12:00:00.000000000-03:00
