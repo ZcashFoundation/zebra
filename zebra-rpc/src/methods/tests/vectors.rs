@@ -3100,13 +3100,19 @@ async fn getblocktemplate() {
         [0x7e; 20],
     );
 
-    gbt_with(net, addr).await;
+    tokio::time::timeout(Duration::from_secs(10), gbt_with(net, addr))
+        .await
+        .expect("template requests finish within the test deadline");
 }
 
 async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // The committed-tip recheck follows blocking template construction. The caller bounds
+    // the complete RPC sequence instead of imposing a separate mock request deadline.
+    let read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(Duration::MAX)
+        .for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
