@@ -215,12 +215,7 @@ fn large_transfer_chain(
         })
         .set_work(10);
         assert_eq!(
-            block.transaction_fees(
-                &spent
-                    .iter()
-                    .map(|(outpoint, output)| (*outpoint, output.utxo.clone()))
-                    .collect(),
-            )?,
+            block.transaction_fees(&spent)?,
             Amount::<NonNegative>::zero()
         );
         let contextual = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
@@ -334,16 +329,7 @@ fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
         .iter()
         .map(|transaction| transaction.hash())
         .collect();
-    assert_eq!(
-        block.transaction_fees(
-            &blocks[1]
-                .spent_outputs
-                .iter()
-                .map(|(outpoint, output)| (*outpoint, output.utxo.clone()))
-                .collect(),
-        )?,
-        value
-    );
+    assert_eq!(block.transaction_fees(&blocks[1].spent_outputs)?, value);
     let block = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
         Arc::new(block).prepare(),
         blocks[1].spent_outputs.as_ref().clone(),
