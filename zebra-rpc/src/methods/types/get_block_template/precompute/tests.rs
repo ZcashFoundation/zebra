@@ -656,6 +656,7 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
 
 #[tokio::test]
 async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
+    use futures::FutureExt;
     use std::{
         collections::HashMap,
         sync::atomic::{AtomicUsize, Ordering},
@@ -753,8 +754,12 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         )
         .await;
         let cache = TemplateCache::default();
+        // Proposal conversion runs off-thread; the outer deadline bounds its mock requests.
         let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
-            MockService::build().for_unit_tests();
+            MockService::build()
+                .with_max_request_delay(Duration::MAX)
+                .for_unit_tests();
+        let mut verifier_requests = verifier.clone();
         let mut tasks = tokio::task::JoinSet::new();
         tasks.spawn(validate_templates(
             cache.subscribe(),
@@ -763,9 +768,21 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         ));
         cache.publish(empty);
         // The empty template must not reach the verifier.
+        // Paused sleeps advance only after runnable work and blocking conversions are idle.
         tokio::time::pause();
-        verifier.expect_no_requests().await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
         tokio::time::resume();
+        assert!(
+            tasks.try_join_next().is_none(),
+            "coinbase-only templates must leave the validator running"
+        );
+        assert!(
+            verifier_requests
+                .try_next_request()
+                .now_or_never()
+                .is_none(),
+            "coinbase-only templates must not reach the verifier"
+        );
         let expected =
             proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap();
@@ -778,8 +795,19 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         full.cur_time = full.cur_time.saturating_add(Duration32::from_seconds(1));
         cache.publish(full.clone());
         tokio::time::pause();
-        verifier.expect_no_requests().await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
         tokio::time::resume();
+        assert!(
+            tasks.try_join_next().is_none(),
+            "pending verification must leave the validator running"
+        );
+        assert!(
+            verifier_requests
+                .try_next_request()
+                .now_or_never()
+                .is_none(),
+            "the next proposal must wait for the current verification"
+        );
         // Forward the worker's request through the real router, populating its consensus cache.
         first.respond(
             router
