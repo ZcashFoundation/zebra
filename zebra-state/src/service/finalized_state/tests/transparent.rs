@@ -290,7 +290,7 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
         })
         .collect();
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+        CheckpointVerifiedBlock::from(SemanticallyVerifiedBlock {
             hash: block.hash(),
             block,
             height,
