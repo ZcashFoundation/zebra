@@ -1233,7 +1233,11 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     // get a new empty state
     let state = MockService::build().for_unit_tests();
-    let read_state = MockService::build().for_unit_tests();
+    // The Tip request follows blocking template construction. Use the whole-RPC deadlines below,
+    // not a separate deadline for scheduling and completing that work.
+    let read_state = MockService::build()
+        .with_max_request_delay(Duration::MAX)
+        .for_unit_tests();
 
     let make_mock_read_state_request_handler = || {
         let mut read_state = read_state.clone();
@@ -1420,8 +1424,9 @@ pub async fn test_mining_rpcs<State, ReadState>(
         ..Default::default()
     }));
 
-    let get_block_template = get_block_template
+    let get_block_template = tokio::time::timeout(Duration::from_secs(10), get_block_template)
         .await
+        .expect("invalid proposal validation must not stall")
         .expect("unexpected error in getblocktemplate RPC call");
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
@@ -1430,6 +1435,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
     // reserve preflight. Networks with scheduled reissuance, like Mainnet and public Testnet,
     // require the live parent even before NU7.
     let proposal = network.blockchain_map()[&1].to_vec();
+    let mut proposal_read_state = read_state.clone();
     let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
         mode: GetBlockTemplateRequestMode::Proposal,
         data: Some(HexData(proposal)),
@@ -1448,7 +1454,13 @@ pub async fn test_mining_rpcs<State, ReadState>(
                 response.unwrap(),
                 GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
             );
-            read_state.clone().expect_no_requests().await;
+            assert!(
+                proposal_read_state
+                    .try_next_request()
+                    .now_or_never()
+                    .is_none(),
+                "Mainnet proposal validation must not request state"
+            );
         } else {
             let (response, ()) =
                 tokio::join!(get_block_template, make_mock_read_state_request_handler());
@@ -1519,7 +1531,11 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     let get_difficulty_fut = rpc_mock_state.get_difficulty();
 
-    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+    let (get_difficulty, ..) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(get_difficulty_fut, mock_read_state_request_handler)
+    })
+    .await
+    .expect("getdifficulty must not stall");
 
     let mock_get_difficulty = get_difficulty.expect("unexpected error in getdifficulty RPC call");
 
