@@ -4300,8 +4300,9 @@ async fn fallback_completion(
         [old_transaction.unmined_id()],
     )
     .generate_id();
+    // Give blocking workers time to run under contention; this timeout only guards hangs.
     let response = tokio::time::timeout(
-        Duration::from_secs(1),
+        Duration::from_secs(10),
         rpc.get_block_template(Some(GetBlockTemplateParameters {
             long_poll_id: Some(id),
             ..Default::default()
