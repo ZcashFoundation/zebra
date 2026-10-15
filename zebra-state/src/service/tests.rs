@@ -1366,12 +1366,15 @@ async fn mined_rejections_and_stale_parent_publish_no_notifications() {
             .non_finalized
             .as_ref()
             .unwrap()
-            .send(super::write::NonFinalizedWriteMessage::Commit((
-                child.clone().prepare(),
-                response_sender,
-                Some(Box::new(contextual.clone())),
-                Some(notifications.clone()),
-            )))
+            .send(super::write::NonFinalizedWriteMessage::Commit(
+                (
+                    child.clone().prepare(),
+                    response_sender,
+                    Some(Box::new(contextual.clone())),
+                    Some(notifications.clone()),
+                ),
+                std::time::Instant::now(),
+            ))
             .unwrap_or_else(|_| panic!("the state writer is still running"));
         assert!(response.await.unwrap().is_err());
         assert!(bodies.borrow().is_none());
