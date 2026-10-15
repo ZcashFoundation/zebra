@@ -16,8 +16,7 @@ use zebra_chain::{
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{
-        ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
-        ReceiveRequestAttempt,
+        ClientTestHarness, ConnectedAddr, MinimumPeerVersion, ReceiveRequestAttempt, TrackedClient,
     },
     peer_set::PeerSet,
     protocol::external::types::Version,
@@ -316,7 +315,7 @@ fn sidecar_peer_always_receives_block_gossip() {
     let block_gossip_peer_ips = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
 
     let mut handles = Vec::with_capacity(TOTAL_PEERS);
-    let discovered_peers: Vec<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> = (0
+    let discovered_peers: Vec<Result<Change<PeerSocketAddr, TrackedClient>, BoxError>> = (0
         ..TOTAL_PEERS)
         .map(|index| {
             let ip = if index == SIDECAR_INDEX {
@@ -406,7 +405,7 @@ fn check_if_only_up_to_date_peers_are_live<D, C>(
     minimum_version: Version,
 ) -> Result<usize, TestCaseError>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {

@@ -5,9 +5,11 @@
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
+    time::Instant,
 };
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};
+use indexmap::IndexMap;
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 use tokio::{
@@ -29,11 +31,14 @@ use zebra_chain::{
 use crate::{
     address_book::AddressMetrics,
     constants::DEFAULT_MAX_CONNS_PER_IP,
-    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
+    peer::{ClientTestHarness, MinimumPeerVersion, TrackedClient},
     peer_set::{set::MorePeers, InventoryChange, PeerSet},
     protocol::external::types::Version,
     AddressBook, Config, PeerSocketAddr,
 };
+
+#[cfg(test)]
+mod lifecycle;
 
 #[cfg(test)]
 mod prop;
@@ -57,12 +62,12 @@ impl PeerVersions {
     /// Convert the arbitrary peer versions into mock peer services.
     ///
     /// Each peer versions results in a mock peer service, which is returned as a tuple. The first
-    /// element is the [`LeadTrackedClient`], which is the actual service for the peer connection.
+    /// element is the [`TrackedClient`], which is the actual service for the peer connection.
     /// The second element is a [`ClientTestHarness`], which contains the open endpoints of the
     /// mock channels used by the peer service.
     ///
     /// The clients and the harnesses are collected into separate [`Vec`] lists and returned.
-    pub fn mock_peers(&self) -> (Vec<LoadTrackedClient>, Vec<ClientTestHarness>) {
+    pub fn mock_peers(&self) -> (Vec<TrackedClient>, Vec<ClientTestHarness>) {
         let mut clients = Vec::with_capacity(self.peer_versions.len());
         let mut harnesses = Vec::with_capacity(self.peer_versions.len());
 
@@ -92,7 +97,7 @@ impl PeerVersions {
     pub fn mock_peer_discovery(
         &self,
     ) -> (
-        impl Stream<Item = Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>,
+        impl Stream<Item = Result<Change<PeerSocketAddr, TrackedClient>, BoxError>>,
         Vec<ClientTestHarness>,
     ) {
         let (clients, harnesses) = self.mock_peers();
@@ -121,6 +126,7 @@ struct PeerSetBuilder<D, C> {
     demand_signal: Option<mpsc::Sender<MorePeers>>,
     handle_rx: Option<tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>>,
     inv_stream: Option<broadcast::Receiver<InventoryChange>>,
+    bans_receiver: Option<watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>>,
     address_book: Option<Arc<std::sync::Mutex<AddressBook>>>,
     minimum_peer_version: Option<MinimumPeerVersion<C>>,
     max_conns_per_ip: Option<usize>,
@@ -162,10 +168,22 @@ impl<D, C> PeerSetBuilder<D, C> {
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
+            bans_receiver: self.bans_receiver,
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
             max_conns_per_ip: self.max_conns_per_ip,
             block_gossip_peer_ips: self.block_gossip_peer_ips,
+        }
+    }
+
+    /// Uses the provided ban-update receiver when constructing the [`PeerSet`].
+    pub fn with_bans_receiver(
+        self,
+        bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
+    ) -> Self {
+        Self {
+            bans_receiver: Some(bans_receiver),
+            ..self
         }
     }
 
@@ -180,6 +198,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
+            bans_receiver: self.bans_receiver,
             address_book: self.address_book,
             minimum_peer_version: Some(minimum_peer_version),
             max_conns_per_ip: self.max_conns_per_ip,
@@ -200,6 +219,7 @@ impl<D, C> PeerSetBuilder<D, C> {
             demand_signal: self.demand_signal,
             handle_rx: self.handle_rx,
             inv_stream: self.inv_stream,
+            bans_receiver: self.bans_receiver,
             address_book: self.address_book,
             minimum_peer_version: self.minimum_peer_version,
             max_conns_per_ip: Some(max_conns_per_ip),
@@ -210,7 +230,7 @@ impl<D, C> PeerSetBuilder<D, C> {
 
 impl<D, C> PeerSetBuilder<D, C>
 where
-    D: Discover<Key = PeerSocketAddr, Service = LoadTrackedClient> + Unpin,
+    D: Discover<Key = PeerSocketAddr, Service = TrackedClient> + Unpin,
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
@@ -239,7 +259,9 @@ where
             .unwrap_or_else(|| guard.create_inventory_receiver());
 
         let address_metrics = guard.prepare_address_book(self.address_book);
-        let (_bans_sender, bans_receiver) = tokio::sync::watch::channel(Default::default());
+        let bans_receiver = self
+            .bans_receiver
+            .unwrap_or_else(|| watch::channel(Arc::new(IndexMap::new())).1);
 
         let peer_set = PeerSet::new(
             &config,

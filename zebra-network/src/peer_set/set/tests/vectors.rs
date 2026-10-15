@@ -320,18 +320,17 @@ fn broadcast_all_queued_removes_banned_peers() {
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version.clone())
-            .build();
-
         let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
         let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
         bans_map.insert(banned_ip, std::time::Instant::now());
 
-        let (bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
-        let _ = bans_tx;
-        peer_set.bans_receiver = bans_rx;
+        let (_bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
+
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .with_bans_receiver(bans_rx)
+            .build();
 
         let banned_addr: PeerSocketAddr = SocketAddr::new(banned_ip, 1).into();
         let mut remaining_peers = HashSet::new();
@@ -367,18 +366,18 @@ fn remove_unready_peer_clears_cancel_handle_and_updates_counts() {
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
 
     runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version.clone())
-            .build();
-
         // Prepare a banned IP map (not strictly required for remove(), but keeps
         // the test's setup similar to real-world conditions).
         let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
         let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
         bans_map.insert(banned_ip, std::time::Instant::now());
         let (_bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
-        peer_set.bans_receiver = bans_rx;
+
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .with_bans_receiver(bans_rx)
+            .build();
 
         // Create a cancel handle as if a request was in-flight to `banned_addr`.
         let banned_addr: PeerSocketAddr = SocketAddr::new(banned_ip, 1).into();
