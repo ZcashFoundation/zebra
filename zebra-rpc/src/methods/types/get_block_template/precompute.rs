@@ -75,7 +75,7 @@ pub(crate) fn new_tip_timeout(miner_params: &MinerParams) -> Duration {
 pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Bounds state/mempool snapshot reads, without cancelling a started coinbase proof.
-const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Minimum pause after event-driven builds, so idle arrivals start immediately and bursts
 /// coalesce without extending the window. Slow builds wait at least their own duration.
@@ -96,7 +96,7 @@ pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<A
 struct TemplateState {
     template: Option<Arc<BlockTemplateResponse>>,
     published_at: Instant,
-    error: Option<ErrorObjectOwned>,
+    error: Option<(Option<block::Hash>, ErrorObjectOwned)>,
 }
 
 impl Default for TemplateCache {
@@ -181,8 +181,8 @@ impl TemplateCache {
             .map(|state| state.published_at + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL))
     }
 
-    /// Reports a live updater's failed build only when the caller could not select usable work.
-    pub(crate) fn build_error(&self) -> Option<ErrorObjectOwned> {
+    /// Returns a failed build and its snapshot's tip, which is absent if no snapshot was obtained.
+    pub(crate) fn build_error(&self) -> Option<(Option<block::Hash>, ErrorObjectOwned)> {
         if !self.updater_is_running() {
             return None;
         }
@@ -192,7 +192,7 @@ impl TemplateCache {
             .and_then(|state| state.error.clone())
     }
 
-    fn record_error(&self, error: ErrorObjectOwned) {
+    fn record_error(&self, error: (Option<block::Hash>, ErrorObjectOwned)) {
         self.0.send_modify(|state| {
             let state = state.get_or_insert_with(|| TemplateState {
                 template: None,
@@ -389,7 +389,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus>(
                         tracing::debug!("discarding a template for a superseded chain tip");
                         continue;
                     }
-                    Err(error) => Err(error),
+                    Err(error) => Err((Some(template.previous_block_hash), error)),
                 }
             }
             result => result,
@@ -522,7 +522,7 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
 }
 
 /// Returns the hash of the chain tip the state has committed, if any.
-async fn state_tip_hash<ReadStateService>(
+pub(crate) async fn state_tip_hash<ReadStateService>(
     read_state: ReadStateService,
 ) -> RpcResult<Option<block::Hash>>
 where
@@ -550,13 +550,18 @@ async fn build<Mempool, ReadStateService>(
     read_state: ReadStateService,
     mempool: Option<Mempool>,
     phase: Option<&AtomicU8>,
-) -> RpcResult<Option<(BlockTemplateResponse, HashSet<UnminedTxId>)>>
+) -> Result<
+    Option<(BlockTemplateResponse, HashSet<UnminedTxId>)>,
+    (Option<block::Hash>, ErrorObjectOwned),
+>
 where
     Mempool: MempoolService,
     ReadStateService: ReadState,
 {
+    let mut error_tip = None;
     let snapshot = tokio::time::timeout(SNAPSHOT_TIMEOUT, async {
         let chain_info = fetch_chain_info(read_state).await?;
+        error_tip = Some(chain_info.tip_hash);
         let (mempool_txs, mempool_tx_deps) = match mempool {
             Some(mempool) => {
                 let Some(snapshot) =
@@ -571,7 +576,9 @@ where
         Ok::<_, ErrorObjectOwned>(Some((chain_info, mempool_txs, mempool_tx_deps)))
     })
     .await
-    .map_misc_error()??;
+    .map_misc_error()
+    .and_then(|result| result)
+    .map_err(|error| (error_tip, error))?;
     let Some((chain_info, mempool_txs, mempool_tx_deps)) = snapshot else {
         return Ok(None);
     };
@@ -612,7 +619,9 @@ where
         .map(|template| Some((template, mempool_tx_ids)))
     })
     .await
-    .map_misc_error()?
+    .map_misc_error()
+    .and_then(|result| result)
+    .map_err(|error| (error_tip, error))
 }
 
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
