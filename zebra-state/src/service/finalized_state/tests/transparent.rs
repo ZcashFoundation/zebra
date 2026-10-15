@@ -264,10 +264,7 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
     });
     assert_eq!(
         block
-            .transaction_fees(&HashMap::from([(
-                existing_outpoint,
-                existing_utxo.utxo.clone()
-            )]))
+            .transaction_fees(&HashMap::from([(existing_outpoint, existing_utxo.clone())]))
             .unwrap(),
         (returned + one).unwrap(),
     );
