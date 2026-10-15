@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Added
-body: Added `MinedBlockNotifications::allow_ordinary_commit` to retain a superseded mined observer without requiring notification capacity for an ordinary same-hash commit.
+body: Added `Request::{CommitMinedBlock, CommitMinedCheckpointVerifiedBlock}` and `MinedBlockNotifications` for state-owned mining notifications, with `CommitBlockError::{MinedBlockNotificationFull, MinedBlockNotificationClosed}` reporting unavailable notification capacity before mutation and `MinedBlockNotifications::allow_ordinary_commit` preserving superseded observers as best-effort.
 time: 2026-10-14T22:35:04.078938665+02:00
