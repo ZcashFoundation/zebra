@@ -1803,14 +1803,6 @@ criteria = "safe-to-deploy"
 version = "0.3.23"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing-test]]
-version = "0.2.6"
-criteria = "safe-to-run"
-
-[[exemptions.tracing-test-macro]]
-version = "0.2.6"
-criteria = "safe-to-run"
-
 [[exemptions.typeid]]
 version = "1.0.3"
 criteria = "safe-to-deploy"
