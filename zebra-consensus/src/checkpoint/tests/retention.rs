@@ -603,4 +603,3 @@ async fn reset_cleans_stale_queue_without_releasing_running_owner() {
     .await
     .expect("reset must clean stale indexes without cancelling accepted work");
 }
-
