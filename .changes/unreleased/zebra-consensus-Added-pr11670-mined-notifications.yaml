@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added `Request::CommitMined` to validate and commit locally mined blocks with state-owned validated-body and committed-block notifications ([#11670](https://github.com/ZcashFoundation/zebra/pull/11670)).
+time: 2026-11-05T06:34:12.549923941+01:00
