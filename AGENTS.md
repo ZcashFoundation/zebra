@@ -96,7 +96,12 @@ Code is primarily in each crate's `src/`; integration tests are in `*/tests/`; m
 
 ## Build, Test, and Development Commands
 
-All of these must pass before submitting a PR:
+All of these must pass before submitting a PR. Run the tests with
+[`cargo nextest`](https://nexte.st/) (`cargo install cargo-nextest`), not plain
+`cargo test`: the test harness installs a global error hook once per process,
+and `cargo test` runs tests as threads in one process, so it fails with
+"a hook has already been installed" even on an unmodified checkout. CI uses
+nextest, which runs one process per test.
 
 ```bash
 # Optional full build check
@@ -105,14 +110,14 @@ cargo build --workspace --locked
 # All three must pass before any PR
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo nextest run
 
 # Run a single crate's tests
-cargo test -p zebra-chain
-cargo test -p zebra-state
+cargo nextest run -p zebra-chain
+cargo nextest run -p zebra-state
 
 # Run a single test by name
-cargo test -p zebra-chain -- test_name
+cargo nextest run -p zebra-chain test_name
 
 # CI-like nextest profile (unit + integration, excludes stateful and E2E)
 cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
@@ -236,11 +241,11 @@ S::Future: Send + 'static,
 - Test configs must match real network parameters (don't rely on defaults)
 
 ```bash
-# Unit tests (all crates)
-cargo test --workspace
+# Unit tests (all crates); use nextest, not `cargo test` (see Build, Test, and Development Commands)
+cargo nextest run
 
 # zebrad unit + integration tests (default nextest profile excludes stateful and E2E)
-cargo nextest run
+cargo nextest run -p zebrad
 
 # Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
 ```

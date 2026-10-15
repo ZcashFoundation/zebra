@@ -40,7 +40,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network as zn;
 use zebra_node_services::mempool::{
     CreatedOrSpent, Gossip, MempoolChange, MempoolTxSubscriber, Request, Response,
 };
@@ -104,7 +104,15 @@ fn adjusted_mempool_misbehavior_score(
             is_in_branch_id_grace_period(transaction_upgrade, verification_height, network)
         });
 
-    if is_grace_mismatch {
+    // Lock times are checked against our own tip, so a peer whose tip is ahead can honestly
+    // relay a transaction we reject.
+    let is_tip_relative_lock_time = matches!(
+        error,
+        TransactionError::LockedUntilAfterBlockHeight(_)
+            | TransactionError::LockedUntilAfterBlockTime(_)
+    );
+
+    if is_grace_mismatch || is_tip_relative_lock_time {
         0
     } else {
         error.mempool_misbehavior_score()
@@ -298,7 +306,7 @@ pub struct Mempool {
     transaction_sender: broadcast::Sender<MempoolChange>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
 
     // Diagnostics
     //
@@ -334,7 +342,7 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
     ) -> (Self, MempoolTxSubscriber) {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
@@ -755,7 +763,12 @@ impl Service<Request> for Mempool {
                             );
 
                             if score != 0 {
-                                let _ = self.misbehavior_sender.try_send((*advertiser_addr, score));
+                                let _ =
+                                    self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                                        *advertiser_addr,
+                                        score,
+                                        format!("invalid mempool transaction {tx_id}: {error}"),
+                                    ));
                             }
                         };
 

@@ -258,14 +258,24 @@ enum JsonRpcVersion {
 
 /// A version-agnostic JSON-RPC request.
 #[derive(Debug, Deserialize, Serialize)]
-struct JsonRpcRequest {
+pub(super) struct JsonRpcRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     jsonrpc: Option<String>,
     method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     params: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_id",
+        skip_serializing_if = "Option::is_none"
+    )]
     id: Option<serde_json::Value>,
+}
+
+fn deserialize_present_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 impl JsonRpcRequest {
@@ -287,7 +297,7 @@ impl JsonRpcRequest {
         }
     }
 
-    fn into_2(mut self) -> Self {
+    pub(super) fn into_2(mut self) -> Self {
         self.jsonrpc = Some("2.0".into());
         self
     }

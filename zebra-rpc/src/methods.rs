@@ -464,6 +464,8 @@ pub trait Rpc {
     /// - Only the multi-argument format is used by lightwalletd and this is what we currently support:
     /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
     /// - It is recommended that users call the method with start/end heights such that the response can't be too large.
+    /// - At most 10,000 addresses are accepted, and a query matching more than 100,000
+    ///   transactions is rejected; narrow the height range instead.
     #[method(name = "getaddresstxids")]
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
 
@@ -481,7 +483,7 @@ pub trait Rpc {
     ///         - `addresses`: (array, required, example=[\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"]) The addresses to get outputs from.
     ///         - `chaininfo`: (boolean, optional, default=false) Include chain info with results
     ///         - `startHeight`: (numeric, optional, default=0) Only return outputs at or above this height
-    ///         - `maxEntries`: (numeric, optional, default=0) Return at most this many outputs, zero for no limit
+    ///         - `maxEntries`: (numeric, optional, default=0) Return at most this many outputs, zero for up to 100,000
     ///
     /// # Notes
     ///
@@ -489,6 +491,9 @@ pub trait Rpc {
     /// that pages through a large address does not make the node read the whole UTXO set each
     /// time. Callers must set both or neither: `maxEntries` alone would truncate the outputs
     /// before the height filter ran.
+    ///
+    /// At most 10,000 addresses are accepted. Without `maxEntries`, a query matching more than
+    /// 100,000 outputs is rejected, and so is a larger `maxEntries`.
     ///
     /// lightwalletd always uses the multi-address request, without chaininfo:
     /// <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402>
@@ -880,6 +885,9 @@ where
     /// if end of support is enforced on `network`. Reported by the `getdeprecationinfo` RPC.
     end_of_support_height: Option<Height>,
 
+    /// The maximum number of results the address RPCs return before rejecting the query.
+    max_address_query_results: usize,
+
     // Services
     //
     /// A handle to the mempool service.
@@ -999,6 +1007,7 @@ where
             network: network.clone(),
             debug_force_finished_sync,
             end_of_support_height: None,
+            max_address_query_results: MAX_ADDRESS_QUERY_RESULTS,
             mempool: mempool.clone(),
             state: state.clone(),
             read_state: read_state.clone(),
@@ -1202,6 +1211,16 @@ where
     /// When unset, or set to `None`, `getdeprecationinfo` omits the `end_of_service` object.
     pub fn with_end_of_support_height(mut self, end_of_support_height: Option<Height>) -> Self {
         self.end_of_support_height = end_of_support_height;
+        self
+    }
+
+    /// Sets the maximum number of results the `getaddresstxids` and `getaddressutxos` RPCs return.
+    #[cfg(test)]
+    pub(crate) fn with_max_address_query_results(
+        mut self,
+        max_address_query_results: usize,
+    ) -> Self {
+        self.max_address_query_results = max_address_query_results;
         self
     }
 }
@@ -2467,9 +2486,12 @@ where
 
         let valid_addresses = request.valid_addresses()?;
 
+        // Ask for one more than the cap, so an oversized result can be detected.
+        let cap = self.max_address_query_results;
         let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
             addresses: valid_addresses,
             height_range,
+            max_entries: Some(cap.saturating_add(1)),
         };
         let response = read_state
             .ready()
@@ -2479,6 +2501,13 @@ where
 
         let hashes = match response {
             zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
+                if hashes.len() > cap {
+                    return Err(format!(
+                        "more than {cap} transactions match; narrow the height range"
+                    ))
+                    .map_error(server::error::LegacyCode::InvalidParameter);
+                }
+
                 let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
 
                 hashes
@@ -2520,15 +2549,26 @@ where
                 .unwrap_or(u32::MAX)
                 .min(Height::MAX.0),
         );
-        let max_entries = (utxos_request.max_entries > 0)
-            // Cast is safe: `usize` is at least 32 bits on all supported platforms.
-            .then_some(utxos_request.max_entries as usize);
+        // Cast is safe: `usize` is at least 32 bits on all supported platforms.
+        let requested_entries = utxos_request.max_entries as usize;
+        let cap = self.max_address_query_results;
+        if requested_entries > cap {
+            return Err(format!("maxEntries must be at most {cap}"))
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
+        // Without `maxEntries`, ask for one more than the cap, so an oversized result can be detected.
+        let max_entries = if requested_entries > 0 {
+            requested_entries
+        } else {
+            cap.saturating_add(1)
+        };
 
         // get utxos data for addresses
         let request = zebra_state::ReadRequest::UtxosByAddresses {
             addresses: valid_addresses,
             height_range: start_height..=Height::MAX,
-            max_entries,
+            max_entries: Some(max_entries),
         };
         let response = read_state
             .ready()
@@ -2570,6 +2610,13 @@ where
             response_utxos.push(entry);
 
             last_output_location = output_location;
+        }
+
+        if response_utxos.len() > cap {
+            return Err(format!(
+                "more than {cap} unspent outputs match; page with startHeight and maxEntries"
+            ))
+            .map_error(server::error::LegacyCode::InvalidParameter);
         }
 
         if !utxos_request.chain_info {
@@ -4026,12 +4073,26 @@ enum DGetAddressBalanceRequest {
 #[deprecated(note = "Use `GetAddressBalanceRequest` instead.")]
 pub type AddressStrings = GetAddressBalanceRequest;
 
+/// The maximum number of addresses a client can send in one request.
+pub(crate) const MAX_REQUEST_ADDRESSES: usize = 10_000;
+
+/// The maximum number of results `getaddresstxids` and `getaddressutxos` return before
+/// rejecting the query; clients narrow the height range or page instead.
+pub(crate) const MAX_ADDRESS_QUERY_RESULTS: usize = 100_000;
+
 /// A collection of validatable addresses
 pub trait ValidateAddresses {
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
     fn valid_addresses(&self) -> Result<HashSet<Address>> {
+        if self.addresses().len() > MAX_REQUEST_ADDRESSES {
+            return Err(format!(
+                "too many addresses: the limit is {MAX_REQUEST_ADDRESSES}"
+            ))
+            .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
         // Reference for the legacy error code:
         // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
         let valid_addresses: HashSet<Address> = self
@@ -4114,7 +4175,7 @@ pub struct GetAddressUtxosRequest {
     #[serde(default)]
     #[serde(rename = "startHeight")]
     start_height: u64,
-    /// The maximum number of unspent outputs to return, or zero for no limit.
+    /// The maximum number of unspent outputs to return, or zero for up to 100,000.
     #[serde(default)]
     #[serde(rename = "maxEntries")]
     max_entries: u32,
@@ -4132,7 +4193,7 @@ impl GetAddressUtxosRequest {
     }
 
     /// Limits this request to the unspent outputs at or above `start_height`, and to at most
-    /// `max_entries` of them. Zero means "from the genesis block" and "no limit".
+    /// `max_entries` of them. Zero means "from the genesis block" and "up to 100,000".
     ///
     /// Both limits are taken together, because applying `max_entries` on its own would
     /// truncate the outputs before the height filter ran.

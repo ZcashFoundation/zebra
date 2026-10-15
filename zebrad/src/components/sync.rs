@@ -30,7 +30,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network as zn;
 use zebra_state as zs;
 
 use crate::{
@@ -419,7 +419,7 @@ where
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
 
     /// Blocks whose download failed with `NotFound` and should be re-requested on
     /// the next sync round, instead of being silently dropped (#5709).
@@ -486,7 +486,7 @@ where
         state: ZS,
         read_state: ZSR,
         latest_chain_tip: ZSTip,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -1216,21 +1216,31 @@ where
                 return Ok(());
             }
 
-            Err(BlockDownloadVerifyError::Invalid {
-                ref error,
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) if error.misbehavior_score() != 0 => {
-                let _ = self
-                    .misbehavior_sender
-                    .try_send((advertiser_addr, error.misbehavior_score()));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::Invalid {
+                    ref error,
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) if error.misbehavior_score() != 0 => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    error.misbehavior_score(),
+                    verify_error.to_string(),
+                ));
             }
 
-            Err(BlockDownloadVerifyError::InvalidHeight {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::InvalidHeight {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    verify_error.to_string(),
+                ));
             }
 
             // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
@@ -1239,11 +1249,17 @@ where
             // not recompute the header's commitment to the body's authorizing data
             // (GHSA-g95h-hw6g-pvgv). Peers that serve genuinely old blocks arrive unattributed and
             // fall through unscored. Score only a parent-proven rewrite.
-            Err(BlockDownloadVerifyError::BehindTipHeightLimit {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::BehindTipHeightLimit {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    format!("parent header contradicts coinbase height: {verify_error}"),
+                ));
             }
 
             // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must
