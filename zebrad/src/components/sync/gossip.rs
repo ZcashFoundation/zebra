@@ -48,6 +48,7 @@ pub enum BlockGossipError {
 ///
 /// Pending submissions bypass the tip delay using ordinary gossip fanout. Only committed mined
 /// blocks use all-peer delivery, so early adverts cannot replace their deferred advertisements.
+/// Queued committed submissions take priority over pending early adverts when peers become ready.
 ///
 /// [`block::Hash`]: zebra_chain::block::Hash
 pub async fn gossip_best_tip_block_hashes<ZN>(
@@ -134,7 +135,12 @@ where
 
         // TODO: Move logic for calling the peer set to its own method.
 
-        info!(?height, ?hash, is_block_submission, log_msg);
+        // Early adverts precede the mined broadcast of the same block, so keep them out of INFO.
+        if is_early {
+            debug!(?height, ?hash, is_block_submission, log_msg);
+        } else {
+            info!(?height, ?hash, is_block_submission, log_msg);
+        }
 
         // `tower::timeout::Timeout` only bounds the response future, not `poll_ready()`.
         // If there are no eligible peers, only waiting for readiness would stop this task from
@@ -153,25 +159,28 @@ where
         loop {
             let mut superseded_blocks: usize = 0;
             let ready_result = loop {
-                tokio::select! {
+                let (mined_block, peers_ready) = tokio::select! {
                     biased;
 
-                    // Dropping an unfinished `Ready` future doesn't affect the service's
-                    // readiness, and we call the service straight after it becomes ready.
-                    ready_result = broadcast_network.ready() => break ready_result.map(|_| ()),
+                    ready_result = broadcast_network.ready() => {
+                        let ready_result = ready_result.map(|_| ());
+                        // Only early adverts may be preempted when peers are ready.
+                        // Committed adverts must not coalesce or starve on a ready peer set.
+                        if !is_early || ready_result.is_err() {
+                            break ready_result;
+                        }
+                        let Some(mined_block) = mined_block_receiver
+                            .as_mut()
+                            .and_then(|receiver| receiver.try_recv().ok())
+                        else {
+                            break ready_result;
+                        };
+                        (mined_block, true)
+                    },
 
                     Some(mined_block) = recv_mined_block(&mut mined_block_receiver) => {
-                        if is_block_submission {
-                            superseded_blocks = superseded_blocks.saturating_add(1);
-                        } else {
-                            displaced_tip = Some((hash, height));
-                        }
-
-                        (hash, height) = mined_block;
-                        is_block_submission = true;
-                        accepted_at = tokio::time::Instant::now();
-                        is_early = false;
-                    }
+                        (mined_block, false)
+                    },
 
                     early = recv_submitted_block(&mut submitted_receiver),
                         if !is_block_submission || is_early => {
@@ -180,9 +189,23 @@ where
                         }
                         (hash, height) = early;
                         is_block_submission = true;
-                        accepted_at = tokio::time::Instant::now();
                         is_early = true;
+                        continue;
                     }
+                };
+
+                if is_block_submission {
+                    superseded_blocks = superseded_blocks.saturating_add(1);
+                } else {
+                    displaced_tip = Some((hash, height));
+                }
+
+                (hash, height) = mined_block;
+                is_block_submission = true;
+                accepted_at = tokio::time::Instant::now();
+                is_early = false;
+                if peers_ready {
+                    break Ok(());
                 }
             };
 
@@ -221,7 +244,8 @@ where
             // Await bounded local writes in a spawned task so they don't delay later broadcasts.
             tokio::spawn(async move {
                 let result = broadcast_fut.await;
-                if is_block_submission {
+                // Early adverts precede commit, so only committed mined blocks have metrics.
+                if is_block_submission && !is_early {
                     let outcome = if result.is_ok() {
                         "completed"
                     } else {
