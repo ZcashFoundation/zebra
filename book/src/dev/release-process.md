@@ -146,7 +146,7 @@ Every new Release PR commit automatically runs `PR Gate / Release readiness`. Th
 - Below 1.0.0, Cargo treats the minor version as the major one, so each level bumps one place lower.
 - `zebrad`'s major version marks a network upgrade, so `zebrad` stops at a minor version unless one of its fragments has the `network-upgrade` kind.
 - A prerelease version graduates to its release version.
-- A package without fragments releases a patch when a path dependency moves to an incompatible version, so its new requirement is published. When it re-exports that dependency with `pub use`, it inherits the break.
+- A path dependency that moves to an incompatible version raises a package to at least a patch release, so its new requirement is published. When the package re-exports that dependency with `pub use`, it inherits the break, even if its own fragments plan a smaller change.
 
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 
@@ -167,7 +167,7 @@ Open the failed job summary before retrying. Each failure identifies the next ac
 | --- | --- |
 | The Release PR is behind `main` | Wait for release-plz to update the PR. |
 | A versioned changelog is missing or empty | For a direct package change, add the missing fragment on `main` with `changie new -j <project>`, then let release-plz refresh the PR. A dependency-only failure indicates a changelog batching regression; do not edit the generated branch. |
-| A version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let release-plz refresh the PR. Otherwise release-plz picked the wrong version: correct the Release PR by hand. Set each crate's `version` in its `Cargo.toml` to the planned one and update its requirement in each released dependent, run `git checkout <base> -- <crate>/Cargo.toml` for each crate that isn't released, then `cargo update --workspace` and `.github/scripts/batch-release-changelogs.sh <base> releases.tsv`, where `releases.tsv` is the planner's output. `release-plz set-version` can't do this: it fails on the `zebrad` changelog heading and rewrites unreleased dependents. |
+| A version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let release-plz refresh the PR. Otherwise release-plz picked the wrong versions: correct the Release PR branch by hand. Save the plan with `.github/scripts/plan-release-versions.sh <base> > releases.tsv` and restore release-plz's edits with `git checkout <base> -- Cargo.lock '*Cargo.toml'`. Then set each planned package's `version`, and its requirement in the other planned packages, to the planned version. Finish with `cargo update --workspace` and `.github/scripts/batch-release-changelogs.sh <base> releases.tsv`. `release-plz set-version` can't do this: it fails on the `zebrad` changelog heading and rewrites unreleased dependents. |
 | Cargo's dry-run fails | Fix the source or dependency problem on `main`. |
 | Crate provenance, a tag target, or a release channel conflicts | Stop and ask a maintainer to investigate. |
 
