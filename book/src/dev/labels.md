@@ -47,7 +47,7 @@ condition just goes false. Change the workflow in the same PR.
 
 | Label | Read by | Effect |
 |---|---|---|
-| `release` | `pr-gate.yml`, `tests-unit.yml`, `release.yml`, `checkpoint-update.yml`, `release-plz.toml` | Marks release PRs; gates release readiness checks. Applied by release-plz and by the release templates |
+| `release` | `pr-gate.yml`, `tests-unit.yml`, `release.yml`, `checkpoint-update.yml`, `codeql.yml`, `release-plz.toml` | Marks release PRs; gates release readiness checks. Applied by release-plz and by the release templates |
 | `run-stateful-tests` | `zfnd-ci-integration-tests-gcp.yml` | Adding it to a PR runs the stateful GCP integration tests for that PR |
 | `run-benchmarks` | `benchmarks.yml` | Adding it to a PR runs the benchmark comparison against the base branch |
 
@@ -62,6 +62,7 @@ one.
 |---|---|
 | `ci-fail/advisory` | `advisory.yml` — scheduled cargo-deny advisory checks on `main` |
 | `ci-fail/binaries` | `release-binaries.yml` |
+| `ci-fail/codeql` | `codeql.yml` — scheduled CodeQL analysis on `main` |
 | `ci-fail/main` | `zfnd-ci-integration-tests-gcp.yml` — integration tests on `main` |
 | `ci-fail/release` | `zfnd-deploy-nodes-gcp.yml` — node deployment and health verification |
 

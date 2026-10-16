@@ -1,0 +1,63 @@
+# Weekly CodeQL analysis of the Rust code on `main`, also run on Release PRs.
+name: CodeQL
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+  # Scans the code a release ships. Other PRs only get a skipped job.
+  pull_request:
+    branches: [main]
+
+# A newer Release PR commit replaces the scan of the previous one.
+# Scheduled and manual runs get their own group, so they are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    if: >-
+      (github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra') &&
+      (github.event_name != 'pull_request' ||
+      (startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'release')))
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd #v4.38.1
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd #v4.38.1
+        with:
+          category: /language:rust
+
+  failure-issue:
+    name: Open or update an issue for CodeQL failures
+    needs: analyze
+    if: (failure() || cancelled()) && github.event_name == 'schedule'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
+        with:
+          title-template: "{{refname}} {{workflow}} analysis failed: {{eventName}}"
+          label-name: ci-fail/codeql
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
