@@ -2238,7 +2238,7 @@ async fn far_ahead_block_does_not_produce_misbehavior_score() {
 /// Unlike [`setup`], this returns the `ChainSync` value itself rather than its `sync` future, so a
 /// test can call response-handling methods directly.
 #[allow(clippy::type_complexity)]
-fn new_chain_sync_with_misbehavior() -> (
+pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
     ChainSync<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,
