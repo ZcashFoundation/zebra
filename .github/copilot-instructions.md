@@ -9,9 +9,10 @@ If the diff or PR description is incomplete, ask questions before making strong 
 Before reviewing code quality, verify:
 
 - [ ] PR links to a pre-discussed issue
-- [ ] PR description includes Motivation, Solution, and Tests sections
-- [ ] PR title follows conventional commits
+- [ ] PR description says what changes and why
+- [ ] Behavior changes have test evidence in the PR description or the diff
 - [ ] If AI tools were used, disclosure is present in the PR description
+- [ ] Merge Danger calls out one-way doors: database format changes, consensus rules, breaking changes to published crates, and peer protocol changes
 
 If these are missing, note it in the review.
 

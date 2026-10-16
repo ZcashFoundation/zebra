@@ -43,8 +43,8 @@ If this returns `true`, the user is a maintainer and the contribution gate can b
 1. Confirm scope: Zebra is a validator node. Avoid out-of-scope features like wallets, block explorers, or mining pools.
 2. Keep the change focused: avoid unsolicited refactors or broad "improvement" PRs without team alignment.
 3. Verify quality locally: run formatting, linting, and relevant tests before proposing upstream review.
-4. Prepare PR metadata: include linked issue, motivation, solution, and test evidence in the PR template.
-5. If AI was used, disclose tool and scope in the PR description.
+4. Update the docs and add the change fragments the change needs (see [Commit & Pull Request Guidelines](#commit--pull-request-guidelines) and [Changelog](#changelog)).
+5. Write the PR description as described in [PR descriptions](#pr-descriptions), including the AI disclosure.
 
 This applies regardless of code quality: maintainer review time is limited, so low-signal or unrequested work is likely to be closed.
 
@@ -131,8 +131,22 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 - Branch commits are preserved in history, so each commit message must be meaningful and follow conventional commits too — release-plz reads the commits that land on `main` when it picks the next version
 - A breaking change needs the `!` marker on the PR title _and_ on the branch commit that introduces it: the PR gate reads the title, release-plz reads the commits
 - Do not add `Co-Authored-By` tags for AI tools, in _any_ commit on the branch — every one of them is preserved on `main`, not just the PR title
-- Do not add "Generated with [tool]" footers, in any commit on the branch
-- Use `.github/pull_request_template.md` and include: motivation, solution summary, test evidence, issue link (`Closes #...`), and AI disclosure.
+- Do not add "Generated with [tool]" footers, in any commit on the branch or in the PR description
+- Update documentation in the same PR when the change affects what users, operators, or contributors do: configuration, RPC methods, metrics, CLI behavior, or a procedure in `book/`
+- The PR gate checks the title format and the change fragments, so the PR description doesn't need to restate them
+
+### PR descriptions
+
+Write for a reviewer who hasn't opened the code, and scale the description to the change. Title the PR with the behavior a reviewer is approving; if one title can't honestly cover the change, split the PR. In a stack, each PR describes only its own layer.
+
+Fill in each section of `.github/pull_request_template.md`:
+
+- **Summary:** the problem, and how Zebra behaves after the change. Explain design choices, changed contracts, and tradeoffs that a reviewer can't reconstruct from the diff. Link the issue with `Closes #...`, or `Part of #...` and the part this PR covers. When the change follows a ZIP, the Zcash protocol specification, or zcashd behavior, link the exact section or source line.
+- **Evidence:** a before and after a reviewer can check, such as a test that failed and now passes, real output trimmed to the lines that matter, or a screenshot. Claim only what the evidence shows, and say what wasn't tested and why. Delete the section when there is no behavior to show.
+- **Merge Danger:** whether the change is a one-way or a two-way door, and its blast radius. Database format changes, consensus rule changes, breaking changes to published crates, peer protocol changes, and deleted data or infrastructure are one-way doors: name what they affect beyond the diff and any migration they need.
+- **AI Disclosure:** see [AI Disclosure](#ai-disclosure).
+
+Add a visual, such as a pseudocode `diff`, a call tree, or a file tree, only for what the file diff doesn't show at a glance. Leave out file-by-file narration, drafting history, follow-up plans (open an issue instead), and checks that CI already reports. Delete sections that have nothing to add rather than writing "None" or "N/A".
 
 ## Project Overview
 
