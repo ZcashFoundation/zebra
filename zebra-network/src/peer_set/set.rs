@@ -132,8 +132,10 @@ use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 use crate::{
     address_book::AddressMetrics,
     connection_metrics::network_kind_label,
-    constants::{INVENTORY_BUSY_PEER_WAIT_TIMEOUT, MIN_PEER_SET_LOG_INTERVAL},
-    peer::{LoadTrackedClient, MinimumPeerVersion},
+    constants::{
+        FIND_BUSY_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT, MIN_PEER_SET_LOG_INTERVAL,
+    },
+    peer::{ConnectionInfo, LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
@@ -187,6 +189,18 @@ struct QueuedInvRequest {
     response_sender: oneshot::Sender<ResponseFuture>,
 }
 
+/// A find request waiting for a serving peer, with a bounded serving-only preference.
+struct QueuedFindRequest {
+    /// The request to route.
+    request: Request,
+
+    /// When this request may fall back to any ready peer.
+    deadline: tokio::time::Instant,
+
+    /// Receives the selected peer's response future; cancellation abandons the queued request.
+    response_sender: oneshot::Sender<ResponseFuture>,
+}
+
 /// Where the peer set routes an inventory request.
 enum InvRoute<K> {
     /// Send the request to this ready peer.
@@ -210,15 +224,15 @@ fn not_found_registry_error(hash: InventoryHash) -> BoxError {
     SharedPeerError::from(PeerError::NotFoundRegistry(vec![hash])).into()
 }
 
-/// A waker for peer events, used while requests are queued in the peer set.
+/// A waker for peer events, queue deadlines, and cancellations while requests are queued.
 ///
 /// Wakes the task that polls the peer set, and notifies the task that runs
 /// [`poll_peer_set_on_notify`]. The peer set is behind a [`tower::buffer::Buffer`], which only
-/// polls it when it has a request, so otherwise a busy peer that becomes ready wouldn't get the
-/// requests that are waiting for it.
+/// polls it when it has a request, so queued requests otherwise wouldn't be routed when a
+/// busy peer becomes ready or a find request's serving-only wait expires.
 #[derive(Default)]
 struct QueuedRequestWaker {
-    /// Notified when a request is queued, or when a peer event happens while requests are queued.
+    /// Notified when requests are queued, peers change, waits expire, or callers cancel.
     notify: Notify,
 
     /// The waker of the task that polls the peer set.
@@ -237,7 +251,7 @@ impl std::task::Wake for QueuedRequestWaker {
 }
 
 /// Polls `peer_set` with a [`Request::PollPeerSet`] each time `queued_request_waker` is notified,
-/// so the peer set routes queued requests to busy peers as soon as they become ready.
+/// so queued requests are routed when peers become ready or their serving-only wait expires.
 ///
 /// `peer_set` must be the service that wraps the [`PeerSet`] that owns `queued_request_waker`.
 /// See [`PeerSet::into_buffer`].
@@ -272,12 +286,14 @@ enum StallOutcome {
     Clear,
 }
 
+type StallEvent = (PeerSocketAddr, Arc<ConnectionInfo>, StallOutcome);
+
+/// Empty replies are valid when the locator reaches the remote tip. Neither a local wall-clock
+/// estimate nor an untrusted, frozen handshake height proves otherwise. Fair discovery routing
+/// prevents fast empty replies from monopolizing requests.
 fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
     match result {
-        Ok(Response::BlockHashes(hashes)) if hashes.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHashes(_)) => Some(StallOutcome::Clear),
-        Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
+        Ok(Response::BlockHashes(_) | Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
         Ok(_) => None,
         Err(_) => Some(StallOutcome::Stall),
     }
@@ -311,18 +327,18 @@ where
     /// A watch channel receiver with a snapshot of the banned peer groups.
     bans_receiver: watch::Receiver<BanList>,
 
-    /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
+    /// Tracks peers returning failed `FindBlocks`/`FindHeaders` responses.
     /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
     find_response_stalls: FindResponseStallTracker,
 
     /// Receives stall/clear events from tracked routing futures in
-    /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
+    /// [`Self::call_ready_peer`]. The channel keeps the tracker single-owner (no
     /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
     /// call [`Self::remove`] directly.
-    stall_event_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, StallOutcome)>,
+    stall_event_rx: tokio_mpsc::UnboundedReceiver<StallEvent>,
 
     /// Producer clones handed to each tracked request's response wrapper.
-    stall_event_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
+    stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
 
     // Peer Tracking: Ready Peers
     //
@@ -332,6 +348,23 @@ where
 
     // Request Routing
     //
+    /// Connection identities in find-request order, preserved while peers are busy.
+    ///
+    /// New connections join at the back; disconnected connections are pruned in
+    /// [`Self::poll_peers`]. The metadata allocation identifies a connection even if
+    /// a later connection reuses its address.
+    find_peer_queue: VecDeque<(D::Key, Arc<ConnectionInfo>)>,
+
+    /// Find requests waiting for a serving peer, in request order.
+    ///
+    /// After [`FIND_BUSY_PEER_WAIT_TIMEOUT`], any ready peer can receive the request.
+    queued_find_requests: VecDeque<QueuedFindRequest>,
+
+    /// Wakes the peer set at the next unexpired queued find request deadline.
+    ///
+    /// Expired requests wait for peer events rather than repeatedly waking a completed timer.
+    queued_find_request_timer: Option<Pin<Box<tokio::time::Sleep>>>,
+
     /// Stores gossiped inventory hashes from connected peers.
     ///
     /// Used to route inventory requests to peers that are likely to have it.
@@ -357,8 +390,8 @@ where
     /// The keys of connected peers that advertised [`PeerServices::NODE_NETWORK`],
     /// so they can serve historic blocks.
     ///
-    /// Busy peers' services are not otherwise accessible, but block routing needs to know
-    /// whether a busy peer can serve blocks. Stale keys of disconnected peers are pruned by
+    /// Busy peers' services are not otherwise accessible, but block and find routing need to
+    /// know whether a busy peer can serve blocks. Stale keys of disconnected peers are pruned by
     /// [`Self::retain_connected_keys`].
     serving_peer_keys: HashSet<D::Key>,
 
@@ -506,6 +539,9 @@ where
             // Ready peers
             ready_services: HashMap::new(),
             // Request Routing
+            find_peer_queue: VecDeque::new(),
+            queued_find_requests: VecDeque::new(),
+            queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
             queued_broadcast_all: None,
             block_gossip_peer_ips: block_gossip_peer_ips.into_iter().collect(),
@@ -540,7 +576,7 @@ where
     /// Returns a waker for peer events, which also notifies [`poll_peer_set_on_notify`] while
     /// requests are queued.
     fn peer_event_waker(&self, cx: &Context<'_>) -> Waker {
-        if self.queued_inv_requests.is_empty() {
+        if self.queued_inv_requests.is_empty() && self.queued_find_requests.is_empty() {
             return cx.waker().clone();
         }
 
@@ -637,6 +673,8 @@ where
 
         // Refuse queued requests, because there are no peers left to route them to.
         self.queued_inv_requests.clear();
+        self.queued_find_requests.clear();
+        self.queued_find_request_timer = None;
 
         // Close the MorePeers channel for all senders,
         // so we don't add more peers to a shut down peer set.
@@ -652,7 +690,8 @@ where
 
     /// Checks for newly ready, disconnects from outdated peers, and polls ready peer errors.
     fn poll_peers(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-        // Bans and protocol upgrades invalidate busy connections too.
+        // Busy connections must remain eligible too: neither a ban nor an upgrade waits for
+        // their request channel to regain capacity.
         self.disconnect_from_ineligible_peers();
 
         // Check for newly ready peers, including newly added peers (which are added as unready).
@@ -664,7 +703,16 @@ where
 
         // Check for failures in ready peers, removing newly errored or disconnected peers.
         // So it needs to run after `poll_unready()`.
-        self.poll_ready_peer_errors(cx).map(Ok)
+        let ready_peers = self.poll_ready_peer_errors(cx);
+        self.find_peer_queue.retain(|(key, _)| {
+            let connected =
+                self.ready_services.contains_key(key) || self.cancel_handles.contains_key(key);
+            if !connected {
+                self.find_response_stalls.clear(*key);
+            }
+            connected
+        });
+        ready_peers.map(Ok)
     }
 
     /// Check busy peer services for request completion or errors.
@@ -935,6 +983,8 @@ where
                         self.serving_peer_keys.remove(&key);
                     }
 
+                    self.find_peer_queue
+                        .push_back((key, svc.connection_info().clone()));
                     self.push_unready(key, svc);
                 }
             }
@@ -947,30 +997,18 @@ where
     fn disconnect_from_ineligible_peers(&mut self) {
         let minimum_version = self.minimum_peer_version.current();
         let bans = self.bans_receiver.borrow();
-        self.ready_services.retain(|key, service| {
-            let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
-            if !eligible {
-                self.find_response_stalls.clear(*key);
+        self.find_peer_queue.retain(|(key, info)| {
+            if !bans.is_banned(key.ip()) && info.remote.version >= minimum_version {
+                return true;
             }
-            eligible
+
+            self.find_response_stalls.clear(*key);
+            self.ready_services.remove(key);
+            if let Some(cancel) = self.cancel_handles.remove(key) {
+                let _ = cancel.send(CancelClientWork);
+            }
+            false
         });
-        for pending in Pin::new(&self.unready_services).iter_pin_ref() {
-            let pending = pending.get_ref();
-            let key = pending
-                .key
-                .as_ref()
-                .expect("unready services retain their key until completion");
-            let service = pending
-                .service
-                .as_ref()
-                .expect("unready services retain their client until completion");
-            if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
-                self.find_response_stalls.clear(*key);
-                if let Some(cancel) = self.cancel_handles.remove(key) {
-                    let _ = cancel.send(CancelClientWork);
-                }
-            }
-        }
     }
 
     /// Takes a ready service by key.
@@ -992,7 +1030,17 @@ where
     /// TCP connection is closed when its service is dropped; address book and
     /// ban list are untouched, so the peer is free to reconnect.
     fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((addr, outcome))) = self.stall_event_rx.poll_recv(cx) {
+        while let Poll::Ready(Some((addr, connection_info, outcome))) =
+            self.stall_event_rx.poll_recv(cx)
+        {
+            // A delayed response from an old connection must not affect its replacement.
+            if !self
+                .find_peer_queue
+                .iter()
+                .any(|(key, info)| *key == addr && Arc::ptr_eq(info, &connection_info))
+            {
+                continue;
+            }
             match outcome {
                 StallOutcome::Stall => {
                     if self.find_response_stalls.record_stall(addr) {
@@ -1014,6 +1062,7 @@ where
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
+        self.find_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
         if let Some((_, remaining_sidecars)) = self.queued_sidecar_broadcast.as_mut() {
@@ -1082,6 +1131,27 @@ where
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
     fn select_ready_p2c_peer(&self) -> Option<D::Key> {
         self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
+    }
+
+    /// Rotates find requests across ready connections, restricting them to serving peers until
+    /// the queued wait expires, unless no serving peers are connected.
+    fn select_ready_find_peer(&mut self, allow_non_serving: bool) -> Option<D::Key> {
+        if self.ready_services.is_empty() {
+            return None;
+        }
+
+        let serving_only = !allow_non_serving && !self.serving_peer_keys.is_empty();
+        let (index, (key, _)) = self
+            .find_peer_queue
+            .iter()
+            .enumerate()
+            .find(|(_, (key, _))| {
+                self.ready_services.contains_key(key)
+                    && (!serving_only || self.serving_peer_keys.contains(key))
+            })?;
+        let key = *key;
+        self.find_peer_queue.rotate_left(index + 1);
+        Some(key)
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
@@ -1218,57 +1288,30 @@ where
         svc.map(|svc| svc.load())
     }
 
-    /// Routes a request using P2C load-balancing.
-    fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        if let Some(p2c_key) = self.select_ready_p2c_peer() {
-            tracing::trace!(?p2c_key, "routing based on p2c");
+    /// Routes find requests fairly and other requests using P2C load-balancing.
+    fn route_request(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let is_find_request = matches!(
+            &req,
+            Request::FindBlocks { .. } | Request::FindHeaders { .. }
+        );
+        let peer_key = if is_find_request {
+            // Fast empty responses must not gain a latency-based routing advantage.
+            self.select_ready_find_peer(false)
+        } else {
+            self.select_ready_p2c_peer()
+        };
 
-            let mut svc = self
-                .take_ready_service(&p2c_key)
-                .expect("selected peer must be ready");
+        if let Some(peer_key) = peer_key {
+            return self.call_ready_peer(peer_key, req);
+        }
 
-            let is_find_request = matches!(
-                &req,
-                Request::FindBlocks { .. } | Request::FindHeaders { .. }
-            );
-            let is_syncing = || {
-                !self
-                    .minimum_peer_version
-                    .chain_tip()
-                    .is_at_or_near_network_tip(chrono::Utc::now())
-            };
-            // zcashd-compat sidecars are exempt: they sync *from* this node,
-            // so they can legitimately trail it without being stalled peers.
-            let track_stalls =
-                is_find_request && !self.zcashd_compat_peer_keys.contains(&p2c_key) && is_syncing();
-
-            let fut = svc.call(req);
-            self.push_unready(p2c_key, svc);
-
-            if track_stalls {
-                let stall_tx = self.stall_event_tx.clone();
-                return async move {
-                    let result = fut.await;
-                    if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
-                    }
-                    result.map_err(Into::into)
-                }
-                .boxed();
-            }
-
-            return fut.map_err(Into::into).boxed();
+        if is_find_request {
+            return self.queue_find_request(req);
         }
 
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
             tokio::task::yield_now().await;
-
-            // # Security
-            //
-            // Avoid routing requests to peers that are missing inventory.
-            // If we kept trying doomed requests, peers that are missing our requested inventory
-            // could take up a large amount of our bandwidth and retry limits.
             Err(SharedPeerError::from(PeerError::NoReadyPeers))
         }
         .map_err(Into::into)
@@ -1432,13 +1475,110 @@ where
         key: D::Key,
         req: Request,
     ) -> <Self as tower::Service<Request>>::Future {
+        let is_find_request = matches!(
+            &req,
+            Request::FindBlocks { .. } | Request::FindHeaders { .. }
+        );
+        tracing::trace!(peer_key = ?key, is_find_request, "routing request to peer");
         let mut svc = self
             .take_ready_service(&key)
             .expect("callers select `key` from the ready services just before calling");
-        let fut = svc.call(req);
-        self.push_unready(key, svc);
 
-        fut.map_err(Into::into).boxed()
+        // Configured sidecars are trusted downstream consumers, not upstream sync sources.
+        let track_stalls = is_find_request && !self.zcashd_compat_peer_keys.contains(&key);
+        let fut = svc.call(req);
+        let response = if track_stalls {
+            let connection_info = svc.connection_info().clone();
+            let stall_tx = self.stall_event_tx.clone();
+            async move {
+                // Cancellation is not evidence of failure: a caught-up peer can
+                // legitimately send no getblocks reply before the caller times out.
+                let result = fut.await;
+                if let Some(outcome) = classify_find_response(&result) {
+                    let _ = stall_tx.send((key, connection_info, outcome));
+                }
+                result.map_err(Into::into)
+            }
+            .boxed()
+        } else {
+            fut.map_err(Into::into).boxed()
+        };
+        self.push_unready(key, svc);
+        response
+    }
+
+    /// Waits for a serving peer, falling back to any ready peer once the bounded wait expires.
+    fn queue_find_request(&mut self, request: Request) -> ResponseFuture {
+        let (response_sender, response_receiver) = oneshot::channel();
+        self.queued_find_requests.push_back(QueuedFindRequest {
+            request,
+            deadline: tokio::time::Instant::now() + FIND_BUSY_PEER_WAIT_TIMEOUT,
+            response_sender,
+        });
+
+        // Register peer, timer, and cancellation wakeups even if the response is never polled.
+        self.queued_request_waker.notify.notify_one();
+
+        async move {
+            let response_fut = response_receiver
+                .await
+                .map_err(|_| SharedPeerError::from(PeerError::NoReadyPeers))?;
+            response_fut.await
+        }
+        .boxed()
+    }
+
+    /// Routes queued discovery before inventory, and registers deadline and cancellation wakeups.
+    ///
+    /// This also runs with no ready peers, so abandoned requests are removed and expired
+    /// serving-only waits stop arming the timer.
+    fn route_queued_find_requests(&mut self, cx: &mut Context<'_>) {
+        if self.queued_find_requests.is_empty() {
+            return;
+        }
+
+        let now = tokio::time::Instant::now();
+        let mut next_deadline = None;
+        for _ in 0..self.queued_find_requests.len() {
+            let mut queued = self
+                .queued_find_requests
+                .pop_front()
+                .expect("the loop visits only requests that were already queued");
+            if queued.response_sender.poll_canceled(cx).is_ready() {
+                continue;
+            }
+
+            let expired = queued.deadline <= now;
+            if let Some(peer) = self.select_ready_find_peer(expired) {
+                let response_fut = self.call_ready_peer(peer, queued.request);
+                // A concurrent cancellation drops the response future, cancelling peer work.
+                let _ = queued.response_sender.send(response_fut);
+                // Register the newly unready service even if an unrelated peer remains ready.
+                // Otherwise an idle Buffer can leave later queued downloads without a wakeup.
+                cx.waker().wake_by_ref();
+            } else {
+                if !expired {
+                    // Requests enter this FIFO with monotonically increasing deadlines.
+                    next_deadline.get_or_insert(queued.deadline);
+                }
+                self.queued_find_requests.push_back(queued);
+            }
+        }
+
+        if let Some(deadline) = next_deadline {
+            let timer = self
+                .queued_find_request_timer
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(deadline)));
+            if timer.deadline() != deadline {
+                timer.as_mut().reset(deadline);
+            }
+            if timer.as_mut().poll(cx).is_ready() {
+                // The deadline might have passed while routing; retry with a fresh `now`.
+                cx.waker().wake_by_ref();
+            }
+        } else {
+            self.queued_find_request_timer = None;
+        }
     }
 
     /// Queues an inventory request until a busy peer that might have `hash` becomes ready.
@@ -1512,7 +1652,7 @@ where
     /// Queued requests are only routed when the peer set is polled. While requests are queued,
     /// peer events notify [`poll_peer_set_on_notify`], which polls the peer set.
     ///
-    /// Reconsiders candidates on every poll, including advertisements and removals.
+    /// Reconsiders candidates on every poll, including advertisements, failures and removals.
     fn route_queued_inv_requests(&mut self, cx: &mut Context<'_>) {
         // Register caller cancellation too, so an expired operation releases its queue entry
         // even when no connection or inventory event follows it.
@@ -1939,10 +2079,12 @@ where
         // - an unready peer becomes ready, or
         // - a new peer arrives.
 
-        // While requests are queued, new or newly ready peers also notify the queued request task,
-        // so the peer set gets polled to route those requests.
+        // Peer events, find deadlines, and cancellations also notify the queued request task,
+        // so the peer set gets polled even when the buffer has no other requests.
         let peer_event_waker = self.peer_event_waker(cx);
         let mut peer_cx = Context::from_waker(&peer_event_waker);
+        // Events can change queued candidates even without a readiness transition. Register
+        // their wakeups with the notification task as well as the Buffer worker.
         self.drain_stall_events(&mut peer_cx);
 
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
@@ -1956,6 +2098,16 @@ where
             self.inventory_registry.poll_inventory(&mut peer_cx)?;
 
         let ready_peers = self.poll_peers(&mut peer_cx)?;
+
+        self.prune_disconnected_sidecar_keys();
+        Self::retain_connected_keys(
+            &mut self.serving_peer_keys,
+            &self.ready_services,
+            &self.cancel_handles,
+        );
+        // Discovery gets newly ready serving peers before queued block downloads can take them.
+        // Even without ready peers, poll deadlines and cancellations to keep the queue live.
+        self.route_queued_find_requests(&mut peer_cx);
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
@@ -1985,14 +2137,7 @@ where
             return Poll::Pending;
         }
 
-        self.prune_disconnected_sidecar_keys();
-        // Serving peer keys are only checked for connected peers, so this only bounds memory.
-        Self::retain_connected_keys(
-            &mut self.serving_peer_keys,
-            &self.ready_services,
-            &self.cancel_handles,
-        );
-        // Route waiting block requests first: their callers are waiting for a response.
+        // Waiting block requests still take priority over broadcasts.
         self.route_queued_inv_requests(&mut peer_cx);
         self.broadcast_all_queued();
         self.send_queued_sidecar_broadcast();
@@ -2001,8 +2146,12 @@ where
             if self.poll_peers(&mut peer_cx)?.is_pending() {
                 return Poll::Pending;
             }
+            // A peer can recover capacity while the first queued request is dispatched.
+            // Do not expose that capacity to the Buffer's held request before queued work.
+            self.route_queued_find_requests(&mut peer_cx);
             self.route_queued_inv_requests(&mut peer_cx);
             if self.ready_services.is_empty() {
+                // Newly inserted readiness futures need a first poll even with an idle Buffer.
                 cx.waker().wake_by_ref();
                 Poll::Pending
             } else {
@@ -2038,8 +2187,8 @@ where
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
 
-            // Choose a random less-loaded peer for all other requests
-            _ => self.route_p2c(req),
+            // Find requests rotate across serving peers with a bounded wait; others use P2C.
+            _ => self.route_request(req),
         };
         self.update_metrics();
 
