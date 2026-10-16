@@ -73,7 +73,6 @@ manifest zebra-node-services 11.0.0 'zebra-chain = { path = "../zebra-chain", ve
 manifest zebra-utils 10.0.2 '' 'zebra-node-services = { path = "../zebra-node-services" }'
 manifest tower-fallback 0.2.43
 write_file zebra-node-services/src/lib.rs 'pub use zebra_chain::parameters;'
-write_file zebra-utils/src/lib.rs 'use zebra_chain::parameters;'
 git -C "$fixture" add --all
 git -C "$fixture" commit --quiet --message base
 git -C "$fixture" update-ref refs/tags/base HEAD
@@ -95,6 +94,17 @@ expect_plan() {
     echo "$expected" >&2
     echo "actual:" >&2
     echo "$actual" >&2
+    exit 1
+  fi
+  git -C "$fixture" reset --hard --quiet base
+  git -C "$fixture" clean --force -d --quiet
+}
+
+expect_plan_failure() {
+  git -C "$fixture" add --all
+  git -C "$fixture" commit --quiet --message "case $((case_number += 1))"
+  if (cd "$fixture" && "$planner" HEAD > /dev/null 2>&1); then
+    echo "expected the plan to fail: $1" >&2
     exit 1
   fi
   git -C "$fixture" reset --hard --quiet base
@@ -151,17 +161,9 @@ expect_plan "a prerelease graduates" \
   "zebrad	7.0.0"
 
 fragment zebra-chain Unknown 1
-if (cd "$fixture" && git add --all && git commit --quiet --message unknown && "$planner" HEAD > /dev/null 2>&1); then
-  echo "expected an unknown kind to fail the plan" >&2
-  exit 1
-fi
-git -C "$fixture" reset --hard --quiet base
-git -C "$fixture" clean --force -d --quiet
+expect_plan_failure "an unknown kind"
 
 fragment zebra-chain network-upgrade 1
-if (cd "$fixture" && git add --all && git commit --quiet --message network-upgrade && "$planner" HEAD > /dev/null 2>&1); then
-  echo "expected a network-upgrade fragment outside zebrad to fail the plan" >&2
-  exit 1
-fi
+expect_plan_failure "a network-upgrade fragment outside zebrad"
 
 echo "Release version planner tests passed."

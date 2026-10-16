@@ -47,7 +47,6 @@ ${heading} - 2026-10-01
 ### Fixed
 
 - An entry."
-  rm -f "${fixture}/.changes/unreleased/${project}-"*.yaml
 }
 
 write_file .changie.yaml 'changesDir: .changes
