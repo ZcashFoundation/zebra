@@ -96,6 +96,9 @@ pub struct InboundSetupData {
     pub address_book: Arc<std::sync::Mutex<AddressBook>>,
 
     /// A service that can be used to download gossiped blocks.
+    ///
+    /// Use [`zn::NetworkService::background_service`] so the inbound service does not keep
+    /// its own network alive.
     pub block_download_peer_set: BlockDownloadPeerSet,
 
     /// A service that verifies downloaded blocks.

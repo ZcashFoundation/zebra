@@ -8,21 +8,16 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
     net::{IpAddr, SocketAddr},
-    pin::Pin,
     sync::Arc,
     time::Duration,
 };
 
-use futures::{
-    future::{self, FutureExt},
-    sink::SinkExt,
-    stream::{FuturesUnordered, StreamExt},
-    Future, TryFutureExt,
-};
+use futures::{future::FutureExt, sink::SinkExt, stream::StreamExt, TryFutureExt};
 use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc, watch},
+    task::JoinSet,
     time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
@@ -31,7 +26,11 @@ use tower::{
 };
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics, parameters::Network};
+use zebra_chain::{
+    chain_tip::ChainTip,
+    diagnostic::task::{CheckForPanics, WaitForPanics},
+    parameters::Network,
+};
 
 use crate::{
     address_book_updater::{
@@ -53,7 +52,8 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
-    AddressBook, BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
+    AddressBook, BanList, BoxError, Config, MisbehaviorReport, NetworkService, PeerSocketAddr,
+    Request, Response,
 };
 
 #[cfg(test)]
@@ -89,6 +89,12 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// cause the peer set to shrink when the inbound service is unable to keep up
 /// with the volume of inbound requests.
 ///
+/// Releasing the last [`NetworkService`] handle and unfinished response stops the network's
+/// background tasks and releases its listener and peer connections. Internal polling and
+/// crawling do not keep the network alive.
+/// Services retained by `inbound_service` must use [`NetworkService::background_service`]
+/// rather than retain an owning network handle.
+///
 /// Use [`NoChainTip`][1] to explicitly provide no chain tip receiver.
 ///
 /// In addition to returning a service for outbound requests, this method
@@ -109,7 +115,7 @@ pub async fn init<S, C>(
     latest_chain_tip: C,
     user_agent: String,
 ) -> (
-    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    NetworkService,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<MisbehaviorReport>,
 )
@@ -142,7 +148,7 @@ pub async fn init_with_block_gossip_peer_ips<S, C>(
     user_agent: String,
     block_gossip_peer_ips: Vec<IpAddr>,
 ) -> (
-    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    NetworkService,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<MisbehaviorReport>,
 )
@@ -171,7 +177,7 @@ where
     );
 
     let misbehaviour_updater = address_book_updater.clone();
-    tokio::spawn(
+    let misbehavior_guard = tokio::spawn(
         async move {
             let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
             // Batch misbehaviour updates so peers can't keep the address book mutex locked
@@ -281,7 +287,14 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
-    let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
+    let (peer_set, worker) =
+        Buffer::pair(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
+    let worker = tokio::spawn(worker.in_current_span());
+    let mut peer_set = NetworkService::new(peer_set, vec![worker.abort_handle()]);
+    peer_set.extend_tasks([
+        address_book_updater_guard.abort_handle(),
+        misbehavior_guard.abort_handle(),
+    ]);
 
     // Connect peerset_tx to the 3 peer sources:
     //
@@ -296,6 +309,7 @@ where
         block_gossip_peer_ips,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
+    peer_set.extend_tasks([listen_guard.abort_handle()]);
 
     // 2. Initial peers, specified in the config and cached on disk.
     let initial_peers_fut = add_initial_peers(
@@ -305,10 +319,11 @@ where
         address_book_updater.clone(),
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
+    peer_set.extend_tasks([initial_peers_join.abort_handle()]);
 
     // 3. Outgoing peers we connect to in response to load.
     let (next_peer_service, mut crawl_service) =
-        crawler_services(address_book_service.clone(), peer_set.clone());
+        crawler_services(address_book_service.clone(), peer_set.background_service());
 
     // Wait for the initial seed peer count
     let mut active_outbound_connections = initial_peers_join
@@ -353,10 +368,12 @@ where
         address_book_updater,
     );
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
+    peer_set.extend_tasks([crawl_guard.abort_handle()]);
 
     // Start the peer disk cache updater
     let peer_cache_updater_fut = peer_cache_updater(config, address_book_service);
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
+    peer_set.extend_tasks([peer_cache_updater_guard.abort_handle()]);
 
     handle_tx
         .send(vec![
@@ -415,62 +432,50 @@ where
     // Resists distributed denial of service attacks by making sure that
     // new peer connections are initiated at least `MIN_OUTBOUND_PEER_CONNECTION_INTERVAL` apart.
     //
-    // # Correctness
-    //
-    // Each `FuturesUnordered` can hold one `Buffer` or `Batch` reservation for
-    // an indefinite period. We can use `FuturesUnordered` without filling
-    // the underlying network buffers, because we immediately drive this
-    // single `FuturesUnordered` to completion, and handshakes have a short timeout.
+    // Seed attempts belong to this task, including when initialization is cancelled.
     let network = config.network.clone();
-    let mut handshakes: FuturesUnordered<_> = initial_peers
-        .into_iter()
-        .enumerate()
-        .map(|(i, addr)| {
-            let connection_tracker = active_outbound_connections.track_connection();
-            let req = OutboundConnectorRequest {
-                addr,
-                connection_tracker,
-            };
-            let outbound_connector = outbound_connector.clone();
-            let network = network.clone();
+    let mut handshakes = JoinSet::new();
+    for (i, addr) in initial_peers.into_iter().enumerate() {
+        let connection_tracker = active_outbound_connections.track_connection();
+        let req = OutboundConnectorRequest {
+            addr,
+            connection_tracker,
+        };
+        let outbound_connector = outbound_connector.clone();
+        let network = network.clone();
 
-            // Spawn a new task to make the outbound connection.
-            tokio::spawn(
-                async move {
-                    // Only spawn one outbound connector per
-                    // `MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`,
-                    // by sleeping for the interval multiplied by the peer's index in the list.
-                    sleep(
-                        constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32),
-                    )
+        // Spawn a new task to make the outbound connection.
+        handshakes.spawn(
+            async move {
+                // Only spawn one outbound connector per
+                // `MIN_OUTBOUND_PEER_CONNECTION_INTERVAL`,
+                // by sleeping for the interval multiplied by the peer's index in the list.
+                sleep(constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32))
                     .await;
 
-                    // As soon as we create the connector future,
-                    // the handshake starts running as a spawned task.
-                    record_connection_attempt_started(
-                        &network,
-                        ConnectionDirection::Outbound,
-                        addr,
-                    );
-                    let result = outbound_connector
-                        .oneshot(req)
-                        .map_err(move |e| (addr, e))
-                        .await;
-                    record_connection_attempt_finished(
-                        &network,
-                        ConnectionDirection::Outbound,
-                        addr,
-                        result.as_ref().err().map(|(_, error)| error),
-                    );
-                    result
-                }
-                .in_current_span(),
-            )
-            .wait_for_panics()
-        })
-        .collect();
+                // As soon as we create the connector future,
+                // the handshake starts running as a spawned task.
+                record_connection_attempt_started(&network, ConnectionDirection::Outbound, addr);
+                let result = outbound_connector
+                    .oneshot(req)
+                    .map_err(move |e| (addr, e))
+                    .await;
+                record_connection_attempt_finished(
+                    &network,
+                    ConnectionDirection::Outbound,
+                    addr,
+                    result.as_ref().err().map(|(_, error)| error),
+                );
+                result
+            }
+            .in_current_span(),
+        );
+    }
 
-    while let Some(handshake_result) = handshakes.next().await {
+    while let Some(handshake_result) = handshakes.join_next().await {
+        let Ok(handshake_result) = handshake_result.panic_if_task_has_panicked() else {
+            continue;
+        };
         match handshake_result {
             Ok(change) => {
                 handshake_success_total += 1;
@@ -709,19 +714,19 @@ where
         .peerset_inbound_connection_limit()
         .saturating_sub(zcashd_compat_reserved_slots);
 
-    let mut handshakes: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
-        FuturesUnordered::new();
-    // Keeping an unresolved future in the pool means the stream never terminates.
-    handshakes.push(future::pending().boxed());
+    // Dropping the listener also aborts unfinished handshakes.
+    let mut handshakes = JoinSet::new();
 
     loop {
         // Check for panics in finished tasks, before accepting new connections
         let inbound_result = tokio::select! {
             biased;
-            next_handshake_res = handshakes.next() => match next_handshake_res {
+            next_handshake_res = handshakes.join_next(), if !handshakes.is_empty() => {
                 // The task has already sent the peer change to the peer set.
-                Some(()) => continue,
-                None => unreachable!("handshakes never terminates, because it contains a future that never resolves"),
+                let _ = next_handshake_res
+                    .expect("the handshake set is not empty")
+                    .panic_if_task_has_panicked();
+                continue;
             },
 
             // This future must wait until new connections are available: it can't have a timeout.
@@ -800,18 +805,16 @@ where
                 "handshaking on an open inbound peer connection"
             );
 
-            let handshake_task = accept_inbound_handshake(
+            accept_inbound_handshake(
                 config.network.clone(),
                 addr,
                 handshaker.clone(),
                 tcp_stream,
                 connection_tracker,
                 peerset_tx.clone(),
+                &mut handshakes,
             )
-            .await?
-            .wait_for_panics();
-
-            handshakes.push(handshake_task);
+            .await?;
 
             // Rate-limit inbound connection handshakes.
             // But sleep longer after a successful connection,
@@ -856,7 +859,8 @@ async fn accept_inbound_handshake<S>(
     tcp_stream: TcpStream,
     connection_tracker: ConnectionTracker,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-) -> Result<tokio::task::JoinHandle<()>, BoxError>
+    handshakes: &mut JoinSet<()>,
+) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
         + Clone,
@@ -883,7 +887,7 @@ where
     // ... instead, spawn a new task to handle this connection
     let mut peerset_tx = peerset_tx.clone();
 
-    let handshake_task = tokio::spawn(
+    handshakes.spawn(
         async move {
             let handshake_result = handshake.await;
             record_connection_attempt_finished(
@@ -903,7 +907,7 @@ where
         .in_current_span(),
     );
 
-    Ok(handshake_task)
+    Ok(())
 }
 
 /// An action that the peer crawler can take.
@@ -1005,13 +1009,8 @@ where
     // has had deadlocks and long hangs caused by running dependent candidate
     // set futures in the same async task.
 
-    // This contains both crawl and handshake tasks.
-    let mut handshakes: FuturesUnordered<
-        Pin<Box<dyn Future<Output = Result<CrawlerAction, BoxError>> + Send>>,
-    > = FuturesUnordered::new();
-    // <FuturesUnordered as Stream> returns None when empty.
-    // Keeping an unresolved future in the pool means the stream never terminates.
-    handshakes.push(future::pending().boxed());
+    // Dropping the crawler also aborts unfinished crawls and outbound handshakes.
+    let mut handshakes = JoinSet::new();
 
     let mut crawl_timer = tokio::time::interval(config.crawl_new_peer_interval);
     // If the crawl is delayed, also delay all future crawls.
@@ -1029,20 +1028,22 @@ where
             "crawler.in_flight_handshakes",
             "network" => network_kind_label(&config.network),
         )
-        .set(
-            handshakes
-                .len()
-                .checked_sub(1)
-                .expect("the pool always contains an unresolved future") as f64,
-        );
+        // Precision loss only affects this diagnostic count; usize values fit within f64's range.
+        .set(handshakes.len() as f64);
 
         let crawler_action = tokio::select! {
             biased;
             // Check for completed handshakes first, because the rest of the app needs them.
             // Pending handshakes are limited by the connection limit.
-            next_handshake_res = handshakes.next() => next_handshake_res.expect(
-                "handshakes never terminates, because it contains a future that never resolves"
-            ),
+            next_handshake_res = handshakes.join_next(), if !handshakes.is_empty() => {
+                match next_handshake_res
+                    .expect("the handshake set is not empty")
+                    .panic_if_task_has_panicked()
+                {
+                    Ok(action) => action,
+                    Err(_cancelled) => continue,
+                }
+            },
             // The timer is rate-limited
             next_timer = crawl_timer.next() => Ok(next_timer.expect("timers never terminate")),
             // Turn any new demand into an action, based on the crawler's current state.
@@ -1090,7 +1091,7 @@ where
                 //
                 // The peer crawler must be able to make progress even if some handshakes are
                 // rate-limited. So the next peer pacing is awaited inside the spawned task.
-                let handshake_or_crawl_handle = tokio::spawn(
+                handshakes.spawn(
                     async move {
                         // Try to get the next available peer for a handshake.
                         //
@@ -1123,10 +1124,7 @@ where
                         }
                     }
                     .in_current_span(),
-                )
-                .wait_for_panics();
-
-                handshakes.push(handshake_or_crawl_handle);
+                );
             }
             Ok(TimerCrawl { tick }) => {
                 let crawl_service = crawl_service.clone();
@@ -1136,7 +1134,7 @@ where
                     .peerset_outbound_connection_limit()
                     .saturating_sub(active_outbound_connections.update_count());
 
-                let crawl_handle = tokio::spawn(
+                handshakes.spawn(
                     async move {
                         debug!(
                             ?tick,
@@ -1166,10 +1164,7 @@ where
                         Ok(TimerCrawlFinished)
                     }
                     .in_current_span(),
-                )
-                .wait_for_panics();
-
-                handshakes.push(crawl_handle);
+                );
             }
 
             // Completed spawned tasks

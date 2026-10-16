@@ -479,7 +479,7 @@ pub struct GenesisPeer {
 
     /// Keeps the peer's network tasks running until the peer is dropped.
     _network_handles: (
-        tower::buffer::Buffer<tower::util::BoxService<Request, Response, BoxError>, Request>,
+        zebra_network::NetworkService,
         Arc<std::sync::Mutex<AddressBook>>,
         tokio::sync::mpsc::Sender<zebra_network::MisbehaviorReport>,
     ),

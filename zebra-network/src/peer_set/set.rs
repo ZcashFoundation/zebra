@@ -143,7 +143,7 @@ use crate::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
 ///

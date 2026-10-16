@@ -115,7 +115,7 @@ impl PeerVersions {
 /// This helps to reduce repeated boilerplate code. Fields that are not set are configured to use
 /// dummy fallbacks.
 #[derive(Default)]
-struct PeerSetBuilder<D, C> {
+pub(in crate::peer_set) struct PeerSetBuilder<D, C> {
     config: Option<Config>,
     discover: Option<D>,
     demand_signal: Option<mpsc::Sender<MorePeers>>,
