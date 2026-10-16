@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.0] - 2026-10-16
+
+### Breaking Changes
+
+- The misbehavior sender returned by `init` and `init_with_block_gossip_peer_ips` now takes a `MisbehaviorReport` instead of a `(PeerSocketAddr, u32)` tuple; the report also carries the `reason` the peer was scored. `MetaAddrChange::UpdateMisbehavior` has a new `reason` field, `MetaAddr::new_misbehavior` takes a `reason` argument, and `MetaAddrChange::misbehavior_reason` returns it.
+
+### Added
+
+- `constants::INVENTORY_BUSY_PEER_REFUSAL_DELAY` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515))
+
+### Changed
+
+- Prefer eligible upstream block-serving peers for single-block `Request::BlocksByHash` requests without a ready advertiser, and delay local refusals by 1.5 seconds while an eligible busy peer might have the block. Banned or outdated connections do not suppress upstream fallback. Busy connections that remain unready past `REQUEST_TIMEOUT` are dropped when the peer set is next polled, releasing their connection slots. Refusal counters include the network label ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748)).
+- Peer connections now ignore `notfound` messages that name none of a pending request's blocks or transactions, instead of failing the request with `NotFoundResponse`.
+
 ## [14.0.0] - 2026-10-01
 
 ### Breaking Changes

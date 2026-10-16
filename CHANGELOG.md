@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.1) - 2026-10-16
+
+### Added
+
+- New [zcashd API Migration Guide](https://zebra.zfnd.org/user/zcashd-api-migration-guide.html) book page, recording which component owns each of the 135 RPC methods `zcashd` 6.20.0 registers, plus its ZMQ topics, REST interface, and notification hooks: whether Zebra or Zallet provides it, what replaces it, or why it was retired, with notes on how Zebra's responses differ from `zcashd`'s ([#11021](https://github.com/ZcashFoundation/zebra/issues/11021)). New [Running Zallet with Zebra](https://zebra.zfnd.org/user/zallet.html) page describing the `zebrad` build and configuration Zallet needs.
+
+### Changed
+
+- Block downloads prefer eligible upstream peers that serve historic blocks and delay local refusals while those peers are busy. Banned or outdated connections do not suppress fallback to other sources. Stuck peer connections that remain unready past the request timeout are dropped when the peer set is next polled, freeing their slots for other connections ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748)).
+- The `banned ip and removed banned peer addresses from address book` warning now logs the misbehavior `score` and the `reason` the peer was banned, such as the block or transaction verification error.
+- Updated `pasta_curves` to 0.6.1, which speeds up Orchard field arithmetic; CPU instruction requirements are unchanged.
+- A late reply to a cancelled request no longer makes Zebra treat a block or transaction as missing from that peer, which could stall syncing from a single peer.
+
+### Fixed
+
+- The block gossip task no longer stalls when there are no ready peers, which could fill the mined block channel and make `submitblock` return errors for blocks that were committed ([#11475](https://github.com/ZcashFoundation/zebra/issues/11475)).
+- The mempool no longer bans peers that relay a transaction rejected for its lock time. Lock times are checked against the local tip, so a better-synced peer could relay a transaction that becomes valid one block later and be banned for 24 hours. Thanks to @sangsoo-osec for the report ([#11623](https://github.com/ZcashFoundation/zebra/issues/11623)).
+
+### Security
+
+- The mempool per-peer inbound-download cap is now keyed on the peer's IP address instead of its full socket address, so a single host can no longer exceed the cap by opening connections from multiple source ports. This matches the inbound-block download cap ([#10685](https://github.com/ZcashFoundation/zebra/issues/10685)).
+- `getaddresstxids` and `getaddressutxos` return an error instead of doing unbounded work when a query matches more than 100,000 results, and the address RPCs accept at most 10,000 addresses. Narrow the height range, or page with `startHeight` and `maxEntries` ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).
+- Update `rustls` to 0.23.46 to fix RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349. Zebra peer and RPC connections do not use TLS, so only outbound HTTPS clients such as `sentry`, OpenTelemetry and Elasticsearch are affected.
+
 ## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
 
 This release candidate supports the NU7 network upgrade on Testnet, which
