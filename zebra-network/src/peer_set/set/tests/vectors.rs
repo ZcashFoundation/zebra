@@ -28,8 +28,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP, FIND_BUSY_PEER_WAIT_TIMEOUT,
-        INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
+        CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
+        FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
     },
     peer::{
         ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
@@ -47,6 +47,9 @@ use crate::{
 use tokio::sync::watch;
 
 use super::{mock_peer_discovery_with_start_height, PeerSetBuilder, PeerSetGuard, PeerVersions};
+
+#[path = "find_capacity.rs"]
+mod find_capacity;
 
 #[path = "failure_reviews.rs"]
 mod failure_reviews;
@@ -1665,7 +1668,7 @@ fn peer_set_routes_queued_find_request_to_serving_peer_once_ready() {
 
             assert_eq!(received_request(&mut handles[1]), None);
             assert!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
                     .await
                     .is_err(),
                 "discovery must wait rather than fail while the serving peer is busy",
@@ -1690,7 +1693,7 @@ fn peer_set_routes_queued_find_request_to_serving_peer_once_ready() {
                 .send(Ok(response.clone()))
                 .expect("queued discovery is still pending");
             assert_eq!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, queued_fut)
                     .await
                     .expect("queued discovery must not hang")
                     .expect("the serving peer answers discovery"),
@@ -1720,7 +1723,7 @@ fn peer_set_routes_queued_find_request_behind_buffer_without_other_requests() {
                 .call(request.clone());
 
             assert!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
                     .await
                     .is_err(),
                 "buffered discovery must wait while the serving peer is busy",
@@ -1730,7 +1733,7 @@ fn peer_set_routes_queued_find_request_behind_buffer_without_other_requests() {
             assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
 
             // No more calls or readiness polls: only the peer's wakeup can route discovery.
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
             let client_request = handles[0]
                 .try_to_receive_outbound_client_request()
                 .request()
@@ -1742,7 +1745,7 @@ fn peer_set_routes_queued_find_request_behind_buffer_without_other_requests() {
                 .send(Ok(response.clone()))
                 .expect("queued discovery is still pending");
             assert_eq!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, queued_fut)
                     .await
                     .expect("buffered discovery must not hang")
                     .expect("the serving peer answers discovery"),
@@ -1804,11 +1807,11 @@ fn peer_set_routes_queued_find_before_earlier_block_behind_buffer() {
                 .call(request.clone());
 
             // Let both requests reach PeerSet while the serving peer remains busy.
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
             assert_eq!(received_request(&mut handles[1]), None);
             assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
             assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
 
             let client_request = handles[0]
                 .try_to_receive_outbound_client_request()
@@ -1820,7 +1823,7 @@ fn peer_set_routes_queued_find_before_earlier_block_behind_buffer() {
                 .send(Ok(response.clone()))
                 .expect("queued discovery is still pending");
             assert_eq!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, find_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, find_fut)
                     .await
                     .expect("prioritized discovery must not hang")
                     .expect("the serving peer answers discovery"),
@@ -1828,7 +1831,7 @@ fn peer_set_routes_queued_find_before_earlier_block_behind_buffer() {
             );
 
             // The earlier block is still routed, after discovery.
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
             let client_request = handles[0]
                 .try_to_receive_outbound_client_request()
                 .request()
@@ -1868,13 +1871,14 @@ fn peer_set_routes_queued_find_to_non_serving_peer_after_wait_timeout() {
                 .expect("the non-serving peer keeps the peer set ready")
                 .call(request.clone());
 
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 2).await;
             peer_set
                 .ready()
                 .await
                 .expect("the non-serving peer is ready");
             assert_eq!(received_request(&mut handles[1]), None);
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2 + Duration::from_millis(1)).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 2 + Duration::from_millis(1))
+                .await;
             peer_set
                 .ready()
                 .await
@@ -1890,7 +1894,7 @@ fn peer_set_routes_queued_find_to_non_serving_peer_after_wait_timeout() {
                 .send(Ok(response.clone()))
                 .expect("queued discovery is still pending");
             assert_eq!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, queued_fut)
                     .await
                     .expect("fallback discovery must not hang")
                     .expect("the fallback peer answers discovery"),
@@ -1928,10 +1932,11 @@ fn peer_set_routes_queued_find_after_timeout_behind_buffer_without_other_request
                 .expect("the buffer has room")
                 .call(request.clone());
 
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 2).await;
             assert_eq!(received_request(&mut handles[1]), None);
             // Neither the busy peer nor any new user request can wake the peer set.
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 2 + Duration::from_millis(1)).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 2 + Duration::from_millis(1))
+                .await;
             let client_request = handles[1]
                 .try_to_receive_outbound_client_request()
                 .request()
@@ -1942,7 +1947,7 @@ fn peer_set_routes_queued_find_after_timeout_behind_buffer_without_other_request
                 .send(Ok(response.clone()))
                 .expect("queued discovery is still pending");
             assert_eq!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, queued_fut)
                     .await
                     .expect("buffered fallback discovery must not hang")
                     .expect("the fallback peer answers discovery"),
@@ -1980,7 +1985,8 @@ fn peer_set_does_not_route_cancelled_queued_find_request() {
             assert_eq!(received_request(&mut handles[0]), None);
             assert_eq!(received_request(&mut handles[1]), None);
 
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT + Duration::from_millis(1)).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT + Duration::from_millis(1))
+                .await;
             peer_set.ready().await.expect("both peers are still ready");
             assert_eq!(received_request(&mut handles[0]), None);
             assert_eq!(received_request(&mut handles[1]), None);
@@ -2010,7 +2016,7 @@ fn peer_set_routes_queued_find_after_serving_peer_disconnects() {
                 .expect("the buffer has room")
                 .call(request.clone());
             assert!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4, &mut queued_fut)
                     .await
                     .is_err(),
                 "discovery waits while the serving peer is connected",
@@ -2018,7 +2024,7 @@ fn peer_set_routes_queued_find_after_serving_peer_disconnects() {
             assert_eq!(received_request(&mut handles[1]), None);
 
             handles[0].close_outbound_client_request_receiver();
-            tokio::time::sleep(FIND_BUSY_PEER_WAIT_TIMEOUT / 4).await;
+            tokio::time::sleep(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT / 4).await;
             let client_request = handles[1]
                 .try_to_receive_outbound_client_request()
                 .request()
@@ -2029,7 +2035,7 @@ fn peer_set_routes_queued_find_after_serving_peer_disconnects() {
                 .send(Ok(response.clone()))
                 .expect("queued discovery is still pending");
             assert_eq!(
-                timeout(FIND_BUSY_PEER_WAIT_TIMEOUT, queued_fut)
+                timeout(FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, queued_fut)
                     .await
                     .expect("discovery after disconnection must not hang")
                     .expect("the fallback peer answers discovery"),

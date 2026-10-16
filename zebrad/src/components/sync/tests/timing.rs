@@ -15,8 +15,8 @@ use zebra_chain::{
     parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_network::constants::{
-    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
-    REQUEST_TIMEOUT,
+    DEFAULT_CRAWL_NEW_PEER_INTERVAL, FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, HANDSHAKE_TIMEOUT,
+    INVENTORY_ROTATION_INTERVAL, REQUEST_TIMEOUT,
 };
 use zebra_state::ChainTipSender;
 
@@ -24,6 +24,7 @@ use crate::{
     components::sync::{
         ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
         BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT, GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
+        TIPS_RESPONSE_TIMEOUT,
     },
     config::ZebradConfig,
 };
@@ -96,6 +97,14 @@ fn ensure_timeouts_consistent() {
     assert!(
         BLOCK_DOWNLOAD_ROUND_TIMEOUT > REQUEST_TIMEOUT + BLOCK_DOWNLOAD_TIMEOUT,
         "the round deadline must leave time for both readiness and the block response"
+    );
+
+    // A find request waits for a busy serving peer, then is sent to any ready peer, all within the
+    // syncer's tips response timeout. That peer needs most of the timeout to answer.
+    assert!(
+        FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT < TIPS_RESPONSE_TIMEOUT / 3,
+        "waiting for a busy serving peer should leave most of the tips response timeout \
+         for the peer's answer, because timed out tip extensions are not retried"
     );
 
     // The default peer crawler interval should be at least
