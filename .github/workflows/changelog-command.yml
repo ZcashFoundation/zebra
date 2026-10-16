@@ -25,7 +25,7 @@ jobs:
       startsWith(github.event.comment.body, '/changelog') &&
       github.repository_owner == 'ZcashFoundation' &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read

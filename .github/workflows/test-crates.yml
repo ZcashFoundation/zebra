@@ -29,7 +29,7 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       test_crates: ${{ steps.filter.outputs.test_crates || 'true' }}
@@ -51,7 +51,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -102,7 +102,7 @@ jobs:
       statuses: write
     timeout-minutes: 90
     # Some of these builds take more than 14GB disk space
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       # avoid rate-limit errors by only launching a few of these jobs at a time,
       # but still finish in a similar time to the longest tests
@@ -165,7 +165,7 @@ jobs:
       contents: read
       statuses: write
     timeout-minutes: 90
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       # avoid rate-limit errors by only launching a few of these jobs at a time,
       # but still finish in a similar time to the longest tests
@@ -206,7 +206,7 @@ jobs:
         run: cargo build --package "$CRATE" --all-features --all-targets
 
   test-crates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: always()
     needs:
       - changes

@@ -30,7 +30,7 @@ jobs:
     # Scheduled runs need the app secrets, so skip them on forks and mirrors
     # (same guard as zfnd-ci-integration-tests-gcp.yml).
     if: ${{ github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       # Needed for the sticky PR comment when `pr_number` is given.
       pull-requests: write

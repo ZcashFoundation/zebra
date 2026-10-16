@@ -24,7 +24,7 @@ jobs:
         startsWith(inputs.release_tag, 'v') &&
         inputs.release_tag == github.event.release.tag_name
       }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: write # attach assets to the existing release
