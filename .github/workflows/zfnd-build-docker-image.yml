@@ -224,17 +224,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Set `vars.DOCKER_BUILDER` to `cloud` to build on Docker Build Cloud, which
-      # uses Docker Hub build minutes. Otherwise the image builds on the runner with
-      # a `docker-container` builder, which supports the attestations and
-      # push-by-digest output below.
+      # Builds on Docker Build Cloud when `vars.DOCKER_BUILDER` is `cloud`, otherwise on the runner.
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
         with:
           version: lab:latest
           driver: ${{ vars.DOCKER_BUILDER || 'docker-container' }}
-          # The endpoint names the Build Cloud builder; other drivers read it as a Docker host.
           endpoint: ${{ vars.DOCKER_BUILDER == 'cloud' && 'zfnd/zebra' || '' }}
 
       # Build and push image by digest to Google Artifact Registry
