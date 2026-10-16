@@ -20,8 +20,8 @@ on:
     - cron: 0 12 * * 5
 
   #! Only this repository runs the weekly `schedule`. A copy of this workflow in any other
-  #! repository is scheduled independently by GitHub and would deploy into the same GCP
-  #! project, colliding on instance and disk names.
+  #! repository is scheduled independently by GitHub and would run these multi-day syncs
+  #! against the same GCP project, competing for its quota.
   #!
   #! The schedule guard means: "Run unless this is a scheduled event in the wrong repository."
   #!
