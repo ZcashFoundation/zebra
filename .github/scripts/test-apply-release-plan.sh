@@ -309,6 +309,22 @@ expect_title "chore: release v7.0.0" "$case"
 expect_ready "$case"
 reset_fixture
 
+case="a maintainer's prerelease of the planned version is applied with its changelog"
+fragment zebrad network-upgrade 1
+apply_plan zebrad@7.0.0-rc.0
+sed -i 's/^zebrad\t7\.0\.0$/zebrad\t7.0.0-rc.1/' "$plan"
+title="$(cd "$fixture" && .github/scripts/apply-release-plan.sh base "$plan" 2> "${temporary_root}/log")" ||
+  fail "$case: the apply script failed" "$(cat "${temporary_root}/log")"
+git -C "$fixture" add --all
+git -C "$fixture" commit --quiet --message "chore: release a prerelease"
+expect_version zebrad 7.0.0-rc.1 "$case"
+expect_locked zebrad 7.0.0-rc.1 "$case"
+[[ -e "${fixture}/.changes/zebrad/v7.0.0-rc.1.md" && ! -e "${fixture}/.changes/zebrad/v7.0.0.md" ]] ||
+  fail "$case: expected zebrad to be batched as 7.0.0-rc.1 only"
+expect_title "chore: release v7.0.0-rc.1" "$case"
+expect_ready "$case"
+reset_fixture
+
 case="no fragments, no release"
 apply_plan zebra-chain@13.0.1 zebrad@6.4.2
 expect_version zebra-chain 13.0.0 "$case"
