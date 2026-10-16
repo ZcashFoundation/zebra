@@ -33,6 +33,7 @@ jobs:
     steps:
       - name: Generate release app token
         id: app-token
+        if: vars.RELEASE_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
@@ -44,7 +45,7 @@ jobs:
         with:
           persist-credentials: false
           ref: main
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Resolve the integration test run ID.
       # For workflow_run: use the triggering run directly.
@@ -157,6 +158,12 @@ jobs:
             git diff --stat
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Validate release app token
+        if: steps.changes.outputs.has_changes == 'true' && steps.app-token.outputs.token == ''
+        run: |
+          echo "::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY. The app token is required to open the checkpoint update PR."
+          exit 1
 
       # Open or update a PR with the checkpoint changes
       - name: Create checkpoint update PR

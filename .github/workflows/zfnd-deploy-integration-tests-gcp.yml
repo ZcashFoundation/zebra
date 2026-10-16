@@ -696,17 +696,20 @@ jobs:
       # Disk images in GCP are required to be in lowercase, but the blockchain network
       # uses sentence case, so we need to downcase ${{ inputs.network }}.
       #
-      # Disk image names in GCP are limited to 63 characters, so we need to limit
-      # branch names to 12 characters.
+      # Disk image names in GCP are limited to 63 characters, so the cache scope is
+      # limited to 12. The scope is the branch slug in ZcashFoundation/zebra and
+      # `r<repository id>` elsewhere, so a copy of the repository never writes `main` images.
+      # The lookup in `zfnd-find-cached-disks.yml` must compute the same scope.
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
-      - name: Format network name and branch name for disks
+      # Passes the cache scope to subsequent steps using $CACHE_SCOPE env variable.
+      - name: Format network name and cache scope for disks
+        env:
+          NETWORK_INPUT: ${{ inputs.network }}
+          SCOPE: ${{ github.repository == 'ZcashFoundation/zebra' && env.GITHUB_REF_POINT_SLUG_URL || format('r{0}', github.repository_id) }}
         run: |
-          NETWORK_CAPS="${{ inputs.network }}"
-          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
-          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
+          echo "NETWORK=${NETWORK_INPUT,,}" >> "$GITHUB_ENV"
+          echo "CACHE_SCOPE=${SCOPE:0:12}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
       - name: Install private SSH key
@@ -1013,7 +1016,7 @@ jobs:
 
              # Create image from the test disk
              gcloud compute images create \
-              "${DISK_PREFIX}-${SHORT_GITHUB_REF}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              "${DISK_PREFIX}-${CACHE_SCOPE}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk="${DISK_NAME}" \
               --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
