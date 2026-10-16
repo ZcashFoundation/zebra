@@ -126,7 +126,7 @@ jobs:
   # the reusable deployment workflow.
   set-matrix:
     name: Resolve event deployment inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       networks: ${{ steps.set-matrix.outputs.networks }}
       zones: ${{ steps.set-matrix.outputs.zones }}
@@ -275,7 +275,7 @@ jobs:
     name: Open or update issues for image build failures
     needs: [build]
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write

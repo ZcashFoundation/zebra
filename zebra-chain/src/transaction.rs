@@ -25,7 +25,7 @@ mod tests;
 
 pub use crate::sapling::FieldNotPresent;
 pub use auth_digest::AuthDigest;
-pub use compat::{sprout_joinsplit_key_and_ciphertexts, SPROUT_CIPHERTEXT_SIZE};
+pub use compat::{sprout_joinsplit_key_proof_and_ciphertexts, SPROUT_CIPHERTEXT_SIZE};
 pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
@@ -844,7 +844,8 @@ impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus
 {
     /// Deserialize a transaction with a known consensus branch ID.
     ///
-    /// Runs the same parse-time consensus checks as [`Transaction::zcash_deserialize`].
+    /// Runs the same parse-time consensus checks as
+    /// [`Transaction::zcash_deserialize`](crate::serialization::ZcashDeserialize::zcash_deserialize).
     fn zcash_deserialize_with_context<R: std::io::Read>(
         reader: R,
         &branch_id: &zcash_protocol::consensus::BranchId,
@@ -914,6 +915,36 @@ fn deserialize_and_check<R: std::io::Read>(
             Vec::new(),
         )
     };
+
+    // # Consensus
+    //
+    // > [NU5 onward] If effectiveVersion ≥ 5, the nConsensusBranchId field MUST match the
+    // > consensus branch ID used for SIGHASH transaction hashes, as specified in [ZIP-244].
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    //
+    // > CONSENSUS_BRANCH_ID is the 4-byte little-endian encoding of the consensus branch ID
+    // > for the epoch of the block containing the transaction.
+    //
+    // <https://zips.z.cash/zip-0244#txid-digest>
+    //
+    // ZIP 229 introduces V6 at NU6.3, replacing the pre-NU6.3 version restriction with:
+    //
+    // > [NU6.3 onward] The transaction version number MUST be 4 or 5 or 6.
+    //
+    // <https://zips.z.cash/zip-0229#consensus-rules>
+    //
+    // Together, these rules exclude pre-NU6.3 branch IDs from V6 transactions.
+    // Older branch IDs select Orchard bundle versions that the V6 writer rejects.
+    // Reject them here so every successfully parsed transaction can be serialized.
+    if inner.version() == TxVersion::V6
+        && compat::branch_id_to_network_upgrade(inner.consensus_branch_id())
+            .is_none_or(|network_upgrade| network_upgrade < NetworkUpgrade::Nu6_3)
+    {
+        return Err(crate::serialization::SerializationError::Parse(
+            "v6 transaction must have a NU6.3 or later consensus branch ID",
+        ));
+    }
 
     // Validate coinbase inputs: the script length must be in bounds and the height
     // encoding must parse correctly. zcash_primitives accepts raw bytes without
@@ -1232,7 +1263,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
         Self::build_transparent(
             zcash_primitives::transaction::TxVersion::V5,
             branch_id,
@@ -1254,7 +1285,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu6_3);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
         Self::build_transparent(
             zcash_primitives::transaction::TxVersion::V6,
             branch_id,
@@ -1313,7 +1344,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
 
         let tx_data = zp_tx::TransactionData::from_parts(
             zp_tx::TxVersion::V5,
@@ -1347,7 +1378,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu6_3);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
 
         let tx_data = zp_tx::TransactionData::from_parts_v6(
             branch_id,
@@ -1380,8 +1411,13 @@ impl Transaction {
     }
 
     /// Rebuild this transaction with new transparent inputs.
+    ///
+    /// Drops the transparent bundle if it ends up with no inputs and no outputs, because
+    /// librustzcash hashes an empty bundle differently from an absent one, and the
+    /// serialized transaction always parses as absent. This keeps the v5 and v6 txid
+    /// matching the one parsed from the serialized transaction.
     pub fn with_transparent_inputs(self, inputs: Vec<transparent::Input>) -> Self {
-        let vin = inputs
+        let vin: Vec<_> = inputs
             .iter()
             .map(crate::transaction::compat::input_to_txin)
             .collect();
@@ -1390,11 +1426,12 @@ impl Transaction {
             .transparent_bundle()
             .map(|b| b.vout.clone())
             .unwrap_or_default();
-        let transparent_bundle = Some(zcash_transparent::bundle::Bundle {
-            vin,
-            vout,
-            authorization: zcash_transparent::bundle::Authorized,
-        });
+        let transparent_bundle =
+            (!vin.is_empty() || !vout.is_empty()).then_some(zcash_transparent::bundle::Bundle {
+                vin,
+                vout,
+                authorization: zcash_transparent::bundle::Authorized,
+            });
         self.rebuild_with_transparent(transparent_bundle)
     }
 

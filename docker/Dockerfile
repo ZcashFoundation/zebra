@@ -157,6 +157,16 @@ ARG CARGO_TARGET_DIR
 # Strip absolute build paths from the binary so it doesn't depend on the build layout.
 ENV RUSTFLAGS="--remap-path-prefix=${HOME}=/zebra --remap-path-prefix=${CARGO_HOME}=/cargo"
 
+# The target cache mount is shared by every build on the builder, from any
+# branch. Cargo treats a workspace crate as fresh when its sources are older than
+# its cached artifacts, and a checkout is often older than a build that another
+# branch ran in the meantime, so this build could link, or entirely reuse, crates
+# compiled from someone else's sources. So the workspace crates are always
+# rebuilt here and only third-party dependencies, which cargo keys by version,
+# come from the cache. `sharing=locked` keeps another build from writing to the
+# target directory between the clean, the build and the copy. That only holds
+# against builds that also lock it, so the cache has its own `id` instead of
+# sharing one with builds that still use the shared mount of older Dockerfiles.
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
@@ -171,9 +181,15 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${CARGO_TARGET_DIR} \
+    --mount=type=cache,id=zebra-release-target,target=${CARGO_TARGET_DIR},sharing=locked \
     --mount=type=cache,target=${CARGO_HOME} \
     [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+    # Keep this list in sync with the workspace crates bind-mounted above.
+    cargo clean --release \
+        --package tower-batch-control --package tower-fallback --package zebra-chain \
+        --package zebra-consensus --package zebra-network --package zebra-node-services \
+        --package zebra-rpc --package zebra-script --package zebra-state \
+        --package zebra-test --package zebra-utils --package zebrad && \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
@@ -256,8 +272,8 @@ CMD ["zebrad"]
 # Override the ARGs to bake in a different sidecar release.
 FROM runtime AS runtime-zcashd-compat
 
-ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.1.0/zcashd-zebra-compat-v1.1.0-linux-x86_64.tar.gz"
-ARG ZCASHD_COMPAT_ARCHIVE_SHA256="92f47c6ff84a99cf6c911f47c03d70d4a5181870cdc87dcb49036d1d4c346567"
+ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.2.0/zcashd-zebra-compat-v1.2.0-linux-x86_64.tar.gz"
+ARG ZCASHD_COMPAT_ARCHIVE_SHA256="a2d1d9a7cd4c766ea73990fcd17f370bc94eee738e50f1a3b97262db32f2bab7"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

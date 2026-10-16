@@ -48,7 +48,7 @@ use cached_peer_addr_response::CachedPeerAddrResponse;
 #[cfg(test)]
 mod tests;
 
-use downloads::Downloads as BlockDownloads;
+use downloads::{Downloads as BlockDownloads, HeightLimitError};
 
 /// The maximum amount of time an inbound service response can take.
 ///
@@ -83,8 +83,12 @@ type SemanticBlockVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
 >;
-type GossipedBlockDownloads =
-    BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<SemanticBlockVerifier>, State>;
+type GossipedBlockDownloads = BlockDownloads<
+    Timeout<BlockDownloadPeerSet>,
+    Timeout<SemanticBlockVerifier>,
+    State,
+    zs::LatestChainTip,
+>;
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
@@ -109,7 +113,7 @@ pub struct InboundSetupData {
     pub latest_chain_tip: zs::LatestChainTip,
 
     /// A channel to send misbehavior reports to the [`AddressBook`].
-    pub misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+    pub misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -154,7 +158,7 @@ pub enum Setup {
         state: State,
 
         /// A channel to send misbehavior reports to the [`AddressBook`].
-        misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
     },
 
     /// Temporary state used in the inbound service's internal initialization code.
@@ -352,12 +356,32 @@ impl Service<zn::Request> for Inbound {
                         err.misbehavior_score()
                     } else if let Some(err) = err.downcast_ref::<VerifyBlockError>() {
                         err.misbehavior_score()
+                    } else if let Some(err) = err.downcast_ref::<HeightLimitError>() {
+                        // A gossiped block dropped before the verifier because its coinbase height
+                        // was outside the accepted range around the tip. The downloader only
+                        // attaches an advertiser address to these drops when the parent header
+                        // Zebra holds contradicts the claimed height, which proves the height was
+                        // rewritten (GHSA-4f6v-mj46-gxg3), so honest peers serving genuinely old or
+                        // far-ahead blocks are never scored.
+                        err.misbehavior_score()
                     } else {
                         continue;
                     };
 
                     if score != 0 {
-                        let _ = misbehavior_sender.try_send((advertiser_addr, score));
+                        // Height limit drops are only attributed when the parent proves a rewrite.
+                        let reason = if err.is::<HeightLimitError>() {
+                            format!(
+                                "invalid gossiped block: parent header contradicts coinbase height: {err}"
+                            )
+                        } else {
+                            format!("invalid gossiped block: {err}")
+                        };
+                        let _ = misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                            advertiser_addr,
+                            score,
+                            reason,
+                        ));
                     }
                 }
 

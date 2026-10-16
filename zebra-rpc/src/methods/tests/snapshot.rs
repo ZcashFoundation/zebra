@@ -47,16 +47,13 @@ use zebra_network::{
 };
 use zebra_node_services::{mempool, BoxError};
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
-use zebra_test::{
-    mock_service::{MockService, PanicAssertion},
-    vectors::BLOCK_MAINNET_1_BYTES,
-};
+use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::{
-        get_block_template::GetBlockTemplateRequestMode,
+        get_block_template::{BlockProposalResponse, GetBlockTemplateRequestMode},
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
         subsidy::GetBlockSubsidyResponse,
@@ -114,6 +111,7 @@ async fn test_z_get_treestate() {
     const SAPLING_ACTIVATION_HEIGHT: u32 = 2;
 
     let custom_testnet = Parameters::build()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             sapling: Some(SAPLING_ACTIVATION_HEIGHT),
             // We need to set the NU5 activation height higher than the height of the last block for
@@ -286,7 +284,14 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .get_info()
         .await
         .expect("We should have a GetInfo struct");
-    snapshot_rpc_getinfo(get_info, &settings);
+    snapshot_rpc_getinfo(
+        get_info,
+        zebra_network::Version::min_remote_for_height(
+            network,
+            blocks.last().unwrap().coinbase_height().unwrap(),
+        ),
+        &settings,
+    );
 
     // `getblockchaininfo`
     let get_blockchain_info = rpc
@@ -706,9 +711,20 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
+fn snapshot_rpc_getinfo(
+    info: GetInfoResponse,
+    minimum_peer_version: zebra_network::Version,
+    settings: &insta::Settings,
+) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_info", info, {
+            ".protocolversion" => dynamic_redaction(move |value, _path| {
+                assert!(
+                    value.as_u64().unwrap() >= u64::from(minimum_peer_version.0),
+                    "the advertised version must meet the minimum for the network and tip",
+                );
+                "[version]"
+            }),
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
                 assert_eq!(value.as_str().unwrap(), "RPC test".to_string());
@@ -912,15 +928,37 @@ fn snapshot_rpc_getblocksubsidy(
 /// Snapshot `getnetworkinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getnetworkinfo(
     get_network_info: GetNetworkInfoResponse,
+    minimum_peer_version: zebra_network::Version,
     settings: &insta::Settings,
 ) {
-    settings.bind(|| insta::assert_json_snapshot!("get_network_info", get_network_info));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("get_network_info", get_network_info, {
+            ".protocolversion" => dynamic_redaction(move |value, _path| {
+                assert!(
+                    value.as_u64().unwrap() >= u64::from(minimum_peer_version.0),
+                    "the advertised version must meet the minimum for the network and tip",
+                );
+                "[version]"
+            }),
+        })
+    });
 }
 
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
+fn snapshot_rpc_getpeerinfo(
+    get_peer_info: Vec<PeerInfo>,
+    minimum_peer_version: zebra_network::Version,
+    settings: &insta::Settings,
+) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_peer_info", get_peer_info, {
+            "[].version" => dynamic_redaction(move |value, _path| {
+                assert!(
+                    value.as_u64().unwrap() >= u64::from(minimum_peer_version.0),
+                    "peer version must meet the minimum for the network and tip",
+                );
+                "[version]"
+            }),
             "[].lastrecv" => dynamic_redaction(|value, _path| {
                 assert!(value.as_u64().unwrap() > 0, "lastrecv should be non-zero");
                 "[lastrecv]"
@@ -1053,7 +1091,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
     let (mock_tip, mock_tip_sender) = MockChainTip::new();
     mock_tip_sender.send_best_tip_height(fake_tip_height);
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
 
     let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_connected(
         SocketAddr::new(
@@ -1079,7 +1117,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         state,
         read_state,
-        block_verifier_router.clone(),
+        block_verifier_router,
         mock_sync_status.clone(),
         mock_tip.clone(),
         mock_address_book,
@@ -1142,25 +1180,41 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("tip_height", get_block_subsidy, &settings);
 
-    let get_block_subsidy = rpc
-        .get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT))
-        .await
-        .expect("We should have a success response");
-    snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+    let get_block_subsidy = rpc.get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT)).await;
+    if network.is_default_testnet() {
+        // Post-D subsidy depends on the unavailable future parent's NSM reserve.
+        assert_eq!(
+            get_block_subsidy
+                .expect_err("future post-D subsidy requires an existing parent block")
+                .code(),
+            i32::from(server::error::LegacyCode::Misc),
+        );
+    } else {
+        let get_block_subsidy = get_block_subsidy.expect("We should have a success response");
+        snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+    }
 
     // `getnetworkinfo`
     let get_network_info = rpc
         .get_network_info()
         .await
         .expect("We should have a success response");
-    snapshot_rpc_getnetworkinfo(get_network_info, &settings);
+    snapshot_rpc_getnetworkinfo(
+        get_network_info,
+        zebra_network::Version::min_remote_for_height(network, fake_tip_height),
+        &settings,
+    );
 
     // `getpeerinfo`
     let get_peer_info = rpc
         .get_peer_info()
         .await
         .expect("We should have a success response");
-    snapshot_rpc_getpeerinfo(get_peer_info, &settings);
+    snapshot_rpc_getpeerinfo(
+        get_peer_info,
+        zebra_network::Version::min_remote_for_height(network, fake_tip_height),
+        &settings,
+    );
 
     // `getnetworksolps` (and `getnetworkhashps`)
     //
@@ -1193,6 +1247,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
                     min_time: fake_min_time,
                     max_time: fake_max_time,
                     chain_history_root: fake_history_tree(network).hash(),
+                    chain_value_pools: Default::default(),
                 }));
         }
     };
@@ -1216,20 +1271,21 @@ pub async fn test_mining_rpcs<State, ReadState>(
     // send tip hash and time needed for getblocktemplate rpc
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
 
+    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
     let (rpc_mock_state, _) = RpcImpl::new(
         network.clone(),
-        mining_conf.clone(),
+        mining_conf,
         false,
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         state.clone(),
         read_state.clone(),
-        block_verifier_router,
-        mock_sync_status.clone(),
-        mock_tip.clone(),
+        mock_block_verifier_router.clone(),
+        mock_sync_status,
+        mock_tip,
         MockAddressBookPeers::default(),
-        rx.clone(),
+        rx,
         None,
     );
 
@@ -1330,49 +1386,40 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
 
-    // the following snapshots use a mock read_state and block_verifier_router
-
-    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
-    let (rpc_mock_state_verifier, _) = RpcImpl::new(
-        network.clone(),
-        mining_conf,
-        false,
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool, 1),
-        state.clone(),
-        read_state.clone(),
-        mock_block_verifier_router.clone(),
-        mock_sync_status,
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    let get_block_template_fut =
-        rpc_mock_state_verifier.get_block_template(Some(GetBlockTemplateParameters {
-            mode: GetBlockTemplateRequestMode::Proposal,
-            data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
-            ..Default::default()
-        }));
-
-    let mock_block_verifier_router_request_handler = async move {
-        mock_block_verifier_router
-            .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
-            .await
-            .respond(Hash::from([0; 32]));
-    };
-
-    let (get_block_template, ..) = tokio::join!(
-        get_block_template_fut,
-        mock_block_verifier_router_request_handler,
-    );
-
-    let get_block_template =
-        get_block_template.expect("unexpected error in getblocktemplate RPC call");
-
-    snapshot_rpc_getblocktemplate("proposal", get_block_template, None, &settings);
+    // Mainnet still accepts verifier-approved proposals without the reserve preflight.
+    // Public Testnet requires the live parent even before NU7, because reissuance is scheduled.
+    let proposal = network.blockchain_map()[&1].to_vec();
+    let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
+        mode: GetBlockTemplateRequestMode::Proposal,
+        data: Some(HexData(proposal)),
+        ..Default::default()
+    }));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        if network.is_mainnet() {
+            let verifier_response = async {
+                mock_block_verifier_router
+                    .expect_request_that(|request| matches!(request, Request::CheckProposal(_)))
+                    .await
+                    .respond(Hash::from([0; 32]));
+            };
+            let (response, ()) = tokio::join!(get_block_template, verifier_response);
+            assert_eq!(
+                response.unwrap(),
+                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Valid),
+            );
+            read_state.clone().expect_no_requests().await;
+        } else {
+            let (response, ()) =
+                tokio::join!(get_block_template, make_mock_read_state_request_handler());
+            assert!(matches!(
+                response.unwrap(),
+                GetBlockTemplateResponse::ProposalMode(BlockProposalResponse::Rejected(_)),
+            ));
+            mock_block_verifier_router.expect_no_requests().await;
+        }
+    })
+    .await
+    .expect("proposal validation must not stall");
 
     // These RPC snapshots use the populated state
 

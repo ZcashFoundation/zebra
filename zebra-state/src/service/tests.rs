@@ -425,7 +425,7 @@ proptest! {
             // which is not included in the UTXO set
             if block.height > block::Height(0) {
                 let utxos = &block.new_outputs.iter().map(|(k, ordered_utxo)| (*k, ordered_utxo.utxo.clone())).collect();
-                let block_value_pool = &block.block.chain_value_pool_change(utxos, DeferredPoolBalanceChange::zero())?;
+                let block_value_pool = &block.block.chain_value_pool_change(utxos, DeferredPoolBalanceChange::zero(), &network, expected_finalized_value_pool.clone()?.constrain()?)?;
                 expected_finalized_value_pool += *block_value_pool;
             }
 
@@ -452,7 +452,7 @@ proptest! {
         let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
         for block in non_finalized_blocks {
             let utxos = block.new_outputs.clone();
-            let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero())?;
+            let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 
             let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());

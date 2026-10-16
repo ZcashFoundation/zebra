@@ -17,7 +17,7 @@ permissions: {}
 jobs:
   merge-policy:
     name: merge-policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       pull-requests: read # reads the labels of the pull requests in a merge group

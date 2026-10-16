@@ -24,7 +24,7 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       lint: ${{ steps.filter.outputs.lint || 'true' }}
@@ -48,7 +48,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -90,7 +90,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -114,7 +114,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       matrix:
@@ -140,7 +140,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -158,7 +158,7 @@ jobs:
   no-test-deps:
     needs: changes
     if: needs.changes.outputs.lint == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -180,7 +180,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -201,7 +201,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         checks:
@@ -246,7 +246,7 @@ jobs:
     if: needs.changes.outputs.hadolint == 'true'
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -264,13 +264,13 @@ jobs:
     if: needs.changes.outputs.shellcheck == 'true'
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      # shellcheck is preinstalled on the ubuntu-latest runner image.
+      # shellcheck is preinstalled on the ubuntu-26.04 runner image.
       - name: Run shellcheck
         run: |
           find . -type f -name '*.sh' \
@@ -290,7 +290,7 @@ jobs:
         run: .github/scripts/test-batch-release-changelogs.sh
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: always()
     needs:
       - changes

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'RPC requests with an explicit `"id": null` are now answered. The JSON-RPC compatibility middleware used to drop the `id`, which turned the request into a notification whose response was discarded.'
+time: 2026-10-08T22:00:00.000000000Z

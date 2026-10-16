@@ -71,7 +71,7 @@ fn compact_action(
         compact_action.cmx = action.cmx().to_bytes().to_vec();
         compact_action.ephemeral_key = action.encrypted_note().epk_bytes.to_vec();
         compact_action.ciphertext =
-            action.encrypted_note().enc_ciphertext[..COMPACT_CIPHERTEXT_SIZE].to_vec();
+            action.encrypted_note().enc_ciphertext.0[..COMPACT_CIPHERTEXT_SIZE].to_vec();
     }
 
     compact_action

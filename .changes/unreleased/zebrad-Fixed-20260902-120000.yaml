@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: 'The syncer no longer restarts when a block''s transparent input lookup times out near the tip, or when the short post-checkpoint verify timeout fires. Both are transient UTXO races, and restarting cancelled the in-flight parent commit, causing a sync restart loop ([#11168](https://github.com/ZcashFoundation/zebra/issues/11168), [#11132](https://github.com/ZcashFoundation/zebra/issues/11132)).'
-time: 2026-09-02T12:00:00.000000000Z

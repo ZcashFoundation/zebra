@@ -45,7 +45,7 @@ jobs:
     # gate outcome. `pr-gate-result` is a required check, so every PR Gate run has to
     # report it, and it can only report an honest verdict if the cheap policy jobs
     # re-evaluate the declaration. Only `semver-checks` is expensive enough to skip.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       semver: ${{ steps.filter.outputs.semver || 'true' }}
@@ -114,7 +114,7 @@ jobs:
       github.event.changes.title != null || github.event.changes.base != null) &&
       needs.changes.outputs.semver == 'true' &&
       needs.changes.outputs.breaking == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -146,7 +146,7 @@ jobs:
   changelog-gate:
     needs: changes
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -165,6 +165,27 @@ jobs:
           merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
           bash .github/scripts/validate-pr-changelogs.sh \
             "$merge_base" HEAD "$CONVENTIONAL" "$DECLARED_TYPE" "$BREAKING"
+
+  # Dry-runs the release batching over every pending fragment, so the set that separate PRs
+  # combine on the merge queue ref and on `main` is checked too.
+  changelog-fragments:
+    needs: changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      # Pinned to the version release.yml batches with.
+      - uses: miniscruff/changie-action@3223cb29b92a0972dedc864ace3da01e04780ae4 # v3.0.1
+        with:
+          version: v1.25.2
+      - name: Check change fragments
+        run: |
+          projects="$(awk '/^projects:/ { p = 1; next } /^[^[:space:]#]/ { p = 0 } p && $1 == "key:" { print $2 }' .changie.yaml)"
+          for project in $projects; do
+            changie batch major --dry-run --project "$project" > /dev/null
+          done
 
   # No ruleset context pins this worker's display name; the ruleset requires `pr-gate-result`.
   release-readiness:
@@ -213,17 +234,7 @@ jobs:
           toolchain: 1.91.0
           cache-on-failure: true
       - name: Install libclang for librocksdb-sys bindgen
-        run: |
-          sudo timeout --kill-after=10s --foreground 180s apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            update
-          sudo timeout --kill-after=10s --foreground 180s apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            install -y libclang-dev
+        run: .github/scripts/apt-install.sh libclang-dev
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
@@ -233,6 +244,10 @@ jobs:
           base-sha: ${{ steps.release-target.outputs.base_sha }}
           target-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}
+        # cargo-release clones the checkout with `git clone --local`, which hardlinks
+        # objects and fails when TMPDIR is on another filesystem, as /tmp is on Ubuntu 26.04.
+        env:
+          TMPDIR: ${{ runner.temp }}
       - name: Summarize release readiness
         if: always()
         env:
@@ -279,9 +294,9 @@ jobs:
     # renamed or skipped result job did. Renaming also never worked as written, because
     # GitHub does not evaluate `name` expressions for a job it skips, so those runs
     # reported the raw expression text.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: always()
-    needs: [changes, semver-checks, changelog-gate, release-readiness]
+    needs: [changes, semver-checks, changelog-gate, changelog-fragments, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed

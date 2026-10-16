@@ -30,7 +30,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network as zn;
 use zebra_state as zs;
 
 use crate::{
@@ -419,7 +419,7 @@ where
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
 
     /// Blocks whose download failed with `NotFound` and should be re-requested on
     /// the next sync round, instead of being silently dropped (#5709).
@@ -486,7 +486,7 @@ where
         state: ZS,
         read_state: ZSR,
         latest_chain_tip: ZSTip,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -1216,21 +1216,31 @@ where
                 return Ok(());
             }
 
-            Err(BlockDownloadVerifyError::Invalid {
-                ref error,
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) if error.misbehavior_score() != 0 => {
-                let _ = self
-                    .misbehavior_sender
-                    .try_send((advertiser_addr, error.misbehavior_score()));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::Invalid {
+                    ref error,
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) if error.misbehavior_score() != 0 => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    error.misbehavior_score(),
+                    verify_error.to_string(),
+                ));
             }
 
-            Err(BlockDownloadVerifyError::InvalidHeight {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::InvalidHeight {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    verify_error.to_string(),
+                ));
             }
 
             // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
@@ -1239,11 +1249,17 @@ where
             // not recompute the header's commitment to the body's authorizing data
             // (GHSA-g95h-hw6g-pvgv). Peers that serve genuinely old blocks arrive unattributed and
             // fall through unscored. Score only a parent-proven rewrite.
-            Err(BlockDownloadVerifyError::BehindTipHeightLimit {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::BehindTipHeightLimit {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    format!("parent header contradicts coinbase height: {verify_error}"),
+                ));
             }
 
             // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must
@@ -1267,6 +1283,14 @@ where
         //   only applies misbehavior reports in batches.
         // - UTXO races (#11168): the block was never rejected, and the state parks its
         //   children until it arrives, so re-request it instead of waiting for a tip walk.
+        // - `Invalid` with a mismatched authorizing data commitment: the block itself is fine, only
+        //   the served body was forged, so the hash is still valid and still wanted. Misbehavior
+        //   reports are flushed to the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so the first
+        //   re-request can briefly land on the same peer again; `MAX_BLOCK_REOBTAIN_RETRIES` bounds
+        //   that.
+        // - `Invalid` because an ancestor had a mismatched authorizing data commitment: the state
+        //   rejects queued descendants along with the forged ancestor, but their hashes are still
+        //   wanted, and the peers that served them are not scored.
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
@@ -1278,6 +1302,12 @@ where
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
             Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
                 if Self::is_utxo_lookup_timeout(e) =>
+            {
+                Some(*hash)
+            }
+            Err(BlockDownloadVerifyError::Invalid { error, hash, .. })
+                if error.is_auth_commitment_mismatch()
+                    || error.is_descendant_of_auth_commitment_mismatch() =>
             {
                 Some(*hash)
             }
@@ -1392,6 +1422,13 @@ where
 
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
+    ///
+    /// Blocks that are only queued in the state, waiting for their parent, are treated as not
+    /// present. A sync restart cancels in-flight downloads, so the parent of a queued block may
+    /// never arrive unless the syncer downloads it again along with its queued children. If the
+    /// syncer skipped queued blocks, `obtain_tips` would reject every download set that contains
+    /// them, and the sync would stall until Zebra restarts. Re-submitting a queued block is
+    /// harmless: the block verifier rejects it as a duplicate, which doesn't restart the sync.
     pub(crate) async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
@@ -1402,7 +1439,9 @@ where
             .await
             .map_err(|e| eyre!(e))?
         {
-            zs::Response::KnownBlock(loc) => Ok(loc.is_some()),
+            zs::Response::KnownBlock(loc) => {
+                Ok(loc.is_some_and(|loc| loc != zs::KnownBlock::Queue))
+            }
             _ => unreachable!("wrong response to known block request"),
         }
     }
@@ -1419,6 +1458,27 @@ where
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
+                false
+            }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if error.is_auth_commitment_mismatch() =>
+            {
+                debug!(
+                    error = ?e,
+                    "served block body did not match the authorizing data commitment in its \
+                     header: the block hash is still valid and is re-requested, and the serving \
+                     peer is scored, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if error.is_descendant_of_auth_commitment_mismatch() =>
+            {
+                debug!(
+                    error = ?e,
+                    "an ancestor's served body did not match the authorizing data commitment in \
+                     its header: this block hash is still valid and is re-requested, continuing"
+                );
                 false
             }
             // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose

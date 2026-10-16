@@ -49,7 +49,6 @@ proptest! {
             // also check the address, port, and services individually
             prop_assert!(!sanitized.addr.ip().is_unspecified());
             prop_assert_ne!(sanitized.addr.port(), 0);
-            prop_assert_eq!(sanitized.misbehavior(), 0);
             prop_assert!(!sanitized.is_inbound());
 
             if let Some(services) = sanitized.services {

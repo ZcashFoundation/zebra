@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: A late reply to a cancelled request no longer makes Zebra treat a block or transaction as missing from that peer, which could stall syncing from a single peer.
+time: 2026-10-15T08:26:51.791882429+02:00

@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Fixed
-body: 'The `non_finalized_state_change` indexer subscription is no longer dropped when the listener buffer fills. A full buffer is ordinary backpressure during the initial send of the non-finalized state, so subscriptions were dropped on connect and clients reconnected in a loop, logging `slow consumer, dropping non_finalized_state_change stream after buffer filled`. `TrustedChainSync` also waits before re-subscribing after a stream ends or errors ([#11265](https://github.com/ZcashFoundation/zebra/issues/11265)).'
-time: 2026-08-17T17:12:09.319628504Z

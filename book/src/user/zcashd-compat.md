@@ -69,7 +69,7 @@ zcashd-compat modes:
 |---------------------------|--------------------------------------------------------------------------|
 | `split-binary` (default)  | Downloads `zebrad` and the sidecar `zcashd`; prints two start commands  |
 | `supervised`              | Downloads `zebrad`; Zebra downloads hash-pinned `zcashd` at startup and supervises it |
-| `docker-split-containers` | Pulls the Zebra and zcashd images; prints two `docker run` commands     |
+| `docker-split-containers` | Pulls the Zebra image and downloads the hash-pinned sidecar `zcashd`; prints two `docker run` commands, running `zcashd` from the Zebra image (`--zcashd-docker-image` uses your own image instead) |
 | `docker-supervised`       | Pulls the Zebra image; prints one supervised `docker run` command (Zebra downloads hash-pinned `zcashd` at first start unless the image vendors it) |
 | `build-from-source`       | Validates source trees and toolchains; prints build and start commands   |
 
@@ -174,7 +174,7 @@ Zebra's embedded release manifest; use `zcashd_source = "path"` plus
 > [!WARNING]
 > The `embedded` source is **experimental**: it downloads a pinned `zcashd`
 > build from [ZcashFoundation/zcashd](https://github.com/ZcashFoundation/zcashd)
-> releases. The current `zebra-compat-v1.1.0` artifact is built by the
+> releases. The current `zebra-compat-v1.2.0` artifact is built by the
 > foundation's own CI from the `zcashd-compat` branch. Production deployments
 > that need stronger guarantees should still build the sidecar from source (or
 > otherwise verify it) and use `zcashd_source = "path"`.

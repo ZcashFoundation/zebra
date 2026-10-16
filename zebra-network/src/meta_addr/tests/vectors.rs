@@ -42,7 +42,6 @@ fn sanitize_extremes() {
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
-        misbehavior_score: Default::default(),
         is_inbound: false,
         user_agent: None,
         negotiated_version: None,
@@ -58,7 +57,6 @@ fn sanitize_extremes() {
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
-        misbehavior_score: Default::default(),
         is_inbound: false,
         user_agent: None,
         negotiated_version: None,
@@ -512,6 +510,7 @@ fn ipv4_mapped_misbehavior_panics_without_fix() {
     let misbehavior_change = MetaAddrChange::UpdateMisbehavior {
         addr: raw_addr, // ← the unfixed, raw address
         score_increment: 100,
+        reason: "test misbehavior".to_string(),
     };
 
     // This call hits `assert_eq!(previous.addr, self.addr())` in apply_to_meta_addr
@@ -555,14 +554,19 @@ fn new_misbehavior_canonicalizes_ipv4_mapped_addr() {
     assert_eq!(previous.addr(), canonical_addr);
 
     // Fix: new_misbehavior canonicalizes the address.
-    let change = MetaAddr::new_misbehavior(raw_addr, 100);
+    let change = MetaAddr::new_misbehavior(raw_addr, 100, "test misbehavior");
 
     assert_eq!(change.addr(), canonical_addr);
+    assert_eq!(change.misbehavior_reason(), Some("test misbehavior"));
 
     let updated = change
         .apply_to_meta_addr(previous, instant_now, chrono_now)
         .expect("canonical misbehavior update should apply to existing peer");
 
     assert_eq!(updated.addr(), canonical_addr);
-    assert_eq!(updated.misbehavior(), 100);
+    assert_eq!(
+        change.misbehavior_score(),
+        100,
+        "canonicalization must preserve the misbehavior increment"
+    );
 }

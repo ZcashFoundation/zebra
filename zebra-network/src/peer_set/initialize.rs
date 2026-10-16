@@ -19,7 +19,6 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future, TryFutureExt,
 };
-use indexmap::IndexMap;
 use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -54,7 +53,7 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 #[cfg(test)]
@@ -112,7 +111,7 @@ pub async fn init<S, C>(
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
-    mpsc::Sender<(PeerSocketAddr, u32)>,
+    mpsc::Sender<MisbehaviorReport>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -145,7 +144,7 @@ pub async fn init_with_block_gossip_peer_ips<S, C>(
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
-    mpsc::Sender<(PeerSocketAddr, u32)>,
+    mpsc::Sender<MisbehaviorReport>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -163,7 +162,7 @@ where
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, listen_addr);
 
-    let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
+    let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
         // Leave enough room for a misbehaviour update on every peer connection
         // before the channel is drained.
         config
@@ -174,7 +173,7 @@ where
     let misbehaviour_updater = address_book_updater.clone();
     tokio::spawn(
         async move {
-            let mut misbehaviors: HashMap<PeerSocketAddr, u32> = HashMap::new();
+            let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
             // Batch misbehaviour updates so peers can't keep the address book mutex locked
             // by repeatedly sending invalid blocks or transactions.
             let mut flush_timer =
@@ -183,17 +182,27 @@ where
             loop {
                 tokio::select! {
                     msg = misbehavior_rx.recv() => match msg {
-                        Some((peer_addr, score_increment)) => *misbehaviors
-                            .entry(peer_addr)
-                            .or_default()
-                            += score_increment,
+                        Some(report) => {
+                            // Keep the first reason: any report can cross the ban threshold.
+                            let score = report.score;
+                            misbehaviors
+                                .entry(report.addr)
+                                .and_modify(|batched| {
+                                    batched.score = batched.score.saturating_add(score)
+                                })
+                                .or_insert(report);
+                        }
                         None => break,
                     },
 
                     _ = flush_timer.next() => {
-                        for (addr, score_increment) in misbehaviors.drain() {
+                        for (_, report) in misbehaviors.drain() {
                             let _ = misbehaviour_updater
-                                .send(MetaAddr::new_misbehavior(addr, score_increment))
+                                .send(MetaAddr::new_misbehavior(
+                                    report.addr,
+                                    report.score,
+                                    report.reason,
+                                ))
                                 .await;
                         }
                     },
@@ -586,7 +595,7 @@ async fn limit_initial_peers(
     for better_peers in preferred_peers.values() {
         let mut better_peers = better_peers.clone();
         let (chosen_peers, _unused_peers) = better_peers.partial_shuffle(
-            &mut rand::thread_rng(),
+            &mut rand::rng(),
             config.peerset_initial_target_size - initial_peers.len(),
         );
 
@@ -664,7 +673,7 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+    bans_receiver: watch::Receiver<BanList>,
     zcashd_compat_peer_ips: Vec<IpAddr>,
 ) -> Result<(), BoxError>
 where
@@ -732,13 +741,14 @@ where
 
             // # Security
             //
-            // Check bans in both the raw and canonical representations: on a
-            // dual-stack listener, an IPv4 peer can connect as IPv4-mapped IPv6,
-            // and it must not dodge a ban stored for its IPv4 address and then
-            // be granted the zcashd-compat sidecar privileges below.
+            // Bans are keyed by peer group, which unmaps IPv4-mapped IPv6 and
+            // masks IPv6 to its `/64`. So a peer cannot dodge a ban — and then
+            // be granted the zcashd-compat sidecar privileges below — by
+            // connecting as IPv4-mapped IPv6 on a dual-stack listener, or from
+            // another address in a banned `/64`.
             let canonical_ip = canonical_socket_addr(addr.remove_socket_addr_privacy()).ip();
             let bans = bans_receiver.borrow().clone();
-            if bans.contains_key(&addr.ip()) || bans.contains_key(&canonical_ip) {
+            if bans.is_banned(addr.ip()) {
                 debug!(?addr, "banned inbound connection attempt");
                 record_inbound_connection_rejected(&config.network, addr, "banned");
                 std::mem::drop(tcp_stream);

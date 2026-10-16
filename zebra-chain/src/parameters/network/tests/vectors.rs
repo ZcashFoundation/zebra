@@ -105,6 +105,7 @@ fn check_parameters_impl() {
 fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             nu7: Some(expected_activation_height),
             ..Default::default()
@@ -168,7 +169,13 @@ fn activates_network_upgrades_correctly() {
 #[test]
 fn check_configured_network_name() {
     // Checks that reserved network names cannot be used for configured testnets.
-    for reserved_network_name in RESERVED_NETWORK_NAMES {
+    for reserved_network_name in RESERVED_NETWORK_NAMES.into_iter().flat_map(|name| {
+        [
+            name.to_string(),
+            name.to_ascii_lowercase(),
+            name.to_ascii_uppercase(),
+        ]
+    }) {
         let err = testnet::Parameters::build()
             .with_network_name(reserved_network_name.to_string())
             .expect_err("should fail when using reserved network name");
@@ -303,9 +310,25 @@ fn check_network_name() {
     );
 }
 
+/// Duplicate activation heights must not hide an earlier out-of-order upgrade.
+#[test]
+fn activation_order_is_checked_before_coalescing_heights() {
+    let activation_heights = ConfiguredActivationHeights {
+        nu5: Some(10),
+        nu6: Some(9),
+        nu7: Some(10),
+        ..Default::default()
+    };
+    assert!(matches!(
+        testnet::Parameters::build().with_activation_heights(activation_heights),
+        Err(ParametersBuilderError::OutOfOrderUpgrades),
+    ));
+}
+
 #[test]
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()
+        .with_slow_start_interval(Height(0))
         .with_activation_heights(ConfiguredActivationHeights {
             // Update this to be the latest network upgrade in Zebra, and update
             // the code below to expect the latest number of network upgrades.
@@ -340,7 +363,7 @@ fn check_configured_funding_stream_constraints() {
     let configured_funding_streams = [
         Default::default(),
         ConfiguredFundingStreams {
-            height_range: Some(Height(2_000_000)..Height(2_200_000)),
+            height_range: Some(Height(2_796_000)..Height(2_900_000)),
             ..Default::default()
         },
         ConfiguredFundingStreams {
@@ -432,20 +455,6 @@ fn check_configured_funding_stream_constraints() {
 
     std::panic::set_hook(Box::new(|_| {}));
 
-    // should panic when there are fewer addresses than the max funding stream address index.
-    let expected_panic_num_addresses = std::panic::catch_unwind(|| {
-        testnet::Parameters::build()
-            .with_funding_streams(vec![ConfiguredFundingStreams {
-                recipients: Some(vec![ConfiguredFundingStreamRecipient {
-                    receiver: FundingStreamReceiver::Ecc,
-                    numerator: 10,
-                    addresses: Some(vec![]),
-                }]),
-                ..Default::default()
-            }])
-            .to_network()
-    });
-
     // should panic when sum of numerators is greater than funding stream denominator.
     let expected_panic_numerator = std::panic::catch_unwind(|| {
         testnet::Parameters::build()
@@ -471,11 +480,10 @@ fn check_configured_funding_stream_constraints() {
                 recipients: Some(vec![ConfiguredFundingStreamRecipient {
                     receiver: FundingStreamReceiver::Ecc,
                     numerator: 10,
-                    addresses: Some(
-                        subsidy::constants::mainnet::FUNDING_STREAM_ECC_ADDRESSES
-                            .map(Into::into)
-                            .to_vec(),
-                    ),
+                    addresses: Some(vec![
+                        subsidy::constants::mainnet::FUNDING_STREAM_ECC_ADDRESSES[0].into();
+                        subsidy::constants::testnet::FUNDING_STREAM_ECC_ADDRESSES.len()
+                    ]),
                 }]),
                 ..Default::default()
             }])
@@ -485,7 +493,6 @@ fn check_configured_funding_stream_constraints() {
     // drop panic hook before expecting errors.
     let _ = std::panic::take_hook();
 
-    expected_panic_num_addresses.expect_err("should panic when there are too few addresses");
     expected_panic_numerator.expect_err(
         "should panic when sum of numerators is greater than funding stream denominator",
     );
@@ -768,4 +775,20 @@ fn temporary_orchard_disabling_soft_fork_heights() {
         None,
     );
     assert!(!disabled.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
+}
+
+#[test]
+fn public_testnet_peers_require_matching_orchard_disable_height() {
+    let builder = testnet::Parameters::build();
+    assert!(builder.is_compatible_with_default_parameters());
+    let public_height = Network::new_default_testnet()
+        .temporary_orchard_disabling_soft_fork_height()
+        .unwrap();
+    assert!(!builder
+        .clone()
+        .with_temporary_orchard_disabling_soft_fork_height(public_height.next().unwrap())
+        .is_compatible_with_default_parameters());
+    assert!(!builder
+        .disable_temporary_orchard_disabling_soft_fork()
+        .is_compatible_with_default_parameters());
 }

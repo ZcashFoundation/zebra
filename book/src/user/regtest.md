@@ -43,6 +43,57 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
+### Testing NU7 reissuance
+
+Use a fresh test chain and replace the activation-height section above with:
+
+```toml
+[network.testnet_parameters]
+initial_nsm_value_balance = 100000000
+nsm_reissuance_height = 12
+
+[network.testnet_parameters.activation_heights]
+Canopy = 1
+NU5 = 2
+NU7 = 9
+```
+
+The reissuance height must be at least 1, no earlier than NU7 activation, and less
+than 2^31. Omitting it uses ZIP 237's scheduled-issuance crossover, which short
+Regtest schedules usually never reach, so set it explicitly to test reissuance.
+These are example consensus parameters, not public Mainnet or Testnet activation
+heights.
+
+At NU7 activation, the NSM reserve receives the explicitly configured initial
+balance in zatoshis; it is not derived from historical issued supply. From that
+block onward, 60% of aggregate transaction fees, rounded down, also enters the
+reserve. The reserve is excluded from issued supply.
+
+Starting at the configured deployment height, mining templates and
+`getblocksubsidy` include the additional subsidy calculated from the parent
+block's reserve. `getblocksubsidy` rejects a future reissuance height whose parent
+block is not yet in the best chain.
+
+Ordinary builds use database format v29.0.0, including the NSM balance in each
+new value-pool record. The registered upgrade automatically moves compatible v28
+state into `state/v29` when no v29 database exists, without resyncing. Legacy
+48-byte value-pool and 52-byte block-info records remain readable with a zero NSM
+balance; new writes use 56 and 60 bytes.
+
+Before upgrading, stop Zebra and direct database readers and retain a v28 backup
+for rollback. Disabling `state.delete_old_database` does not preserve the
+directory that the upgrade moves. Upgrade direct database readers, including
+Zallet's Zebra backend and Zaino's Zebra read-state backend, together with the
+node: their `zebra-state` dependency must support v29. Start the writer before
+compatible readers. A v28 reader cannot read the wider records written by v29;
+manually renaming or symlinking versioned directories is not a substitute for
+the supported upgrade.
+
+Format reuse does not fix old custom-network accounting: existing state with
+nonzero genesis transparent outputs must still be rebuilt, including experimental
+v29 state created with the old accounting. Rebuild custom state if consensus
+parameters change for blocks already in the cache.
+
 ### Using Zebra's Internal Miner
 
 Zebra can mine blocks on the Regtest network when compiled with the experimental `internal-miner` compilation feature and configured to enable to internal miner.

@@ -224,10 +224,6 @@ pub struct MetaAddr {
     /// See the [`MetaAddr::last_failure`] method for details.
     last_failure: Option<Instant>,
 
-    /// The misbehavior score for this peer.
-    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = 0))]
-    misbehavior_score: u32,
-
     /// The outcome of our most recent communication attempt with this peer.
     //
     // TODO: move the time and services fields into PeerAddrState?
@@ -334,12 +330,14 @@ pub enum MetaAddrChange {
         services: Option<PeerServices>,
     },
 
-    /// Updates an existing `MetaAddr` when a peer misbehaves such as by advertising
+    /// Bans a peer's group when it misbehaves, such as by advertising
     /// semantically invalid blocks or transactions.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     UpdateMisbehavior {
         addr: PeerSocketAddr,
         score_increment: u32,
+        /// Why the peer was scored, logged if this change bans the peer's group.
+        reason: String,
     },
 }
 
@@ -369,7 +367,6 @@ impl MetaAddr {
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
-            misbehavior_score: 0,
             is_inbound: false,
             user_agent: None,
             negotiated_version: None,
@@ -479,10 +476,15 @@ impl MetaAddr {
     /// (`new_connected`). On Linux dual-stack sockets, inbound IPv4 connections
     /// arrive as IPv4-mapped IPv6 addresses (`::ffff:A.B.C.D`); without
     /// canonicalization, `apply_to_meta_addr` panics on the addr invariant.
-    pub fn new_misbehavior(addr: PeerSocketAddr, score_increment: u32) -> MetaAddrChange {
+    pub fn new_misbehavior(
+        addr: PeerSocketAddr,
+        score_increment: u32,
+        reason: impl Into<String>,
+    ) -> MetaAddrChange {
         UpdateMisbehavior {
             addr: canonical_peer_addr(*addr),
             score_increment,
+            reason: reason.into(),
         }
     }
 
@@ -756,11 +758,6 @@ impl MetaAddr {
         self.negotiated_version
     }
 
-    /// Returns a score of misbehavior encountered in a peer at this address.
-    pub fn misbehavior(&self) -> u32 {
-        self.misbehavior_score
-    }
-
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
@@ -770,8 +767,8 @@ impl MetaAddr {
             return None;
         }
 
-        // Avoid responding to GetAddr requests with addresses of misbehaving peers.
-        if self.misbehavior_score != 0 || self.is_inbound {
+        // Inbound addresses are ephemeral remote ports, not listener ports.
+        if self.is_inbound {
             return None;
         }
 
@@ -800,7 +797,6 @@ impl MetaAddr {
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
-            misbehavior_score: 0,
             is_inbound: false,
             user_agent: None,
             negotiated_version: None,
@@ -1015,20 +1011,29 @@ impl MetaAddrChange {
             last_attempt: self.last_attempt(instant_now),
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
-            misbehavior_score: self.misbehavior_score(),
             is_inbound: self.is_inbound(),
             user_agent,
             negotiated_version,
         }
     }
 
-    /// Returns the misbehavior score increment for the current change.
+    /// Returns the misbehavior score for the current change, or `0` if it is not
+    /// an [`MetaAddrChange::UpdateMisbehavior`] change.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             MetaAddrChange::UpdateMisbehavior {
                 score_increment, ..
             } => *score_increment,
             _ => 0,
+        }
+    }
+
+    /// Returns the reason the peer was scored, or `None` if this is not an
+    /// [`MetaAddrChange::UpdateMisbehavior`] change.
+    pub fn misbehavior_reason(&self) -> Option<&str> {
+        match self {
+            MetaAddrChange::UpdateMisbehavior { reason, .. } => Some(reason),
+            _ => None,
         }
     }
 
@@ -1083,7 +1088,6 @@ impl MetaAddrChange {
             last_attempt: None,
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
-            misbehavior_score: self.misbehavior_score(),
             is_inbound: self.is_inbound(),
             user_agent: None,
             negotiated_version: None,
@@ -1241,7 +1245,6 @@ impl MetaAddrChange {
                 last_attempt: None,
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
-                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
                 is_inbound: previous.is_inbound || self.is_inbound(),
                 user_agent: None,
                 negotiated_version: None,
@@ -1269,7 +1272,6 @@ impl MetaAddrChange {
                 last_failure: self.last_failure(instant_now).or(previous.last_failure),
                 // Replace the state with the updated state.
                 last_connection_state: self.peer_addr_state(),
-                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
                 is_inbound: previous.is_inbound || self.is_inbound(),
                 user_agent: self.user_agent().or(previous.user_agent),
                 negotiated_version: self.negotiated_version().or(previous.negotiated_version),

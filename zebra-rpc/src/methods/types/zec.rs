@@ -18,6 +18,9 @@ use zebra_node_services::BoxError;
 #[allow(unused_imports)]
 use zebra_chain::amount::MAX_MONEY;
 
+#[cfg(test)]
+mod tests;
+
 /// The maximum precision of a zatoshi in ZEC.
 /// Also used as the default decimal precision for ZEC formatting.
 ///
@@ -60,26 +63,25 @@ impl<C: Constraint> Zec<C> {
         zats / coin
     }
 
-    /// Converts a `f64` ZEC value to a [`Zec`] amount.
+    /// Converts a `f64` ZEC value to a [`Zec`] amount, rounding to the nearest zatoshi.
     ///
-    /// This method should not be used for consensus-critical calculations, because it is lossy.
+    /// This method should not be used for consensus-critical calculations, because it is lossy:
+    /// fractions of a zatoshi are rounded rather than rejected.
     pub fn from_lossy_zec(lossy_zec: f64) -> Result<Self, BoxError> {
         // This conversion is exact, because f64 has 53 bits of precision, but COIN has <27
         let coin = COIN as f64;
 
-        // After this calculation, we might have lost one bit of precision
+        // Dividing by COIN and multiplying back rounds twice, so the product is often a fraction
+        // of a zatoshi away from the amount that was serialized: round to the nearest zatoshi.
         let zats = lossy_zec * coin;
 
-        if zats != zats.trunc() {
-            return Err(
-                "loss of precision parsing ZEC value: floating point had fractional zatoshis"
-                    .into(),
-            );
+        if !zats.is_finite() {
+            return Err("invalid ZEC value: floating point is not finite".into());
         }
 
-        // We know this conversion is exact, because we just checked.
-        let zats = zats as i64;
-        let zats = Amount::try_from(zats)?;
+        // The double rounding is below half a zatoshi for every amount up to `MAX_MONEY`, so
+        // rounding recovers it. The cast saturates, and `try_from` rejects out-of-range values.
+        let zats = Amount::try_from(zats.round() as i64)?;
 
         Ok(Self(zats))
     }

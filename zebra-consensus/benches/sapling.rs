@@ -26,7 +26,6 @@ mod common;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rand::thread_rng;
 
 use zebra_chain::{
     block::{self, Block},
@@ -110,7 +109,7 @@ fn bench_sapling_verify(c: &mut Criterion) {
         b.iter(|| {
             let mut batch = BatchValidator::default();
             assert!(batch.check_bundle(item.bundle.clone(), item.sighash.into()));
-            assert!(batch.validate(&spend_vk, &output_vk, thread_rng()));
+            assert!(batch.validate(&spend_vk, &output_vk, rand::rng()));
         })
     });
 
@@ -126,7 +125,7 @@ fn bench_sapling_verify(c: &mut Criterion) {
                     for item in items {
                         let mut batch = BatchValidator::default();
                         assert!(batch.check_bundle(item.bundle.clone(), item.sighash.into()));
-                        assert!(batch.validate(&spend_vk, &output_vk, thread_rng()));
+                        assert!(batch.validate(&spend_vk, &output_vk, rand::rng()));
                     }
                 })
             },
@@ -148,7 +147,7 @@ fn bench_sapling_verify(c: &mut Criterion) {
                     for item in items {
                         assert!(batch.check_bundle(item.bundle.clone(), item.sighash.into()));
                     }
-                    assert!(batch.validate(&spend_vk, &output_vk, thread_rng()));
+                    assert!(batch.validate(&spend_vk, &output_vk, rand::rng()));
                 })
             },
         );

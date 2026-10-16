@@ -142,7 +142,8 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
             .wrap_err("failed to read z_getsubtreesbyindex response body")?;
         let parsed: Value =
             serde_json::from_slice(&body).wrap_err("invalid z_getsubtreesbyindex JSON response")?;
-        insta::assert_json_snapshot!(i.0, parsed);
+        // The client gives every request a distinct id, so it changes between runs.
+        insta::assert_json_snapshot!(i.0, parsed, { ".id" => "[id]" });
     }
 
     zebrad.kill(false)?;

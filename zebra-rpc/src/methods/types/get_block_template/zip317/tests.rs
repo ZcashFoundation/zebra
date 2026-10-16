@@ -41,6 +41,7 @@ fn excludes_tx_with_unselected_dependencies() {
             vec![unmined_tx],
             mempool_tx_deps,
             None,
+            None,
         ),
         vec![],
         "should not select any transactions when dependencies are unavailable"
@@ -80,6 +81,7 @@ fn includes_tx_with_selected_dependencies() {
         &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
+        None,
         None,
     );
 
@@ -149,6 +151,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
             vec![unmined_tx.clone()],
             TransactionDependencies::default(),
             None,
+            None,
         )
         .len(),
         1,
@@ -165,8 +168,143 @@ fn reserves_space_for_block_header_and_transaction_count() {
             vec![unmined_tx],
             TransactionDependencies::default(),
             None,
+            None,
         ),
         vec![],
         "should not select a transaction one byte over the safe block budget"
+    );
+}
+
+/// Orchard and Ironwood candidates must share the ZIP-218 budget with the Sapling coinbase.
+#[test]
+fn reserves_shielded_budget_for_sapling_coinbase() {
+    use super::super::CoinbaseCache;
+    use crate::config::mining::{default_miner_address, MinerAddressType};
+    use std::sync::Arc;
+    use zebra_chain::{
+        parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        transaction::{
+            arbitrary::{fake_bundle_for_branch, fake_v6_transaction},
+            Transaction, VerifiedUnminedTx,
+        },
+    };
+    use zebra_consensus::ShieldedActionCounts;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let height = Height(1_000);
+    let miner = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Sapling),
+        )
+        .unwrap(),
+    );
+    let cache = CoinbaseCache::default();
+    let sizing = TransactionTemplate::new_coinbase_with_parent_pools(
+        &network,
+        height,
+        &miner,
+        Amount::zero(),
+        Some(Amount::zero()),
+    )
+    .unwrap();
+    let sizing_tx: Transaction = sizing.data.as_ref().zcash_deserialize_into().unwrap();
+    let coinbase_counts = ShieldedActionCounts::from_transaction(&sizing_tx);
+    assert!(sizing_tx.sapling_outputs().count() > 0);
+    cache.store(height, Amount::zero(), Some(Amount::zero()), sizing);
+
+    let transaction = fake_v6_transaction(
+        NetworkUpgrade::Nu7,
+        Some(
+            fake_bundle_for_branch(
+                zcash_protocol::consensus::BranchId::Nu7,
+                orchard::ValuePool::Orchard,
+                2,
+                1,
+            )
+            .expect("NU7 supports Orchard"),
+        ),
+        Some(
+            fake_bundle_for_branch(
+                zcash_protocol::consensus::BranchId::Nu7,
+                orchard::ValuePool::Ironwood,
+                2,
+                2,
+            )
+            .expect("NU7 supports Ironwood"),
+        ),
+    );
+    // Distinct serialized transactions ensure the selector's txid map keeps all candidates.
+    let candidates: Vec<_> = (0..83)
+        .map(|i| {
+            let mut tx = transaction.clone();
+            tx.set_expiry_height(Height(2_000 + i));
+            let tx = zebra_chain::transaction::UnminedTx::from(Arc::new(tx));
+            let fee = tx.conventional_fee;
+            VerifiedUnminedTx::new(tx, fee, 0, 0, Arc::new(vec![])).unwrap()
+        })
+        .collect();
+    let extra_counts =
+        ShieldedActionCounts::from_transaction(&candidates[0].transaction.transaction);
+    let selected = select_mempool_transactions(
+        &network,
+        height,
+        &miner,
+        candidates,
+        TransactionDependencies::default(),
+        Some(&cache),
+        Some(Amount::zero()),
+    );
+    assert_eq!(
+        selected.len(),
+        (330 - coinbase_counts.shielded_cost()) / 4,
+        "each candidate spends four units of the budget reserved after the coinbase",
+    );
+    let counts = selected.iter().fold(coinbase_counts, |counts, (_, tx)| {
+        counts.saturating_add(ShieldedActionCounts::from_transaction(
+            &tx.transaction.transaction,
+        ))
+    });
+    assert!(counts.exceeded_limit().is_none());
+    assert!(counts
+        .saturating_add(extra_counts)
+        .exceeded_limit()
+        .is_some());
+
+    let fees = selected
+        .iter()
+        .map(|(_, tx)| tx.miner_fee)
+        .sum::<zebra_chain::amount::Result<Amount<_>>>()
+        .unwrap();
+    let actual = TransactionTemplate::new_coinbase_with_parent_pools(
+        &network,
+        height,
+        &miner,
+        fees,
+        Some(Amount::zero()),
+    )
+    .unwrap();
+    let actual_tx: Transaction = actual.data.as_ref().zcash_deserialize_into().unwrap();
+    assert_eq!(
+        ShieldedActionCounts::from_transaction(&actual_tx),
+        coinbase_counts
+    );
+    assert_eq!(
+        actual.data.as_ref().len(),
+        sizing_tx.zcash_serialized_size()
     );
 }

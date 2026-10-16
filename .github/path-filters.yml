@@ -16,6 +16,8 @@ lint:
   - "deny.toml"
   - "supply-chain/**"
   - ".github/workflows/lint.yml"
+  - ".github/actions/setup-zebra-build/**"
+  - ".github/scripts/apt-install.sh"
   - ".github/path-filters.yml"
 
 hadolint:
@@ -41,6 +43,8 @@ unit_tests:
   - "**/Cargo.lock"
   - ".config/nextest.toml"
   - ".github/workflows/tests-unit.yml"
+  - ".github/actions/setup-zebra-build/**"
+  - ".github/scripts/apt-install.sh"
   - ".github/path-filters.yml"
 
 test_crates:
@@ -50,6 +54,8 @@ test_crates:
   - ".cargo/config.toml"
   - "**/clippy.toml"
   - ".github/workflows/test-crates.yml"
+  - ".github/actions/setup-zebra-build/**"
+  - ".github/scripts/apt-install.sh"
   - ".github/path-filters.yml"
 
 test_docker:

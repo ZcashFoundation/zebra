@@ -59,10 +59,11 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
     let _init_guard = zebra_test::init();
 
     let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             // These are dummy values. The particular values don't matter much,
-            // as long as the nu5 one is smaller than the chains being generated
-            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure that upgrade is exercised
+            // as long as the nu7 one is smaller than the chains being generated
+            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure all upgrades are exercised
             // in the test below. (The test will fail if that does not happen.)
             before_overwinter: Some(1),
             overwinter: Some(10),
@@ -78,7 +79,19 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
-        .extend_funding_streams()
+        .with_nsm_reissuance_height(Height(50))
+        // These short chains have no historical funding-stream deposits to disburse.
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![]);
+
+    // Seed the NSM value balance at NU7 activation, so that committing blocks past it reissues
+    // from the balance and debits it.
+    let initial_nsm_value_balance =
+        zebra_chain::amount::Amount::try_from(10 * zebra_chain::amount::COIN)
+            .expect("valid amount");
+    let network = network.with_initial_nsm_value_balance(initial_nsm_value_balance);
+
+    let network = network
         .to_network()
         .expect("failed to build configured network");
     let ledger_strategy =
@@ -132,6 +145,37 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             }
             // Make sure the failure path was triggered
             prop_assert_eq!(failure_count, 4);
+
+            // The finalized state tracked the NSM value balance from NU7 activation: seeded, then
+            // debited by each block's additional subsidy and credited with its ZIP 235 fee
+            // contribution.
+            {
+                use zebra_chain::{
+                    parameters::subsidy::{additional_block_subsidy, nsm_fee_contribution},
+                    transparent::utxos_from_ordered_utxos,
+                };
+
+                let utxos = utxos_from_ordered_utxos(
+                    chain.iter().flat_map(|block| block.new_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.clone()))),
+                );
+
+                let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();
+                let tip_height = state.finalized_tip_height().unwrap();
+                prop_assert!(tip_height >= nu7_height, "the chain must reach NU7");
+
+                let mut expected = initial_nsm_value_balance;
+                for height in (nu7_height.0..=tip_height.0).map(Height) {
+                    let fees = chain[height.0 as usize].block.transaction_fees(&utxos).expect("valid fees");
+
+                    expected = (expected - additional_block_subsidy(height, &network, expected))
+                        .expect("the balance never goes negative");
+                    expected = (expected + nsm_fee_contribution(height, &network, fees))
+                        .expect("the balance stays a valid amount");
+                }
+
+                prop_assert_eq!(state.finalized_value_pool().nsm_amount(), expected);
+                prop_assert!(expected > zebra_chain::amount::Amount::<zebra_chain::amount::NonNegative>::zero());
+            }
     });
 
     Ok(())

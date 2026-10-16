@@ -1,7 +1,7 @@
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
 use bytes::BytesMut;
+use libfuzzer_sys::fuzz_target;
 use std::panic;
 use std::sync::OnceLock;
 use tokio_util::codec::{Decoder, Encoder};
@@ -25,7 +25,9 @@ fn default_testnet() -> &'static Network {
 const FUZZ_HEADER_LEN: usize = 24;
 
 /// Body cap a codec starts at, before a handshake raises it. Tracks
-/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private.
+/// `MAX_HANDSHAKE_BODY_LEN` in `codec.rs`, which is private. Used by Layer 0
+/// below to model the pre-handshake codec state; Layer 0b models the
+/// post-handshake state and is not bounded by this constant.
 const FUZZ_MAX_HANDSHAKE_BODY_LEN: usize = 1024;
 
 /// The wire commands `Codec::read_body` dispatches on, in the order they appear
@@ -103,6 +105,45 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Layer 0b: Framed body, post-handshake — reach the deep-fuzzed
+    // accessors (including `ironwood_*`) on bodies larger than the
+    // pre-handshake cap.
+    //
+    // A production `Connection` calls `reconfigure_full_body_len()` on its
+    // codec once the version/verack handshake completes, raising the body
+    // cap to `MAX_PROTOCOL_MESSAGE_LEN`; every message after that — `tx`,
+    // `block`, and the rest — is decoded under the raised cap, not the 1 KiB
+    // pre-handshake one Layer 0 models above. Real Orchard/Ironwood shielded
+    // action data is larger than 1 KiB, so Layer 0's truncated body can never
+    // carry a `tx`/`block` into `deep_fuzz_transaction` with non-empty
+    // shielded pools — the `ironwood_*`/`orchard_value_balance()` calls
+    // there would only ever see empty bundles. This layer reuses Layer 0's
+    // framing (so the mutator still controls the body directly, without
+    // needing to guess a checksum) but against a codec already configured
+    // for the post-handshake cap, and without truncating the body, so a v6
+    // transaction with real shielded pool data can reach the accessors.
+    //
+    // The body is still capped at `MAX_PROTOCOL_MESSAGE_LEN`, the same bound
+    // `reconfigure_full_body_len()` gives the codec: `assemble_frame` below
+    // unconditionally copies and `sha256d`-hashes the body it's given before
+    // `decode` gets a chance to reject an oversize one, so bounding first
+    // avoids doing that work on bytes no post-handshake codec would ever
+    // accept.
+    // ═══════════════════════════════════════════════════════════════════
+    if let Some((&selector, body)) = data.split_last() {
+        let command = WIRE_COMMANDS[selector as usize % WIRE_COMMANDS.len()];
+        let body = &body[..body
+            .len()
+            .min(zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN)];
+        let mut framed = assemble_frame(&Network::Mainnet, command, body);
+        let mut framed_codec = Codec::builder().finish();
+        framed_codec.reconfigure_full_body_len();
+        if let Ok(Some(msg)) = framed_codec.decode(&mut framed) {
+            messages.push(msg);
+        }
+    }
+
     // Decode all messages from the buffer. The per-message byte segments this
     // loop used to record fed only the re-encode-vs-input-segment oracle, which
     // has been removed, so they are no longer computed.
@@ -112,8 +153,8 @@ fuzz_target!(|data: &[u8]| {
                 messages.push(msg);
                 continue;
             }
-            Ok(None) => break,  // need more data
-            Err(_) => break,    // parse error — expected, not a bug
+            Ok(None) => break, // need more data
+            Err(_) => break,   // parse error — expected, not a bug
         }
     }
 
@@ -155,7 +196,12 @@ fuzz_target!(|data: &[u8]| {
                 Message::Ping(nonce) | Message::Pong(nonce) => {
                     let _n = *nonce;
                 }
-                Message::Reject { message, ccode, reason, data } => {
+                Message::Reject {
+                    message,
+                    ccode,
+                    reason,
+                    data,
+                } => {
                     let _msg = message.clone();
                     let _code = *ccode;
                     let _reason = reason.clone();
@@ -165,7 +211,8 @@ fuzz_target!(|data: &[u8]| {
                     let _count = addrs.len();
                     for _addr in addrs {}
                 }
-                Message::GetBlocks { known_blocks, stop } | Message::GetHeaders { known_blocks, stop } => {
+                Message::GetBlocks { known_blocks, stop }
+                | Message::GetHeaders { known_blocks, stop } => {
                     let _count = known_blocks.len();
                     for _hash in known_blocks {}
                     let _stop = *stop;
@@ -177,17 +224,19 @@ fuzz_target!(|data: &[u8]| {
                 Message::Headers(headers) => {
                     let _count = headers.len();
                     for header in headers {
-                        let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-                            header.header.hash()
-                        }));
+                        let _ =
+                            panic::catch_unwind(panic::AssertUnwindSafe(|| header.header.hash()));
                     }
                 }
                 Message::Block(block) => {
                     // Deep fuzz the block — replicate block_deep_fuzz Layer 2
-                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { block.hash() }));
-                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { block.coinbase_height() }));
-                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { let _ = block.commitment(&zebra_chain::parameters::Network::Mainnet); }));
-                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { block.auth_data_root() }));
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.hash()));
+                    let _ =
+                        panic::catch_unwind(panic::AssertUnwindSafe(|| block.coinbase_height()));
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                        let _ = block.commitment(&zebra_chain::parameters::Network::Mainnet);
+                    }));
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.auth_data_root()));
 
                     // Deep fuzz each transaction in the block
                     for tx in &block.transactions {
@@ -198,7 +247,12 @@ fuzz_target!(|data: &[u8]| {
                     // Deep fuzz the transaction
                     deep_fuzz_transaction(&unmined_tx.transaction);
                 }
-                Message::FilterLoad { filter, hash_functions_count, tweak, flags } => {
+                Message::FilterLoad {
+                    filter,
+                    hash_functions_count,
+                    tweak,
+                    flags,
+                } => {
                     let _f = filter;
                     let _hfc = *hash_functions_count;
                     let _t = *tweak;
@@ -329,12 +383,24 @@ fuzz_target!(|data: &[u8]| {
         let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             // Cover the variants the dispatcher's pre-state match touches.
             match msg {
-                Message::Version(_) | Message::Verack | Message::Ping(_) | Message::Pong(_)
-                | Message::Reject { .. } | Message::GetAddr | Message::Addr(_)
-                | Message::GetBlocks { .. } | Message::Inv(_) | Message::GetData(_)
-                | Message::NotFound(_) | Message::Block(_) | Message::Headers(_)
-                | Message::GetHeaders { .. } | Message::Tx(_) | Message::Mempool
-                | Message::FilterLoad { .. } | Message::FilterAdd { .. }
+                Message::Version(_)
+                | Message::Verack
+                | Message::Ping(_)
+                | Message::Pong(_)
+                | Message::Reject { .. }
+                | Message::GetAddr
+                | Message::Addr(_)
+                | Message::GetBlocks { .. }
+                | Message::Inv(_)
+                | Message::GetData(_)
+                | Message::NotFound(_)
+                | Message::Block(_)
+                | Message::Headers(_)
+                | Message::GetHeaders { .. }
+                | Message::Tx(_)
+                | Message::Mempool
+                | Message::FilterLoad { .. }
+                | Message::FilterAdd { .. }
                 | Message::FilterClear => {
                     let _cmd = msg.command();
                 }
@@ -384,25 +450,26 @@ fuzz_target!(|data: &[u8]| {
     // a regression in `for_network` would surface here.
     // ═══════════════════════════════════════════════════════════════════
     for msg in &messages {
-        let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            for net in [Network::Mainnet, default_testnet().clone()] {
-                let mut codec_x = Codec::builder().for_network(&net).finish();
-                let mut out = BytesMut::new();
-                if codec_x.encode(msg.clone(), &mut out).is_ok() && out.len() >= 4 {
-                    let magic_bytes = &out[..4];
-                    let expected = net.magic().0;
-                    assert_eq!(
+        let _ =
+            panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                for net in [Network::Mainnet, default_testnet().clone()] {
+                    let mut codec_x = Codec::builder().for_network(&net).finish();
+                    let mut out = BytesMut::new();
+                    if codec_x.encode(msg.clone(), &mut out).is_ok() && out.len() >= 4 {
+                        let magic_bytes = &out[..4];
+                        let expected = net.magic().0;
+                        assert_eq!(
                         magic_bytes,
                         &expected[..],
                         "Codec::for_network({:?}) produced wrong magic: got {:02x?}, want {:02x?}",
                         net, magic_bytes, expected
                     );
-                    // Round-trip through same-network decoder.
-                    let mut codec_y = Codec::builder().for_network(&net).finish();
-                    let _ = codec_y.decode(&mut out);
+                        // Round-trip through same-network decoder.
+                        let mut codec_y = Codec::builder().for_network(&net).finish();
+                        let _ = codec_y.decode(&mut out);
+                    }
                 }
-            }
-        }));
+            }));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -512,7 +579,7 @@ fuzz_target!(|data: &[u8]| {
                 let mut mixed: Vec<InventoryHash> = Vec::new();
                 for (i, h) in hashes.iter().enumerate().take(64) {
                     match i % 4 {
-                        0 => mixed.push(h.clone()),
+                        0 => mixed.push(*h),
                         1 => {
                             if let Some(hash32) = inv_hash_to_32(h) {
                                 mixed.push(InventoryHash::Block(zebra_chain::block::Hash(hash32)));
@@ -533,7 +600,10 @@ fuzz_target!(|data: &[u8]| {
                 }
                 let mut codec_e = Codec::builder().for_network(&Network::Mainnet).finish();
                 let mut out = BytesMut::new();
-                if codec_e.encode(Message::Inv(mixed.clone()), &mut out).is_ok() {
+                if codec_e
+                    .encode(Message::Inv(mixed.clone()), &mut out)
+                    .is_ok()
+                {
                     let mut codec_d = Codec::builder().for_network(&Network::Mainnet).finish();
                     let _ = codec_d.decode(&mut out);
                 }
@@ -554,7 +624,8 @@ fuzz_target!(|data: &[u8]| {
                 if let Ok(Some(msg2)) = codec_dec.decode(&mut decoder_buf) {
                     // Command-level oracle (always).
                     assert_eq!(
-                        msg.command(), msg2.command(),
+                        msg.command(),
+                        msg2.command(),
                         "Message round-trip command mismatch"
                     );
                 }
@@ -593,9 +664,9 @@ fn deep_fuzz_transaction(tx: &zebra_chain::transaction::Transaction) {
     use zebra_chain::parameters::Network;
 
     // Property extraction
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.hash() }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.auth_digest() }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.unmined_id() }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.hash()));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.auth_digest()));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.unmined_id()));
 
     let _version = tx.version();
     let _is_overwintered = tx.is_overwintered();
@@ -617,9 +688,8 @@ fn deep_fuzz_transaction(tx: &zebra_chain::transaction::Transaction) {
     let _has_transparent_or_shielded_out = tx.has_transparent_or_shielded_outputs();
 
     let _joinsplit_count = tx.joinsplit_count();
-    for _js in tx.sprout_joinsplits() {}
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        for _js in tx.sprout_groth16_joinsplits() {}
+        for _js in tx.sprout_joinsplit_descriptions() {}
     }));
     let _pub_key = tx.sprout_joinsplit_pub_key();
     let _has_sprout = tx.has_sprout_joinsplit_data();
@@ -627,24 +697,53 @@ fn deep_fuzz_transaction(tx: &zebra_chain::transaction::Transaction) {
         for _c in tx.sprout_note_commitments() {}
     }));
 
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _a in tx.sapling_anchors() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _s in tx.sapling_spends_per_anchor() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _o in tx.sapling_outputs() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _n in tx.sapling_nullifiers() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _c in tx.sapling_note_commitments() {} }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(
+        || {
+            for _a in tx.sapling_anchors() {}
+        },
+    ));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| for _s in tx.sapling_spends() {}));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(
+        || {
+            for _o in tx.sapling_outputs() {}
+        },
+    ));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _n in tx.sapling_nullifiers() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _c in tx.sapling_note_commitments() {}
+    }));
     let _has_sapling = tx.has_sapling_shielded_data();
 
-    let _orchard_data = tx.orchard_shielded_data();
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _a in tx.orchard_actions() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _n in tx.orchard_nullifiers() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _c in tx.orchard_note_commitments() {} }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(
+        || {
+            for _a in tx.orchard_actions() {}
+        },
+    ));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _n in tx.orchard_nullifiers() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _c in tx.orchard_note_commitments() {}
+    }));
     let _flags = tx.orchard_flags();
     let _has_orchard = tx.has_orchard_shielded_data();
+    let _ = tx.orchard_value_balance();
 
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _v in tx.output_values_to_sprout() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { for _v in tx.input_values_from_sprout() {} }));
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| { tx.sapling_value_balance() }));
-    let _binding_sig = tx.sapling_binding_sig();
+    let _ = tx.ironwood_actions().count();
+    let _ = tx.ironwood_nullifiers().count();
+    let _ = tx.ironwood_note_commitments().count();
+    let _ = tx.ironwood_flags();
+    let _ = tx.ironwood_value_balance();
+
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _v in tx.output_values_to_sprout() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        for _v in tx.input_values_from_sprout() {}
+    }));
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| tx.sapling_value_balance()));
 
     let _enough_flags = tx.has_enough_orchard_flags();
     let _valid_non_coinbase = tx.is_valid_non_coinbase();
@@ -668,16 +767,26 @@ fn deep_fuzz_transaction(tx: &zebra_chain::transaction::Transaction) {
     }
     for h in [0u32, 419_200, 1_000_000, 1_687_104] {
         let _ = zebra_consensus::transaction::check::disabled_add_to_sprout_pool(
-            tx, Height(h), &Network::Mainnet,
+            tx,
+            Height(h),
+            &Network::Mainnet,
         );
     }
     {
         let height = Height(1_000_000);
-        let _ = zebra_consensus::transaction::check::coinbase_expiry_height(&height, tx, &Network::Mainnet);
+        let _ = zebra_consensus::transaction::check::coinbase_expiry_height(
+            &height,
+            tx,
+            &Network::Mainnet,
+        );
         let _ = zebra_consensus::transaction::check::non_coinbase_expiry_height(&height, tx);
     }
     for h in [0u32, 419_200, 903_000, 1_046_400, 1_687_104, 1_842_420] {
-        let _ = zebra_consensus::transaction::check::consensus_branch_id(tx, Height(h), &Network::Mainnet);
+        let _ = zebra_consensus::transaction::check::consensus_branch_id(
+            tx,
+            Height(h),
+            &Network::Mainnet,
+        );
     }
 
     // ZIP-317 fee calculations

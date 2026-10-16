@@ -107,6 +107,11 @@ expression: info
       "name": "NU6.3",
       "activationheight": 4134000,
       "status": "pending"
+    },
+    "77190ad9": {
+      "name": "NU7",
+      "activationheight": 4465026,
+      "status": "pending"
     }
   },
   "consensus": {

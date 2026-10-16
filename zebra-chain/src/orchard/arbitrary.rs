@@ -2,7 +2,7 @@
 
 use group::{
     ff::{FromUniformBytes, PrimeField},
-    prime::PrimeCurveAffine,
+    CurveAffine,
 };
 use halo2::pasta::pallas;
 use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, VerificationKeyBytes};
@@ -105,7 +105,7 @@ impl Arbitrary for SpendAuthVerificationKeyBytes {
                 // Convert that back to a (canonical) encoding
                 let sk_bytes = sk_scalar.to_repr();
                 // Decode it into a signing key
-                let sk = SigningKey::try_from(sk_bytes).unwrap();
+                let sk = SigningKey::from_bytes(&sk_bytes).unwrap();
                 let pk = VerificationKey::<SpendAuth>::from(&sk);
                 SpendAuthVerificationKeyBytes(pk.into())
             })

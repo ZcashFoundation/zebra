@@ -191,7 +191,7 @@ impl Config {
     ) -> PathBuf {
         let db_kind = db_kind.as_ref();
         let major_version = format!("v{major_version}");
-        let net_dir = network.lowercase_name();
+        let net_dir = network.directory_name();
 
         if self.ephemeral {
             gen_temp_path(&format!("zebra-{db_kind}-{major_version}-{net_dir}-"))
@@ -213,7 +213,7 @@ impl Config {
             return None;
         }
 
-        let net_dir = network.lowercase_name();
+        let net_dir = network.directory_name();
         Some(self.cache_dir.join("non_finalized_state").join(net_dir))
     }
 
@@ -328,7 +328,7 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
     // Check and remove the network path.
     assert_eq!(
         db_path.file_name(),
-        Some(network.lowercase_name().as_ref()),
+        Some(network.directory_name().as_ref()),
         "unexpected database network path structure"
     );
     assert!(db_path.pop());

@@ -39,12 +39,12 @@ use hex_literal::hex;
 use zebra_chain::{
     block::{Block, Height},
     parameters::{
+        subsidy::funding_stream_address,
         Network,
         NetworkUpgrade::{Nu5, Sapling},
     },
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::funding_stream_address;
 use zebra_state::state_database_format_version_in_code;
 
 use crate::common::{

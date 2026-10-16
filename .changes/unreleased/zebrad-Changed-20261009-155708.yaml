@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Updated `pasta_curves` to 0.6.1, which speeds up Orchard field arithmetic; CPU instruction requirements are unchanged.
+time: 2026-10-09T15:57:08.75228317+02:00
