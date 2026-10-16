@@ -237,6 +237,10 @@ pub enum InvalidateError {
     /// The block hash was not found in any non-finalized chain.
     #[error("block hash {0} not found in any non-finalized chain")]
     BlockNotFound(block::Hash),
+
+    /// Invalidating this root would remove the only non-finalized chain.
+    #[error("cannot invalidate block {0}: it is the root of the only non-finalized chain")]
+    OnlyChainRoot(block::Hash),
 }
 
 /// An error describing why a `ReconsiderBlock` request failed.

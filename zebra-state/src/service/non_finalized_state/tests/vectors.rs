@@ -22,7 +22,7 @@ use crate::{
     service::{
         finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
-        ReconsiderError,
+        InvalidateError, ReconsiderError,
     },
     tests::FakeChainHelper,
     Config,
@@ -331,36 +331,68 @@ fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, Finalized
     (state, finalized_state)
 }
 
-/// Invalidating the non-finalized root of a tracked chain previously called
-/// `BTreeSet::remove(&chain)`, which compared the stored chain against
-/// itself via `Chain::cmp` and reached an `unreachable!()` for matching tip
-/// hashes. The root branch now retains by tip hash and the call returns
-/// successfully without panicking.
+/// Reject invalidating the only root before changing either live chains or invalidation records.
 #[test]
-fn invalidating_non_finalized_root_does_not_panic() {
+fn invalidating_only_non_finalized_root_preserves_state() {
     let _init_guard = zebra_test::init();
-
     let network = Network::Mainnet;
-    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
-    let block2 = block1.make_fake_child().set_work(10);
-
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let child = root.make_fake_child().set_work(10);
     let (mut state, finalized_state) = new_invalidate_test_state(&network);
-
     state
-        .commit_new_chain(block1.clone().prepare(), &finalized_state)
-        .expect("fake root block should commit to an empty non-finalized state");
+        .commit_new_chain(root.clone().prepare(), &finalized_state)
+        .unwrap();
     state
-        .commit_block(block2.prepare(), &finalized_state)
-        .expect("fake child block should extend the fake root chain");
-
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    // Keep an existing invalidation record to check that rejection preserves it too.
+    let grandchild = child.make_fake_child().set_work(1);
     state
-        .invalidate_block(block1.hash())
-        .expect("invalidating the chain root should not panic");
+        .commit_block(grandchild.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(grandchild.hash()).unwrap();
+    let before = state.clone();
 
-    assert!(
-        state.best_chain().is_none(),
-        "invalidating the root should leave no live non-finalized chain"
+    let result = state.invalidate_block(root.hash());
+    assert!(matches!(result, Err(InvalidateError::OnlyChainRoot(hash)) if hash == root.hash()));
+    assert!(state.eq_internal_state(&before));
+    assert_eq!(
+        state.invalidated_blocks.len(),
+        before.invalidated_blocks.len()
     );
+    for (height, blocks) in &before.invalidated_blocks {
+        assert!(Arc::ptr_eq(
+            blocks,
+            state.invalidated_blocks.get(height).unwrap()
+        ));
+    }
+}
+
+/// A root can still be invalidated when another chain remains available.
+#[test]
+fn invalidating_non_finalized_root_preserves_other_chain() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let other_root = root.clone().set_work(20);
+    let child = root.make_fake_child().set_work(10);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(root.clone().prepare(), &finalized_state)
+        .unwrap();
+    state
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    state
+        .commit_new_chain(other_root.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    assert_eq!(state.invalidate_block(root.hash()).unwrap(), root.hash());
+    assert_eq!(state.chain_count(), 1);
+    assert_eq!(state.best_tip_block().unwrap().hash, other_root.hash());
+    assert!(!state.any_chain_contains(&root.hash()));
+    assert!(!state.any_chain_contains(&child.hash()));
+    assert_eq!(state.invalidated_blocks.values().next().unwrap().len(), 2);
 }
 
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10586.
@@ -490,6 +522,11 @@ fn reconsider_block_preserves_record_when_parent_chain_missing() {
     state
         .commit_block(block3.prepare(), &finalized_state)
         .expect("fake grandchild should extend the child chain");
+
+    // Keep another root live so invalidating block1 does not empty the state.
+    state
+        .commit_new_chain(block1.clone().set_work(20).prepare(), &finalized_state)
+        .expect("independent root should commit");
 
     state
         .invalidate_block(block2.hash())

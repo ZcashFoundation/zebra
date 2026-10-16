@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Return an error instead of exiting when invalidateblock targets the root of the only non-finalized chain (#11536).'
+time: 2026-10-15T15:32:00.000000000Z

@@ -386,6 +386,8 @@ impl NonFinalizedState {
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
+    ///
+    /// Returns an error without modifying the state if the block is the root of the only chain.
     #[allow(clippy::unwrap_in_result)]
     pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
@@ -393,6 +395,10 @@ impl NonFinalizedState {
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
+            if self.chain_set.len() == 1 {
+                return Err(InvalidateError::OnlyChainRoot(block_hash));
+            }
+
             self.chain_set.remove(&chain);
             chain.blocks.values().cloned().collect()
         } else {
