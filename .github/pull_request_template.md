@@ -11,6 +11,7 @@ Put each link on its own line:
 - "Part of #123" for an issue it only partly resolves, with the part it covers
 - "Closes #456" for another PR this one replaces, with a short reason, such as
   "Closes #456: supersedes it with a smaller fix"
+- "Depends on #789" for a PR this one is stacked on, with the commits to review
 -->
 
 ## Evidence
@@ -24,12 +25,14 @@ Delete this section when there is no behavior to show, such as a docs change.
 ## Merge Danger
 
 <!--
-Door: "two-way" if reverting this PR fully undoes it, or "one-way" if it can't
-be cleanly undone, such as a database format change, a consensus rule change, a
-breaking change to a published crate, or deleted data or infrastructure.
+Door: "two-way" if reverting this PR fully undoes it. "One-way" if it acts
+outside the repository in a way a revert doesn't undo: a database format
+upgrade, a publish, a production deployment, or deleted data or infrastructure.
+"Two-way until the next release" for consensus, peer protocol, crate API,
+configuration, RPC, or metrics changes.
 
 Blast radius: what a defect would affect, in a few words, such as "sync",
-"mempool", "RPC clients", "state on disk", or "CI only".
+"RPC clients", "state on disk", "release path", or "CI only".
 -->
 
 **Door:**
