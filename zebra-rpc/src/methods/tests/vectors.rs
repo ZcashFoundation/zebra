@@ -5526,3 +5526,107 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
         .expect("RPC should succeed");
     assert_eq!(response.connections, 0);
 }
+
+/// `z_getsubtreesbyindex` only returns the subtrees that end at or below `max_height`, in every pool.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_getsubtreesbyindex_max_height() {
+    let _init_guard = zebra_test::init();
+
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests::<_, _, BoxError>(),
+        MockService::build().for_unit_tests::<_, _, BoxError>(),
+        read_state.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    for pool in ["sapling", "orchard", "ironwood"] {
+        for (max_height, expected, case) in [
+            (9, vec![], "below every subtree"),
+            (10, vec![10], "the bound is inclusive"),
+            (u32::MAX, vec![10, 20], "above every subtree"),
+        ] {
+            let end_heights =
+                subtree_end_heights(&rpc, &mut read_state, pool, Some(max_height)).await;
+            assert_eq!(end_heights, expected, "{pool}: {case}");
+        }
+    }
+
+    read_state.expect_no_requests().await;
+}
+
+/// Calls `z_getsubtreesbyindex` for `pool` and `max_height`, with the state holding two subtrees
+/// that end at heights 10 and 20, and returns the end heights of the subtrees in the response.
+async fn subtree_end_heights(
+    rpc: &impl RpcServer,
+    read_state: &mut MockService<
+        ReadRequest,
+        ReadResponse,
+        zebra_test::mock_service::PanicAssertion,
+        BoxError,
+    >,
+    pool: &str,
+    max_height: Option<u32>,
+) -> Vec<u32> {
+    fn subtrees<Node: Copy>(
+        root: Node,
+    ) -> std::collections::BTreeMap<
+        NoteCommitmentSubtreeIndex,
+        zebra_chain::subtree::NoteCommitmentSubtreeData<Node>,
+    > {
+        [(0, Height(10)), (1, Height(20))]
+            .into_iter()
+            .map(|(index, end_height)| {
+                (
+                    NoteCommitmentSubtreeIndex(index),
+                    zebra_chain::subtree::NoteCommitmentSubtreeData::new(end_height, root),
+                )
+            })
+            .collect()
+    }
+
+    let response = match pool {
+        "sapling" => ReadResponse::SaplingSubtrees(subtrees(
+            sapling_crypto::Node::from_bytes([0; 32]).expect("all-zero bytes are a valid node"),
+        )),
+        "orchard" => {
+            ReadResponse::OrchardSubtrees(subtrees(zebra_chain::orchard::tree::Node::default()))
+        }
+        _ => ReadResponse::IronwoodSubtrees(subtrees(zebra_chain::orchard::tree::Node::default())),
+    };
+
+    let state_response = read_state
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                ReadRequest::SaplingSubtrees { .. }
+                    | ReadRequest::OrchardSubtrees { .. }
+                    | ReadRequest::IronwoodSubtrees { .. }
+            )
+        })
+        .map(|responder| responder.respond(response));
+
+    let (rpc_response, ()) = tokio::join!(
+        rpc.z_get_subtrees_by_index(pool.to_string(), 0u16.into(), None, max_height),
+        state_response,
+    );
+
+    rpc_response
+        .expect("a known pool with mocked subtrees returns a response")
+        .subtrees()
+        .iter()
+        .map(|subtree| subtree.end_height.0)
+        .collect()
+}
