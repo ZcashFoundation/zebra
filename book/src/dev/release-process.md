@@ -129,6 +129,14 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 
 Track each release in an issue created from the [release issue template](https://github.com/ZcashFoundation/zebra/issues/new?template=release.md), and follow its checklist. It covers the preparation steps and the review of the Release PR's version bumps and changelogs.
 
+To correct a Release PR by hand without release-plz regenerating it:
+
+1. Freeze `main` in Merge Freeze.
+2. Remove every other pull request from the merge queue. A freeze does not stop a group that has already passed `mergefreeze` (see [Holding a Pull Request Back](continuous-integration.md#holding-a-pull-request-back)).
+3. Push the corrections to the Release PR branch.
+4. Unblock the Release PR with Merge Freeze's **Unblock 1 pull request**, then merge it.
+5. Unfreeze `main`, and queue the pull requests you removed again.
+
 ### What Release Readiness Reports
 
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, validates each changed package's versioned changelog, and runs Cargo 1.91's multi-package dry-run. Changelog and Cargo validation run independently, so the summary reports both outcomes even when one fails. The job also observes crates.io, tags, and the GitHub Release without changing them.

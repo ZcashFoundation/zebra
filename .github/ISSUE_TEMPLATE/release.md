@@ -128,5 +128,6 @@ If security release:
 - If no automatic readiness run is available after rerunning the PR checks, run `gh workflow run release.yml --ref main -f operation=check -f release_pr_number=<PR>`.
 - If publication stops after merge, run `gh workflow run release.yml --ref main -f operation=resume -f release_pr_number=<PR>`.
 - If published crates, tags, or release channels conflict with the plan, stop and ask a maintainer to investigate.
+- To correct the Release PR by hand, follow [Review the Release PR](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#review-the-release-pr) so release-plz does not regenerate it.
 
 See the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for workflow details and recovery guidance.
