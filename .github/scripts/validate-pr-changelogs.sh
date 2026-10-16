@@ -21,10 +21,12 @@ cd "$repository_root"
 # a CHANGELOG.md.
 unreleased_directory=".changes/unreleased"
 
-# The changie kind that declares a break. This is the kind's *key* from
+# The changie kinds that declare a break. These are the kinds' *keys* from
 # `.changie.yaml`, which is what fragments store and what `changie new -k` takes;
-# the `Breaking Changes` label is not accepted once a key is set.
+# a label is not accepted once a key is set. A network upgrade breaks every node
+# that doesn't upgrade, and only zebrad may declare one.
 breaking_kind="breaking"
+network_upgrade_kind="network-upgrade"
 
 allowed_type=false
 case "$declared_type" in
@@ -104,9 +106,16 @@ for path in ${fragment_paths[@]+"${fragment_paths[@]}"}; do
     continue
   fi
 
+  if [[ "$kind" == "$network_upgrade_kind" && "$project" != "zebrad" ]]; then
+    printf 'Network upgrade outside zebrad: %s declares %s\n' "$path" "$project" >&2
+    echo "::error title=Network upgrade outside zebrad::${path} uses the '${network_upgrade_kind}' kind, which only zebrad may use." >&2
+    failed=true
+    continue
+  fi
+
   fragment_projects+=("$project")
 
-  if [[ "$kind" == "$breaking_kind" ]]; then
+  if [[ "$kind" == "$breaking_kind" || "$kind" == "$network_upgrade_kind" ]]; then
     breaking_fragment_projects+=("$project")
   fi
 done
@@ -115,7 +124,7 @@ done
 # from the fragment and the `semver-checks` skip derived from the title agree.
 if [[ "$breaking" != "true" && ${#breaking_fragment_projects[@]} -gt 0 ]]; then
   echo "Breaking fragment without a breaking PR title." >&2
-  echo "::error title=Undeclared breaking change::This PR adds a '${breaking_kind}' fragment, so its title needs a conventional commit break marker, for example 'feat!: ...'." >&2
+  echo "::error title=Undeclared breaking change::This PR adds a '${breaking_kind}' or '${network_upgrade_kind}' fragment, so its title needs a conventional commit break marker, for example 'feat!: ...'." >&2
   failed=true
 fi
 
