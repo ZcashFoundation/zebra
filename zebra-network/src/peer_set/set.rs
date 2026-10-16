@@ -1020,17 +1020,40 @@ where
         let minimum_version = self.minimum_peer_version.current();
         let bans = self.bans_receiver.borrow();
         self.find_peer_queue.retain(|(key, info)| {
-            if !bans.is_banned(key.ip()) && info.remote.version >= minimum_version {
-                return true;
-            }
-
-            self.find_response_stalls.clear(*key);
-            self.ready_services.remove(key);
-            if let Some(cancel) = self.cancel_handles.remove(key) {
-                let _ = cancel.send(CancelClientWork);
-            }
-            false
+            !bans.is_banned(key.ip()) && info.remote.version >= minimum_version
         });
+        self.ready_services.retain(|key, service| {
+            let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
+            if !eligible {
+                self.find_response_stalls.clear(*key);
+            }
+            eligible
+        });
+        for pending in Pin::new(&self.unready_services).iter_pin_ref() {
+            let pending = pending.get_ref();
+            let key = pending
+                .key
+                .as_ref()
+                .expect("unready services retain their key until completion");
+            // Canceled futures can outlive their connection and share a replacement's address.
+            if !self
+                .cancel_handles
+                .get(key)
+                .is_some_and(|cancel| cancel.is_connected_to(&pending.cancel))
+            {
+                continue;
+            }
+            let service = pending
+                .service
+                .as_ref()
+                .expect("unready services retain their client until completion");
+            if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
+                self.find_response_stalls.clear(*key);
+                if let Some(cancel) = self.cancel_handles.remove(key) {
+                    let _ = cancel.send(CancelClientWork);
+                }
+            }
+        }
     }
 
     /// Takes a ready service by key.
@@ -1162,6 +1185,9 @@ where
         if peer_version >= self.minimum_peer_version.current() {
             self.cancel_handles.insert(key, tx);
         } else {
+            self.find_response_stalls.clear(key);
+            // Reject delayed response events before the next peer-set poll.
+            self.find_peer_queue.retain(|(addr, _)| *addr != key);
             // Cancel any request made to the service because it is using an outdated protocol
             // version.
             let _ = tx.send(CancelClientWork);

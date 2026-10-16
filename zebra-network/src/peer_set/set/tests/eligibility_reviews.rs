@@ -1,8 +1,138 @@
 //! Consumer-visible eligibility and scheduling regressions from the auxiliary review.
 
+use std::task::{Context, Poll};
+
 use futures::FutureExt as _;
 
 use super::*;
+
+#[test]
+fn outdated_canceled_future_preserves_same_address_replacement() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let addr: PeerSocketAddr = "127.0.0.1:1".parse().unwrap();
+    let outdated_version = Version::min_remote_for_height(&Network::Mainnet, None);
+    let (outdated, mut outdated_handle) = ClientTestHarness::build()
+        .with_version(outdated_version)
+        .finish();
+    let (replacement, mut replacement_handle) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .finish();
+    let discovery = stream::iter([
+        Ok::<_, BoxError>(Change::Insert(addr, outdated.into())),
+        Ok(Change::Insert(addr, replacement.into())),
+    ])
+    .chain(stream::pending());
+    let (mut minimum, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    best_tip.send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+    assert!(minimum.current() > outdated_version);
+    let (mut peers, _peer_guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum)
+        .build();
+
+    // Admit both connections before polling either canceled or ready future.
+    let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(peers.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+    assert!(peers.ready_services.contains_key(&addr));
+    assert!(!outdated_handle.wants_connection_heartbeats());
+    assert!(replacement_handle.wants_connection_heartbeats());
+
+    let _response = peers.call(Request::Peers);
+    assert_eq!(
+        received_request(&mut replacement_handle),
+        Some(Request::Peers),
+    );
+}
+
+#[test]
+fn outdated_call_rejects_late_find_stalls_before_replacement() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    let addr: PeerSocketAddr = "127.0.0.1:1".parse().unwrap();
+    let outdated_version = Version::min_remote_for_height(&Network::Mainnet, None);
+    let (outdated, mut outdated_handle) = ClientTestHarness::build()
+        .with_version(outdated_version)
+        .finish();
+    let (mut discovery_tx, discovery) = futures::channel::mpsc::channel(1);
+    discovery_tx
+        .try_send(Ok::<_, BoxError>(Change::Insert(addr, outdated.into())))
+        .expect("discovery channel has room");
+    let (minimum, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peers, _peer_guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum)
+        .build();
+
+    runtime.block_on(async {
+        let find = find_requests_and_responses()[0].0.clone();
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+            assert!(respond_to_request(
+                &mut peers,
+                &mut outdated_handle,
+                find.clone(),
+                Err(PeerError::ConnectionReceiveTimeout.into()),
+            )
+            .await
+            .is_err());
+        }
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(matches!(peers.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+        assert!(outdated_handle.wants_connection_heartbeats());
+
+        // Keep one earlier response pending while the client becomes ready for another call.
+        let late_response = peers.call(find.clone());
+        let late_request = outdated_handle
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("the old connection received the find request");
+        assert_eq!(late_request.request, find);
+        assert!(matches!(peers.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+
+        // Raise the minimum after readiness so the call cancels the now-outdated connection.
+        best_tip.send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+        let _response = peers.call(Request::Peers);
+        assert!(!peers.cancel_handles.contains_key(&addr));
+
+        // Complete the old response after cancellation, before readiness can prune its identity.
+        late_request
+            .tx
+            .send(Err(PeerError::ConnectionReceiveTimeout.into()))
+            .expect("the old response is still pending");
+        assert!(timeout(Duration::from_secs(10), late_response)
+            .await
+            .expect("the old response must not hang")
+            .is_err());
+        assert!(peers.poll_ready(&mut cx).is_pending());
+        assert!(!outdated_handle.wants_connection_heartbeats());
+
+        let (replacement, mut replacement_handle) = ClientTestHarness::build()
+            .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+            .finish();
+        discovery_tx
+            .try_send(Ok(Change::Insert(addr, replacement.into())))
+            .expect("discovery channel has room");
+        for _ in 0..FIND_RESPONSE_STALL_THRESHOLD - 1 {
+            assert!(respond_to_request(
+                &mut peers,
+                &mut replacement_handle,
+                find.clone(),
+                Err(PeerError::ConnectionReceiveTimeout.into()),
+            )
+            .await
+            .is_err());
+        }
+        let _ = peers.poll_ready(&mut cx);
+        assert!(
+            replacement_handle.wants_connection_heartbeats(),
+            "the replacement must not inherit the outdated connection's find failures",
+        );
+    });
+}
 
 #[test]
 fn queued_block_ignores_banned_or_outdated_busy_peer() {
