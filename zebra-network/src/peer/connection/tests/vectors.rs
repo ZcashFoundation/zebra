@@ -20,7 +20,7 @@ use tower::load_shed::error::Overloaded;
 use tracing::Span;
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
     serialization::{SerializationError, ZcashDeserializeInto},
     transaction::UnminedTx,
 };
@@ -29,7 +29,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     constants::{MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, REQUEST_TIMEOUT},
     peer::{
-        connection::{overload_drop_connection_probability, Connection, State},
+        connection::{overload_drop_connection_probability, Connection, Handler, State},
         ClientRequest, ErrorSlot,
     },
     protocol::{
@@ -967,6 +967,42 @@ async fn connection_ping_pong_round_trip() {
 
     drop(peer_tx);
     let _ = connection.await;
+}
+
+/// Test that `FindBlocks` responses keep at most the first 500 block hashes.
+#[test]
+fn find_blocks_response_hash_limit() {
+    let _init_guard = zebra_test::init();
+
+    let hashes: Vec<block::Hash> = (0..501u32)
+        .map(|i| {
+            let mut hash = [0; 32];
+            hash[..4].copy_from_slice(&i.to_le_bytes());
+            block::Hash(hash)
+        })
+        .collect();
+
+    for len in [500, 501] {
+        let mut handler = Handler::FindBlocks;
+        let items = hashes[..len]
+            .iter()
+            .copied()
+            .map(InventoryHash::Block)
+            .collect();
+
+        let ignored = handler.process_message(Message::Inv(items), &mut Vec::new(), None);
+        assert!(
+            ignored.is_none(),
+            "response must not be handled as a request"
+        );
+
+        match handler {
+            Handler::Finished(Ok(Response::BlockHashes(response))) => {
+                assert_eq!(response, hashes[..500], "must keep the first 500 hashes")
+            }
+            handler => panic!("unexpected handler state for {len} hashes: {handler:?}"),
+        }
+    }
 }
 
 /// Test that a `notfound` for a cancelled request doesn't end a later request for other inventory.
