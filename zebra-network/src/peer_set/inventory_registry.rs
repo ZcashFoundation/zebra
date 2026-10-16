@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures::{FutureExt, Stream, StreamExt};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use tokio::{
     sync::broadcast,
     time::{self, Instant},
@@ -97,6 +97,23 @@ pub struct InventoryRegistry {
 
     /// Map tracking inventory statuses from the previous interval period.
     prev: IndexMap<InventoryHash, IndexMap<PeerSocketAddr, InventoryMarker>>,
+
+    /// Map tracking peers that failed to return inventory in the current interval period.
+    ///
+    /// A failure is a completed peer error or response timeout, not caller cancellation or a
+    /// `notfound` response. Missing inventory is tracked separately; failed peers might still have it.
+    ///
+    /// Failures are tracked separately from inventory statuses, so a peer can't clear its failure
+    /// by advertising the inventory again.
+    ///
+    /// # Security
+    ///
+    /// This map is limited like the status maps, using [`MAX_INV_PER_MAP`] and
+    /// [`MAX_PEERS_PER_INV`]. So it uses up to 3 MB for both intervals.
+    failed_current: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+
+    /// Map tracking peers that failed to return inventory in the previous interval period.
+    failed_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -204,17 +221,15 @@ impl InventoryRegistry {
         let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);
         // # Security
         //
-        // If the rotation time is late, execute as many ticks as needed to catch up.
-        // This is a tradeoff between memory usage and quickly accessing remote data
-        // under heavy load. Bursting prioritises lower memory usage.
-        //
-        // Skipping or delaying could keep peer inventory in memory for a longer time,
-        // further increasing memory load or delays due to virtual memory swapping.
-        interval.set_missed_tick_behavior(time::MissedTickBehavior::Burst);
+        // Delay missed ticks so newly registered inventory survives a full interval.
+        // Per-map caps bound memory use even when polling is delayed.
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         Self {
             current: Default::default(),
             prev: Default::default(),
+            failed_current: Default::default(),
+            failed_prev: Default::default(),
             inv_stream: BroadcastStream::new(inv_stream).boxed(),
             interval: IntervalStream::new(interval),
         }
@@ -230,6 +245,53 @@ impl InventoryRegistry {
     pub fn missing_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
         self.status_peers(hash)
             .filter_map(|addr_status| addr_status.missing())
+    }
+
+    /// Returns an iterator over addrs of peers that recently failed to return `hash`.
+    ///
+    /// Can include the same peer twice, if it failed in the current and previous interval.
+    pub fn failed_peers(&self, hash: InventoryHash) -> impl Iterator<Item = &PeerSocketAddr> {
+        self.failed_current
+            .get(&hash)
+            .into_iter()
+            .chain(self.failed_prev.get(&hash))
+            .flatten()
+    }
+
+    /// Records that `peer` failed to return `hash`.
+    ///
+    /// Failures expire after the registry rotates twice, like inventory statuses.
+    pub fn register_failed(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {
+        if let Some(index) = self.failed_current.get_index_of(&hash) {
+            self.failed_current
+                .move_index(index, self.failed_current.len() - 1);
+        }
+        let failed_peers = self.failed_current.entry(hash).or_default();
+        let (index, _) = failed_peers.insert_full(peer);
+        failed_peers.move_index(index, failed_peers.len() - 1);
+
+        // # Security
+        //
+        // Limit the number of stored peers and hashes, removing the oldest entries, like
+        // `register()`.
+        if failed_peers.len() > MAX_PEERS_PER_INV {
+            // Performance: `MAX_PEERS_PER_INV` is small, so O(n) performance is acceptable.
+            failed_peers.shift_remove_index(0);
+        }
+        if self.failed_current.len() > MAX_INV_PER_MAP {
+            // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
+            self.failed_current.shift_remove_index(0);
+        }
+    }
+
+    /// Clears failures from previous connections that used `peer`'s transient address.
+    pub fn clear_peer_failures(&mut self, peer: PeerSocketAddr) {
+        for failures in [&mut self.failed_current, &mut self.failed_prev] {
+            failures.retain(|_, peers| {
+                peers.shift_remove(&peer);
+                !peers.is_empty()
+            });
+        }
     }
 
     /// Returns an iterator over peer inventory statuses for `hash`.
@@ -303,12 +365,8 @@ impl InventoryRegistry {
         //
         // # Security
         //
-        // Only rotate one inventory per peer request, to give the next inventory
-        // time to gather some peer advertisements. This is a tradeoff between
-        // memory usage and quickly accessing remote data under heavy load.
-        //
-        // This prevents a burst edge case where all inventory is emptied after
-        // two interval ticks are delayed.
+        // Rotate before registering new inventory. Missed ticks restart the interval, so
+        // repeated polls cannot immediately age out new advertisements or failures.
         if Pin::new(&mut self.interval).poll_next(cx).is_ready() {
             self.rotate();
             result = Poll::Ready(Ok(()));
@@ -437,5 +495,6 @@ impl InventoryRegistry {
     /// HashMap
     fn rotate(&mut self) {
         self.prev = std::mem::take(&mut self.current);
+        self.failed_prev = std::mem::take(&mut self.failed_current);
     }
 }

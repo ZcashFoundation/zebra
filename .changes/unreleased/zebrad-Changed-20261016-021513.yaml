@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Retry block requests using another source when one is available after a peer fails to return the block ([#11525](https://github.com/ZcashFoundation/zebra/pull/11525)).
+time: 2026-10-16T02:15:13.236240596+02:00
