@@ -48,7 +48,8 @@ jobs:
     # Runs for every trigger, including the labels and edits that cannot change the
     # gate outcome. `pr-gate-result` is a required check, so every PR Gate run has to
     # report it, and it can only report an honest verdict if the cheap policy jobs
-    # re-evaluate the declaration. Only `api-diff` is expensive enough to skip.
+    # re-evaluate the declaration. Only `api-diff` and `release-api-diff` are expensive
+    # enough to skip.
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
@@ -203,6 +204,122 @@ jobs:
         with:
           path: target/zc-cache/${{ github.sha }}.*
           key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ github.sha }}
+
+  # Posts the public API and dependency diff since the last zebrad release on the Release PR, so
+  # reviewers can check each crate's bump. Like `api-diff`, it skips labels and edits that cannot
+  # change the diff.
+  release-api-diff:
+    if: >-
+      github.event_name == 'pull_request' &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write # creates or updates the sticky API diff comment
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Find the last zebrad release
+        id: baseline
+        run: |
+          if ! tag="$(git describe --tags --match 'v*' --abbrev=0 HEAD)"; then
+            echo "::error title=No release tag found::This diff needs a v* tag reachable from the release PR head."
+            exit 1
+          fi
+          # `v*` tags are zebrad's. A library crate that skipped a zebrad release has an older
+          # tag of its own, and its changes from before `$tag` are missing from the diff.
+          older_crate_tags=""
+          while read -r crate; do
+            [[ -d "$crate" ]] || continue
+            crate_tag="$(git describe --tags --match "${crate}-v*" --abbrev=0 HEAD)"
+            if ! git merge-base --is-ancestor "$tag" "$crate_tag"; then
+              older_crate_tags+="${older_crate_tags:+ }${crate_tag}"
+            fi
+          done < <(git tag --list '*-v*' --merged HEAD | sed 's/-v[0-9].*$//' | sort -u)
+          {
+            echo "tag=${tag}"
+            echo "rev=$(git rev-parse "${tag}^{commit}")"
+            echo "older_crate_tags=${older_crate_tags}"
+          } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Restore the zc rustdoc cache
+        # Restores what `api-diff-warm` saved for the release commit; a pull request must never save.
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          # The path is part of the cache version, so it must match the save path exactly.
+          path: target/zc-cache/${{ steps.baseline.outputs.rev }}.*
+          key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ steps.baseline.outputs.rev }}
+      - name: Diff the public API and dependencies since the last release
+        id: zc
+        uses: ZcashFoundation/zc@8e37c96bff652df008a645b566cb9d3124b10edc # v0.7.0
+        with:
+          baseline: ${{ steps.baseline.outputs.tag }}
+          fail-on: none
+          features: ${{ env.ZC_FEATURES }}
+          with-changelog: "true"
+      - name: Post the diff as a pull request comment
+        # A cancelled run must not replace the previous diff with a failure notice.
+        if: ${{ !cancelled() && steps.baseline.outputs.tag != '' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CHANGELOG_FILE: ${{ steps.zc.outputs.changelog }}
+          OLDER_CRATE_TAGS: ${{ steps.baseline.outputs.older_crate_tags }}
+          TAG: ${{ steps.baseline.outputs.tag }}
+        with:
+          script: |
+            const fs = require('fs');
+
+            const marker = '<!-- release-api-diff -->';
+            const tag = process.env.TAG;
+            const head = context.payload.pull_request.head.sha.slice(0, 12);
+            const file = process.env.CHANGELOG_FILE;
+            const olderCrateTags = process.env.OLDER_CRATE_TAGS.split(' ').filter(Boolean);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const code = items => items.map(item => `\`${item}\``).join(', ');
+
+            let header = `${marker}\n## Public API diff since zebrad ${tag}\n\nComparing \`${tag}\` with \`${head}\`.\n`;
+            if (olderCrateTags.length > 0) {
+              header += `\nThese crates were last released before zebrad ${tag}, so their changes from before it are missing: ${code(olderCrateTags)}.\n`;
+            }
+
+            let body;
+            if (fs.existsSync(file)) {
+              body = `${header}\n${fs.readFileSync(file, 'utf8')}`;
+              // The run summary keeps the whole diff when the comment has to be cut.
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+            } else {
+              body = `${header}\nThe diff could not be produced. See [the job log](${runUrl}).`;
+            }
+
+            // GitHub rejects comment bodies over 65536 characters, so cut back to a whole crate section.
+            if (body.length > 65536) {
+              const kept = body.slice(0, 60000);
+              const boundary = kept.lastIndexOf('\n## ');
+              const cut = boundary > header.length ? boundary : kept.lastIndexOf('\n');
+              const dropped = [...body.slice(cut).matchAll(/^## (.+)$/gm)].map(match => match[1]);
+              const including = dropped.length > 0 ? `, including ${code(dropped)}` : '';
+              body = `${body.slice(0, cut)}\n\nThe [run summary](${runUrl}) has the full diff${including}.\n`;
+            }
+
+            const issue = { ...context.repo, issue_number: context.issue.number };
+            const comments = await github.paginate(github.rest.issues.listComments, issue);
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' && c.body.startsWith(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...issue, body });
+            }
 
   # This checks for changelog entries depending on the type of the PR (per title).
   # An entry is required for a crate if any file in the crate changed.
