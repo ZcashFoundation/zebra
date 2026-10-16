@@ -220,8 +220,8 @@ pub fn sync_until(
 /// depend on live network peers.
 ///
 /// With [`MempoolBehavior::ShouldNotActivate`], `zebrad` has to exit by itself so the test can
-/// collect its whole output. `TestChild::with_timeout` doesn't apply to that wait, so `timeout`
-/// doesn't bound it: the per-test `slow-timeout` in `.config/nextest.toml` does.
+/// collect its whole output. The child deadline bounds this wait; the profile `slow-timeout` in
+/// `.config/nextest.toml` provides an additional process-level backstop.
 ///
 /// See [`sync_until`] for the other arguments and the return value.
 #[allow(clippy::too_many_arguments)]
@@ -269,7 +269,7 @@ pub fn sync_until_with_peers(
         testdir()?.with_config(&mut config)?
     };
 
-    let child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout);
+    let child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout)?;
 
     let network_log = format!("network: {network},");
 
@@ -446,7 +446,7 @@ pub fn create_cached_database_height(
     let mut child = dir
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
-        .with_timeout(FINISH_FULL_SYNC_TIMEOUT)
+        .with_timeout(FINISH_FULL_SYNC_TIMEOUT)?
         .bypass_test_capture(true);
 
     let network = format!("network: {network},");

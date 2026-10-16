@@ -414,7 +414,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
 }
 
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_zero_connect_panic() {
     let _init_guard = zebra_test::init();
 
@@ -438,7 +438,7 @@ async fn crawler_peer_limit_zero_connect_panic() {
 }
 
 /// Test the crawler with an outbound peer limit of one peer, and a connector that always errors.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_error() {
     let _init_guard = zebra_test::init();
 
@@ -462,7 +462,7 @@ async fn crawler_peer_limit_one_connect_error() {
 
 /// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then disconnects the peer.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
@@ -511,7 +511,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
 
 /// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then holds the peer open.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
@@ -569,6 +569,15 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
     }
 
     assert!(
+        peer_change_count > 0,
+        "expected successful peer connections"
+    );
+    assert_eq!(
+        peer_tracker_count, peer_change_count,
+        "expected one held tracker per successful peer connection",
+    );
+
+    assert!(
         peer_change_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
         peer_change_count,
@@ -586,7 +595,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
 }
 
 /// Test the crawler with the default outbound peer limit, and a connector that always errors.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_error() {
     let _init_guard = zebra_test::init();
 
@@ -610,7 +619,7 @@ async fn crawler_peer_limit_default_connect_error() {
 
 /// Test the crawler with the default outbound peer limit,
 /// and a connector that returns success then disconnects the peer.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
@@ -661,7 +670,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
 
 /// Test the crawler with the default outbound peer limit,
 /// and a connector that returns success then holds the peer open.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
@@ -720,6 +729,15 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     }
 
     assert!(
+        peer_change_count > 0,
+        "expected successful peer connections"
+    );
+    assert_eq!(
+        peer_tracker_count, peer_change_count,
+        "expected one held tracker per successful peer connection",
+    );
+
+    assert!(
         peer_change_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
         peer_change_count,
@@ -740,7 +758,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
 /// using existing address book candidates, without any demand signals, and even when
 /// crawls return no new addresses. Then test that it replaces dropped connections,
 /// and doesn't dial over the limit once it is reached.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_refills_spare_outbound_capacity_on_timer() {
     let _init_guard = zebra_test::init();
 
