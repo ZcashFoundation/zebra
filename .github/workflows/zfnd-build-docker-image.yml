@@ -172,8 +172,8 @@ jobs:
             org.opencontainers.image.revision=${{ inputs.source_sha }}
           tags: |
             type=semver,pattern={{version}}
-            type=ref,event=pr
-            type=ref,event=branch
+            type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
+            type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=schedule
 
       - name: Authenticate to Google Cloud
@@ -332,8 +332,8 @@ jobs:
             # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
             # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
             # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
-            type=ref,event=pr
-            type=ref,event=branch
+            type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
+            type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=schedule
             # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
             # Applied to every build except releases, to ensure CI tests use the exact image from the last commit.
@@ -356,11 +356,11 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      # Login to DockerHub when:
+      # Login to DockerHub in ZcashFoundation/zebra, when:
       # 1. Publishing images for a release or pre-release, OR
       # 2. Running Docker Scout on release PRs (requires DockerHub authentication)
       - name: Login to DockerHub
-        if: inputs.publish_to_dockerhub || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v'))
+        if: github.repository == 'ZcashFoundation/zebra' && (inputs.publish_to_dockerhub || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v')))
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
