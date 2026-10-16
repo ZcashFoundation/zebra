@@ -245,14 +245,16 @@ impl Handler {
                     }
                 }
             }
-            // `zcashd` peers actually return this response
+            // `zcashd` peers actually return this response.
+            // A `notfound` naming none of the pending IDs is for a cancelled request or
+            // unsolicited, so it isn't a response to this request.
             (
                 Handler::TransactionsById {
                     pending_ids,
                     transactions,
                 },
                 Message::NotFound(missing_invs),
-            ) => {
+            ) if transaction_ids(&missing_invs).any(|id| pending_ids.contains(&id)) => {
                 // assumptions:
                 //   - the peer eventually returns a transaction or a `notfound` entry
                 //     for each hash
@@ -354,14 +356,16 @@ impl Handler {
                     }
                 }
             }
-            // peers are allowed to return this response, but `zcashd` never does
+            // Peers are allowed to return this response, but `zcashd` never does.
+            // A `notfound` naming none of the pending hashes is for a cancelled request or
+            // unsolicited, so it isn't a response to this request.
             (
                 Handler::BlocksByHash {
                     pending_hashes,
                     blocks,
                 },
                 Message::NotFound(missing_invs),
-            ) => {
+            ) if block_hashes(&missing_invs).any(|hash| pending_hashes.contains(&hash)) => {
                 // assumptions:
                 //   - the peer eventually returns a block or a `notfound` entry
                 //     for each hash

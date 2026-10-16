@@ -61,8 +61,8 @@
 //!   [`PeerSet::push_unready`]
 //! - disconnect from peers that have just responded and became outdated, in
 //!   [`PeerSet::poll_unready`]
-//! - disconnect from idle peers that have become outdated, in
-//!   [`PeerSet::disconnect_from_outdated_peers`]
+//! - disconnect from ready or busy peers that have become outdated, in
+//!   [`PeerSet::disconnect_from_ineligible_peers`]
 //!
 //! ## Network Coalescence
 //!
@@ -522,20 +522,15 @@ where
 
     /// Checks for newly ready, disconnects from outdated peers, and polls ready peer errors.
     fn poll_peers(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        // Bans and protocol upgrades invalidate busy connections too.
+        self.disconnect_from_ineligible_peers();
+
         // Check for newly ready peers, including newly added peers (which are added as unready).
         // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
         // peers.
         //
-        // Each connected peer should become ready within a few minutes, or timeout, close the
-        // connection, and release its connection slot.
-        //
-        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
+        // Request-channel backpressure is bounded independently of the wire response timeout.
         let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
-
-        // Cleanup
-
-        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
-        self.disconnect_from_outdated_peers();
 
         // Check for failures in ready peers, removing newly errored or disconnected peers.
         // So it needs to run after `poll_unready()`.
@@ -629,6 +624,14 @@ where
                         ?key,
                         duplicate_connection = self.cancel_handles.contains_key(&key),
                         "cancel handle was dropped, dropping service"
+                    );
+                }
+                Some(Err((key, UnreadyError::TimedOut))) => {
+                    debug!(?key, "service readiness timed out, dropping service");
+                    let cancel = self.cancel_handles.remove(&key);
+                    assert!(
+                        cancel.is_some(),
+                        "timed-out unready service has a cancel handle"
                     );
                 }
 
@@ -796,8 +799,6 @@ where
                         self.zcashd_compat_peer_keys.insert(key);
                     }
 
-                    // Also clear any stale key, in case a disconnected serving peer's address was
-                    // reused before it was pruned.
                     if svc.remote_services().contains(PeerServices::NODE_NETWORK) {
                         self.serving_peer_keys.insert(key);
                     } else {
@@ -812,12 +813,33 @@ where
         result
     }
 
-    /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
-    fn disconnect_from_outdated_peers(&mut self) {
-        if let Some(minimum_version) = self.minimum_peer_version.changed() {
-            // It is ok to drop ready services, they don't need anything cancelled.
-            self.ready_services
-                .retain(|_address, peer| peer.remote_version() >= minimum_version);
+    /// Disconnects banned and outdated connections, whether ready or backpressured.
+    fn disconnect_from_ineligible_peers(&mut self) {
+        let minimum_version = self.minimum_peer_version.current();
+        let bans = self.bans_receiver.borrow();
+        self.ready_services.retain(|key, service| {
+            let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
+            if !eligible {
+                self.find_response_stalls.clear(*key);
+            }
+            eligible
+        });
+        for pending in Pin::new(&self.unready_services).iter_pin_ref() {
+            let pending = pending.get_ref();
+            let key = pending
+                .key
+                .as_ref()
+                .expect("unready services retain their key until completion");
+            let service = pending
+                .service
+                .as_ref()
+                .expect("unready services retain their client until completion");
+            if bans.is_banned(key.ip()) || service.remote_version() < minimum_version {
+                self.find_response_stalls.clear(*key);
+                if let Some(cancel) = self.cancel_handles.remove(key) {
+                    let _ = cancel.send(CancelClientWork);
+                }
+            }
         }
     }
 
@@ -914,6 +936,7 @@ where
             key: Some(key),
             service: Some(svc),
             cancel: rx,
+            readiness_timeout: tokio::time::sleep(crate::constants::REQUEST_TIMEOUT),
             _req: PhantomData,
         });
 
@@ -1245,7 +1268,12 @@ where
             kind,
             "no ready peer can serve the inventory, failing request"
         );
-        metrics::counter!("zcash.net.peer_set.inventory_refusal", "kind" => kind).increment(1);
+        metrics::counter!(
+            "zcash.net.peer_set.inventory_refusal",
+            "kind" => kind,
+            "network" => network_kind_label(&self.network)
+        )
+        .increment(1);
 
         async move {
             if delay_refusal {

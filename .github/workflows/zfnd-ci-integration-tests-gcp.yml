@@ -623,7 +623,7 @@ jobs:
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write
@@ -639,7 +639,7 @@ jobs:
 
   integration-tests-success:
     name: integration tests success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: >-
       ${{
         always() &&

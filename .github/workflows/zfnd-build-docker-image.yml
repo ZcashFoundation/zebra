@@ -84,7 +84,7 @@ jobs:
   # consumers route to the same dev/stage/prod GitHub environment.
   determine-environment:
     name: Determine environment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       environment: ${{ steps.set.outputs.environment }}
@@ -107,14 +107,14 @@ jobs:
 
   prepare-matrix:
     name: Prepare build matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Set build matrix
         id: set-matrix
         env:
-          AMD64_RUNNER: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
+          AMD64_RUNNER: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-26.04' }}
           ARM64_RUNNER: ${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
           DOCKERFILE_TARGET: ${{ inputs.dockerfile_target }}
         run: |
@@ -224,14 +224,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
         with:
           version: lab:latest
-          driver: ${{ vars.DOCKER_BUILDER || 'docker' }}
-          endpoint: zfnd/zebra
+          driver: ${{ vars.DOCKER_BUILDER || 'docker-container' }}
+          endpoint: ${{ vars.DOCKER_BUILDER == 'cloud' && 'zfnd/zebra' || '' }}
 
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
@@ -306,7 +305,7 @@ jobs:
   # and applies all necessary tags to both GCP Artifact Registry and DockerHub
   merge:
     name: Create multi-arch manifest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [determine-environment, prepare-matrix, build]
     environment: ${{ needs.determine-environment.outputs.environment }}
     permissions:

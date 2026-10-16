@@ -6,6 +6,7 @@
 
 use std::{
     collections::HashSet,
+    sync::Arc,
     task::Poll,
     time::{Duration, Instant},
 };
@@ -18,7 +19,11 @@ use futures::{
 use tower::load_shed::error::Overloaded;
 use tracing::Span;
 
-use zebra_chain::{block, serialization::SerializationError};
+use zebra_chain::{
+    block::{self, Block},
+    serialization::{SerializationError, ZcashDeserializeInto},
+    transaction::UnminedTx,
+};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
@@ -27,7 +32,10 @@ use crate::{
         connection::{overload_drop_connection_probability, Connection, Handler, State},
         ClientRequest, ErrorSlot,
     },
-    protocol::external::{InventoryHash, Message},
+    protocol::{
+        external::{InventoryHash, Message},
+        internal::InventoryResponse,
+    },
     types::Nonce,
     PeerError, Request, Response,
 };
@@ -995,6 +1003,133 @@ fn find_blocks_response_hash_limit() {
             handler => panic!("unexpected handler state for {len} hashes: {handler:?}"),
         }
     }
+}
+
+/// Test that a `notfound` for a cancelled request doesn't end a later request for other inventory.
+#[tokio::test]
+async fn connection_ignores_notfound_for_cancelled_requests() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = [
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.as_slice(),
+    ]
+    .into_iter()
+    .map(|bytes| {
+        bytes
+            .zcash_deserialize_into()
+            .expect("block vectors are valid")
+    })
+    .collect();
+    let transactions: Vec<UnminedTx> = blocks
+        .iter()
+        .map(|block| UnminedTx::from(&block.transactions[0]))
+        .collect();
+    let block_request = |block: &Arc<Block>| Request::BlocksByHash(HashSet::from([block.hash()]));
+    let transaction_request = |tx: &UnminedTx| Request::TransactionsById(HashSet::from([tx.id]));
+
+    // A cancelled transaction request, then a block request.
+    let response = cancelled_notfound_then_response(
+        transaction_request(&transactions[0]),
+        transactions[0].id.into(),
+        block_request(&blocks[1]),
+        Message::Block(blocks[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Blocks(vec![InventoryResponse::Available((
+            blocks[1].clone(),
+            None
+        ))])
+    );
+
+    // A cancelled block request, then a transaction request.
+    let response = cancelled_notfound_then_response(
+        block_request(&blocks[0]),
+        blocks[0].hash().into(),
+        transaction_request(&transactions[1]),
+        Message::Tx(transactions[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Transactions(vec![InventoryResponse::Available((
+            transactions[1].clone(),
+            None
+        ))])
+    );
+
+    // A cancelled block request, then a request for a different block.
+    let response = cancelled_notfound_then_response(
+        block_request(&blocks[0]),
+        blocks[0].hash().into(),
+        block_request(&blocks[1]),
+        Message::Block(blocks[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Blocks(vec![InventoryResponse::Available((
+            blocks[1].clone(),
+            None
+        ))])
+    );
+}
+
+/// Cancels `cancelled`, sends `request`, then delivers the peer's `notfound` for `missing` from
+/// the cancelled request before `reply`. Returns the response to `request`.
+async fn cancelled_notfound_then_response(
+    cancelled: Request,
+    missing: InventoryHash,
+    request: Request,
+    reply: Message,
+) -> Response {
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, mut inbound_service, mut peer_outbound_messages, error_slot) =
+        new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let mut response_rx = None;
+    for request in [cancelled, request] {
+        // Dropping the previous receiver cancels its request.
+        drop(response_rx.take());
+        let (tx, rx) = oneshot::channel();
+        client_tx
+            .send(ClientRequest {
+                request,
+                tx,
+                inv_collector: None,
+                transient_addr: None,
+                span: Span::none(),
+            })
+            .await
+            .expect("connection accepts requests");
+        assert!(matches!(
+            peer_outbound_messages.next().await,
+            Some(Message::GetData(_))
+        ));
+        response_rx = Some(rx);
+    }
+
+    for message in [Message::NotFound(vec![missing]), reply] {
+        peer_tx
+            .send(Ok(message))
+            .await
+            .expect("connection is running");
+    }
+    let response = response_rx
+        .expect("the loop sends the request")
+        .await
+        .expect("connection responds")
+        .expect("the notfound for the cancelled request is ignored");
+
+    assert!(error_slot.try_get_error().is_none());
+    inbound_service.expect_no_requests().await;
+
+    drop(peer_tx);
+    let _ = connection.await;
+    response
 }
 
 /// Creates a new [`Connection`] instance for unit tests.

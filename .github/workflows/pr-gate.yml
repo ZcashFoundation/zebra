@@ -14,18 +14,20 @@ on:
     types: [checks_requested]
 
 # Cancel obsolete gate runs after new commits. Events that cannot change the gate
-# outcome use separate groups so they cannot cancel the required PR Gate run:
-# unrelated labels, and edits that leave the title and the base branch alone.
+# outcome get a group of their own, keyed by run id, so they can cancel neither the
+# required PR Gate run nor each other: unrelated labels, and edits that leave the
+# title and the base branch alone. Cancelling one of those runs would report the
+# required check as failed, because `alls-green` reads a cancelled need as a failure.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'release' &&
-      'ignored-label' ||
+      format('ignored-label-{0}', github.run_id) ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
       github.event.changes.base == null &&
-      'ignored-edit' ||
+      format('ignored-edit-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
@@ -39,15 +41,11 @@ env:
 
 jobs:
   changes:
-    # Only the release label affects gate results, and only a title or base edit
-    # can change the declaration this gate reads. Every other label and edit event
-    # is a no-op, so it must not spend a runner or replace the required check.
-    if: >-
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
-    runs-on: ubuntu-latest
+    # Runs for every trigger, including the labels and edits that cannot change the
+    # gate outcome. `pr-gate-result` is a required check, so every PR Gate run has to
+    # report it, and it can only report an honest verdict if the cheap policy jobs
+    # re-evaluate the declaration. Only `semver-checks` is expensive enough to skip.
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       semver: ${{ steps.filter.outputs.semver || 'true' }}
@@ -105,11 +103,18 @@ jobs:
     needs: changes
     # Real work runs only on contributor pull requests that change Rust and do not already declare
     # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
+    # An unrelated label, or an edit that leaves the title and the base branch alone, cannot change the
+    # API delta of a head commit that did not move, so it must not spend 45 minutes of runner time.
+    # `pr-gate-result` tolerates the resulting skip.
     if: >-
       github.event_name == 'pull_request' &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
       needs.changes.outputs.semver == 'true' &&
       needs.changes.outputs.breaking == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -141,7 +146,7 @@ jobs:
   changelog-gate:
     needs: changes
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -165,7 +170,7 @@ jobs:
   # combine on the merge queue ref and on `main` is checked too.
   changelog-fragments:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -233,7 +238,7 @@ jobs:
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e # v0.1.0
+        uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
         with:
           phase: check
           base-sha: ${{ steps.release-target.outputs.base_sha }}
@@ -278,26 +283,15 @@ jobs:
           fi
 
   pr-gate-result:
-    # Keep skipped unrelated-label and unrelated-edit runs from replacing the
-    # required check.
-    name: >-
-      ${{
-        (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-        github.event.label.name != 'release' &&
-        'Label does not affect the PR gate' ||
-        github.event.action == 'edited' &&
-        github.event.changes.title == null &&
-        github.event.changes.base == null &&
-        'Edit does not affect the PR gate' ||
-        'pr-gate-result'
-      }}
-    runs-on: ubuntu-latest
-    if: >-
-      always() &&
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
+    # The ruleset requires the `pr-gate-result` context, and GitHub resolves it against
+    # the check runs of the newest PR Gate run for the head commit. So the job keeps a
+    # fixed name and runs for every trigger: a run that reports nothing under this name
+    # leaves the required check waiting for a status that never arrives, which is what a
+    # renamed or skipped result job did. Renaming also never worked as written, because
+    # GitHub does not evaluate `name` expressions for a job it skips, so those runs
+    # reported the raw expression text.
+    runs-on: ubuntu-26.04
+    if: always()
     needs: [changes, semver-checks, changelog-gate, changelog-fragments, release-readiness]
     timeout-minutes: 5
     steps:
@@ -309,6 +303,9 @@ jobs:
           # entries are good enough. `allowed-failures` also tolerates a skip, and
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
-          # Temporarily keep semver checks advisory until #11409 is resolved.
+          # Temporarily keep semver checks advisory until #11409 is resolved. When it stops
+          # being advisory, move it to `allowed-skips` instead of dropping it from both
+          # lists: no-op label and edit runs skip it, and an intolerant list would turn
+          # every one of those runs into a failed required check.
           allowed-failures: changelog-gate, semver-checks
           allowed-skips: release-readiness

@@ -24,6 +24,7 @@ use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
 use crate::methods::{
     trees::GetTreestateResponse, GetAddressBalanceRequest, GetAddressTxIdsRequest,
     GetAddressUtxosRequest, GetAddressUtxosResponse, RpcServer as RpcMethods,
+    MAX_REQUEST_ADDRESSES,
 };
 
 use super::{
@@ -36,12 +37,6 @@ use super::{
 
 /// The maximum number of messages that can be queued to be streamed to a client.
 const RESPONSE_BUFFER_SIZE: usize = 64;
-
-/// The maximum number of addresses a client can send in one request.
-///
-/// Bounds the addresses buffered from a client stream, and the work a single unary
-/// request can start.
-const MAX_REQUEST_ADDRESSES: usize = 10_000;
 
 /// The maximum number of `exclude` entries a `GetMempoolTx` client can send.
 ///

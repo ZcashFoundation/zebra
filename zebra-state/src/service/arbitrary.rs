@@ -14,6 +14,7 @@ use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
     block::{Block, Height},
+    chain_tip::ChainTip,
     fmt::{humantime_seconds, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
@@ -24,7 +25,8 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     service::{check, ReadStateService, StateService},
-    BoxError, ChainTipChange, Config, LatestChainTip, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, ChainTipChange, CheckpointVerifiedBlock, Config, LatestChainTip, Request, Response,
+    SemanticallyVerifiedBlock,
 };
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
@@ -215,9 +217,11 @@ pub async fn populated_state(
     LatestChainTip,
     ChainTipChange,
 ) {
+    let blocks: Vec<CheckpointVerifiedBlock> = blocks.into_iter().map(Into::into).collect();
+    let tip_height = blocks.iter().map(|block| block.height).max();
     let requests = blocks
         .into_iter()
-        .map(|block| Request::CommitCheckpointVerifiedBlock(block.into()));
+        .map(Request::CommitCheckpointVerifiedBlock);
 
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
@@ -233,25 +237,32 @@ pub async fn populated_state(
     }
 
     while let Some(rsp) = responses.next().await {
-        // Wait for the block result and the chain tip update,
-        // which both happen in a separate thread from this one.
         rsp.expect("unexpected block commit failure");
-
-        // Wait for the chain tip update
-        if let Err(timeout_error) = timeout(
-            CHAIN_TIP_UPDATE_WAIT_LIMIT,
-            chain_tip_change.wait_for_tip_change(),
-        )
-        .await
-        .map(|change_result| change_result.expect("unexpected chain tip update failure"))
-        {
-            debug!(
-                timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-                ?timeout_error,
-                "timeout waiting for chain tip change after committing block"
-            );
-        }
     }
+
+    // The block write thread updates the chain tip just after it sends each commit response.
+    // The tip channel only keeps the latest tip, so blocks committed close together produce a
+    // single tip change. Waiting for one tip change per block would time out once for each of
+    // those blocks, so wait for the tip to reach the highest block instead.
+    if let Err(timeout_error) = timeout(CHAIN_TIP_UPDATE_WAIT_LIMIT, async {
+        while latest_chain_tip.best_tip_height() < tip_height {
+            chain_tip_change
+                .wait_for_tip_change()
+                .await
+                .expect("unexpected chain tip update failure");
+        }
+    })
+    .await
+    {
+        debug!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing blocks"
+        );
+    }
+
+    // Mark the current tip as seen, so callers only see tip changes after these blocks.
+    let _ = chain_tip_change.last_tip_change();
 
     (state, read_state, latest_chain_tip, chain_tip_change)
 }
