@@ -141,7 +141,7 @@ Write for a reviewer who hasn't opened the code, and scale the description to th
 
 Fill in each section of `.github/pull_request_template.md`:
 
-- **Summary:** the problem, and how Zebra behaves after the change. Explain design choices, changed contracts, and tradeoffs that a reviewer can't reconstruct from the diff. Link the issue with `Closes #...`, or `Part of #...` and the part this PR covers. When the change follows a ZIP, the Zcash protocol specification, or zcashd behavior, link the exact section or source line.
+- **Summary:** the problem, and how Zebra behaves after the change. Explain design choices, changed contracts, and tradeoffs that a reviewer can't reconstruct from the diff. Put each link on its own line: `Fixes #...` for an issue the PR resolves, `Part of #...` with the part it covers for an issue it only partly resolves, and `Closes #...` with a one-line reason for another PR it replaces, such as a PR it supersedes. When the change follows a ZIP, the Zcash protocol specification, or zcashd behavior, link the exact section or source line.
 - **Evidence:** a before and after a reviewer can check, such as a test that failed and now passes, real output trimmed to the lines that matter, or a screenshot. Claim only what the evidence shows, and say what wasn't tested and why. Delete the section when there is no behavior to show.
 - **Merge Danger:** whether the change is a one-way or a two-way door, and its blast radius. Database format changes, consensus rule changes, breaking changes to published crates, peer protocol changes, and deleted data or infrastructure are one-way doors: name what they affect beyond the diff and any migration they need.
 - **AI Disclosure:** see [AI Disclosure](#ai-disclosure).

@@ -6,7 +6,11 @@ opened the code. Explain any design choice or tradeoff the diff doesn't show.
 Add a pseudocode, call-tree, or file-tree sketch only when it shows something
 the diff doesn't. A small change needs only a short paragraph.
 
-Link the issue: "Closes #123", or "Part of #123" with the part this PR covers.
+Put each link on its own line:
+- "Fixes #123" for an issue this PR resolves
+- "Part of #123" for an issue it only partly resolves, with the part it covers
+- "Closes #456" for another PR this one replaces, with a short reason, such as
+  "Closes #456: supersedes it with a smaller fix"
 -->
 
 ## Evidence
