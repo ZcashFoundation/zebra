@@ -118,6 +118,13 @@ expect_plan "a break cascades: re-exporters inherit it, other dependents get a p
 zebra-chain	14.0.0
 zebra-node-services	12.0.0"
 
+fragment zebra-chain breaking 1
+fragment zebra-node-services Fixed 1
+expect_plan "a re-exporter inherits a break even when its own fragments plan less" \
+  "zebrad	6.4.3
+zebra-chain	14.0.0
+zebra-node-services	12.0.0"
+
 fragment zebrad breaking 1
 expect_plan "a zebrad break stops at a minor bump" \
   "zebrad	6.5.0"
