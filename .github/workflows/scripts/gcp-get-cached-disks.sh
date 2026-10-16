@@ -10,6 +10,10 @@
 # Within each of these categories:
 # - prefer newer images to older images
 #
+# In ZcashFoundation/zebra, images written by copies of the repository are
+# skipped. Copies share the GCP project and name their images
+# `<prefix>-r<repository id>-<sha>-...`.
+#
 # The selected image is used for setting up the environment in a CI/CD pipeline.
 # It also checks if specific disk types are available for subsequent jobs.
 
@@ -20,14 +24,31 @@ echo "Extracting local state version..."
 LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "${GITHUB_WORKSPACE}/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
 echo "STATE_VERSION: ${LOCAL_STATE_VERSION}"
 
+# Function to print the newest ready image named `<image_prefix>-<name_pattern>`.
+# GCE filters use RE2, which has no negative lookahead, so images from copies of
+# the repository are dropped from the listed names instead.
+find_newest_image() {
+    local image_prefix="${1}"
+    local name_pattern="${2}"
+    local images
+
+    images=$(gcloud compute images list --filter="status=READY AND name~${image_prefix}-${name_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp)
+
+    if [[ "${GITHUB_REPOSITORY}" == "ZcashFoundation/zebra" ]]; then
+        grep -m1 -vE -- "^${image_prefix}-r[0-9]+-[0-9a-f]+-v[0-9]+-" <<<"${images}" || true
+    else
+        head -n1 <<<"${images}"
+    fi
+}
+
 # Function to find a cached disk image based on the git pattern (branch, main, or any branch)
 find_cached_disk_image() {
     local git_pattern="${1}"
     local git_source="${2}"
     local disk_name
-    local disk_search_pattern="${DISK_PREFIX}-${git_pattern}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
+    local disk_search_pattern="${git_pattern}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
 
-    disk_name=$(gcloud compute images list --filter="status=READY AND name~${disk_search_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+    disk_name=$(find_newest_image "${DISK_PREFIX}" "${disk_search_pattern}")
 
     # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     if [[ -n "${disk_name}" ]]; then
@@ -36,7 +57,7 @@ find_cached_disk_image() {
         echo "Description: ${disk_description}" >&2
         echo "${disk_name}" # This is the actual return value when a disk is found
     else
-        echo "No ${git_source} disk found with '${disk_search_pattern}' pattern." >&2
+        echo "No ${git_source} disk found with '${DISK_PREFIX}-${disk_search_pattern}' pattern." >&2
     fi
 }
 
@@ -70,10 +91,9 @@ fi
 find_available_disk_type() {
     local base_name="${1}"
     local disk_type="${2}"
-    local disk_pattern="${base_name}-cache"
     local disk_name
 
-    disk_name=$(gcloud compute images list --filter="status=READY AND name~${disk_pattern}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${disk_type}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+    disk_name=$(find_newest_image "${base_name}-cache" ".+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${disk_type}")
 
     # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     if [[ -n "${disk_name}" ]]; then
