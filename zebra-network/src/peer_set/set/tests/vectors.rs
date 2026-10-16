@@ -44,6 +44,9 @@ use tokio::sync::watch;
 
 use super::{PeerSetBuilder, PeerVersions};
 
+#[path = "eligibility_reviews.rs"]
+mod eligibility_reviews;
+
 #[test]
 fn peer_set_ready_single_connection() {
     // We are going to use just one peer version in this test
@@ -1347,7 +1350,11 @@ fn peer_set_delays_block_refusal_while_serving_peer_busy() {
                 .is_err(),
             "refusal should be delayed while a serving peer is busy",
         );
-        assert_not_found_registry(refused_fut.await);
+        assert_not_found_registry(
+            timeout(INVENTORY_BUSY_PEER_REFUSAL_DELAY, refused_fut)
+                .await
+                .expect("local refusal must complete within its bounded delay"),
+        );
 
         // Let the serving peer take its queued requests, so it becomes ready again.
         assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));

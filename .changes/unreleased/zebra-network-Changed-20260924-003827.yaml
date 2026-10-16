@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Changed
-body: 'Prefer block-serving peers for single-block `Request::BlocksByHash` requests without a ready advertiser, and delay local refusals by 1.5 seconds while an eligible busy peer might have the block. Refusals are counted in `zcash.net.peer_set.inventory_refusal` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515)).'
+body: 'Prefer eligible upstream block-serving peers for single-block `Request::BlocksByHash` requests without a ready advertiser, and delay local refusals by 1.5 seconds while an eligible busy peer might have the block. Banned or outdated connections do not suppress upstream fallback. Busy connections that remain unready past `REQUEST_TIMEOUT` are dropped when the peer set is next polled, releasing their connection slots. Refusal counters include the network label ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748)).'
 time: 2026-09-24T00:38:27.544666125Z

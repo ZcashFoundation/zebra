@@ -97,18 +97,18 @@ fn ensure_timeouts_consistent() {
          before we expire all inventory"
     );
 
-    // A busy peer can take up to `REQUEST_TIMEOUT` to become ready again, and the peer set delays
-    // each refused block request while a busy peer might have the block.
+    // Model the all-local-refusal case, not mixed immediate peer misses.
+    // The retry limit is the constant 3, so conversion to u32 is lossless.
     let missing_block_attempts =
         (BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1) * (u32::from(MAX_BLOCK_REOBTAIN_RETRIES) + 1);
     assert!(
         INVENTORY_BUSY_PEER_REFUSAL_DELAY * missing_block_attempts > REQUEST_TIMEOUT,
-        "the syncer should keep retrying a missing block until a busy peer could be ready again"
+        "the all-local-refusal schedule should outlast one peer request timeout"
     );
     assert!(
         INVENTORY_BUSY_PEER_REFUSAL_DELAY < BLOCK_DOWNLOAD_TIMEOUT / 4,
-        "refusals should be much faster than block download timeouts, \
-         because timed out downloads are not re-requested"
+        "refusals should leave response time within each attempt; inner retries include timeouts, \
+         but exhausted timeouts do not use the hash-level NotFound reobtain path"
     );
 
     // The default peer crawler interval should be at least

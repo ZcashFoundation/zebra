@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: 'Block downloads now prefer peers that serve historic blocks and delay refusals while those peers are busy, so retries do not immediately exhaust near the chain tip ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515)).'
+body: 'Block downloads prefer eligible upstream peers that serve historic blocks and delay local refusals while those peers are busy. Banned or outdated connections do not suppress fallback to other sources. Stuck peer connections that remain unready past the request timeout are dropped when the peer set is next polled, freeing their slots for other connections ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748)).'
 time: 2026-09-24T00:38:27.544659485Z
