@@ -131,7 +131,13 @@ Track each release in an issue created from the [release issue template](https:/
 
 To check the bumps, read the "Public API diff since zebrad vX" comment on the Release PR. `PR Gate / release-api-diff` refreshes it on every Release PR update with each crate's public API and dependency changes since the last zebrad release, and names any crate whose own last release is older.
 
-To correct a Release PR by hand, freeze `main` in Merge Freeze first, then remove any other pull requests from the merge queue: a freeze does not stop a queued pull request that has already passed `mergefreeze`, and anything that lands on `main` makes release-plz regenerate the Release PR (see [Holding a Pull Request Back](continuous-integration.md#holding-a-pull-request-back)). Push the corrections to the Release PR branch, merge it with **Unblock 1 pull request**, then unfreeze and add any pull requests you removed back to the queue.
+To correct a Release PR by hand without release-plz regenerating it:
+
+1. Freeze `main` in Merge Freeze.
+2. Remove every other pull request from the merge queue. A freeze does not stop a group that has already passed `mergefreeze` (see [Holding a Pull Request Back](continuous-integration.md#holding-a-pull-request-back)).
+3. Push the corrections to the Release PR branch.
+4. Unblock the Release PR with Merge Freeze's **Unblock 1 pull request**, then merge it.
+5. Unfreeze `main`, and queue the pull requests you removed again.
 
 ### What Release Readiness Reports
 

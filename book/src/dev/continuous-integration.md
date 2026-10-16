@@ -58,7 +58,8 @@ Two independent hold checks, both required by the ruleset:
 
 - **`merge-policy`**: fails while a PR has the `do-not-merge` label. Remove the
   label to release it. Label changes re-run only this small workflow. In the merge
-  queue it also fails a Release PR that lacks a commit queued ahead of it.
+  queue it also fails a Release PR that is behind the commits queued ahead of it.
+  Wait for release-plz to update the Release PR, then queue it again.
 - **`mergefreeze`**: the [Merge Freeze](https://www.mergefreeze.com/) GitHub App
   fails this status during a release window. Repository admins and members with
   write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
