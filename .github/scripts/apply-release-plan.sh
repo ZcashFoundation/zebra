@@ -43,10 +43,6 @@ packages=()
 
 while IFS=$'\t' read -r package version; do
   [[ -n "$package" ]] || continue
-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "::error title=Invalid release plan::${package} has version '${version}', but the plan only contains release versions." >&2
-    exit 1
-  fi
   planned["$package"]="$version"
   packages+=("$package")
 done < "$releases_tsv"

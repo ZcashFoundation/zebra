@@ -134,7 +134,7 @@ Track each release in an issue created from the [release issue template](https:/
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, then runs these checks independently, so the summary reports every outcome even when one fails:
 
 - **Changelogs:** each released package has a non-empty versioned changelog.
-- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted. The workflow always applies the release version, so a prerelease is a maintainer edit to the Release PR after the workflow's latest update, and a later release-plz update replaces it.
+- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted. The workflow always applies the release version. To release a prerelease, such as `zebrad` `7.0.0-rc.1`, save the plan with `.github/scripts/plan-release-versions.sh <base> > releases.tsv`, change that package's version in `releases.tsv`, then run `.github/scripts/apply-release-plan.sh <base> releases.tsv` on the Release PR branch and push the result. The next workflow update replaces it with the release version.
 - **Manifests:** a package whose `Cargo.toml` changes is released.
 - **Cargo release:** Cargo 1.91's multi-package dry-run. It also observes crates.io, tags, and the GitHub Release without changing them.
 
