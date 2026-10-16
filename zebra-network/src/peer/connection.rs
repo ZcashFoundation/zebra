@@ -23,8 +23,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, MAX_ADDRS_IN_MESSAGE, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
-        OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
+        self, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES, MAX_OVERLOAD_DROP_PROBABILITY,
+        MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -46,10 +46,6 @@ mod peer_tx;
 
 #[cfg(test)]
 mod tests;
-
-/// The maximum number of block hashes kept from a `FindBlocks` response, matching the
-/// `MAX_FIND_BLOCK_HASHES_RESULTS` limit that Zebra and zcashd apply when serving `getblocks`.
-const MAX_FIND_BLOCKS_RESPONSE_HASHES: usize = 500;
 
 #[derive(Debug)]
 pub(super) enum Handler {
