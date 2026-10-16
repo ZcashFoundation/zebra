@@ -240,3 +240,46 @@ In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback t
    ```
 
    Existing `Cargo.lock` files keep working.
+
+## Patch releases from a release branch
+
+A patch release ships a published version plus a fix, and nothing else. It is built on a `release/X.Y` branch instead of `main`. [ADR 0009](https://github.com/ZcashFoundation/zebra/blob/main/docs/decisions/devops/0009-release-branches.md) records why.
+
+> [!WARNING]
+> The release pipeline does not support release branches yet ([#11433](https://github.com/ZcashFoundation/zebra/issues/11433)). Pull requests into `release/X.Y` do not run the required checks, so they cannot merge without an admin bypass, and the Release workflow does not open a Release PR there. Publishing a patch today is a break-glass manual release.
+>
+> A GitHub Release published from a release branch also moves Docker `latest` and deploys production on Mainnet and Testnet, even when a newer release is already out. If production must not run the patch, disable the `Deploy Nodes to GCP` workflow before you publish, and enable it again once the GitHub Release exists. If Docker `latest` must not point at the patch, move it back as in [Withdraw a Bad Release](#withdraw-a-bad-release), step 2.
+
+### Create the release branch
+
+Patch the line of the latest published stable release, whatever version an open Release PR on `main` proposes. If 6.4.2 is the latest stable release, that is `release/6.4`. Patching an older line takes an explicit maintainer decision.
+
+Create the branch when the line first needs a patch, from the newest tag on that line:
+
+```sh
+git fetch origin --tags
+git push origin 'v6.4.2^{commit}:refs/heads/release/6.4'
+```
+
+The `Release branches` ruleset protects every `release/**` branch: pull requests need the same review and checks as on `main`, and the branch cannot be deleted or force-pushed.
+
+### Develop the fix
+
+Open the fix pull request against `release/X.Y`. To reuse a fix that already merged to `main`, cherry-pick its merge commit. `-m 1` takes the whole merged change, and `-x` records where it came from:
+
+```sh
+git switch -c fix-<name>-6.4 origin/release/6.4
+git cherry-pick -x -m 1 <merge commit of the main PR>
+```
+
+Add a change fragment with `changie new` unless the cherry-pick brought one. Never merge `main` into a release branch.
+
+Just before publishing, set `ESTIMATED_RELEASE_HEIGHT` on the branch, as the [release issue template](https://github.com/ZcashFoundation/zebra/blob/main/.github/ISSUE_TEMPLATE/release.md) describes.
+
+### Carry the fix into `main`
+
+Every fix on a release branch must also reach `main`. Skip this when the fix was cherry-picked from `main`. Otherwise, open the forward-port pull request into `main` alongside the branch pull request, and track it in the patch's release issue until it merges.
+
+### Retire the release branch
+
+Delete `release/X.Y` only when maintainers explicitly end support for the line. A newer release or a renewed end-of-support height does not retire it.
