@@ -11,9 +11,10 @@
 #   stops at a minor bump unless one of its fragments has the `network-upgrade`
 #   kind. Only zebrad may use that kind.
 # - A prerelease base version graduates to its release version.
-# - A project without fragments releases a patch when a path dependency moves to
-#   an incompatible version, so its new dependency requirement is published. When
-#   it re-exports that dependency (`pub use <dependency>`), it inherits the break.
+# - A path dependency that moves to an incompatible version raises a project to
+#   at least a patch, so its new dependency requirement is published. When the
+#   project re-exports that dependency (`pub use <dependency>`), it inherits the
+#   break, even if its own fragments plan a smaller change.
 
 set -euo pipefail
 
@@ -150,8 +151,6 @@ changed=true
 while [[ "$changed" == "true" ]]; do
   changed=false
   for project in "${projects[@]}"; do
-    [[ -z "${new[$project]:-}" ]] || continue
-
     cascade=""
     while IFS= read -r dependency; do
       if [[ -n "${new[$dependency]:-}" ]] && ! compatible "${old[$dependency]}" "${new[$dependency]}"; then
@@ -163,7 +162,8 @@ while [[ "$changed" == "true" ]]; do
       fi
     done < <(path_dependencies "$project")
 
-    if [[ -n "$cascade" ]]; then
+    if (($(rank "$cascade") > $(rank "${level[$project]:-}"))); then
+      level["$project"]="$cascade"
       new["$project"]="$(bump "${old[$project]}" "$cascade" "$project")"
       changed=true
     fi
