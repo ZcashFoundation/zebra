@@ -1,4 +1,4 @@
-# Fast required check for repository-owned merge holds and Release PR freshness in the queue.
+# Fast required check for repository-owned merge holds.
 name: Merge Policy
 
 on:
@@ -39,7 +39,9 @@ jobs:
       # back from the pull requests the queue named in the branch. Without this the
       # label only fails the source pull request, which does not stop a group that has
       # already been built: the group's own check passes and the queue merges it.
-      - name: Enforce do-not-merge across the merge group
+      # Release readiness does not run in the queue, so this step also holds a Release
+      # PR that is behind the commits queued ahead of it.
+      - name: Enforce merge holds across the merge group
         if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,7 +72,7 @@ jobs:
               echo "::error title=Held by do-not-merge::Pull request #${number} in this merge group carries \`do-not-merge\`."
               held=1
             else
-              echo "Pull request #${number}: no repository-owned merge hold is active."
+              echo "Pull request #${number} does not carry \`do-not-merge\`."
             fi
 
             if [[ "${head_ref}" == release-plz-* && ",${labels}," == *,release,* ]]; then
@@ -81,7 +83,7 @@ jobs:
               fi
 
               if [[ "${behind}" != "0" ]]; then
-                echo "::error title=Release PR is behind the queue::Release PR #${number} (${head_sha}) is ${behind} commit(s) behind the queue base ${BASE_SHA}, so its release plan does not cover everything being merged. Wait for release-plz to update it."
+                echo "::error title=Release PR is behind the queue::Release PR #${number} (${head_sha}) is ${behind} commit(s) behind the queue base ${BASE_SHA}, so its release plan does not cover everything being merged. Wait for release-plz to update it, then queue it again."
                 held=1
               fi
             fi
