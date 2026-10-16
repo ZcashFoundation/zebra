@@ -326,7 +326,7 @@ jobs:
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e #v0.1.0
+        uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
         with:
           phase: check
           source-directory: release-source
@@ -430,7 +430,7 @@ jobs:
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 #v1.0.5
       - name: Publish and verify missing crates
         id: cargo-release-publish
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e #v0.1.0
+        uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
         with:
           phase: publish
           source-directory: release-source
@@ -477,7 +477,7 @@ jobs:
           exit 1
       - name: Create missing tags and GitHub Release
         id: cargo-release-finalize
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e #v0.1.0
+        uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
         with:
           phase: finalize
           source-directory: release-source

@@ -233,7 +233,7 @@ jobs:
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e # v0.1.0
+        uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
         with:
           phase: check
           base-sha: ${{ steps.release-target.outputs.base_sha }}
