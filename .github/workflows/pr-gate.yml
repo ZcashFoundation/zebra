@@ -38,17 +38,21 @@ permissions:
 
 env:
   CLICOLOR: 1
+  # Every zc job shares these, because a cache entry is only valid for one zc release and one
+  # feature policy. Bump the key prefix with the zc pin: a saved key can never be refreshed.
+  ZC_CACHE_KEY_PREFIX: zc-cache-v0.7.0
+  ZC_FEATURES: exclude:proptest-impl,fuzzing,bench
 
 jobs:
   changes:
     # Runs for every trigger, including the labels and edits that cannot change the
     # gate outcome. `pr-gate-result` is a required check, so every PR Gate run has to
     # report it, and it can only report an honest verdict if the cheap policy jobs
-    # re-evaluate the declaration. Only `semver-checks` is expensive enough to skip.
+    # re-evaluate the declaration. Only `api-diff` is expensive enough to skip.
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
-      semver: ${{ steps.filter.outputs.semver || 'true' }}
+      api_diff: ${{ steps.filter.outputs.api_diff || 'true' }}
       breaking: ${{ steps.title.outputs.breaking }}
       type: ${{ steps.title.outputs.type }}
       conventional: ${{ steps.title.outputs.conventional }}
@@ -99,12 +103,13 @@ jobs:
             echo "conventional=$conventional"
           } >> "$GITHUB_OUTPUT"
 
-  semver-checks:
+  api-diff:
     needs: changes
-    # Real work runs only on contributor pull requests that change Rust and do not already declare
-    # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
+    # Real work runs only on pull requests that change Rust. A declared break runs too: the diff is
+    # the evidence a reviewer needs to judge what the `!` actually covers. Merge groups and pushes
+    # skip it because each queued pull request already passed it against its own fork point.
     # An unrelated label, or an edit that leaves the title and the base branch alone, cannot change the
-    # API delta of a head commit that did not move, so it must not spend 45 minutes of runner time.
+    # API delta of a head commit that did not move, so it must not spend runner time.
     # `pr-gate-result` tolerates the resulting skip.
     if: >-
       github.event_name == 'pull_request' &&
@@ -112,8 +117,7 @@ jobs:
       github.event.label.name == 'release') &&
       (github.event.action != 'edited' ||
       github.event.changes.title != null || github.event.changes.base != null) &&
-      needs.changes.outputs.semver == 'true' &&
-      needs.changes.outputs.breaking == 'false'
+      needs.changes.outputs.api_diff == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
@@ -131,14 +135,74 @@ jobs:
           # `fetch-depth: 0` populates the base branch without persisting credentials.
           echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-zebra-build
-      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+      - name: Restore the zc rustdoc cache
+        # Restores what `api-diff-warm` saved for the fork point; a pull request must never save.
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          # Gate the consumer-facing library crates only. zebrad is a binary whose build script
-          # needs test-only protos absent from the baseline; zebra-test and zebra-utils are test
-          # and tooling crates whose feature-gated APIs are not stability surfaces.
-          exclude: zebrad, zebra-test, zebra-utils
-          feature-group: default-features
-          baseline-rev: ${{ steps.baseline.outputs.rev }}
+          # The path is part of the cache version, so it must match the save path exactly.
+          path: target/zc-cache/${{ steps.baseline.outputs.rev }}.*
+          key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ steps.baseline.outputs.rev }}
+      # A declared break only has to analyse cleanly; an undeclared one must not break the API.
+      - name: Diff the public API and dependencies
+        id: zc
+        uses: ZcashFoundation/zc@8e37c96bff652df008a645b566cb9d3124b10edc # v0.7.0
+        with:
+          baseline: ${{ steps.baseline.outputs.rev }}
+          fail-on: ${{ needs.changes.outputs.breaking == 'true' && 'error' || 'api-breaking' }}
+          features: ${{ env.ZC_FEATURES }}
+      - name: Explain how to resolve the failure
+        if: failure() && steps.zc.outcome == 'failure'
+        env:
+          REPORT: ${{ steps.zc.outputs.report }}
+          VERDICT: ${{ steps.zc.outputs.verdict }}
+        run: |
+          stages=""
+          if [[ -f "$REPORT" ]]; then
+            stages="$(jq -r '[.crates[].error.stage // empty] | unique | join(" ")' "$REPORT")"
+          fi
+          if [[ "$VERDICT" == "breaking" ]]; then
+            title="Declare or avoid the break"
+            hint="If the break is intended, add '!' to the PR title and a 'breaking' change fragment. zc already leaves out the 'proptest-impl', 'fuzzing', and 'bench' features. It still counts zebrad's library, but a break only in zebrad's library does not need '!'."
+          elif [[ "$stages" == *baseline_build* ]]; then
+            title="The fork point does not build"
+            hint="zc could not build this PR's fork point on the base branch with its pinned nightly. Every PR from that fork point fails the same way, so a rerun will not help; it needs a fix on the base branch or in zc."
+          elif [[ "$stages" == *head_build* ]]; then
+            title="This branch does not build"
+            hint="zc could not build this branch with its pinned nightly. Check the zc output above; a rerun only helps if the failure was transient."
+          else
+            title="Rerun the analysis"
+            hint="zc could not analyse every crate. Rerun the job; if it fails again, check the zc output above."
+          fi
+          echo "::notice title=${title}::${hint} This check is advisory and does not block merging."
+
+  # A pull request can only restore caches written on its own ref or on main, so this push-only
+  # job saves each main commit's rustdoc JSON for pull requests that fork from it. Runs are not
+  # cancelled, because a commit without a saved entry leaves its pull requests uncached.
+  api-diff-warm:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Build the rustdoc JSON for this commit
+        # Comparing the commit with itself builds each crate once. Warming only has to populate
+        # the cache, so it never fails the job.
+        continue-on-error: true
+        uses: ZcashFoundation/zc@8e37c96bff652df008a645b566cb9d3124b10edc # v0.7.0
+        with:
+          baseline: ${{ github.sha }}
+          head: ${{ github.sha }}
+          features: ${{ env.ZC_FEATURES }}
+      - name: Save the zc rustdoc cache
+        # zc names cache files `<commit>.<fingerprint>...`, so this saves only this commit's files.
+        if: hashFiles(format('target/zc-cache/{0}.*', github.sha)) != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: target/zc-cache/${{ github.sha }}.*
+          key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ github.sha }}
 
   # This checks for changelog entries depending on the type of the PR (per title).
   # An entry is required for a crate if any file in the crate changed.
@@ -292,7 +356,7 @@ jobs:
     # reported the raw expression text.
     runs-on: ubuntu-26.04
     if: always()
-    needs: [changes, semver-checks, changelog-gate, changelog-fragments, release-readiness]
+    needs: [changes, api-diff, changelog-gate, changelog-fragments, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -303,9 +367,9 @@ jobs:
           # entries are good enough. `allowed-failures` also tolerates a skip, and
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
-          # Temporarily keep semver checks advisory until #11409 is resolved. When it stops
-          # being advisory, move it to `allowed-skips` instead of dropping it from both
-          # lists: no-op label and edit runs skip it, and an intolerant list would turn
-          # every one of those runs into a failed required check.
-          allowed-failures: changelog-gate, semver-checks
+          # `api-diff` stays advisory until after the NU7 Mainnet decision on 2026-10-20, so a
+          # new blocking check cannot stall merges before then. When it becomes required, move it
+          # to `allowed-skips` instead of dropping it from both lists: no-op label and edit runs
+          # skip it, and an intolerant list would turn each of them into a failed required check.
+          allowed-failures: changelog-gate, api-diff
           allowed-skips: release-readiness
