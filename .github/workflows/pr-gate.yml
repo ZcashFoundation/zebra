@@ -239,6 +239,10 @@ jobs:
           base-sha: ${{ steps.release-target.outputs.base_sha }}
           target-sha: ${{ github.event.pull_request.head.sha }}
           github-token: ${{ github.token }}
+        # cargo-release clones the checkout with `git clone --local`, which hardlinks
+        # objects and fails when TMPDIR is on another filesystem, as /tmp is on Ubuntu 26.04.
+        env:
+          TMPDIR: ${{ runner.temp }}
       - name: Summarize release readiness
         if: always()
         env:
