@@ -472,7 +472,7 @@ where
 
         let subtrees = self
             .rpc
-            .z_get_subtrees_by_index(pool.to_string(), start_index, limit)
+            .z_get_subtrees_by_index(pool.to_string(), start_index, limit, None)
             .await
             .map_err(rpc_error_to_status)?;
 
