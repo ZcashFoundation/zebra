@@ -15,15 +15,15 @@ use zebra_chain::{
     parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_network::constants::{
-    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_BUSY_PEER_REFUSAL_DELAY,
-    INVENTORY_ROTATION_INTERVAL, REQUEST_TIMEOUT,
+    DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
+    REQUEST_TIMEOUT,
 };
 use zebra_state::ChainTipSender;
 
 use crate::{
     components::sync::{
-        ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
-        GENESIS_TIMEOUT_RETRY, MAX_BLOCK_REOBTAIN_RETRIES, SYNC_RESTART_DELAY,
+        ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+        BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT, GENESIS_TIMEOUT_RETRY, SYNC_RESTART_DELAY,
     },
     config::ZebradConfig,
 };
@@ -39,16 +39,11 @@ fn ensure_timeouts_consistent() {
         "Sync restart should allow for pending and buffered requests to complete"
     );
 
-    // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
-    // seconds before retrying.
-    const BLOCK_DOWNLOAD_HEDGE_TIMEOUT: u64 =
-        2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
-
     // This constraint avoids spurious failures due to block download timeouts
     assert!(
         BLOCK_VERIFY_TIMEOUT.as_secs()
             > SYNC_RESTART_DELAY.as_secs()
-                + BLOCK_DOWNLOAD_HEDGE_TIMEOUT
+                + BLOCK_DOWNLOAD_ROUND_TIMEOUT.as_secs()
                 + BLOCK_DOWNLOAD_TIMEOUT.as_secs(),
         "Block verify should allow for a block timeout, a sync restart, and some block fetches"
     );
@@ -97,18 +92,10 @@ fn ensure_timeouts_consistent() {
          before we expire all inventory"
     );
 
-    // Model the all-local-refusal case, not mixed immediate peer misses.
-    // The retry limit is the constant 3, so conversion to u32 is lossless.
-    let missing_block_attempts =
-        (BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1) * (u32::from(MAX_BLOCK_REOBTAIN_RETRIES) + 1);
+    // A busy peer can finish its current wire response before the queued download is dispatched.
     assert!(
-        INVENTORY_BUSY_PEER_REFUSAL_DELAY * missing_block_attempts > REQUEST_TIMEOUT,
-        "the all-local-refusal schedule should outlast one peer request timeout"
-    );
-    assert!(
-        INVENTORY_BUSY_PEER_REFUSAL_DELAY < BLOCK_DOWNLOAD_TIMEOUT / 4,
-        "refusals should leave response time within each attempt; inner retries include timeouts, \
-         but exhausted timeouts do not use the hash-level NotFound reobtain path"
+        BLOCK_DOWNLOAD_ROUND_TIMEOUT > REQUEST_TIMEOUT + BLOCK_DOWNLOAD_TIMEOUT,
+        "the round deadline must leave time for both readiness and the block response"
     );
 
     // The default peer crawler interval should be at least
@@ -137,11 +124,11 @@ fn request_genesis_is_rate_limited() {
     let state_requests_counter = Arc::new(AtomicU8::new(0));
     let state_requests_counter_in_service = Arc::clone(&state_requests_counter);
 
-    // create a fake peer service that respond with `Error` to `BlocksByHash` or
+    // create a fake peer service that responds with `Error` to `BlockDownload` or
     // panic in any other type of request.
     let peer_service = tower::service_fn(move |request| {
         match request {
-            zebra_network::Request::BlocksByHash(_) => {
+            zebra_network::Request::BlockDownload { .. } => {
                 // Track the call
                 peer_requests_counter_in_service.fetch_add(1, Ordering::SeqCst);
                 // Respond with `Error`
@@ -207,6 +194,7 @@ fn request_genesis_is_rate_limited() {
 
     let peer_requests_counter = peer_requests_counter.load(Ordering::SeqCst);
     assert!(peer_requests_counter >= RETRIES_TO_RUN);
+    // The retry limit is the constant 3, so conversion to u8 is lossless.
     assert!(peer_requests_counter <= RETRIES_TO_RUN * (BLOCK_DOWNLOAD_RETRY_LIMIT as u8) * 2);
     assert_eq!(
         state_requests_counter.load(Ordering::SeqCst),

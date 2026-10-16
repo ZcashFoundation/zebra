@@ -36,7 +36,7 @@ use zebra_node_services::mempool;
 use crate::BoxError;
 
 // Re-use the syncer timeouts for consistency.
-use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+use super::sync::BLOCK_VERIFY_TIMEOUT;
 
 use InventoryResponse::*;
 
@@ -83,12 +83,8 @@ type SemanticBlockVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
 >;
-type GossipedBlockDownloads = BlockDownloads<
-    Timeout<BlockDownloadPeerSet>,
-    Timeout<SemanticBlockVerifier>,
-    State,
-    zs::LatestChainTip,
->;
+type GossipedBlockDownloads =
+    BlockDownloads<BlockDownloadPeerSet, Timeout<SemanticBlockVerifier>, State, zs::LatestChainTip>;
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
@@ -282,7 +278,7 @@ impl Service<zn::Request> for Inbound {
 
                     let block_downloads = Box::pin(BlockDownloads::new(
                         full_verify_concurrency_limit,
-                        Timeout::new(block_download_peer_set, BLOCK_DOWNLOAD_TIMEOUT),
+                        block_download_peer_set,
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         state.clone(),
                         latest_chain_tip,
@@ -627,7 +623,11 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
+            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+
+            zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
+
+            zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }
     }
 }

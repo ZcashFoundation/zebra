@@ -143,23 +143,18 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// If this timeout is set too low, the peer set and remote peers can get overloaded.
 pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 
-/// Controls how long we wait for a block download request to complete.
+/// The per-peer wire-response budget used to derive complete download deadlines.
 ///
-/// This timeout makes sure that the syncer doesn't hang when:
-///   - the lookahead queue is full, and
-///   - we are waiting for a request that is stuck.
+/// Connections start this timeout at dispatch, not while waiting for capacity. The complete sync
+/// operation is separately bounded by [`BLOCK_DOWNLOAD_ROUND_TIMEOUT`].
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = zn::constants::REQUEST_TIMEOUT;
+
+/// Bounds one complete block download round, including readiness, capacity waits and both hedges.
 ///
-/// See [`BLOCK_VERIFY_TIMEOUT`] for details.
-///
-/// ## Correctness
-///
-/// If this timeout is removed (or set too high), the syncer will sometimes hang.
-///
-/// If this timeout is set too low, the syncer will sometimes get stuck in a
-/// failure loop.
-///
-/// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+/// Reuse the existing four-attempt response budget rather than charging capacity waits as attempts.
+/// The retry limit is the constant 3, so conversion to u32 is lossless.
+const BLOCK_DOWNLOAD_ROUND_TIMEOUT: Duration =
+    BLOCK_DOWNLOAD_TIMEOUT.saturating_mul(BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -392,7 +387,7 @@ where
     downloads: Pin<
         Box<
             Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, ZN>>, AlwaysHedge>,
                 Timeout<ZV>,
                 ZSR,
                 ZSTip,
@@ -522,20 +517,13 @@ where
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
 
-        // The Hedge middleware is the outermost layer, hedging requests
-        // between two retry-wrapped networks.  The innermost timeout
-        // layer is relatively unimportant, because slow requests will
-        // probably be preemptively hedged.
-        //
-        // The Hedge goes outside the Retry, because the Retry layer
-        // abstracts away spurious failures from individual peers
-        // making a less-fallible network service, and the Hedge layer
-        // tries to reduce latency of that less-fallible service.
+        // Capacity waiting stays inside the network request and does not consume a retry.
+        // Connections start response deadlines at wire dispatch; Downloads bounds readiness
+        // and the complete hedged retry operation with one absolute deadline.
         let block_network = Hedge::new(
             ServiceBuilder::new()
                 .concurrency_limit(download_concurrency_limit)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
             AlwaysHedge,
             20,

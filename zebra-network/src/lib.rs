@@ -184,6 +184,7 @@ pub(crate) use peer_set::PeerSet;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use crate::{
     isolated::{connect_isolated_tcp_direct_with_inbound, connect_isolated_with_inbound},
+    peer_set::set::tests::consumer as test_support,
     protocol::external::canonical_peer_addr,
 };
 

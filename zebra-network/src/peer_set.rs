@@ -3,7 +3,7 @@ mod initialize;
 mod inventory_registry;
 mod limit;
 mod service;
-mod set;
+pub(crate) mod set;
 mod stall_tracker;
 mod unready_service;
 

@@ -50,6 +50,26 @@ pub struct ClientTestHarness {
     heartbeat_aborter: AbortHandle,
 }
 
+/// A client request using the same response and missing-inventory handling as a connection.
+pub struct ReceivedClientRequest(super::InProgressClientRequest);
+
+impl ReceivedClientRequest {
+    /// Returns the request sent through the real client channel.
+    pub fn request(&self) -> &crate::Request {
+        &self.0.request
+    }
+
+    /// Sends a response through the production response sender and inventory collector.
+    pub fn respond(self, response: Result<crate::Response, SharedPeerError>) {
+        let _ = self.0.tx.send(response);
+    }
+
+    /// Returns whether the caller dropped its response future.
+    pub fn is_canceled(&self) -> bool {
+        self.0.tx.is_canceled()
+    }
+}
+
 impl ClientTestHarness {
     /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
     /// and a [`ClientTestHarness`] to track it.
@@ -115,6 +135,13 @@ impl ClientTestHarness {
         self.client_request_receiver
             .take()
             .expect("request receiver endpoint has already been dropped");
+    }
+
+    /// Receives a request with production response handling for cross-crate consumer tests.
+    pub fn take_request(&mut self) -> Option<ReceivedClientRequest> {
+        self.try_to_receive_outbound_client_request()
+            .request()
+            .map(|request| ReceivedClientRequest(request.into()))
     }
 
     /// Tries to receive a [`ClientRequest`] sent by the [`Client`] instance.

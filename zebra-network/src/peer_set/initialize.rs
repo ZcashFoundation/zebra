@@ -21,9 +21,7 @@ use tokio::{
     time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
-use tower::{
-    buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
-};
+use tower::{discover::Change, layer::Layer, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -287,10 +285,8 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
-    let (peer_set, worker) =
-        Buffer::pair(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
-    let worker = tokio::spawn(worker.in_current_span());
-    let mut peer_set = NetworkService::new(peer_set, vec![worker.abort_handle()]);
+    // Also route queued peer set requests as soon as a peer that might serve them is ready.
+    let (mut peer_set, poll_peer_set_guard) = peer_set.into_buffer(constants::PEERSET_BUFFER_SIZE);
     peer_set.extend_tasks([
         address_book_updater_guard.abort_handle(),
         misbehavior_guard.abort_handle(),
@@ -381,6 +377,7 @@ where
             crawl_guard,
             address_book_updater_guard,
             peer_cache_updater_guard,
+            poll_peer_set_guard,
         ])
         .unwrap();
 
