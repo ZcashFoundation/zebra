@@ -99,6 +99,7 @@ privileges is around.
 Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#release-candidate--release-process) for detailed instructions and recovery guidance.
 
 - [ ] Wait for `PR Gate / Release readiness` and every other required check to pass on the latest Release PR commit.
+- [ ] Check that `CodeQL / Analyze (rust)` passed on the latest Release PR commit with no new code scanning alerts. If it was skipped, run [`codeql.yml`](https://github.com/ZcashFoundation/zebra/actions/workflows/codeql.yml) manually on the Release PR branch and check that branch's alerts.
 - [ ] Double-check the correctness of the version bumps and changelogs. Common pitfalls:
     - A major bump in e.g. `zebra-chain` requires a major bump in most of its
       users (because they re-export types from it)
