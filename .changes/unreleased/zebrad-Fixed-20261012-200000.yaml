@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: "`getinfo`, `getnetworkinfo` and `getpeerinfo` no longer stop responding, or block other RPC requests, while the node processes a large batch of gossiped peer addresses ([#11702](https://github.com/ZcashFoundation/zebra/pull/11702))."
+time: 2026-10-12T20:00:00.000000000+00:00

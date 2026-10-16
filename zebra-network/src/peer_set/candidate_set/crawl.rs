@@ -33,6 +33,9 @@ use crate::{
 
 use super::RateLimitBySkipping;
 
+/// The maximum number of gossiped addresses applied to the address book in one request.
+pub(super) const GOSSIPED_ADDRS_PER_REQUEST: usize = 100;
+
 /// The service that crawls the network for more peer addresses.
 ///
 /// # Security
@@ -282,21 +285,33 @@ async fn send_addrs(
         return;
     }
 
-    // Extend handles duplicate addresses internally.
-    //
-    // Correctness: box the request future, so its captured types don't
-    // leak into generic callers (rustc's async Send inference struggles
-    // with boxed trait objects inside generic spawned tasks).
-    let result = address_book_service
-        .oneshot(AddressBookRequest::ExtendGossiped(addrs))
-        .boxed()
-        .await;
+    // Send the batch in chunks, one at a time, so the address book mutex is
+    // released between chunks instead of being held for the whole batch (#11618).
+    let mut addrs = addrs.into_iter();
+    loop {
+        let chunk: Vec<MetaAddrChange> = addrs.by_ref().take(GOSSIPED_ADDRS_PER_REQUEST).collect();
+        if chunk.is_empty() {
+            break;
+        }
 
-    if let Err(error) = result {
-        debug!(
-            ?error,
-            "error sending gossiped addresses to the address book, is Zebra shutting down?"
-        );
+        // Extend handles duplicate addresses internally.
+        //
+        // Correctness: box the request future, so its captured types don't
+        // leak into generic callers (rustc's async Send inference struggles
+        // with boxed trait objects inside generic spawned tasks).
+        let result = address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::ExtendGossiped(chunk))
+            .boxed()
+            .await;
+
+        if let Err(error) = result {
+            debug!(
+                ?error,
+                "error sending gossiped addresses to the address book, is Zebra shutting down?"
+            );
+            return;
+        }
     }
 }
 
