@@ -67,32 +67,32 @@ for package in "${packages[@]}"; do
   fi
 done
 
-set_package_version() {
-  local manifest="$1" version="$2"
+# Sets a planned package's version, and moves its requirement on each other
+# planned package to that package's version, keeping the requirement's operator,
+# the way release-plz and cargo-edit rewrite dependents.
+set_planned_versions() {
+  local manifest="$1" package="$2"
 
-  awk -v version="$version" '
-    /^\[/ { in_package = ($0 ~ /^\[package\][[:space:]]*$/) }
+  awk -v plan="$releases_tsv" -v package="$package" '
+    BEGIN {
+      while ((getline line < plan) > 0) {
+        split(line, field, "\t")
+        planned[field[1]] = field[2]
+      }
+    }
+    /^\[/ {
+      in_package = ($0 ~ /^\[package\][[:space:]]*$/)
+      in_dependencies = ($0 ~ /dependencies\][[:space:]]*$/)
+    }
     in_package && !done && /^[[:space:]]*version[[:space:]]*=/ {
-      sub(/"[^"]*"/, "\"" version "\"")
+      sub(/"[^"]*"/, "\"" planned[package] "\"")
       done = 1
     }
-    { print }
-  ' "$manifest" > "${manifest}.new"
-  mv "${manifest}.new" "$manifest"
-}
-
-# Moves the version requirement of every path dependency on `dependency`, keeping
-# its operator, the way release-plz and cargo-edit rewrite dependents.
-set_dependency_requirement() {
-  local manifest="$1" dependency="$2" version="$3"
-
-  awk -v dependency="$dependency" -v version="$version" '
-    /^\[/ { in_dependencies = ($0 ~ /dependencies\][[:space:]]*$/) }
-    in_dependencies && $1 == dependency && /path[[:space:]]*=/ &&
+    in_dependencies && ($1 in planned) && /path[[:space:]]*=/ &&
       match($0, /version[[:space:]]*=[[:space:]]*"[=^~<>[:space:]]*/) {
       prefix = substr($0, 1, RSTART + RLENGTH - 1)
       rest = substr($0, RSTART + RLENGTH)
-      sub(/^[^"]*/, version, rest)
+      sub(/^[^"]*/, planned[$1], rest)
       $0 = prefix rest
     }
     { print }
@@ -101,11 +101,7 @@ set_dependency_requirement() {
 }
 
 for package in "${packages[@]}"; do
-  manifest="${directory[$package]}/Cargo.toml"
-  set_package_version "$manifest" "${planned[$package]}"
-  for dependency in "${packages[@]}"; do
-    set_dependency_requirement "$manifest" "$dependency" "${planned[$dependency]}"
-  done
+  set_planned_versions "${directory[$package]}/Cargo.toml" "$package"
   printf 'Set %s %s -> %s.\n' "$package" "${previous[$package]}" "${planned[$package]}" >&2
 done
 
