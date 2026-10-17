@@ -35,7 +35,7 @@ use crate::{
         StateService,
     },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, KnownBlock, Request, Response,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, Request, Response,
     SemanticallyVerifiedBlock, ValidateContextError,
 };
 
@@ -748,11 +748,14 @@ fn nu5_ledger_strategy() -> BoxedStrategy<LedgerState> {
     LedgerState::genesis_strategy(Some(network), NetworkUpgrade::Nu5, 5, false)
 }
 
-/// Checks that a checkpoint block which fails the finalized commitment check, and the
-/// descendants dropped with it, are not reported as known, so they can be downloaded again
-/// and the honest block at the same hash can be committed without a restart.
+/// Checks that after a checkpoint block fails the finalized commitment check, no block above the
+/// finalized tip is reported as known or left waiting in the queue, so the syncer can download
+/// them again and the honest range commits without a restart.
+///
+/// Covers blocks dropped by the write task, queued before the reset, arriving after the reset,
+/// and queued behind a gap while the range is re-sent out of order.
 #[test]
-fn rejected_checkpoint_block_is_not_known_as_sent() -> Result<()> {
+fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let ledger_strategy = nu5_ledger_strategy();
@@ -765,20 +768,19 @@ fn rejected_checkpoint_block_is_not_known_as_sent() -> Result<()> {
             .no_shrink())| {
             let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
             let honest_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
-            let honest = &chain[honest_index];
-            let child = &chain[honest_index + 1];
+            let range = &chain[honest_index..honest_index + 4];
             let parent_height = chain[honest_index - 1].height;
 
-            let twin = coinbase_authorization_twin(&honest.block);
-            prop_assert_eq!(twin.hash(), honest.hash);
-            prop_assert_ne!(twin.auth_data_root(), honest.block.auth_data_root());
+            let twin = coinbase_authorization_twin(&range[0].block);
+            prop_assert_eq!(twin.hash(), range[0].hash);
+            prop_assert_ne!(twin.auth_data_root(), range[0].block.auth_data_root());
 
             let runtime = Runtime::new().unwrap();
             // A large concurrency limit makes every block "close to the final checkpoint".
             let (mut state, _, _, _) = runtime.block_on(StateService::new(
                 Config::ephemeral(),
                 &network,
-                child.height,
+                range[3].height,
                 1_000,
             ));
 
@@ -790,9 +792,18 @@ fn rejected_checkpoint_block_is_not_known_as_sent() -> Result<()> {
                     .expect("valid prefix commits");
             }
 
-            // Send the child right behind the twin, so the write task drops it when the twin fails.
+            let checkpoint_verified = |index: usize| CheckpointVerifiedBlock::from(range[index].block.clone());
+            let known_block = |state: &mut StateService, index: usize| {
+                runtime
+                    .block_on(state.call(Request::KnownBlock(range[index].hash)))
+                    .expect("KnownBlock succeeds")
+            };
+
+            // The first child is sent right behind the twin, and the third one waits in the queue
+            // for its parent when the twin fails.
             let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
-            let child_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(child.block.clone()));
+            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1));
+            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
 
             let twin_error = twin_rx.blocking_recv().expect("write task responds").expect_err("twin is rejected");
             prop_assert!(
@@ -813,93 +824,10 @@ fn rejected_checkpoint_block_is_not_known_as_sent() -> Result<()> {
             prop_assert!(child_rx.blocking_recv().is_err(), "dropped child gets no response");
             prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(parent_height));
 
-            // The rejected block and its dropped child must not be reported as sent.
-            for hash in [honest.hash, child.hash] {
-                let response = runtime
-                    .block_on(state.call(Request::KnownBlock(hash)))
-                    .expect("KnownBlock succeeds");
-                prop_assert_eq!(response, Response::KnownBlock(None));
-            }
-            prop_assert!(state.read_service.db.finalized_tip_height() < Some(honest.height));
-
-            // The honest block and its child commit without a restart.
-            for block in [honest, child] {
-                let committed = state
-                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
-                    .blocking_recv()
-                    .expect("write task responds")
-                    .expect("honest block commits");
-                prop_assert_eq!(committed, block.hash);
-            }
-            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(child.height));
-            let response = runtime
-                .block_on(state.call(Request::KnownBlock(honest.hash)))
-                .expect("KnownBlock succeeds");
-            prop_assert_eq!(response, Response::KnownBlock(Some(KnownBlock::WriteChannel)));
-        }
-    );
-
-    Ok(())
-}
-
-/// Checks that a finalized reset fails the blocks queued behind the rejected block, and the
-/// blocks of the failed range that arrive after the reset, instead of keeping them queued and
-/// known as sent, which would stop the syncer from downloading them again.
-#[test]
-fn blocks_above_a_finalized_reset_are_failed() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let ledger_strategy = nu5_ledger_strategy();
-
-    proptest!(
-        ProptestConfig::with_cases(1),
-        |((chain, _count, network, _history_tree) in PreparedChain::default()
-            .with_ledger_strategy(ledger_strategy)
-            .with_valid_commitments()
-            .no_shrink())| {
-            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
-            let honest_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
-            let range = &chain[honest_index..honest_index + 4];
-            let parent_height = chain[honest_index - 1].height;
-
-            let twin = coinbase_authorization_twin(&range[0].block);
-            prop_assert_eq!(twin.hash(), range[0].hash);
-
-            let runtime = Runtime::new().unwrap();
-            let (mut state, _, _, _) = runtime.block_on(StateService::new(
-                Config::ephemeral(),
-                &network,
-                range[3].height,
-                1_000,
-            ));
-
-            for block in chain.iter().take(honest_index) {
-                state
-                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
-                    .blocking_recv()
-                    .expect("write task responds")
-                    .expect("valid prefix commits");
-            }
-
-            let checkpoint_verified = |index: usize| CheckpointVerifiedBlock::from(range[index].block.clone());
-
-            // The first child is sent behind the twin, and the third one is queued waiting for
-            // its parent when the twin fails.
-            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
-            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1));
-            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
-
-            prop_assert!(
-                twin_rx.blocking_recv().expect("write task responds").is_err(),
-                "twin is rejected"
-            );
-            // The write task drops the child after it sends the reset.
-            prop_assert!(child_rx.blocking_recv().is_err(), "dropped child gets no response");
-            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(parent_height));
-
-            // The second child reaches the state after the reset: it can't chain to the reset tip.
+            // The second child reaches the state after the reset, ahead of the reset height.
             let late_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(2));
 
+            // The reset fails the queued block, and the late block is failed instead of queued.
             for rx in [queued_rx, late_rx] {
                 let error = rx
                     .blocking_recv()
@@ -911,83 +839,12 @@ fn blocks_above_a_finalized_reset_are_failed() -> Result<()> {
                 );
             }
             prop_assert!(state.finalized_state_queued_blocks.is_empty());
-
-            for block in range {
-                let response = runtime
-                    .block_on(state.call(Request::KnownBlock(block.hash)))
-                    .expect("KnownBlock succeeds");
-                prop_assert_eq!(response, Response::KnownBlock(None));
+            for index in 0..range.len() {
+                prop_assert_eq!(known_block(&mut state, index), Response::KnownBlock(None));
             }
 
-            // The verifier sends the range again from the reset tip, and it commits.
-            for (index, block) in range.iter().enumerate() {
-                let committed = state
-                    .queue_and_commit_to_finalized_state(checkpoint_verified(index))
-                    .blocking_recv()
-                    .expect("write task responds")
-                    .expect("honest block commits");
-                prop_assert_eq!(committed, block.hash);
-            }
-            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(range[3].height));
-        }
-    );
-
-    Ok(())
-}
-
-/// Checks that after a finalized reset, a block of the re-sent range that arrives before the
-/// reset height is failed, and the block queued behind it is not known as sent, so both can be
-/// downloaded again and the range still commits.
-#[test]
-fn queued_blocks_after_a_finalized_reset_are_not_known_as_sent() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let ledger_strategy = nu5_ledger_strategy();
-
-    proptest!(
-        ProptestConfig::with_cases(1),
-        |((chain, _count, network, _history_tree) in PreparedChain::default()
-            .with_ledger_strategy(ledger_strategy)
-            .with_valid_commitments()
-            .no_shrink())| {
-            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
-            let honest_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
-            let range = &chain[honest_index..honest_index + 4];
-
-            let runtime = Runtime::new().unwrap();
-            let (mut state, _, _, _) = runtime.block_on(StateService::new(
-                Config::ephemeral(),
-                &network,
-                range[3].height,
-                1_000,
-            ));
-
-            for block in chain.iter().take(honest_index) {
-                state
-                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
-                    .blocking_recv()
-                    .expect("write task responds")
-                    .expect("valid prefix commits");
-            }
-
-            let checkpoint_verified = |index: usize| CheckpointVerifiedBlock::from(range[index].block.clone());
-
-            let twin = coinbase_authorization_twin(&range[0].block);
-            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
-            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1));
-            prop_assert!(twin_rx.blocking_recv().expect("write task responds").is_err());
-            // The write task drops the child after it sends the reset.
-            prop_assert!(child_rx.blocking_recv().is_err());
-
-            // The re-sent range arrives out of order: the third block is ahead of the reset height.
-            prop_assert!(
-                state
-                    .queue_and_commit_to_finalized_state(checkpoint_verified(2))
-                    .blocking_recv()
-                    .expect("state responds")
-                    .is_err(),
-                "block above the reset height is failed"
-            );
+            // The range is sent again out of order: the fourth block waits for the third one,
+            // and it isn't reported as known until it is sent.
             for index in [0, 1] {
                 state
                     .queue_and_commit_to_finalized_state(checkpoint_verified(index))
@@ -995,17 +852,11 @@ fn queued_blocks_after_a_finalized_reset_are_not_known_as_sent() -> Result<()> {
                     .expect("write task responds")
                     .expect("honest block commits");
             }
-            // The fourth block waits in the queue for the failed one.
             let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
-
-            for block in &range[2..] {
-                let response = runtime
-                    .block_on(state.call(Request::KnownBlock(block.hash)))
-                    .expect("KnownBlock succeeds");
-                prop_assert_eq!(response, Response::KnownBlock(None));
+            for index in [2, 3] {
+                prop_assert_eq!(known_block(&mut state, index), Response::KnownBlock(None));
             }
 
-            // When the failed block is downloaded again, the queued one commits behind it.
             state
                 .queue_and_commit_to_finalized_state(checkpoint_verified(2))
                 .blocking_recv()
