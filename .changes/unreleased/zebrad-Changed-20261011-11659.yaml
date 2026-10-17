@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: "The internal miner discards solutions for superseded template parents and pauses public-network mining while behind or without recently live peers. Regtest and configured Testnet retain peerless mining ([#11659](https://github.com/ZcashFoundation/zebra/pull/11659))."
+time: 2026-10-11T00:00:00Z
