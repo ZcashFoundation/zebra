@@ -95,6 +95,37 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
     Ok(())
 }
 
+/// Waiting drains pipes already taken by the line readers, even when both pipes fill.
+#[cfg(unix)]
+#[test]
+fn wait_with_output_drains_taken_output() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut child = tempdir()?.spawn_child_with_command(
+        "sh",
+        args![
+            "-c",
+            "printf 'ready\\n'; i=0; while [ \"$i\" -lt 8192 ]; do \
+             printf '%0128d\\n' \"$i\"; printf '%0128d\\n' \"$i\" >&2; i=$((i + 1)); done"
+        ],
+    )?;
+    child.expect_stdout_line_matches("^ready$")?;
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let _ = sender.send(child.wait_with_output());
+    });
+    let output = receiver
+        .recv_timeout(Duration::from_secs(30))
+        .map_err(|_| eyre!("wait_with_output timed out"))??;
+    waiter
+        .join()
+        .map_err(|_| eyre!("child waiter must not panic"))?;
+    output.assert_success()?;
+
+    Ok(())
+}
+
 /// Test if a process that keeps on producing output, but doesn't produce any newlines,
 /// is killed after the timeout.
 ///

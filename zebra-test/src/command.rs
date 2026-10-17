@@ -344,8 +344,6 @@ impl<T> TestChild<T> {
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
     ///
-    /// The failure regexes are ignored by `wait_with_output`.
-    ///
     /// To never match any log lines, use `RegexSet::empty()`.
     ///
     /// This method is a [`TestChild::with_failure_regexes`] wrapper for
@@ -373,8 +371,6 @@ impl<T> TestChild<T> {
 
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
-    ///
-    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// To never match any log lines, use [`NO_MATCHES_REGEX_ITER`].
     ///
@@ -404,8 +400,6 @@ impl<T> TestChild<T> {
     /// Sets up command output so each line is checked against a failure regex set,
     /// unless it matches any of the ignore regexes.
     ///
-    /// The failure regexes are ignored by `wait_with_output`.
-    ///
     /// # Panics
     ///
     /// - adds a panic to any method that reads output,
@@ -424,8 +418,6 @@ impl<T> TestChild<T> {
     }
 
     /// Applies the failure and ignore regex sets to command output.
-    ///
-    /// The failure regexes are ignored by `wait_with_output`.
     ///
     /// # Panics
     ///
@@ -710,14 +702,14 @@ impl<T> TestChild<T> {
     ///
     /// # Correctness
     ///
-    /// The other test child output methods take one or both outputs,
-    /// making them unavailable to this method.
+    /// Outputs already taken by other test child output methods are drained concurrently,
+    /// checking failure regexes, but are not included in the returned output.
     ///
     /// Ignores any configured timeouts.
     ///
     /// Returns an error if the child has already been taken.
-    /// TODO: return an error if both outputs have already been taken.
     #[spandoc::spandoc]
+    #[allow(clippy::unwrap_in_result)]
     pub fn wait_with_output(mut self) -> Result<TestOutput<T>> {
         let child = match self.child.take() {
             Some(child) => child,
@@ -733,24 +725,35 @@ impl<T> TestChild<T> {
             }
         };
 
-        // TODO: fix the usage in the zebrad acceptance tests, or fix the bugs in TestChild,
-        //       then re-enable this check
-        /*
-        if child.stdout.is_none() && child.stderr.is_none() {
-            // Also checks the taken child output for failure regexes,
-            // either in `context_from`, or on drop.
-            return Err(eyre!(
-                "child stdout and stderr were already taken.\n\
-                 Hint: choose one of these alternatives:\n\
-                 1. use wait_with_output once on each child process, or\n\
-                 2. replace wait_with_output with the other TestChild output methods"
-            ))
-            .context_from(self.as_mut());
-        };
-         */
+        let bypass_test_capture = self.bypass_test_capture;
+        let output = std::thread::scope(|scope| {
+            let readers = [self.stdout.take(), self.stderr.take()].map(|lines| {
+                lines.map(|lines| {
+                    scope.spawn(move || {
+                        // Keep draining after an error, so the child can always exit.
+                        let mut result = Ok(());
+                        for line in lines {
+                            result =
+                                result.and(line.map(|line| {
+                                    Self::write_to_test_logs(line, bypass_test_capture)
+                                }));
+                        }
+                        result
+                    })
+                })
+            });
 
-        /// SPANDOC: waiting for command to exit
-        let output = child.wait_with_output().with_section({
+            /// SPANDOC: waiting for command to exit
+            let output = child.wait_with_output();
+            for reader in readers.into_iter().flatten() {
+                match reader.join() {
+                    Ok(result) => result.expect("failure reading test process logs"),
+                    Err(panic) => std::panic::resume_unwind(panic),
+                }
+            }
+            output
+        })
+        .with_section({
             let cmd = self.cmd.clone();
             || cmd.header("Command:")
         })?;

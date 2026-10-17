@@ -30,7 +30,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network as zn;
 use zebra_state as zs;
 
 use crate::{
@@ -143,23 +143,18 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// If this timeout is set too low, the peer set and remote peers can get overloaded.
 pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 
-/// Controls how long we wait for a block download request to complete.
+/// The per-peer wire-response budget used to derive complete download deadlines.
 ///
-/// This timeout makes sure that the syncer doesn't hang when:
-///   - the lookahead queue is full, and
-///   - we are waiting for a request that is stuck.
+/// Connections start this timeout at dispatch, not while waiting for capacity. The complete sync
+/// operation is separately bounded by [`BLOCK_DOWNLOAD_ROUND_TIMEOUT`].
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = zn::constants::REQUEST_TIMEOUT;
+
+/// Bounds one complete block download round, including readiness, capacity waits and both hedges.
 ///
-/// See [`BLOCK_VERIFY_TIMEOUT`] for details.
-///
-/// ## Correctness
-///
-/// If this timeout is removed (or set too high), the syncer will sometimes hang.
-///
-/// If this timeout is set too low, the syncer will sometimes get stuck in a
-/// failure loop.
-///
-/// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+/// Reuse the existing four-attempt response budget rather than charging capacity waits as attempts.
+/// The retry limit is the constant 3, so conversion to u32 is lossless.
+const BLOCK_DOWNLOAD_ROUND_TIMEOUT: Duration =
+    BLOCK_DOWNLOAD_TIMEOUT.saturating_mul(BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -392,7 +387,7 @@ where
     downloads: Pin<
         Box<
             Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, ZN>>, AlwaysHedge>,
                 Timeout<ZV>,
                 ZSR,
                 ZSTip,
@@ -419,7 +414,7 @@ where
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
 
     /// Blocks whose download failed with `NotFound` and should be re-requested on
     /// the next sync round, instead of being silently dropped (#5709).
@@ -486,7 +481,7 @@ where
         state: ZS,
         read_state: ZSR,
         latest_chain_tip: ZSTip,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -522,20 +517,13 @@ where
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
 
-        // The Hedge middleware is the outermost layer, hedging requests
-        // between two retry-wrapped networks.  The innermost timeout
-        // layer is relatively unimportant, because slow requests will
-        // probably be preemptively hedged.
-        //
-        // The Hedge goes outside the Retry, because the Retry layer
-        // abstracts away spurious failures from individual peers
-        // making a less-fallible network service, and the Hedge layer
-        // tries to reduce latency of that less-fallible service.
+        // Capacity waiting stays inside the network request and does not consume a retry.
+        // Connections start response deadlines at wire dispatch; Downloads bounds readiness
+        // and the complete hedged retry operation with one absolute deadline.
         let block_network = Hedge::new(
             ServiceBuilder::new()
                 .concurrency_limit(download_concurrency_limit)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
             AlwaysHedge,
             20,
@@ -1216,21 +1204,31 @@ where
                 return Ok(());
             }
 
-            Err(BlockDownloadVerifyError::Invalid {
-                ref error,
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) if error.misbehavior_score() != 0 => {
-                let _ = self
-                    .misbehavior_sender
-                    .try_send((advertiser_addr, error.misbehavior_score()));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::Invalid {
+                    ref error,
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) if error.misbehavior_score() != 0 => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    error.misbehavior_score(),
+                    verify_error.to_string(),
+                ));
             }
 
-            Err(BlockDownloadVerifyError::InvalidHeight {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::InvalidHeight {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    verify_error.to_string(),
+                ));
             }
 
             // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
@@ -1239,11 +1237,17 @@ where
             // not recompute the header's commitment to the body's authorizing data
             // (GHSA-g95h-hw6g-pvgv). Peers that serve genuinely old blocks arrive unattributed and
             // fall through unscored. Score only a parent-proven rewrite.
-            Err(BlockDownloadVerifyError::BehindTipHeightLimit {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::BehindTipHeightLimit {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    format!("parent header contradicts coinbase height: {verify_error}"),
+                ));
             }
 
             // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must

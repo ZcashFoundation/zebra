@@ -22,7 +22,7 @@ use tokio::{
     time::{error, timeout, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, task::AbortOnDropHandle};
 use tower::Service;
 use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
@@ -652,10 +652,10 @@ where
         .expect("in-range number of seconds and valid nanosecond");
 
     // Whether this node is still syncing, used below to decide whether outbound peers must
-    // advertise `NODE_NETWORK`. Read before the match below, which can move `config.network`.
+    // advertise `NODE_NETWORK`.
     let is_syncing = !minimum_peer_version
         .chain_tip()
-        .is_at_or_near_network_tip(&config.network);
+        .is_at_or_near_network_tip(Utc::now());
 
     let network = config.network.clone();
     let (their_addr, our_services, our_listen_addr) = match connected_addr {
@@ -1250,8 +1250,8 @@ where
         // Correctness: As a defence-in-depth against hangs, wrap the entire handshake in a timeout.
         let fut = timeout(constants::HANDSHAKE_TIMEOUT, fut);
 
-        // Spawn a new task to drive this handshake, forwarding panics to the calling task.
-        tokio::spawn(fut.instrument(negotiator_span))
+        // Forward panics, but cancel negotiation if the owning listener, crawler, or caller stops.
+        AbortOnDropHandle::new(tokio::spawn(fut.instrument(negotiator_span)))
             .map(
                 |join_result: Result<
                     Result<Result<Client, HandshakeError>, error::Elapsed>,

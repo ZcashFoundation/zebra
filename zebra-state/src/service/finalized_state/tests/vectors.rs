@@ -29,6 +29,267 @@ use zebra_chain::{
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
+/// Unspendable custom genesis outputs stay outside issued supply after a database reopen.
+#[test]
+fn custom_genesis_unspendable_outputs_survive_reopen() {
+    use crate::{service::finalized_state::FinalizedState, CheckpointVerifiedBlock, Config};
+    use std::sync::Arc;
+    use zebra_chain::{
+        amount::Amount,
+        block::Block,
+        parameters::testnet::{ConfiguredActivationHeights, ParametersBuilder},
+        serialization::ZcashDeserializeInto,
+    };
+
+    let _init_guard = zebra_test::init();
+    let mut genesis: Block = zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let transaction = Arc::make_mut(&mut genesis.transactions[0]);
+    let mut outputs = transaction.outputs();
+    outputs[0].value = Amount::try_from(1).unwrap();
+    transaction.set_outputs(outputs);
+    Arc::make_mut(&mut genesis.header).merkle_root = genesis.transactions.iter().collect();
+    let network = ParametersBuilder::default()
+        .with_slow_start_interval(Height::MIN)
+        .with_genesis_hash(genesis.hash())
+        .unwrap()
+        .clear_checkpoints()
+        .unwrap()
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_initial_nsm_value_balance(Amount::try_from(100_000_000).unwrap())
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![])
+        .to_network()
+        .unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let open = || {
+        FinalizedState::new(
+            &config,
+            &network,
+            #[cfg(feature = "elasticsearch")]
+            false,
+        )
+        .unwrap()
+    };
+    let mut state = open();
+    state
+        .commit_finalized_direct(
+            CheckpointVerifiedBlock::from(Arc::new(genesis)).into(),
+            None,
+            "custom genesis NSM test",
+        )
+        .unwrap();
+    let expected = state.db.finalized_value_pool();
+    assert!(expected.transparent_amount().is_zero());
+    assert!(
+        expected.nsm_amount().is_zero(),
+        "the configured seed starts at NU7, not its parent"
+    );
+    drop(state);
+    let state = open();
+    assert_eq!(state.db.finalized_value_pool(), expected);
+    assert_eq!(
+        *state
+            .db
+            .block_info(Height::MIN.into())
+            .unwrap()
+            .value_pools(),
+        expected,
+    );
+}
+
+/// A pre-NU7 v28 cache is reused without rewriting legacy records, then accepts new v29 blocks.
+#[tokio::test]
+async fn v28_cache_is_reused_with_legacy_value_pools() {
+    use std::{sync::Arc, time::Duration};
+
+    use semver::Version;
+    use tokio::time::{sleep, timeout};
+    use zebra_chain::{
+        block::Block, block_info::BlockInfo, parameters::Network,
+        serialization::ZcashDeserializeInto,
+    };
+
+    use crate::{
+        config::check_and_delete_old_state_databases,
+        constants::STATE_DATABASE_KIND,
+        service::finalized_state::{
+            zebra_db::chain::{BLOCK_INFO, CHAIN_VALUE_POOLS},
+            FinalizedState, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        CheckpointVerifiedBlock, Config,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        delete_old_database: true,
+        ..Config::default()
+    };
+    let old_version = Version::new(28, 0, 0);
+    let old_path = config.db_path(STATE_DATABASE_KIND, old_version.major, &network);
+    let mut state = FinalizedState {
+        db: ZebraDb::new(
+            &config,
+            STATE_DATABASE_KIND,
+            &old_version,
+            &network,
+            true,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            false,
+        )
+        .unwrap(),
+        debug_stop_at_height: None,
+        #[cfg(feature = "elasticsearch")]
+        elastic_db: None,
+        #[cfg(feature = "elasticsearch")]
+        elastic_blocks: vec![],
+    };
+    state
+        .db
+        .update_format_version_on_disk(&old_version)
+        .unwrap();
+    state.db.mark_finished_format_upgrades();
+
+    // Commit real blocks to a persistent v28 database, then encode its pool records at v28 widths.
+    let legacy_block_info = |info: &BlockInfo| {
+        let mut bytes = [0; 52];
+        bytes[..48].copy_from_slice(&info.value_pools().to_bytes()[..48]);
+        bytes[48..].copy_from_slice(&info.size().to_le_bytes());
+        bytes
+    };
+    for bytes in [
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.as_slice(),
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
+    ] {
+        let block = bytes.zcash_deserialize_into::<Arc<Block>>().unwrap();
+        let height = block.coinbase_height().unwrap();
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block).into(),
+                None,
+                "v28 cache reuse test",
+            )
+            .unwrap();
+        let info = state.db.block_info(height.into()).unwrap();
+        let cf = state.db.cf_handle(BLOCK_INFO).unwrap();
+        state
+            .db
+            .put_cf(&cf, height.as_bytes(), legacy_block_info(&info))
+            .unwrap();
+    }
+    let expected_tip_hash = state.db.finalized_tip_hash();
+    let expected_pools = state.db.finalized_value_pool();
+    let expected_info = state.db.block_info(Height(1).into()).unwrap();
+    let legacy_pools: [u8; 48] = expected_pools.to_bytes()[..48].try_into().unwrap();
+    state
+        .db
+        .put_cf(
+            &state.db.cf_handle(CHAIN_VALUE_POOLS).unwrap(),
+            [],
+            legacy_pools,
+        )
+        .unwrap();
+    assert!(!expected_pools.transparent_amount().is_zero());
+    drop(state);
+
+    // Startup cleanup must not remove the cache before the upgrader has a chance to reuse it.
+    timeout(
+        Duration::from_secs(30),
+        check_and_delete_old_state_databases(&config, &network),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        old_path.exists(),
+        "cleanup must protect a reusable v28 cache"
+    );
+
+    // Disabling cleanup is not a rollback backup: startup moves the v28 directory to v29.
+    config.delete_old_database = false;
+    let mut state = FinalizedState::new(
+        &config,
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .unwrap();
+    timeout(Duration::from_secs(30), async {
+        while !state.db.finished_format_upgrades() {
+            state.db.check_for_panics();
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap().unwrap().major,
+        29,
+    );
+    assert!(
+        !old_path.exists(),
+        "reuse moves rather than backs up the cache"
+    );
+    assert_eq!(state.db.finalized_tip_height(), Some(Height(1)));
+    assert_eq!(state.db.finalized_tip_hash(), expected_tip_hash);
+    assert_eq!(state.db.finalized_value_pool(), expected_pools);
+    assert!(state.db.finalized_value_pool().nsm_amount().is_zero());
+    assert_eq!(
+        state.db.block_info(Height(1).into()).unwrap(),
+        expected_info
+    );
+
+    // No migration has rewritten either old record.
+    for (column, key, expected) in [
+        (CHAIN_VALUE_POOLS, [].as_slice(), legacy_pools.as_slice()),
+        (
+            BLOCK_INFO,
+            Height(1).as_bytes().as_slice(),
+            legacy_block_info(&expected_info).as_slice(),
+        ),
+    ] {
+        let cf = state.db.cf_handle(column).unwrap();
+        let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
+        assert_eq!(raw.as_ref(), expected);
+    }
+
+    let next_block = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let next_hash = next_block.hash();
+    state
+        .commit_finalized_direct(
+            CheckpointVerifiedBlock::from(next_block).into(),
+            None,
+            "v29 cache reuse test",
+        )
+        .unwrap();
+    assert_eq!(state.db.finalized_tip_hash(), next_hash);
+    // Continuing the existing chain writes the wider layout, even while NSM is zero.
+    for (column, key, width) in [
+        (CHAIN_VALUE_POOLS, [].as_slice(), 56),
+        (BLOCK_INFO, Height(2).as_bytes().as_slice(), 60),
+    ] {
+        let cf = state.db.cf_handle(column).unwrap();
+        let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
+        assert_eq!(raw.len(), width);
+    }
+}
+
 /// Check that the sprout tree database serialization format has not changed.
 #[test]
 fn sprout_note_commitment_tree_serialization() {

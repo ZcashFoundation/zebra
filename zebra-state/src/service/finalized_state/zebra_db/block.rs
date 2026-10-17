@@ -667,9 +667,8 @@ impl DiskWriteBatch {
         //
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         //
-        // So we ignore the genesis UTXO, transparent address index, and value pool updates
-        // for the genesis block. This also ignores genesis shielded value pool updates, but there
-        // aren't any of those on mainnet or testnet.
+        // Ignore genesis UTXOs and the transparent address index. The shared block value-pool
+        // calculation also excludes these unspendable outputs; shielded updates are retained.
         if !finalized.height.is_min() {
             // Commit transaction indexes
             self.prepare_transparent_transaction_batch(

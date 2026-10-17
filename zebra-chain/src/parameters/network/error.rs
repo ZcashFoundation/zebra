@@ -47,6 +47,14 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     InvalidHeightZero,
 
+    #[error("halving interval must be in 1..=Height::MAX and produce supported halving indices and heights; configured funding streams require a nonzero address period, and reissuance requires a positive NSM coefficient")]
+    #[non_exhaustive]
+    InvalidHalvingInterval,
+
+    #[error("scheduled issuance through the maximum supported height, excluding unspendable genesis issuance, must not exceed MAX_MONEY; early spacing upgrades may require slow_start_interval = 0")]
+    #[non_exhaustive]
+    InvalidSubsidySchedule,
+
     #[error("network upgrades must be activated in order specified by the protocol")]
     #[non_exhaustive]
     OutOfOrderUpgrades,
@@ -58,6 +66,38 @@ pub enum ParametersBuilderError {
     #[error("halving interval on ParametersBuilder must not be set after setting funding streams")]
     #[non_exhaustive]
     HalvingIntervalAfterFundingStreams,
+
+    /// A funding stream recipient does not cover the configured address periods.
+    #[error("funding stream recipient {receiver:?} requires {required} addresses, but only {provided} were provided")]
+    #[non_exhaustive]
+    InsufficientFundingStreamAddresses {
+        /// The recipient whose address list is too short.
+        receiver: super::subsidy::FundingStreamReceiver,
+        /// The minimum number of addresses needed for the configured height range.
+        required: usize,
+        /// The number of configured addresses.
+        provided: usize,
+    },
+
+    /// Two nonempty funding stream height ranges overlap after applying inherited defaults.
+    #[error("funding stream height ranges {first:?} and {second:?} overlap")]
+    #[non_exhaustive]
+    OverlappingFundingStreamRanges {
+        /// The earlier configured range in the overlapping pair.
+        first: std::ops::Range<crate::block::Height>,
+        /// The later configured range in the overlapping pair.
+        second: std::ops::Range<crate::block::Height>,
+    },
+
+    /// A non-deferred funding stream recipient uses an address without a supported payment script.
+    #[error("funding stream recipient {receiver:?} uses unsupported address {address}; only P2SH and P2PKH addresses are supported")]
+    #[non_exhaustive]
+    UnsupportedFundingStreamAddress {
+        /// The receiver whose payment cannot be represented by a supported funding stream script.
+        receiver: super::subsidy::FundingStreamReceiver,
+        /// The unsupported address.
+        address: crate::transparent::Address,
+    },
 
     #[error("checkpoints file format must be valid")]
     #[non_exhaustive]
@@ -88,4 +128,8 @@ pub enum ParametersBuilderError {
     )]
     #[non_exhaustive]
     InsufficientCheckpointCoverage,
+
+    #[error("the NSM reissuance height must be at or after the NU7 activation height")]
+    #[non_exhaustive]
+    NsmReissuanceHeightBeforeNu7,
 }

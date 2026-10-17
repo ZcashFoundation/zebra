@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [13.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- Updated `libzcash_script` to 0.2 and `zcash_script` to 0.6, whose `libzcash_script::Error` appears in `Error::Unknown` and `Sigops::sigops`, along with `zcash_primitives` 0.31.0-pre.0 and `zcash_transparent` 0.11.0-pre.0 for NU7 ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
 ## [12.0.0] - 2026-09-23
 
 ### Breaking Changes

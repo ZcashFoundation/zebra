@@ -224,10 +224,18 @@ fn version_args() -> Result<()> {
 #[test]
 fn external_address() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut external_address_test_config(&Mainnet)?)?;
+
+    // Zebra logs its external address when it sends a version message on an outbound
+    // connection. A local listener accepts the TCP connection, so the node doesn't need any
+    // live network peers.
+    let peer_listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let mut config = external_address_test_config(&Mainnet)?;
+    config.network.initial_mainnet_peers = [peer_listener.local_addr()?.to_string()].into();
+
+    let testdir = testdir()?.with_config(&mut config)?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
-    // Give enough time to start connecting to some peers.
+    // Give enough time to start connecting to the local peer.
     std::thread::sleep(Duration::from_secs(10));
 
     child.kill(false)?;

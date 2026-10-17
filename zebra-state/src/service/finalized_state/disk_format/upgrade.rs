@@ -110,7 +110,13 @@ fn format_upgrades(
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
         // major-version upgrade that is restorable from the previous major database format version.
         Box::new(add_ironwood_tree::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 6])
+        // Legacy value pools and block info default the absent NSM balance to zero, so existing
+        // records need no rewrite even though new writes use the wider v29 layout.
+        Box::new(no_migration::NoMigration::new(
+            "add NSM value balance",
+            Version::new(29, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 7])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

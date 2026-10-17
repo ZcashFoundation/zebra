@@ -23,7 +23,7 @@ permissions: {}
 jobs:
   update-checkpoints:
     name: Update checkpoint files
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read

@@ -61,7 +61,7 @@ pub fn zebra_skip_ipv6_tests() -> bool {
 /// times. For example: setting up both ends of a connection, or reusing
 /// the same port multiple times.
 pub fn random_known_port() -> u16 {
-    use rand::Rng;
+    use rand::RngExt;
     // Use the intersection of the IANA/Windows/macOS ephemeral port range,
     // and the Linux ephemeral port range:
     //   - https://en.wikipedia.org/wiki/Ephemeral_port#Range
@@ -77,7 +77,7 @@ pub fn random_known_port() -> u16 {
     //     starting from 49152:
     //      - https://dataplane.org/ephemeralports.html
 
-    rand::thread_rng().gen_range(53500..60999)
+    rand::rng().random_range(53500..60999)
 }
 
 #[cfg(not(windows))]

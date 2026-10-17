@@ -1,10 +1,12 @@
 //! Fixed test vectors for transactions.
 
+use ::orchard::bundle::{BundleVersion, Flags};
 use arbitrary::v5_transactions;
 use chrono::DateTime;
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
-use rand::{seq::IteratorRandom, thread_rng};
+use rand::seq::IteratorRandom;
+use zcash_protocol::{consensus::BranchId, value::ZatBalance};
 
 use std::sync::Arc;
 
@@ -14,9 +16,15 @@ use crate::{
     orchard,
     parameters::Network,
     primitives::{x25519, zcash_primitives::PrecomputedTxData, Groth16Proof},
-    serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashDeserializeWithContext,
+        ZcashSerialize,
+    },
     sprout,
-    transaction::sighash::SigHasher,
+    transaction::{
+        arbitrary::shielded::{fake_orchard_bundle, fake_v6_transaction},
+        sighash::SigHasher,
+    },
     transparent::Script,
     value_balance::ValueBalanceError,
 };
@@ -1110,7 +1118,7 @@ fn consensus_branch_id() {
 
             let any_other_nu = NetworkUpgrade::iter()
                 .filter(|&nu| nu != tx_nu)
-                .choose(&mut thread_rng())
+                .choose(&mut rand::rng())
                 .expect("there must be a network upgrade other than the tx one");
 
             // All computations should succeed under the tx nu.
@@ -1245,6 +1253,67 @@ fn v6_ironwood_txid_and_roundtrip() {
 
     assert_eq!(tx, tx2);
     assert_eq!(tx2.hash(), txid, "txid is stable across serialization");
+}
+
+/// Tests that both parsing entry points reject V6 transactions with pre-NU6.3 wire branch IDs.
+///
+/// These branch IDs select Orchard bundle versions that the V6 writer cannot serialize,
+/// violating the serialization contract if parsing succeeds.
+#[test]
+fn v6_transaction_rejects_pre_nu6_3_branch_ids() {
+    let _test_guard = zebra_test::init();
+
+    let orchard = fake_orchard_bundle(
+        Flags::CROSS_ADDRESS_DISABLED,
+        ZatBalance::from_i64(0).expect("zero is a valid balance"),
+        1,
+        1,
+        BundleVersion::orchard_v3(),
+    );
+
+    let transaction = fake_v6_transaction(NetworkUpgrade::Nu6_3, Some(orchard), None);
+    let mut transaction_bytes = transaction
+        .zcash_serialize_to_vec()
+        .expect("the NU6.3 fixture has a serializable V6 Orchard bundle");
+
+    let deserialized_transaction = Transaction::zcash_deserialize(&transaction_bytes[..])
+        .expect("the unmodified NU6.3 fixture parses");
+    assert_eq!(deserialized_transaction, transaction);
+
+    for branch_id in [
+        BranchId::Nu5,
+        BranchId::Nu6,
+        BranchId::Nu6_1,
+        BranchId::Nu6_2,
+    ] {
+        // The wire branch ID follows the four-byte header and four-byte version group ID.
+        transaction_bytes[8..12].copy_from_slice(&u32::from(branch_id).to_le_bytes());
+
+        let result_without_context = Transaction::zcash_deserialize(&transaction_bytes[..]);
+        let result_with_context =
+            Transaction::zcash_deserialize_with_context(&transaction_bytes[..], &BranchId::Nu6_3);
+
+        assert!(
+            matches!(
+                result_with_context,
+                Err(SerializationError::Parse(
+                    "v6 transaction must have a NU6.3 or later consensus branch ID"
+                ))
+            ),
+            "V6 with {branch_id:?} must fail to parse with context. \
+             Result: {result_with_context:?}",
+        );
+        assert!(
+            matches!(
+                result_without_context,
+                Err(SerializationError::Parse(
+                    "v6 transaction must have a NU6.3 or later consensus branch ID"
+                ))
+            ),
+            "V6 with {branch_id:?} must fail to parse without context. \
+             Result: {result_without_context:?}",
+        );
+    }
 }
 
 /// A v6 transaction carrying populated Orchard-v6 and Ironwood bundles round-trips through the
@@ -1747,4 +1816,42 @@ fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
         .expect("a single regular input parses");
     assert!(!tx.is_coinbase());
     assert!(tx.is_valid_non_coinbase());
+}
+
+/// Tests that dropping every transparent input from a transaction with no transparent
+/// outputs leaves no transparent bundle, so its txid matches its serialized form.
+///
+/// ZIP-244 defines a single transparent digest for a transaction with no transparent
+/// inputs or outputs, but librustzcash only produces it for an absent bundle: a present
+/// bundle with empty `vin` and `vout` hashes differently. Both serialize to the same
+/// bytes, which always parse as absent.
+#[test]
+fn with_transparent_inputs_drops_empty_bundle() {
+    let _test_guard = zebra_test::init();
+
+    let orchard = fake_orchard_bundle(
+        Flags::ENABLED,
+        ZatBalance::from_i64(0).expect("zero is a valid balance"),
+        1,
+        1,
+        BundleVersion::orchard_insecure_v1(),
+    );
+    let transaction = Transaction::test_v5_with_orchard(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+        block::Height(0),
+        Some(orchard),
+    )
+    .with_transparent_inputs(Vec::new());
+
+    assert!(transaction.transparent_bundle().is_none());
+
+    let deserialized_transaction: Transaction = transaction
+        .zcash_serialize_to_vec()
+        .expect("the fixture serializes")
+        .zcash_deserialize_into()
+        .expect("the serialized fixture parses");
+    assert_eq!(deserialized_transaction.hash(), transaction.hash());
 }

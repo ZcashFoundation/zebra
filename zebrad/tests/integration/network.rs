@@ -11,6 +11,7 @@ use zebra_chain::{
     block::Height,
     parameters::{
         testnet::{self, ConfiguredActivationHeights},
+        Magic,
         Network::*,
     },
 };
@@ -21,12 +22,56 @@ use zebra_test::{args, net::random_known_port, prelude::*};
 use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
-    config::{default_test_config, testdir},
+    config::{default_test_config, testdir, use_live_peers},
     launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt},
     test_type::TestType::*,
 };
 
 use crate::integration::database::check_config_conflict;
+
+/// The maximum time for `zebrad` to finish its initial connections to live Mainnet peers.
+const LIVE_PEER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Check that `zebrad` resolves the default DNS seeders and completes a handshake with at least
+/// one live Mainnet peer at startup.
+///
+/// This is the only zebrad test that checks the default seeders and real peer handshakes on every
+/// PR: other zebrad tests don't use live peers unless they call `use_live_peers()`.
+#[test]
+fn live_mainnet_peer_handshake() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
+    let mut config = default_test_config(&Mainnet);
+    use_live_peers(&mut config);
+
+    let mut child = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LIVE_PEER_HANDSHAKE_TIMEOUT);
+
+    let initial_peers_line = child
+        .expect_stdout_line_matches("finished connecting to initial seed and disk cache peers")?;
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+    output.assert_was_killed()?;
+
+    let handshake_succeeded = regex::Regex::new(r"handshake_success_total=[1-9]")
+        .expect("hard-coded regex is valid")
+        .is_match(&initial_peers_line);
+
+    assert_with_context!(
+        handshake_succeeded,
+        &output,
+        "no initial handshake with a live Mainnet peer succeeded: {initial_peers_line}"
+    );
+
+    Ok(())
+}
 
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
@@ -171,6 +216,8 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 
     let _init_guard = zebra_test::init();
     let network1 = testnet::Parameters::build()
+        .with_network_magic(Magic([0; 4]))
+        .expect("private test network magic must not be reserved")
         .with_activation_heights(ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),
@@ -261,6 +308,8 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
         .wrap_err("node 1 exited before opening its network listener")?;
 
     let network2 = testnet::Parameters::build()
+        .with_network_magic(Magic([0; 4]))
+        .expect("private test network magic must not be reserved")
         .with_activation_heights(ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),

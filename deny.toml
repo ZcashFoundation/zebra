@@ -118,12 +118,6 @@ skip-tree = [
     { name = "sha2", version = "=0.10.9" },
     { name = "ripemd", version = "=0.1.3" },
 
-    # pre-release RustCrypto crates pulled in by librustzcash 2026-04 release wave;
-    # remove once the broader ecosystem catches up to the same pre-release line
-    { name = "block-buffer", version = "=0.11.0-rc.3" },
-    { name = "crypto-common", version = "=0.2.0-rc.1" },
-    { name = "digest", version = "=0.11.0-pre.9" },
-
     # console 0.15.x is pulled by indicatif (via howudoin); 0.16.x by insta (dev-dep).
     # remove once indicatif/howudoin update to console 0.16.
     { name = "console", version = "=0.15.11" },
@@ -137,9 +131,6 @@ skip-tree = [
 
     { name = "windows-sys", version = "=0.52.0" },
 
-    { name = "indexmap", version = "1.9" },
-
-    { name = "hashbrown", version = "0.12" },
     # hashbrown 0.14.x pulled by ordered-multimap, via rust-ini and config
     { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps, incl. hashlink/petgraph/metrics-util;
@@ -152,6 +143,12 @@ skip-tree = [
     { name = "rand", version = "0.8" },
     { name = "rand_core", version = "0.6" },
     { name = "rand_chacha", version = "0.3" },
+
+    # rand 0.9.x pulled by proptest, metrics-util and opentelemetry_sdk; 0.10.x by the
+    # librustzcash and ECC crates. Remove once they update to rand 0.10.
+    { name = "rand", version = "0.9" },
+    { name = "rand_core", version = "0.9" },
+    { name = "rand_chacha", version = "0.9" },
 
     # wait for derive_builder to update
     { name = "darling", version = "0.20.11" },
@@ -171,13 +168,15 @@ unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
+# Experimental NU7 dependencies must remain pinned to an immutable revision.
+required-git-spec = "rev"
 
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 # List of URLs for allowed Git repositories.
-# Empty: every dependency comes from the crates.io registry.
+# Remove this exception with the NU7 patches once supporting crates are released.
 allow-git = []
 
 [sources.allow-org]

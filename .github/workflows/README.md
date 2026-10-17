@@ -220,7 +220,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
-- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
+- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
@@ -404,6 +404,7 @@ docker run --rm zebra-tests
   `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
   `mergefreeze` status on the merge group
 
-It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
-`pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
-manually with the PR number.
+It does **not** cover the [zcash/integration-tests](https://github.com/zcash/integration-tests)
+interop suite (Zaino/Zallet RPC tests): `trigger-integration-tests.yml` runs weekly against
+`main` only, so to test a PR (same-repo or fork) a maintainer dispatches it manually with
+the PR number.

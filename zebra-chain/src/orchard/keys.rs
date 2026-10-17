@@ -6,12 +6,12 @@
 
 use std::{fmt, io};
 
-use group::{ff::PrimeField, prime::PrimeCurveAffine, Group, GroupEncoding};
+use group::{ff::PrimeField, CurveAffine as _, Group, GroupEncoding};
 use halo2::{
     arithmetic::{Coordinates, CurveAffine},
     pasta::pallas,
 };
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use crate::{
     error::RandError,
@@ -102,7 +102,7 @@ impl Diversifier {
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     pub fn new<T>(csprng: &mut T) -> Result<Self, RandError>
     where
-        T: RngCore + CryptoRng,
+        T: Rng + CryptoRng,
     {
         let mut bytes = [0u8; 11];
         csprng

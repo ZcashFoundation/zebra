@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [17.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- [ZIP 218](https://zips.z.cash/zip-0218) shielded action limits, enforced from NU7 activation before coinbase output recovery: at most 330 actions per Orchard or Ironwood pool, 300 Sapling inputs plus outputs, and zero Sprout JoinSplits per block. The shared budget requires Orchard actions + Ironwood actions + Sapling inputs and outputs + twice the JoinSplit count to be at most 330. Adds `block::check::shielded_action_limits_are_valid`, `block::{ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT, SPROUT_BLOCK_JOIN_SPLIT_LIMIT, GLOBAL_SHIELDED_BUDGET}`, and shared `block::ShieldedActionCounts` accounting for template builders. Struct literals must include the public `ironwood_actions` field; exhaustive error matches must handle `BlockError::TooManyShieldedActions`. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- Removed `block::subsidy` and the crate-root `funding_stream_address` re-export. Use `zebra_chain::parameters::subsidy::funding_stream_address` ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Exhaustive matches on `error::TransactionError` must handle the new `TooManyShieldedActions { pool, count, limit }` variant. NU7 mempool admission rejects transactions exceeding a ZIP 218 block budget before state access or proof verification; these policy rejections have zero peer misbehavior score ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Updated `zcash_primitives` and `zcash_proofs` to 0.31.0-pre.0 for NU7, along with `orchard` 0.16, `sapling-crypto` 0.9, `halo2_proofs` 0.4, `bellman` 0.15, `bls12_381` 0.9, `jubjub` 0.11, `reddsa` 0.6, `redjubjub` 0.9, `zcash_script` 0.6 and `libzcash_script` 0.2. Groth16 types now come from the `groth16` 0.2 crate instead of `bellman::groth16`, so `groth16::Item` converts from `groth16::batch::Item` and `groth16::SPROUT` holds `groth16` verifying keys. `ed25519::Item` is built from `ed25519-zebra` 5.0.0 types ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
+### Changed
+
+- From the configured NSM reissuance height, block verification leaves subsidy, funding-stream, and miner-fee validation to contextual state verification against the exact parent NSM balance; before that height semantic verification retains those checks ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+
 ## [16.0.0] - 2026-09-23
 
 ### Breaking Changes
@@ -29,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Security
 
 - `misbehavior_score()` now returns 100 for a block that contains duplicate transactions, so `error::BlockError::DuplicateTransaction` is scored like the other definitive block-validity violations. The score reported by `router::RouterError`, `VerifyBlockError`, and `VerifyCheckpointError` for this error changes from 0 to 100 ([#11157](https://github.com/ZcashFoundation/zebra/pull/11157)).
-- `VerifyCheckpointError::misbehavior_score()` now unwraps the boxed `CommitCheckpointVerifiedError`, mirroring `is_duplicate_request()`, so misbehaviour scores from contextual validation reach the syncer during checkpoint sync. Checkpoint verification only checks the block hash, so a block body forged to keep that hash reaches contextual validation on the checkpoint path too, and its score was previously lost.
+- `VerifyCheckpointError::misbehavior_score()` now unwraps the boxed `CommitCheckpointVerifiedError`, mirroring `is_duplicate_request()`, so misbehaviour scores from contextual validation reach the syncer during checkpoint sync. Checkpoint verification only checks the block hash, so a block body forged to keep that hash reaches contextual validation on the checkpoint path too, and its score was previously lost ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
 
 ## [15.0.0] - 2026-08-10
 

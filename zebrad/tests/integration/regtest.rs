@@ -11,7 +11,7 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    client::{SubmitBlockErrorResponse, SubmitBlockResponse},
+    client::{BlockProposalResponse, SubmitBlockErrorResponse, SubmitBlockResponse},
     config::mining::ExtraCoinbaseData,
     server::OPENED_RPC_ENDPOINT_MSG,
 };
@@ -24,6 +24,8 @@ use crate::common::{
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
     regtest::MiningRpcMethods,
 };
+
+mod nu7;
 
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]
@@ -78,7 +80,7 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
 #[tokio::test]
 async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Result<()> {
     use zebra_rpc::{
-        client::{BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource},
+        client::{BlockTemplateResponse, BlockTemplateTimeSource},
         proposal_block_from_template,
     };
 
@@ -1299,6 +1301,38 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
             "Zebra should have the same block"
         );
     }
+
+    // Reject removing the only non-finalized root through the real RPC path (#11536).
+    // Only 50 blocks were mined, so no blocks above the checkpoints have finalized.
+    let root_height = net.checkpoint_list().max_height().next().unwrap();
+    let root = rpc_client
+        .get_block(root_height.0.try_into()?)
+        .await
+        .map_err(|err| eyre!(err))?
+        .expect("the first non-finalized block should exist");
+    let tip_before: String = rpc_client
+        .json_result_from_call("getbestblockhash", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    let root_params = serde_json::to_string(&vec![root.hash().to_string()])?;
+    let error = rpc_client
+        .json_result_from_call::<()>("invalidateblock", &root_params)
+        .await
+        .expect_err("invalidating the only non-finalized root must return an RPC error");
+    assert!(
+        error
+            .to_string()
+            .contains("root of the only non-finalized chain"),
+        "expected the root-invalidation error, got: {error}"
+    );
+    let tip_after: String = rpc_client
+        .json_result_from_call("getbestblockhash", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        tip_after, tip_before,
+        "rejected invalidation must preserve the tip"
+    );
 
     tracing::info!("invalidating blocks");
 

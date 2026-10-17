@@ -50,12 +50,33 @@ pub struct ClientTestHarness {
     heartbeat_aborter: AbortHandle,
 }
 
+/// A client request using the same response and missing-inventory handling as a connection.
+pub struct ReceivedClientRequest(super::InProgressClientRequest);
+
+impl ReceivedClientRequest {
+    /// Returns the request sent through the real client channel.
+    pub fn request(&self) -> &crate::Request {
+        &self.0.request
+    }
+
+    /// Sends a response through the production response sender and inventory collector.
+    pub fn respond(self, response: Result<crate::Response, SharedPeerError>) {
+        let _ = self.0.tx.send(response);
+    }
+
+    /// Returns whether the caller dropped its response future.
+    pub fn is_canceled(&self) -> bool {
+        self.0.tx.is_canceled()
+    }
+}
+
 impl ClientTestHarness {
     /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
     /// and a [`ClientTestHarness`] to track it.
     pub fn build() -> ClientTestHarnessBuilder {
         ClientTestHarnessBuilder {
             version: None,
+            services: None,
             connection_task: None,
             heartbeat_task: None,
             connected_addr: None,
@@ -114,6 +135,13 @@ impl ClientTestHarness {
         self.client_request_receiver
             .take()
             .expect("request receiver endpoint has already been dropped");
+    }
+
+    /// Receives a request with production response handling for cross-crate consumer tests.
+    pub fn take_request(&mut self) -> Option<ReceivedClientRequest> {
+        self.try_to_receive_outbound_client_request()
+            .request()
+            .map(|request| ReceivedClientRequest(request.into()))
     }
 
     /// Tries to receive a [`ClientRequest`] sent by the [`Client`] instance.
@@ -252,6 +280,7 @@ pub struct ClientTestHarnessBuilder<C = future::Ready<()>, H = future::Ready<()>
     connection_task: Option<C>,
     heartbeat_task: Option<H>,
     version: Option<Version>,
+    services: Option<PeerServices>,
     connected_addr: Option<ConnectedAddr>,
 }
 
@@ -263,6 +292,12 @@ where
     /// Configure the mocked version for the peer.
     pub fn with_version(mut self, version: Version) -> Self {
         self.version = Some(version);
+        self
+    }
+
+    /// Configure the mocked services the peer advertised in its `version` message.
+    pub fn with_services(mut self, services: PeerServices) -> Self {
+        self.services = Some(services);
         self
     }
 
@@ -281,6 +316,7 @@ where
             connection_task: Some(connection_task),
             heartbeat_task: self.heartbeat_task,
             version: self.version,
+            services: self.services,
             connected_addr: self.connected_addr,
         }
     }
@@ -294,6 +330,7 @@ where
             connection_task: self.connection_task,
             heartbeat_task: Some(heartbeat_task),
             version: self.version,
+            services: self.services,
             connected_addr: self.connected_addr,
         }
     }
@@ -317,7 +354,7 @@ where
 
         let remote = VersionMessage {
             version: remote_version,
-            services: PeerServices::default(),
+            services: self.services.unwrap_or_default(),
             timestamp: Utc::now(),
             address_recv: AddrInVersion::new(
                 SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1),

@@ -495,7 +495,10 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -561,7 +564,10 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -626,7 +632,10 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -682,7 +691,10 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -733,7 +745,10 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -756,4 +771,64 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
     );
 
     state.expect_no_requests().await;
+}
+
+/// Network readiness and an unanswered response share one absolute download deadline.
+#[tokio::test(start_paused = true)]
+async fn download_deadline_includes_readiness_and_response() {
+    use tokio::time::{sleep, timeout_at, Instant};
+    use tower::{limit::ConcurrencyLimit, ServiceExt};
+
+    let _init_guard = zebra_test::init();
+    let budget = super::BLOCK_DOWNLOAD_ROUND_TIMEOUT;
+    for release_capacity in [false, true] {
+        let mut network: MockNetwork = MockService::build().for_unit_tests();
+        let limited = ConcurrencyLimit::new(network.clone(), 1);
+        let mut reservation = limited.clone();
+        reservation.ready().await.unwrap();
+        let verifier: MockVerifier = MockService::build().for_unit_tests();
+        let state: MockState = MockService::build().for_unit_tests();
+        let (tip, _sender) = MockChainTip::new();
+        let mut downloads = Downloads::new(
+            limited,
+            verifier,
+            state,
+            tip,
+            watch::channel(false).0,
+            MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            Height(1_000_000),
+        );
+        let hash = block_1().hash();
+        let started = Instant::now();
+        let queued = {
+            let enqueue = downloads.download_and_verify(hash);
+            tokio::pin!(enqueue);
+            assert!(futures::poll!(&mut enqueue).is_pending());
+            if release_capacity {
+                sleep(budget / 2).await;
+                drop(reservation);
+            }
+            timeout_at(started + budget + Duration::from_secs(1), enqueue)
+                .await
+                .expect("network readiness must be bounded")
+        };
+        let result = if release_capacity {
+            queued.expect("capacity becomes available before the deadline");
+            let _response = network
+                .expect_request(zn::Request::BlockDownload {
+                    hash,
+                    advertiser: None,
+                })
+                .await;
+            timeout_at(started + budget + Duration::from_secs(1), downloads.next())
+                .await
+                .expect("the response must use the remaining deadline")
+                .expect("the queued download has a result")
+                .map(|_| ())
+        } else {
+            queued
+        };
+        assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
+        assert_eq!(Instant::now() - started, budget);
+    }
 }

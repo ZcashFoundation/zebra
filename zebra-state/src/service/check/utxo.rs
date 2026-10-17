@@ -230,7 +230,11 @@ pub fn remaining_transaction_value(
     semantically_verified: &SemanticallyVerifiedBlock,
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<(), ValidateContextError> {
-    let utxos = utxos_from_ordered_utxos(utxos.clone());
+    let utxos = utxos_from_ordered_utxos(
+        utxos
+            .iter()
+            .map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
+    );
 
     for (tx_index_in_block, transaction) in
         semantically_verified.block.transactions.iter().enumerate()

@@ -14,6 +14,7 @@
 //! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
+    collections::HashSet,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -42,14 +43,14 @@ use crate::{
     peer_set::{
         crawler_services,
         initialize::{
-            accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
-            DiscoveredPeer,
+            accept_inbound_connections, add_initial_peers, crawl_and_dial, limit_initial_peers,
+            open_listener, DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -59,10 +60,11 @@ use Network::*;
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 
-/// The amount of time to run the peer cache updater task, before testing what it has done.
+/// The crawl timer interval for crawler tests.
 ///
-/// Using a very short time can make the peer cache updater not run at all.
-const PEER_CACHE_UPDATER_TEST_DURATION: Duration = Duration::from_secs(25);
+/// Much shorter than [`CRAWLER_TEST_DURATION`], so the timer refills freed outbound slots many
+/// times during each test, rather than only on its first tick.
+const CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_millis(100);
 
 /// The amount of time to run the listener, before testing what it has done.
 ///
@@ -227,7 +229,7 @@ async fn peer_limit_zero_mainnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book =
+    let (_network, address_book) =
         init_with_peer_limit(0, unreachable_inbound_service, Mainnet, None, None).await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
@@ -249,7 +251,7 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         0,
         unreachable_inbound_service,
         Network::new_default_testnet(),
@@ -277,7 +279,7 @@ async fn peer_limit_one_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -296,7 +298,7 @@ async fn peer_limit_one_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         1,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -322,7 +324,7 @@ async fn peer_limit_two_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -341,7 +343,7 @@ async fn peer_limit_two_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         2,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -356,101 +358,59 @@ async fn peer_limit_two_testnet() {
     // Any number of address book peers is valid here, because some peers might have failed.
 }
 
-/// Test zebra-network writes a peer cache file, and can read it back manually.
-#[tokio::test]
-async fn written_peer_cache_can_be_read_manually() {
-    let _init_guard = zebra_test::init();
-
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
-    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
-
-    // Use a temporary peer cache directory, so this test doesn't read or write the default
-    // peer cache directory, which is shared with other tests and local zebrad instances.
-    let peer_cache_dir =
-        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
-    let config = Config {
-        cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
-        ..Config::default()
-    };
-    let address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
-
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
-
-    let approximate_peer_count = address_book
-        .lock()
-        .expect("previous thread panicked while holding address book lock")
-        .len();
-    if approximate_peer_count > 0 {
-        let cached_peers = config
-            .load_peer_cache()
-            .await
-            .expect("unexpected error reading peer cache");
-
-        assert!(
-            !cached_peers.is_empty(),
-            "unexpected empty peer cache from manual load: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
-}
-
-/// Test zebra-network writes a peer cache file, and reads it back automatically.
+/// Test that startup loads exactly the written cache into its connection candidates and address book.
 #[tokio::test]
 async fn written_peer_cache_is_automatically_read_on_startup() {
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
-    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
-
-    // Use a temporary peer cache directory, so this test doesn't read or write the default
-    // peer cache directory, which is shared with other tests and local zebrad instances.
     let peer_cache_dir =
         tempfile::tempdir().expect("creating a temporary cache directory should succeed");
-    let mut config = Config {
+    let config = Config {
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
+        // The disk cache must be the only source of initial peers.
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
         ..Config::default()
     };
-    let _address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let expected_peers: HashSet<PeerSocketAddr> = ["127.1.1.1:8233", "127.1.1.2:8233"]
+        .into_iter()
+        .map(|addr| addr.parse().expect("test peer addresses are valid"))
+        .collect();
 
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
-
-    // The address book also contains unverified DNS seed addresses, so only test automatic
-    // loading when the peer cache updater actually wrote at least one cacheable peer.
-    let cached_peers = config
-        .load_peer_cache()
+    // The persistent_mode_peer_cache integration test covers the background writer with a
+    // real local peer. Here, write the cache directly: DNS seeds have no last-seen timestamp,
+    // so finding seeds alone does not guarantee any cacheable peers.
+    config
+        .update_peer_cache(expected_peers.clone())
         .await
-        .expect("unexpected error reading peer cache");
-    if !cached_peers.is_empty() {
-        // Make sure our only peers are coming from the disk cache
-        config.initial_mainnet_peers = Default::default();
+        .expect("writing the temporary peer cache should succeed");
 
-        let address_book =
-            init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        address_book_updater_task_handle,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
 
-        // Let the peer cache reader run and fill the address book.
-        tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+    // Exercise the startup loader without opening sockets or handshaking with public peers.
+    let initial_peers = limit_initial_peers(&config, address_book_updater).await;
+    assert_eq!(initial_peers, expected_peers);
 
-        // We should have loaded at least one peer from the cache
-        let approximate_cached_peer_count = address_book
-            .lock()
-            .expect("previous thread panicked while holding address book lock")
-            .len();
-        assert!(
-            approximate_cached_peer_count > 0,
-            "unexpected empty address book using cache from previous instance: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
+    // The loader drops the last change sender. Wait for its queued address updates to drain.
+    drop(address_book_service);
+    let _ = tokio::time::timeout(Duration::from_secs(5), address_book_updater_task_handle)
+        .await
+        .expect("queued address updates should drain before the timeout")
+        .expect("the address book updater should shut down without panicking");
+    let loaded_peers: HashSet<_> = address_book
+        .lock()
+        .expect("previous thread panicked while holding address book lock")
+        .peers()
+        .map(|peer| peer.addr)
+        .collect();
+    assert_eq!(loaded_peers, expected_peers);
 }
 
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
@@ -1606,9 +1566,10 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     // Ban the peer, using the same channel that block and transaction verification uses.
     misbehavior_tx
-        .send((
+        .send(MisbehaviorReport::new(
             PeerSocketAddr::from(SocketAddr::new(peer_ip.into(), ipv4_listen_addr.port())),
             constants::MAX_PEER_MISBEHAVIOR_SCORE,
+            "test misbehavior",
         ))
         .await
         .expect("misbehavior channel is open");
@@ -1937,7 +1898,7 @@ async fn self_connections_should_fail() {
         ..Config::default()
     };
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         TEST_PEERSET_INITIAL_TARGET_SIZE,
         unreachable_inbound_service,
         Mainnet,
@@ -2227,14 +2188,14 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
 /// Uses `default_config` or Zebra's defaults for the rest of the configuration.
 ///
-/// Returns the newly created [`AddressBook`] for testing.
+/// Returns the network owner and newly created [`AddressBook`] for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
     network: Network,
     force_listen_addr: impl Into<Option<SocketAddr>>,
     default_config: impl Into<Option<Config>>,
-) -> Arc<std::sync::Mutex<AddressBook>>
+) -> (crate::NetworkService, Arc<std::sync::Mutex<AddressBook>>)
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
@@ -2254,7 +2215,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (peer_service, address_book, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2262,7 +2223,7 @@ where
     )
     .await;
 
-    address_book
+    (peer_service, address_book)
 }
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
@@ -2286,7 +2247,10 @@ where
     C::Future: Send + 'static,
 {
     // Create a test config.
-    let mut config = Config::default();
+    let mut config = Config {
+        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        ..Config::default()
+    };
     if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
         config.peerset_initial_target_size = peerset_initial_target_size;
     }

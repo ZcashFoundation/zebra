@@ -2,38 +2,41 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
+#[cfg(test)]
+use std::net::SocketAddr;
+use std::{net::IpAddr, sync::Arc};
 
-use futures::{channel::mpsc, stream, Stream, StreamExt};
+use futures::channel::mpsc;
+#[cfg(test)]
+use futures::{stream, Stream, StreamExt};
+#[cfg(test)]
 use proptest::{collection::vec, prelude::*};
+#[cfg(test)]
 use proptest_derive::Arbitrary;
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
 };
-use tower::{
-    discover::{Change, Discover},
-    BoxError,
-};
+#[cfg(test)]
+use tower::discover::Change;
+use tower::{discover::Discover, BoxError};
 use tracing::Span;
 
-use zebra_chain::{
-    block,
-    chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
-};
+#[cfg(test)]
+use zebra_chain::{block, parameters::NetworkUpgrade};
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
     constants::DEFAULT_MAX_CONNS_PER_IP,
-    peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
+    peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{set::MorePeers, InventoryChange, PeerSet},
-    protocol::external::types::Version,
     AddressBook, Config, PeerSocketAddr,
 };
+#[cfg(test)]
+use crate::{peer::ClientTestHarness, protocol::external::types::Version};
+
+pub mod consumer;
 
 #[cfg(test)]
 mod prop;
@@ -44,15 +47,18 @@ mod vectors;
 /// The maximum number of arbitrary peers to generate in [`PeerVersions`].
 ///
 /// This affects the maximum number of peer connections added to the [`PeerSet`] during the tests.
+#[cfg(test)]
 const MAX_PEERS: usize = 20;
 
 /// A helper type to generate arbitrary peer versions which can then become mock peer services.
+#[cfg(test)]
 #[derive(Arbitrary, Debug)]
 struct PeerVersions {
     #[proptest(strategy = "vec(any::<Version>(), 1..MAX_PEERS)")]
     peer_versions: Vec<Version>,
 }
 
+#[cfg(test)]
 impl PeerVersions {
     /// Convert the arbitrary peer versions into mock peer services.
     ///
@@ -115,7 +121,7 @@ impl PeerVersions {
 /// This helps to reduce repeated boilerplate code. Fields that are not set are configured to use
 /// dummy fallbacks.
 #[derive(Default)]
-struct PeerSetBuilder<D, C> {
+pub(crate) struct PeerSetBuilder<D, C> {
     config: Option<Config>,
     discover: Option<D>,
     demand_signal: Option<mpsc::Sender<MorePeers>>,
@@ -136,6 +142,7 @@ impl PeerSetBuilder<(), ()> {
 
 impl<D, C> PeerSetBuilder<D, C> {
     /// Use the provided [`Config`] when constructing the [`PeerSet`] instance.
+    #[cfg(test)]
     pub fn with_config(self, config: Config) -> PeerSetBuilder<D, C> {
         PeerSetBuilder {
             config: Some(config),
@@ -144,6 +151,7 @@ impl<D, C> PeerSetBuilder<D, C> {
     }
 
     /// Always include these inbound peer IPs in block inventory broadcasts.
+    #[cfg(test)]
     pub fn with_block_gossip_peer_ips(
         self,
         block_gossip_peer_ips: Vec<IpAddr>,
@@ -188,6 +196,7 @@ impl<D, C> PeerSetBuilder<D, C> {
     }
 
     /// Use the provided [`MinimumPeerVersion`] instance when constructing the [`PeerSet`] instance.
+    #[cfg(test)]
     pub fn max_conns_per_ip(self, max_conns_per_ip: usize) -> PeerSetBuilder<D, C> {
         assert!(
             max_conns_per_ip > 0,
@@ -378,6 +387,7 @@ impl PeerSetGuard {
 
 /// A pair of block height values, where one is before and the other is at or after an arbitrary
 /// network upgrade's activation height.
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct BlockHeightPairAcrossNetworkUpgrades {
     /// The network for which the block height values represent heights before and after an
@@ -391,6 +401,7 @@ pub struct BlockHeightPairAcrossNetworkUpgrades {
     pub after_upgrade: block::Height,
 }
 
+#[cfg(test)]
 impl Arbitrary for BlockHeightPairAcrossNetworkUpgrades {
     type Parameters = ();
 

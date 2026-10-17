@@ -1,8 +1,8 @@
 //! Loading and checking correctness of Groth16 Sprout parameters.
 
-use bellman::groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
 use derive_getters::Getters;
+use groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
 
 lazy_static::lazy_static! {
     /// Spend parameters for the Sprout circuit.

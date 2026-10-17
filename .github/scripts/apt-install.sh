@@ -63,8 +63,12 @@ apt_get 90s -q update ||
 # These packages are required, so retry once -- a second attempt redoes the
 # mirror failover -- then fail loudly, instead of leaving a later step to break
 # on a missing header or binary.
+#
+# `-q` here too: under `-qq` a stalled install prints nothing before the timeout
+# kills it, so the log cannot show whether a download or dpkg hung. `-q` keeps
+# the `Get:` and `Unpacking`/`Setting up` lines that pin it down.
 for attempt in 1 2; do
-  if apt_get 240s -qq install -y --no-install-recommends "$@"; then
+  if apt_get 240s -q install -y --no-install-recommends "$@"; then
     exit 0
   fi
 

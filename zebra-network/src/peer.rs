@@ -11,7 +11,7 @@ mod priority;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(unused_imports)]
-pub use client::tests::ClientTestHarness;
+pub use client::tests::{ClientTestHarness, ReceivedClientRequest};
 
 #[cfg(test)]
 pub(crate) use client::tests::ReceiveRequestAttempt;

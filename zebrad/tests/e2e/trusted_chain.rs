@@ -19,7 +19,7 @@ use zebra_test::{args, net::random_known_port, prelude::*};
 use crate::common::{
     config::{
         os_assigned_rpc_port_config, random_known_rpc_port_config, read_listen_addr_from_logs,
-        testdir,
+        testdir, use_live_peers,
     },
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
     regtest::MiningRpcMethods,
@@ -269,6 +269,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     output.assert_failure()?;
 
     let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
+    use_live_peers(&mut config);
     config.state.ephemeral = false;
     config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from((
         [127, 0, 0, 1],

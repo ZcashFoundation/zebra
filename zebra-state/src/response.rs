@@ -1,7 +1,7 @@
 //! State [`tower::Service`] response types.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -406,6 +406,14 @@ pub enum ReadResponse {
     /// serialized size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
+    /// non-coinbase inputs of the specified block, keyed by the spending
+    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found.
+    ///
+    /// An outpoint whose spent output could not be found in the best chain is
+    /// omitted from the map.
+    SpentOutputs(Option<HashMap<transparent::OutPoint, transparent::Utxo>>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -575,6 +583,14 @@ pub struct GetBlockTemplateChainInfo {
     /// The maximum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
     pub max_time: DateTime32,
+
+    /// The chain value pools after the tip block, which determine the candidate block's subsidy
+    /// once the [halving-preserving issuance ZIP][zip] is active.
+    /// Depends on the `tip_hash`.
+    ///
+    /// [zip]: https://zips.z.cash/zip-0237
+    pub chain_value_pools:
+        zebra_chain::value_balance::ValueBalance<zebra_chain::amount::NonNegative>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -623,6 +639,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

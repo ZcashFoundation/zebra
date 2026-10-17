@@ -37,8 +37,8 @@ use crate::{
 
 use super::{
     check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, zip317::select_mempool_transactions, BlockTemplateResponse,
-    CoinbaseCache, MinerParams,
+    fetch_mempool_transactions, nsm_value_balance_for_next_block,
+    zip317::select_mempool_transactions, BlockTemplateResponse, CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
@@ -134,8 +134,8 @@ impl TemplateCache {
         self.0.send_replace(Some(Arc::new(template)));
     }
 
-    /// Returns a template for `tip_hash`, unless Testnet's time-dependent difficulty may have
-    /// become easier since it was built.
+    /// Returns a template for `tip_hash` whose timestamp range still satisfies the local-clock
+    /// bound, unless Testnet's time-dependent difficulty may have become easier since it was built.
     pub(crate) fn template_for_tip(
         &self,
         tip_hash: block::Hash,
@@ -150,6 +150,12 @@ impl TemplateCache {
             return None;
         }
 
+        // Recheck the whole advertised range: the clock can move backwards between refreshes,
+        // and a failed refresh leaves the previous template cached.
+        if template.max_time > now.saturating_add(Duration32::from_hours(2)) {
+            return None;
+        }
+
         // Only an abbreviated standard-difficulty Testnet time range can become unprofitable.
         // At the full 90-minute median-time cap, even a fresh build clamps to the same max_time.
         // Regtest deliberately uses historical chain time rather than the wall clock.
@@ -157,15 +163,16 @@ impl TemplateCache {
             && !network.is_regtest()
             && NetworkUpgrade::minimum_difficulty_spacing_for_height(
                 network,
-                Height(template.height.saturating_sub(1)),
+                Height(template.height),
             )
             .is_some()
             && template.bits != network.target_difficulty_limit().to_compact()
-            && template
-                .max_time
-                .saturating_duration_since(template.min_time)
-                .seconds()
-                < Duration32::from_minutes(90).seconds() - 1
+            && (!network.is_max_block_time_enforced(Height(template.height))
+                || template
+                    .max_time
+                    .saturating_duration_since(template.min_time)
+                    .seconds()
+                    < Duration32::from_minutes(90).seconds() - 1)
         {
             return None;
         }
@@ -398,6 +405,7 @@ where
     let network = network.clone();
     let miner_params = miner_params.clone();
     let coinbase_cache = coinbase_cache.clone();
+    let parent_nsm_value_balance = nsm_value_balance_for_next_block(&network, &chain_info);
 
     // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
     // a shielded coinbase takes seconds to prove, so keep them off the async executor.
@@ -409,6 +417,7 @@ where
             mempool_txs,
             mempool_tx_deps,
             Some(&coinbase_cache),
+            parent_nsm_value_balance,
         );
 
         // `submit_old` depends on the long poll ID the client sent, so the RPC sets it.
@@ -434,6 +443,10 @@ fn start_precomputing_coinbase(
     miner_params: &MinerParams,
     height: Height,
 ) {
+    // The future parent does not exist yet, so its NSM balance is unknown.
+    if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network) {
+        return;
+    }
     if next_coinbase
         .as_ref()
         .is_some_and(|(precomputed_height, task)| {
@@ -473,11 +486,12 @@ async fn store_precomputed_coinbase(
     let (_, coinbase) = next_coinbase
         .take()
         .expect("the precomputed height was checked above");
+    coinbase_cache.select(height, None);
 
     match coinbase.await {
         // A coinbase-only block pays no fees, so this also caches the zero-fee coinbase that
         // ZIP-317 transaction selection needs for its size and sigop limits.
-        Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), coinbase),
+        Ok(coinbase) => coinbase_cache.store(height, Amount::zero(), None, coinbase),
         Err(error) => tracing::warn!(?error, "precomputed coinbase transaction task failed"),
     }
 }

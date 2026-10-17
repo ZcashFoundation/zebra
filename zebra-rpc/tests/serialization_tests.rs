@@ -695,6 +695,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let hex = tx.hex().clone().as_ref().to_vec();
     let height = tx.height();
     let confirmations = tx.confirmations();
+    let fee = tx.fee();
     let inputs = tx
         .inputs()
         .iter()
@@ -711,6 +712,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
                 value,
                 value_zat,
                 address,
+                prevout,
             } => {
                 let asm = script_sig.asm().clone();
                 let hex = script_sig.hex().as_raw_bytes().to_vec();
@@ -722,6 +724,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
                     value: *value,
                     value_zat: *value_zat,
                     address: address.clone(),
+                    prevout: prevout.clone(),
                 }
             }
         })
@@ -887,6 +890,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         hex.into(),
         height,
         confirmations,
+        fee,
         inputs,
         outputs,
         shielded_spends,

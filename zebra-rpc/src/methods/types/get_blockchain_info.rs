@@ -126,6 +126,9 @@ impl GetBlockchainInfoBalance {
         ]
     }
 
+    // The NU7 NSM reserve is deliberately not a pool here: it is not part of the Issued Supply,
+    // so `chain_supply()` correctly falls as fees are burned.
+
     /// Converts a [`ValueBalance`] to a [`GetBlockchainInfoBalance`] representing the total chain supply.
     pub fn chain_supply(value_balance: ValueBalance<NonNegative>) -> Self {
         Self::value_pools(value_balance, None)

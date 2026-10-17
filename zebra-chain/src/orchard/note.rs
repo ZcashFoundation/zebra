@@ -2,7 +2,7 @@
 
 use group::{ff::PrimeField, GroupEncoding};
 use halo2::pasta::pallas;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, Rng};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -32,7 +32,7 @@ pub struct SeedRandomness(pub(crate) [u8; 32]);
 impl SeedRandomness {
     pub fn new<T>(csprng: &mut T) -> Result<Self, RandError>
     where
-        T: RngCore + CryptoRng,
+        T: Rng + CryptoRng,
     {
         let mut bytes = [0u8; 32];
         csprng
@@ -69,7 +69,7 @@ impl From<Nullifier> for Rho {
 impl Rho {
     pub fn new<T>(csprng: &mut T) -> Result<Self, NoteError>
     where
-        T: RngCore + CryptoRng,
+        T: Rng + CryptoRng,
     {
         let mut bytes = [0u8; 32];
         csprng
@@ -128,7 +128,7 @@ impl Note {
         nf_old: Nullifier,
     ) -> Result<Self, RandError>
     where
-        T: RngCore + CryptoRng,
+        T: Rng + CryptoRng,
     {
         Ok(Self {
             address,

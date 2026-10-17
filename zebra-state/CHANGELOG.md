@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- The state uses database format v29.0.0. Its registered upgrade automatically moves compatible v28 state into `state/v29` when no v29 database exists, without a resync or record migration. Legacy 48-byte value-pool and 52-byte block-info records remain readable with a zero NSM balance; new writes use 56 and 60 bytes. New block-info records append NSM after the existing pool-and-size prefix. Direct database readers must use a v29-compatible `zebra-state` dependency and be upgraded with the writer; v28 readers cannot read the wider records. Retain a v28 backup before upgrading for rollback: disabling `state.delete_old_database` does not preserve the directory that the upgrade moves. Manual directory renames are not a substitute for the supported upgrade. The public `zebra_state::IntoDisk::Bytes` associated type changes from `Vec<u8>` to `[u8; 60]` for `zebra_chain::block_info::BlockInfo`, and from `[u8; 48]` to `[u8; 56]` for `zebra_chain::value_balance::ValueBalance<NonNegative>`. The NSM reserve is seeded once at NU7 activation, persisted with each block, and excluded from issued supply. `GetBlockTemplateChainInfo::chain_value_pools` is now unconditional; update struct literals. Contextual invalid-subsidy errors score the sending peer 100 ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `ContextuallyVerifiedBlock::with_block_and_spent_utxos` now also requires the network and parent chain value pools. It performs accounting, not coinbase payout validation; callers must separately apply the contextual subsidy checks. Deferred-pool calculation propagates subsidy errors through `ValidateContextError::InvalidSubsidy` rather than substituting zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `ReadRequest::SolutionRate::num_blocks` is now `Option<usize>`: use `Some` for an explicit window or `None` to select the consensus averaging window after the requested height is clamped to the snapshotted tip ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `Config::{db_path, non_finalized_state_backup_dir}` include configured Testnet wire magic in storage namespaces. Resynchronize existing custom Testnets; Mainnet, public Testnet, and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `ReadRequest` and `ReadResponse`, which are not `#[non_exhaustive]`, gain `SpentOutputs` variants that return the transparent outputs spent by a block's non-coinbase inputs. Consumers that match on them exhaustively must handle the new variants. ([#11472](https://github.com/ZcashFoundation/zebra/pull/11472))
+- Updated `sapling-crypto` to 0.9, whose `Node` appears in `ReadResponse::SaplingSubtrees` ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
+### Changed
+
+- From NU7 activation, the state credits the NSM with 60% of aggregate transaction fees, rounded down. From the configured NSM reissuance height, contextual payout validation uses the exact parent reserve and rejects coinbases that claim the withheld fees ([#11487](https://github.com/ZcashFoundation/zebra/pull/11487), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- [ZIP 218](https://zips.z.cash/zip-0218) widens the difficulty averaging window from 17 to 102 blocks at NU7 ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- `ReadRequest::ChainInfo` bounds timestamps by network-specific median-time rules and the local two-hour future limit, rejecting empty ranges. Testnet minimum-difficulty timestamps follow the candidate upgrade: six target spacings before NU7 and eighteen from NU7, requiring a gap strictly greater than 450 seconds under the approved amendment in [zips#1382](https://github.com/zcash/zips/pull/1382). Templates retain standard difficulty when the threshold exceeds the timestamp representation ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+
 ## [14.0.0] - 2026-09-23
 
 ### Breaking Changes
@@ -34,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Security
 
-- A peer that serves a block whose authorizing data does not match its header commitment is now scored at the ban threshold. From NU5 onward the block hash and merkle root commit to transaction effects but not to authorizing data (ZIP-244), so a peer could reuse a canonical header with a forged body and keep the block hash unchanged. Such a body is only rejected by the contextual `hashBlockCommitments` check, whose suggested misbehaviour score was hard-coded to 0, so the peer was never scored and could repeat the forgery for free. `InvalidChainHistoryBlockTxAuthCommitment` now scores 100; every other contextual error keeps a score of 0, because it does not prove the serving peer misbehaved. Blocks queued behind a forged body are rejected with a distinct `AncestorRejected` error that scores 0, so the honest peers that served them are not banned along with the forger.
+- A peer that serves a block whose authorizing data does not match its header commitment is now scored at the ban threshold. From NU5 onward the block hash and merkle root commit to transaction effects but not to authorizing data (ZIP-244), so a peer could reuse a canonical header with a forged body and keep the block hash unchanged. Such a body is only rejected by the contextual `hashBlockCommitments` check, whose suggested misbehaviour score was hard-coded to 0, so the peer was never scored and could repeat the forgery for free. `InvalidChainHistoryBlockTxAuthCommitment` now scores 100; every other contextual error keeps a score of 0, because it does not prove the serving peer misbehaved. Blocks queued behind a forged body are rejected with a distinct `AncestorRejected` error that scores 0, so the honest peers that served them are not banned along with the forger ([GHSA-3c94-hf7p-g5mf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3c94-hf7p-g5mf)). Thanks to @ouicate for reporting the issue.
 
 ## [13.0.0] - 2026-08-10
 
