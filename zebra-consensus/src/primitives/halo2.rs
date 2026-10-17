@@ -343,11 +343,14 @@ static CACHED_VERIFIER_PRE_NU6_2: Lazy<CachedVerifierService> = Lazy::new(|| {
         CACHE_CAPACITY,
         "halo2_pre_nu6_2",
     )
+    .with_flush(super::flush::Verifier::Halo2PreNu6_2)
 });
 
 /// Cached verification at NU6.2 using the public verifier's batch worker.
-static CACHED_VERIFIER_NU6_2: Lazy<CachedVerifierService> =
-    Lazy::new(|| Cached::new(VERIFIER_NU6_2.clone(), CACHE_CAPACITY, "halo2_nu6_2"));
+static CACHED_VERIFIER_NU6_2: Lazy<CachedVerifierService> = Lazy::new(|| {
+    Cached::new(VERIFIER_NU6_2.clone(), CACHE_CAPACITY, "halo2_nu6_2")
+        .with_flush(super::flush::Verifier::Halo2Nu6_2)
+});
 
 /// Cached verification from NU6.3 onward using the public verifier's batch worker.
 static CACHED_VERIFIER_NU6_3_ONWARD: Lazy<CachedVerifierService> = Lazy::new(|| {
@@ -356,6 +359,7 @@ static CACHED_VERIFIER_NU6_3_ONWARD: Lazy<CachedVerifierService> = Lazy::new(|| 
         CACHE_CAPACITY,
         "halo2_nu6_3_onward",
     )
+    .with_flush(super::flush::Verifier::Halo2Nu6_3)
 });
 
 /// Returns the global Halo2 verifier for the **Orchard-pool** bundle of a **v5** transaction in a
