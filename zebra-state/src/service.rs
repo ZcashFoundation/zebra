@@ -523,7 +523,7 @@ impl StateService {
         let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
         let queued_height = checkpoint_verified.height;
 
-        // Apply pending resets first, so they can't remove the hash of the block sent below.
+        // Apply pending resets first, so they can't fail the block queued below.
         self.drain_finalized_resets();
 
         if let Some(next_height) = self.finalized_reset_next_height {
@@ -537,13 +537,6 @@ impl StateService {
             } else if queued_height == next_height {
                 self.finalized_reset_next_height = None;
             }
-        }
-
-        // If we're close to the final checkpoint, make the block's UTXOs available for
-        // semantic block verification, even when it is in the channel.
-        if self.is_close_to_final_checkpoint(queued_height) {
-            self.non_finalized_block_write_sent_hashes
-                .add_finalized(&checkpoint_verified)
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -629,6 +622,16 @@ impl StateService {
             let last_sent_finalized_block_height = queued_block.0.height;
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
+
+            // If we're close to the final checkpoint, make the block's UTXOs available for
+            // semantic block verification, even when it is in the channel.
+            // Blocks waiting in the queue are not recorded, so they can be downloaded again.
+            if self.block_write_sender.finalized.is_some()
+                && self.is_close_to_final_checkpoint(last_sent_finalized_block_height)
+            {
+                self.non_finalized_block_write_sent_hashes
+                    .add_finalized(&queued_block.0);
+            }
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)

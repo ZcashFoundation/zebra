@@ -934,3 +934,90 @@ fn blocks_above_a_finalized_reset_are_failed() -> Result<()> {
 
     Ok(())
 }
+
+/// Checks that after a finalized reset, a block of the re-sent range that arrives before the
+/// reset height is failed, and the block queued behind it is not known as sent, so both can be
+/// downloaded again and the range still commits.
+#[test]
+fn queued_blocks_after_a_finalized_reset_are_not_known_as_sent() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let ledger_strategy = nu5_ledger_strategy();
+
+    proptest!(
+        ProptestConfig::with_cases(1),
+        |((chain, _count, network, _history_tree) in PreparedChain::default()
+            .with_ledger_strategy(ledger_strategy)
+            .with_valid_commitments()
+            .no_shrink())| {
+            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let honest_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
+            let range = &chain[honest_index..honest_index + 4];
+
+            let runtime = Runtime::new().unwrap();
+            let (mut state, _, _, _) = runtime.block_on(StateService::new(
+                Config::ephemeral(),
+                &network,
+                range[3].height,
+                1_000,
+            ));
+
+            for block in chain.iter().take(honest_index) {
+                state
+                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
+                    .blocking_recv()
+                    .expect("write task responds")
+                    .expect("valid prefix commits");
+            }
+
+            let checkpoint_verified = |index: usize| CheckpointVerifiedBlock::from(range[index].block.clone());
+
+            let twin = coinbase_authorization_twin(&range[0].block);
+            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
+            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1));
+            prop_assert!(twin_rx.blocking_recv().expect("write task responds").is_err());
+            // The write task drops the child after it sends the reset.
+            prop_assert!(child_rx.blocking_recv().is_err());
+
+            // The re-sent range arrives out of order: the third block is ahead of the reset height.
+            prop_assert!(
+                state
+                    .queue_and_commit_to_finalized_state(checkpoint_verified(2))
+                    .blocking_recv()
+                    .expect("state responds")
+                    .is_err(),
+                "block above the reset height is failed"
+            );
+            for index in [0, 1] {
+                state
+                    .queue_and_commit_to_finalized_state(checkpoint_verified(index))
+                    .blocking_recv()
+                    .expect("write task responds")
+                    .expect("honest block commits");
+            }
+            // The fourth block waits in the queue for the failed one.
+            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
+
+            for block in &range[2..] {
+                let response = runtime
+                    .block_on(state.call(Request::KnownBlock(block.hash)))
+                    .expect("KnownBlock succeeds");
+                prop_assert_eq!(response, Response::KnownBlock(None));
+            }
+
+            // When the failed block is downloaded again, the queued one commits behind it.
+            state
+                .queue_and_commit_to_finalized_state(checkpoint_verified(2))
+                .blocking_recv()
+                .expect("write task responds")
+                .expect("honest block commits");
+            prop_assert_eq!(
+                queued_rx.blocking_recv().expect("write task responds").expect("queued block commits"),
+                range[3].hash
+            );
+            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(range[3].height));
+        }
+    );
+
+    Ok(())
+}
