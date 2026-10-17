@@ -197,6 +197,151 @@ async fn connection_run_loop_message_ok() {
     assert_eq!(outbound_message, None);
 }
 
+/// An empty mempool reply releases the connection before the request timeout.
+#[tokio::test(start_paused = true)]
+async fn empty_mempool_reply_unblocks_queued_block_request() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, _inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+
+    let (mempool_tx, mempool_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::MempoolTransactionIds,
+            tx: mempool_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Mempool),
+    );
+
+    let hash = zebra_chain::block::Hash([1; 32]);
+    let (block_tx, block_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::BlockDownload {
+                hash,
+                advertiser: None,
+            },
+            tx: block_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(outbound.next().now_or_never().is_none());
+
+    peer_tx.send(Ok(Message::Inv(Vec::new()))).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        assert_eq!(
+            mempool_rx.await.unwrap().unwrap(),
+            Response::TransactionIds(Vec::new()),
+        );
+        assert_eq!(
+            outbound.next().await,
+            Some(Message::GetData(vec![InventoryHash::Block(hash)])),
+        );
+    })
+    .await
+    .expect("an empty mempool reply must release the queued block request without a timeout");
+
+    assert!(error_slot.try_get_error().is_none());
+    drop(block_rx);
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// A late empty mempool reply must not finish a later block-locator request.
+#[tokio::test(start_paused = true)]
+async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, _inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+
+    let (mempool_tx, mempool_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::MempoolTransactionIds,
+            tx: mempool_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Mempool),
+    );
+    drop(mempool_rx);
+
+    let (find_tx, mut find_rx) = oneshot::channel();
+    client_tx
+        .send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: Vec::new(),
+                stop: None,
+            },
+            tx: find_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::GetBlocks {
+            known_blocks: Vec::new(),
+            stop: None,
+        }),
+    );
+
+    peer_tx.send(Ok(Message::Inv(Vec::new()))).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), &mut find_rx)
+            .await
+            .is_err(),
+        "the late empty mempool reply must leave the block-locator request pending",
+    );
+
+    let hashes = vec![
+        zebra_chain::block::Hash([1; 32]),
+        zebra_chain::block::Hash([2; 32]),
+    ];
+    peer_tx
+        .send(Ok(Message::Inv(
+            hashes.iter().copied().map(InventoryHash::Block).collect(),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), find_rx)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        Response::BlockHashes(hashes),
+    );
+
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
 /// Test that the connection run loop fails correctly when dropped
 #[tokio::test]
 async fn connection_run_loop_future_drop() {

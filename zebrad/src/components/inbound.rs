@@ -613,7 +613,6 @@ impl Service<zn::Request> for Inbound {
             // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
-                    mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
                     _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                 })
