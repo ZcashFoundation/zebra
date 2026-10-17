@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce block-verification overhead for transactions with a single external transparent input.
+time: 2026-10-17T14:29:49.00356053+02:00
