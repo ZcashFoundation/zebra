@@ -96,6 +96,14 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
+    /// No peer delivered the block before the download round's deadline.
+    ///
+    /// The round covers waiting for a peer that might have the block, retries, and both hedged
+    /// requests. The syncer treats this like a missing block: a hedged request that already
+    /// failed with `NotFound` can still be waiting for its sibling when the deadline drops both.
+    #[error("block download round timed out: {hash:?}")]
+    DownloadTimedOut { hash: block::Hash },
+
     /// A downloaded block was a long way ahead of the state chain tip.
     /// This error should be very rare during normal operation.
     ///
@@ -399,7 +407,8 @@ where
                             .record(download_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = timeout_at(deadline, block_req) => rsp?
+                    rsp = timeout_at(deadline, block_req) => rsp
+                        .map_err(|_| BlockDownloadVerifyError::DownloadTimedOut { hash })?
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 

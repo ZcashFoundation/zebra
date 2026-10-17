@@ -2170,6 +2170,35 @@ async fn download_failed_is_only_requeued_for_not_found() {
     );
 }
 
+/// A download round that expires is re-requested like a missing block, instead of restarting sync.
+///
+/// When one hedged request fails with `NotFound`, it waits for its sibling, so the round deadline
+/// can drop that `NotFound`.
+#[tokio::test]
+async fn download_round_timeout_is_requeued_without_restart() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let timed_out_hash = block::Hash::from([0xA5; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadTimedOut {
+            hash: timed_out_hash,
+        }))
+        .expect("a download round timeout is non-fatal and must not restart the syncer");
+
+    assert!(
+        chain_sync.reobtain_hashes.contains(&timed_out_hash),
+        "a block no peer delivered within the download round must be re-queued"
+    );
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "a timed out download must not score any peer"
+    );
+}
+
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
 /// height limit must NOT score the peer that served it, while consensus-invalid
 /// blocks still must.

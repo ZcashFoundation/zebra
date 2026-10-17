@@ -1275,6 +1275,8 @@ where
         // next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`:
         // - `DownloadFailed`/`NotFound`: no peer delivered the block, which wedges the checkpoint
         //   frontier until the verify timeout (#5709).
+        // - `DownloadTimedOut`: no peer delivered the block within the download round. One hedged
+        //   request can already have failed with `NotFound` while its sibling was still waiting.
         // - `BehindTipHeightLimit`: the body was not a usable block for this hash, so the hash is
         //   still missing (GHSA-g95h-hw6g-pvgv). This re-request runs whether or not the peer could
         //   be attributed, and covers the window before a score reaches the address book, which
@@ -1297,6 +1299,7 @@ where
             {
                 Some(*hash)
             }
+            Err(BlockDownloadVerifyError::DownloadTimedOut { hash }) => Some(*hash),
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
             Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
                 if Self::is_utxo_lookup_timeout(e) =>
@@ -1535,6 +1538,10 @@ where
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+            BlockDownloadVerifyError::DownloadTimedOut { .. } => {
+                debug!(error = ?e, "no peer delivered the block within the download round, re-requesting, continuing");
                 false
             }
 
