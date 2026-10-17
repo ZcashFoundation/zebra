@@ -5,7 +5,6 @@ use std::{
     iter, mem,
 };
 
-use multimap::MultiMap;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
@@ -50,17 +49,17 @@ pub struct QueuedBlocks {
 /// Blocks with the same transaction create the same outpoints, so an outpoint is only
 /// forgotten when the last block that creates it is removed.
 #[derive(Debug, Default)]
-struct KnownUtxos(MultiMap<transparent::OutPoint, transparent::Utxo>);
+struct KnownUtxos(HashMap<transparent::OutPoint, Vec<transparent::Utxo>>);
 
 impl KnownUtxos {
     /// Records that one more block creates `outpoint`.
     fn insert(&mut self, outpoint: transparent::OutPoint, utxo: transparent::Utxo) {
-        self.0.insert(outpoint, utxo);
+        self.0.entry(outpoint).or_default().push(utxo);
     }
 
     /// Records that one fewer block creates `outpoint`, and forgets it when none do.
     fn remove(&mut self, outpoint: &transparent::OutPoint) {
-        if let Some(utxos) = self.0.get_vec_mut(outpoint) {
+        if let Some(utxos) = self.0.get_mut(outpoint) {
             utxos.pop();
             if utxos.is_empty() {
                 self.0.remove(outpoint);
@@ -69,7 +68,10 @@ impl KnownUtxos {
     }
 
     fn get(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        self.0.get(outpoint).cloned()
+        self.0
+            .get(outpoint)
+            .and_then(|utxos| utxos.first())
+            .cloned()
     }
 
     #[cfg(test)]
@@ -262,6 +264,7 @@ impl QueuedBlocks {
     /// Doesn't update the metrics, because it is only used when the state is being dropped.
     pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedSemanticallyVerified> {
         self.known_utxos.0.clear();
+        self.known_utxos.0.shrink_to_fit();
         self.by_parent.clear();
         self.by_parent.shrink_to_fit();
         self.by_height.clear();
@@ -411,6 +414,7 @@ impl SentHashes {
         });
 
         self.sent.shrink_to_fit();
+        self.known_utxos.0.shrink_to_fit();
         self.bufs.shrink_to_fit();
 
         self.update_metrics_for_cache();

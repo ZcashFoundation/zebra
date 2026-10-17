@@ -307,3 +307,27 @@ fn queued_blocks_keep_shared_outpoints_until_last_owner_is_dequeued() -> Result<
 
     Ok(())
 }
+
+/// Adding a sent block again releases its earlier outpoints, so removing it once forgets them.
+#[test]
+fn sent_hashes_readd_does_not_keep_outpoints() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let prepared = block.prepare();
+    let outpoint = *prepared
+        .new_outputs
+        .keys()
+        .next()
+        .expect("block has outputs");
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared);
+    sent.add(&prepared);
+
+    sent.remove(&prepared.hash);
+    assert!(sent.utxo(&outpoint).is_none());
+
+    Ok(())
+}
