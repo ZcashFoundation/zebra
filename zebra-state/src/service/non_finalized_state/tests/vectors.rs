@@ -1759,3 +1759,36 @@ fn fork_limit_is_higher_on_test_networks() -> Result<()> {
 
     Ok(())
 }
+
+/// The backup task writes each block once, even when several chains share it.
+#[test]
+fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for i in 0..3u8 {
+        let sibling = block1.make_fake_child().set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+    assert_eq!(3, state.chain_count());
+
+    // Claim every block is already backed up, so nothing should be written.
+    let backup_dir = tempfile::tempdir()?;
+    let backup_blocks = state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        .map(|block| (block.hash, backup_dir.path().join("unused")))
+        .collect();
+    super::super::backup::update_non_finalized_state_backup(
+        backup_dir.path(),
+        &state,
+        backup_blocks,
+    );
+
+    assert_eq!(0, std::fs::read_dir(backup_dir.path())?.count());
+
+    Ok(())
+}
