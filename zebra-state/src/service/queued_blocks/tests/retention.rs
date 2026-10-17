@@ -344,6 +344,7 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
             Default::default(),
         )
         .unwrap();
+        let spent_storage = Arc::downgrade(&contextual.spent_outputs);
         let budget =
             usize::try_from(MAX_CHECKPOINT_BYTE_COUNT).unwrap() * MAX_NON_FINALIZED_CHAIN_FORKS;
         let submissions = budget / spent_script_bytes + 1;
@@ -397,6 +398,7 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
             queue.blocks.len() < submissions,
             "byte pressure must evict below the count cap"
         );
+        assert_eq!(spent_storage.strong_count(), queue.blocks.len());
         assert!(queue
             .blocks
             .values()
@@ -417,6 +419,10 @@ async fn cached_orphan_spent_outputs_share_the_byte_bound() {
             .prune_by_height(Height(2));
         assert!(state.non_finalized_state_queued_blocks.blocks.is_empty());
         assert_indexes(&state.non_finalized_state_queued_blocks);
+        assert!(
+            spent_storage.upgrade().is_none(),
+            "pruning must release cached verdict ownership"
+        );
         let next = parent.make_fake_child();
         drop(state.queue_and_commit_to_non_finalized_state(next.clone().prepare(), None, None));
         assert!(state.non_finalized_state_queued_blocks.has(next.hash()));

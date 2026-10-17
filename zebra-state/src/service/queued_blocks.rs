@@ -69,7 +69,7 @@ impl QueuedBlocks {
     /// The caller must dispatch ready blocks, then call [`Self::prune_overflow`] before returning.
     /// The queue can temporarily exceed its limits by this one incoming block, without awaiting.
     /// This lets a commit-ready parent release a full queue of children before applying the limits.
-    #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
+    #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
@@ -308,11 +308,11 @@ impl SentHashes {
     /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
     pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
         let mut sent_hashes = Self::default();
-        for (_, block) in non_finalized_state
+        for block in non_finalized_state
             .chain_iter()
-            .flat_map(|c| c.blocks.clone())
+            .flat_map(|chain| chain.blocks.values())
         {
-            sent_hashes.add(&block.into());
+            sent_hashes.add_outputs(block.hash, block.height, &block.new_outputs);
         }
 
         if !sent_hashes.sent.is_empty() {
@@ -328,9 +328,18 @@ impl SentHashes {
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
+        self.add_outputs(block.hash, block.height, &block.new_outputs);
+    }
+
+    /// Stores borrowed block metadata without materializing another verified block.
+    fn add_outputs(
+        &mut self,
+        hash: block::Hash,
+        height: block::Height,
+        new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) {
         // Track known UTXOs in sent blocks.
-        let outpoints = block
-            .new_outputs
+        let outpoints = new_outputs
             .iter()
             .map(|(outpoint, ordered_utxo)| {
                 self.known_utxos
@@ -340,10 +349,10 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((block.hash, block.height));
-        self.sent.insert(block.hash, outpoints);
+        self.curr_buf.push_back((hash, height));
+        self.sent.insert(hash, outpoints);
 
-        self.update_metrics_for_block(block.height);
+        self.update_metrics_for_block(height);
     }
 
     /// Stores the checkpoint verified `block`'s hash, height, and UTXOs, so they can be used to check if a
