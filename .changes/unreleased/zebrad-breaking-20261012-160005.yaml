@@ -1,0 +1,7 @@
+project: zebrad
+kind: breaking
+body: >-
+  Peer network metrics no longer have per-peer `addr`, `remote_ip` or `user_agent` labels,
+  which bounds the number of Prometheus series; dashboards and alerts that select or group by
+  these labels need updating, as the bundled Grafana dashboards are.
+time: 2026-10-12T16:00:05.000000000+02:00

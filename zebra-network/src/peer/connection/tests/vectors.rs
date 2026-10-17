@@ -5,8 +5,8 @@
 //!   - inbound message, but not a request (or a response)
 
 use std::{
-    collections::HashSet,
-    sync::Arc,
+    collections::{HashMap, HashSet},
+    sync::{atomic::Ordering, Arc, Mutex},
     task::Poll,
     time::{Duration, Instant},
 };
@@ -15,6 +15,10 @@ use futures::{
     channel::{mpsc, oneshot},
     sink::SinkMapErr,
     FutureExt, SinkExt, StreamExt,
+};
+use metrics::{
+    atomics::AtomicU64, Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString,
+    Unit,
 };
 use tower::load_shed::error::Overloaded;
 use tracing::Span;
@@ -29,7 +33,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     constants::{MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, REQUEST_TIMEOUT},
     peer::{
-        connection::{overload_drop_connection_probability, Connection, State},
+        connection::{overload_drop_connection_probability, Connection, Handler, State},
         ClientRequest, ErrorSlot,
     },
     protocol::{
@@ -39,6 +43,170 @@ use crate::{
     types::Nonce,
     PeerError, Request, Response,
 };
+
+#[derive(Default)]
+struct ConnectionStateRecorder {
+    gauges: Mutex<HashMap<String, Arc<AtomicU64>>>,
+}
+
+impl ConnectionStateRecorder {
+    fn state(&self, command: &str) -> f64 {
+        let gauges = self
+            .gauges
+            .lock()
+            .expect("test recorder mutex is unpoisoned");
+        f64::from_bits(
+            gauges
+                .get(command)
+                .expect("the connection recorded this state")
+                .load(Ordering::Relaxed),
+        )
+    }
+}
+
+impl Recorder for ConnectionStateRecorder {
+    fn describe_counter(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+    fn describe_gauge(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+    fn describe_histogram(&self, _key: KeyName, _unit: Option<Unit>, _description: SharedString) {}
+
+    fn register_counter(&self, _key: &Key, _metadata: &Metadata<'_>) -> Counter {
+        Counter::noop()
+    }
+
+    fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
+        if key.name() != "zebra.net.connection.state" {
+            return Gauge::noop();
+        }
+
+        let mut labels = key.labels();
+        let command = labels.next().expect("connection state has a command label");
+        assert_eq!(command.key(), "command");
+        assert!(
+            labels.next().is_none(),
+            "state must not have per-peer labels"
+        );
+        let mut gauges = self
+            .gauges
+            .lock()
+            .expect("test recorder mutex is unpoisoned");
+        Gauge::from_arc(
+            gauges
+                .entry(command.value().to_owned())
+                .or_default()
+                .clone(),
+        )
+    }
+
+    fn register_histogram(&self, _key: &Key, _metadata: &Metadata<'_>) -> Histogram {
+        Histogram::noop()
+    }
+}
+
+/// Aggregate gauges count concurrent peers and return to zero after transitions and disconnects.
+#[tokio::test]
+async fn connection_state_metrics_return_to_zero() {
+    let _init_guard = zebra_test::init();
+    let recorder = ConnectionStateRecorder::default();
+    let mut series_count = None;
+
+    metrics::with_local_recorder(&recorder, || {
+        for cycle in 0..8 {
+            let (first, mut client_tx, _service, mut outbound_messages, _error_slot) =
+                new_test_connection();
+            let (second, _idle_client_tx, _idle_service, _idle_messages, _idle_error_slot) =
+                new_test_connection();
+            let (mut peer_tx, peer_rx) = mpsc::channel(1);
+            let (mut idle_peer_tx, idle_peer_rx) = mpsc::channel(1);
+            let first = first.run(peer_rx).shared();
+            let second = second.run(idle_peer_rx).shared();
+
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(second.clone().now_or_never(), None);
+            assert_eq!(recorder.state("AwaitingRequest"), 2.0);
+
+            // Polling an unchanged state must not count the same connection twice.
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(recorder.state("AwaitingRequest"), 2.0);
+
+            let (response_tx, mut response_rx) = oneshot::channel();
+            client_tx
+                .try_send(ClientRequest {
+                    request: Request::Peers,
+                    tx: response_tx,
+                    inv_collector: None,
+                    transient_addr: None,
+                    span: Span::none(),
+                })
+                .expect("the connection is listening for client requests");
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(
+                outbound_messages.try_recv().expect("the request was sent"),
+                Message::GetAddr,
+            );
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(recorder.state("AwaitingRequest"), 1.0);
+            assert_eq!(recorder.state("AwaitingResponse(Peers)"), 1.0);
+
+            peer_tx
+                .try_send(Ok(Message::Addr(Vec::new())))
+                .expect("the connection is listening for peer messages");
+            assert_eq!(first.clone().now_or_never(), None);
+            assert_eq!(
+                response_rx
+                    .try_recv()
+                    .expect("the response channel is open")
+                    .expect("the response was sent")
+                    .expect("the peer returned a valid response"),
+                Response::Peers(Vec::new()),
+            );
+            assert_eq!(recorder.state("AwaitingRequest"), 2.0);
+            assert_eq!(recorder.state("AwaitingResponse(Peers)"), 0.0);
+
+            // Exercise both normal disconnects and cancellation of a live connection.
+            if cycle % 2 == 0 {
+                peer_tx.close_channel();
+                assert_eq!(first.clone().now_or_never(), Some(()));
+            }
+            drop(first);
+            assert_eq!(recorder.state("AwaitingRequest"), 1.0);
+
+            // Distinct transport error messages must not create distinct state series.
+            idle_peer_tx
+                .try_send(Err(
+                    std::io::Error::other(format!("peer failure {cycle}")).into()
+                ))
+                .expect("the idle connection is listening for peer messages");
+            assert_eq!(second.clone().now_or_never(), Some(()));
+            drop(second);
+            drop(new_test_connection().0);
+
+            let gauges = recorder
+                .gauges
+                .lock()
+                .expect("test recorder mutex is unpoisoned");
+            assert!(gauges
+                .values()
+                .all(|value| f64::from_bits(value.load(Ordering::Relaxed)) == 0.0));
+            assert_eq!(*series_count.get_or_insert(gauges.len()), gauges.len());
+        }
+    });
+}
+
+#[test]
+fn connection_state_commands_omit_serialization_details() {
+    for detail in ["first peer failure", "second peer failure"] {
+        let handler = Handler::Finished(Err(PeerError::Serialization(
+            std::io::Error::other(detail).into(),
+        )));
+        assert_eq!(handler.command(), "Finished(Serialization)");
+        assert!(
+            handler.to_string().contains(detail),
+            "logs retain error details",
+        );
+    }
+}
 
 /// Test that the connection run loop works as a future
 #[tokio::test]
