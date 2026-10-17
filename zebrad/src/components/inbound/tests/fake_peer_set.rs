@@ -15,7 +15,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::Network::{self, *},
     serialization::{DateTime32, ZcashDeserializeInto},
-    transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{Hash as TxHash, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{
     error::TransactionError, router::RouterError, transaction, Config as ConsensusConfig,
@@ -40,7 +40,7 @@ use crate::{
     components::{
         inbound::{
             downloads::{HeightLimitError, MAX_INBOUND_CONCURRENCY},
-            Inbound, InboundSetupData,
+            Inbound, InboundSetupData, GETDATA_MAX_TRANSACTION_COUNT,
         },
         mempool::{
             gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
@@ -121,6 +121,79 @@ async fn mempool_requests_for_transactions() {
             )
         }
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
+    };
+
+    // check that nothing unexpected happened
+    peer_set.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        sync_gossip_result.is_none(),
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        tx_gossip_result.is_none(),
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
+    );
+}
+
+/// Check that a transaction request with more IDs than [`GETDATA_MAX_TRANSACTION_COUNT`] is
+/// capped before the mempool lookup, so the response (including `Missing` entries) covers only
+/// the capped set, matching the block path.
+///
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/10566>.
+#[tokio::test(flavor = "multi_thread")]
+async fn inbound_transactions_by_id_request_is_capped() {
+    let (
+        inbound_service,
+        _mempool_guard,
+        _committed_blocks,
+        _added_transactions,
+        _mock_tx_verifier,
+        mut peer_set,
+        _state_guard,
+        _chain_tip_change,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+
+    // A request for twice the cap, all for transactions the mempool doesn't have.
+    let req_tx_ids: HashSet<UnminedTxId> = (0..2 * GETDATA_MAX_TRANSACTION_COUNT as u32)
+        .map(|i| {
+            let mut bytes = [0u8; 32];
+            bytes[..4].copy_from_slice(&i.to_le_bytes());
+            UnminedTxId::from_legacy_id(TxHash(bytes))
+        })
+        .collect();
+    assert_eq!(req_tx_ids.len(), 2 * GETDATA_MAX_TRANSACTION_COUNT);
+
+    let response = inbound_service
+        .clone()
+        .oneshot(Request::TransactionsById(req_tx_ids.clone()))
+        .await;
+
+    match response {
+        Ok(Response::Transactions(response)) => {
+            // Only the capped set is looked up and reported missing;
+            // the rest of the request is ignored.
+            assert_eq!(response.len(), GETDATA_MAX_TRANSACTION_COUNT);
+            for tx in &response {
+                match tx {
+                    Missing(id) => assert!(
+                        req_tx_ids.contains(id),
+                        "every reported ID must come from the request"
+                    ),
+                    Available(_) => {
+                        panic!("the mempool has none of the requested transactions")
+                    }
+                }
+            }
+        }
+        _ => unreachable!(
+            "`TransactionsById` requests should always respond `Ok(Vec<InventoryResponse>)`, got {response:?}"
+        ),
     };
 
     // check that nothing unexpected happened
