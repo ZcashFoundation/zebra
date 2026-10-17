@@ -5041,6 +5041,7 @@ dependencies = [
  "metrics",
  "once_cell",
  "orchard",
+ "parking_lot",
  "rand 0.10.2",
  "rayon",
  "sapling-crypto",
