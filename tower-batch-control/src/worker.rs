@@ -254,7 +254,17 @@ where
                         let span = msg.span;
                         let is_new_batch = self.pending_items_weight == 0;
 
-                        self.process_req(msg.request, msg.tx)
+                        let request = match msg.request {
+                            BatchControl::Item(request) => request,
+                            BatchControl::Flush => {
+                                // A zero-weight item still creates a pending batch.
+                                if self.pending_batch_timer.is_some() {
+                                    self.flush_service().instrument(span).await;
+                                }
+                                continue;
+                            }
+                        };
+                        self.process_req(request, msg.tx.expect("item messages have a response sender"))
                             // Apply the provided span to request processing.
                             .instrument(span)
                             .await;
@@ -398,9 +408,9 @@ where
 
         // Fail queued requests
         while let Ok(msg) = self.rx.try_recv() {
-            let _ = msg
-                .tx
-                .send(Err(self.failed.as_ref().expect("just set failed").clone()));
+            if let Some(tx) = msg.tx {
+                let _ = tx.send(Err(self.failed.as_ref().expect("just set failed").clone()));
+            }
         }
 
         // Clear any finished batches, ignoring any errors.

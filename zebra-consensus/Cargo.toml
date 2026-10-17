@@ -47,6 +47,7 @@ rayon = { workspace = true }
 chrono = { workspace = true }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 futures = { workspace = true }
 futures-util = { workspace = true }
