@@ -42,7 +42,8 @@ fn excludes_tx_with_unselected_dependencies() {
             mempool_tx_deps,
             None,
             None,
-        ),
+        )
+        .unwrap(),
         vec![],
         "should not select any transactions when dependencies are unavailable"
     );
@@ -83,7 +84,8 @@ fn includes_tx_with_selected_dependencies() {
         mempool_tx_deps.clone(),
         None,
         None,
-    );
+    )
+    .unwrap();
 
     assert_eq!(
         selected_txs.len(),
@@ -137,6 +139,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
             None,
             None,
         )
+        .unwrap()
         .len(),
         1,
         "should select a transaction exactly filling the safe block budget"
@@ -153,7 +156,8 @@ fn reserves_space_for_block_header_and_transaction_count() {
             TransactionDependencies::default(),
             None,
             None,
-        ),
+        )
+        .unwrap(),
         vec![],
         "should not select a transaction one byte over the safe block budget"
     );
@@ -252,7 +256,8 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         TransactionDependencies::default(),
         Some(&cache),
         Some(Amount::zero()),
-    );
+    )
+    .unwrap();
     assert_eq!(
         selected.len(),
         (330 - coinbase_counts.shielded_cost()) / 4,

@@ -457,7 +457,6 @@ impl StartCmd {
                 .service(BoxService::new(block_verifier_router.clone())),
             miner_params,
         );
-        let mempool_background_work = mempool.background_work();
 
         // Subscribe as soon as possible to not miss any events
         let mempool_change_receiver = mempool_transaction_subscriber.subscribe();
@@ -631,7 +630,6 @@ impl StartCmd {
         let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(
             mempool.clone(),
             mempool_transaction_verified,
-            mempool_background_work,
             latest_chain_tip.clone(),
         );
 

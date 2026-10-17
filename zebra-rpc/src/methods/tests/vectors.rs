@@ -2973,7 +2973,8 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                 Default::default(),
                 Some(&cache),
                 Some(pools.nsm_amount()),
-            );
+            )
+            .unwrap();
             let make_template = |fees: i64| {
                 let mut transaction = Mainnet
                     .unmined_transactions_in_blocks(..)
@@ -2989,6 +2990,7 @@ async fn rpc_nsm_subsidy_and_same_height_templates_follow_parent_reserve() {
                     vec![transaction],
                     None,
                 )
+                .unwrap()
             };
             // Three and four zatoshis have the same miner share. Returning to three exercises
             // a cached response without confusing the gross fee with the coinbase payout.
@@ -3180,7 +3182,8 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         LongPollInput::new(fake_tip_height, fake_tip_hash, fake_max_time, []).generate_id(),
         vec![],
         None,
-    );
+    )
+    .unwrap();
     let (_templates, receiver) = watch::channel(Some(Arc::new(template)));
     let (requests, _overrides) = mpsc::channel(1);
     let rpc = rpc.with_block_templates(receiver, requests);
@@ -3808,6 +3811,7 @@ async fn getblocktemplate_clock_rollback_serves_valid_work() {
                     vec![],
                     None,
                 )
+                .unwrap()
             }
         })
         .await
@@ -3968,6 +3972,7 @@ async fn getblocktemplate_long_poll_expires_once() {
                 vec![],
                 None,
             )
+            .unwrap()
         };
         let template = make_template(&chain_info);
         let (templates, receiver) = watch::channel(Some(Arc::new(template.clone())));
@@ -4054,110 +4059,6 @@ async fn getblocktemplate_long_poll_expires_once() {
         assert_eq!(response.submit_old, Some(false));
         queue.abort();
     }
-}
-
-/// Checks that `getblocktemplate` doesn't serve a precomputed template for a block the state has
-/// already committed, even while the chain tip channel still names that block's parent.
-///
-/// The state's write task publishes a committed block to the read state before it updates the chain
-/// tip channel (`update_latest_chain_channels()`), so there is an interval where `ReadRequest::Tip`
-/// and `ReadRequest::ChainInfo` report the new tip and `latest_chain_tip` still reports the old one.
-/// A precomputed template for the old tip is stale work in that interval: the node has extended the
-/// chain itself, and every share a miner computes on it is wasted.
-///
-/// The interval is microseconds wide in production, so this test holds it open instead: the mock
-/// chain tip never advances past the first tip, while the state reports the second one.
-#[tokio::test(flavor = "multi_thread")]
-async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_state() {
-    let _init_guard = zebra_test::init();
-
-    let net = Network::Mainnet;
-
-    let request_delay = Duration::from_secs(30);
-    let mempool: MockService<_, _, _, BoxError> = MockService::build()
-        .with_max_request_delay(request_delay)
-        .for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
-        .with_max_request_delay(request_delay)
-        .for_unit_tests();
-
-    let mut mock_sync_status = MockSyncStatus::default();
-    mock_sync_status.set_is_close_to_tip(true);
-
-    let mining_conf = mining::Config {
-        miner_address: Some(ZcashAddress::from_transparent_p2pkh(
-            NetworkType::from(NetworkKind::from(&net)),
-            [0x7e; 20],
-        )),
-        extra_coinbase_data: None,
-        miner_memo: None,
-        internal_miner: false,
-    };
-
-    let tip_height = NetworkUpgrade::Nu5
-        .activation_height(&net)
-        .expect("nu5 activation height");
-    let tip_hash =
-        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
-
-    // The block the state commits while the chain tip channel still reports its parent.
-    let committed_height = tip_height.next().expect("height is below Height::MAX");
-    let committed_hash =
-        Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
-
-    let (mock_tip, mock_tip_sender) = MockChainTip::new();
-    mock_tip_sender.send_best_tip_height(tip_height);
-    mock_tip_sender.send_best_tip_hash(tip_hash);
-    mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
-
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
-        net.clone(),
-        mining_conf,
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool.clone(), 1),
-        state.clone(),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        mock_sync_status,
-        mock_tip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    let (templates, receiver) = watch::channel(Some(Arc::new(template_extending(
-        &net, tip_height, tip_hash,
-    ))));
-    let (requests, _overrides) = mpsc::channel(1);
-    let rpc = rpc.with_block_templates(receiver, requests);
-    let waiting = rpc.get_block_template(None);
-    tokio::pin!(waiting);
-    tokio::select! {
-        biased;
-        _ = &mut waiting => panic!("the published work is for a superseded tip"),
-        request = read_state.expect_request(ReadRequest::Tip) => {
-            request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
-        }
-    }
-    assert!(futures::poll!(&mut waiting).is_pending());
-    templates.send_replace(Some(Arc::new(template_extending(
-        &net,
-        committed_height,
-        committed_hash,
-    ))));
-    let (served, ()) = tokio::join!(waiting, async {
-        read_state
-            .expect_request(ReadRequest::Tip)
-            .await
-            .respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
-    });
-    let served = served.unwrap().try_into_template().unwrap();
-    assert_eq!(served.previous_block_hash, committed_hash);
-    assert_eq!(served.height, committed_height.0 + 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -5507,14 +5408,12 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
             .await
             .respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
     },);
-    assert_eq!(
-        served
-            .expect("the new tip's template should be served")
-            .try_into_template()
-            .unwrap()
-            .previous_block_hash,
-        committed_hash,
-    );
+    let served = served
+        .expect("the new tip's template should be served")
+        .try_into_template()
+        .unwrap();
+    assert_eq!(served.previous_block_hash, committed_hash);
+    assert_eq!(served.height, committed_height.0 + 1);
 }
 
 /// Caller-specific generation preserves randomized coinbases and never changes the default payout.
@@ -5558,7 +5457,8 @@ async fn generate_overrides_do_not_change_default_templates() {
         long_poll_id,
         vec![],
         None,
-    );
+    )
+    .unwrap();
     let (_templates, receiver) = watch::channel(Some(Arc::new(default_template.clone())));
     let (requests, mut overrides) = mpsc::channel::<BlockTemplateRequest>(1);
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -5612,6 +5512,7 @@ async fn generate_overrides_do_not_change_default_templates() {
                     vec![],
                     None,
                 )
+                .unwrap()
             })
             .await
             .unwrap();
@@ -5697,6 +5598,7 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
         vec![],
         None,
     )
+    .unwrap()
 }
 
 /// A contended address book must not prevent other RPC runtime tasks from progressing.

@@ -1053,18 +1053,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             vec![],
             None,
         )
+        .unwrap()
     };
-    let (templates, receiver) =
-        tokio::sync::watch::channel(Some(Arc::new(make_template(&chain_info))));
-    let (requests, _overrides) = tokio::sync::mpsc::channel(1);
-    let rpc = rpc.with_block_templates(receiver, requests);
-    let GetBlockTemplateResponse::TemplateMode(block_template) =
-        rpc.get_block_template(None).await?
-    else {
-        panic!(
-            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
-        )
-    };
+    let block_template = make_template(&chain_info);
 
     let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
@@ -1127,16 +1118,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
 
     // Gets the next block template
-    templates.send_replace(Some(Arc::new(make_template(
-        &fetch_chain_info(read_state.clone()).await?,
-    ))));
-    let GetBlockTemplateResponse::TemplateMode(block_template) =
-        rpc.get_block_template(None).await?
-    else {
-        panic!(
-            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
-        )
-    };
+    let block_template = make_template(&fetch_chain_info(read_state.clone()).await?);
 
     let valid_original_block_template = block_template.clone();
 
@@ -1404,7 +1386,7 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
     );
 
     let chain_info = fetch_chain_info(read_state.clone()).await?;
-    let template = BlockTemplateResponse::from_transactions(
+    let block_template = BlockTemplateResponse::from_transactions(
         &network,
         &CoinbaseCache::default(),
         &miner_params,
@@ -1418,15 +1400,8 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         .generate_id(),
         vec![],
         None,
-    );
-    let (_templates, receiver) = tokio::sync::watch::channel(Some(Arc::new(template)));
-    let (requests, _overrides) = tokio::sync::mpsc::channel(1);
-    let rpc = rpc.with_block_templates(receiver, requests);
-    let GetBlockTemplateResponse::TemplateMode(block_template) =
-        rpc.get_block_template(None).await?
-    else {
-        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
-    };
+    )
+    .unwrap();
 
     let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);

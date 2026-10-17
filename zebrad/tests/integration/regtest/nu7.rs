@@ -1360,7 +1360,8 @@ async fn lockbox_disbursement_above_the_pool_is_rejected() -> Result<()> {
             identity,
             vec![],
             None,
-        );
+        )
+        .unwrap();
         let block = proposal_block_from_template(&candidate, None, &network)?;
         assert_eq!(block.coinbase_height(), Some(Height(NU6_1)));
         let output = transparent::Output::new(Amount::try_from(600_000_000)?, recipient.script());

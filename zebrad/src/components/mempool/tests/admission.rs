@@ -39,16 +39,15 @@ type ProposalResponse =
 /// These tests control semantic verification; chain info supplies a supported template era while
 /// parent hashes and final freshness checks still come from the ephemeral committed state.
 pub(super) fn mock_proposals(mempool: &mut Mempool) -> ProposalVerifier {
-    mock_proposals_with_width(mempool, super::super::config::DEFAULT_ADMISSION_SPLIT_WIDTH)
-}
-
-fn mock_proposals_with_width(mempool: &mut Mempool, split_width: usize) -> ProposalVerifier {
-    let verifier = MockService::build().for_unit_tests();
+    // Admission sends proposals from background batches, which a loaded runner can start later
+    // than the mock's default request deadline.
+    let verifier = MockService::build()
+        .with_max_request_delay(Duration::from_secs(10))
+        .for_unit_tests();
     mempool.admission = Admission::new(
         mempool.network.clone(),
         admission_read_state(mempool.state.clone(), &mempool.network),
         Buffer::new(BoxService::new(verifier.clone()), 1),
-        split_width,
     );
     verifier
 }
@@ -68,16 +67,7 @@ fn mock_templates(
     let verifier: ProposalVerifier = MockService::build()
         .with_max_request_delay(Duration::from_secs(10))
         .for_unit_tests();
-    let miner_params = zebra_rpc::MinerParams::from(
-        zcash_keys::address::Address::decode(
-            &mempool.network,
-            zebra_rpc::config::mining::default_miner_address(
-                mempool.network.kind(),
-                &zebra_rpc::config::mining::MinerAddressType::Transparent,
-            ),
-        )
-        .expect("the hard-coded transparent address is valid"),
-    );
+    let miner_params = validation_miner_params(&mempool.network);
 
     let (templates, published, requests) = super::super::block_template::BlockTemplates::new(
         mempool.network.clone(),
@@ -176,17 +166,11 @@ async fn rejected_proposal_does_not_trigger_an_empty_template_fill() {
     let mut proposals = mock_proposals(&mut mempool);
     let coinbase = drive(&mut mempool, templates.expect_request_that(|_| true)).await;
     let tx = candidate();
-    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx));
+    let result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     drive(&mut mempool, proposals.expect_request_that(|_| true))
         .await
-        .respond(Err::<block::Hash, BoxError>(
-            zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
-                zebra_consensus::error::TransactionError::BadBalance,
-            ))
-            .into(),
+        .respond(proposal_error(
+            zebra_consensus::error::TransactionError::BadBalance,
         ));
     assert!(drive(&mut mempool, result).await.unwrap().is_err());
     coinbase.respond(block::Hash([0; 32]));
@@ -219,10 +203,7 @@ async fn self_eviction_does_not_trigger_an_empty_template_fill() {
     let (mut templates, mut published, _requests) = mock_templates(&mut mempool);
     let coinbase = drive(&mut mempool, templates.expect_request_that(|_| true)).await;
     let tx = candidate();
-    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx));
+    let result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
     assert_eq!(
         error.downcast_ref::<MempoolError>(),
@@ -262,10 +243,7 @@ async fn deterministic_proposal_rejection_is_cached_until_the_tip_changes() {
     mempool.enable(&mut recent_syncs).await;
     let mut proposals = mock_proposals(&mut mempool);
     let tx = candidate();
-    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx.clone()));
+    let result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     // Follow the actual CheckProposal -> ValidateProposal -> ValidateContextError path.
     let context = zebra_chain::sapling::Nullifier::from([1; 32]).duplicate_nullifier_error(false);
     drive(&mut mempool, proposals.expect_request_that(|_| true))
@@ -283,13 +261,7 @@ async fn deterministic_proposal_rejection_is_cached_until_the_tip_changes() {
             .is_some(),
         "the first caller keeps the original consensus error"
     );
-    let replay = queue_candidate(&mut mempool, &tx).await.unwrap_err();
-    assert!(matches!(
-        replay.downcast_ref::<MempoolError>(),
-        Some(MempoolError::StorageExactTip(
-            ExactTipRejectionError::FailedProposal { .. }
-        )),
-    ));
+    assert_cached_rejection(&mut mempool, &tx).await;
 
     let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into()
@@ -305,10 +277,7 @@ async fn deterministic_proposal_rejection_is_cached_until_the_tip_changes() {
         .unwrap();
     tip_change.wait_for_tip_change().await.unwrap();
     mempool.dummy_call().await;
-    let retry = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx.clone()));
+    let retry = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     drive(&mut mempool, proposals.expect_request_that(|_| true))
         .await
         .respond(block::Hash([0; 32]));
@@ -398,19 +367,13 @@ async fn proposal_service_failures_are_retryable() {
         .into(),
     ];
     for error in errors {
-        let result = queue_candidate(&mut mempool, &tx).await.unwrap();
-        drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-            .await
-            .respond(transaction::MempoolResponse::from(tx.clone()));
+        let result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
         drive(&mut mempool, proposals.expect_request_that(|_| true))
             .await
             .respond(Err::<block::Hash, BoxError>(error));
         assert!(drive(&mut mempool, result).await.unwrap().is_err());
     }
-    let result = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx.clone()));
+    let result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     drive(&mut mempool, proposals.expect_request_that(|_| true))
         .await
         .respond(block::Hash([0; 32]));
@@ -427,10 +390,7 @@ async fn timed_out_proposal_drains_without_caching_its_late_rejection() {
     mempool.enable(&mut recent_syncs).await;
     let mut proposals = mock_proposals(&mut mempool);
     let tx = candidate();
-    let mut result = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx.clone()));
+    let mut result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     let held = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
     tokio::time::pause();
     tokio::time::advance(
@@ -443,21 +403,15 @@ async fn timed_out_proposal_drains_without_caching_its_late_rejection() {
         Err(oneshot::error::TryRecvError::Empty)
     ));
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
-    held.respond(Err::<block::Hash, BoxError>(
-        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Transaction(
-            zebra_consensus::error::TransactionError::BadBalance,
-        ))
-        .into(),
+    held.respond(proposal_error(
+        zebra_consensus::error::TransactionError::BadBalance,
     ));
     tokio::time::resume();
     let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
     assert!(error
         .downcast_ref::<tokio::time::error::Elapsed>()
         .is_some());
-    let retry = queue_candidate(&mut mempool, &tx).await.unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx.clone()));
+    let retry = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     drive(&mut mempool, proposals.expect_request_that(|_| true))
         .await
         .respond(block::Hash([0; 32]));
@@ -480,15 +434,7 @@ async fn oversized_package_rejection_is_cached() {
         .await
         .respond(transaction::MempoolResponse::from(oversized));
     assert!(drive(&mut mempool, result).await.unwrap().is_err());
-    assert!(matches!(
-        queue_candidate(&mut mempool, &tx)
-            .await
-            .unwrap_err()
-            .downcast_ref::<MempoolError>(),
-        Some(MempoolError::StorageExactTip(
-            ExactTipRejectionError::FailedProposal { .. }
-        )),
-    ));
+    assert_cached_rejection(&mut mempool, &tx).await;
 }
 
 #[tokio::test]
@@ -547,21 +493,7 @@ async fn rejected_proposal_never_releases_outputs_or_gossip() {
         .await
         .unwrap()
         .call(Request::AwaitOutput(outpoint));
-    let Response::Queued(mut queued) = mempool
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
-        .await
-        .unwrap()
-    else {
-        panic!("Queue response expected")
-    };
-    let mut result = queued.remove(0).unwrap();
-    tx_verifier
-        .expect_request_that(|_| true)
-        .await
-        .respond(transaction::MempoolResponse::from(tx));
+    let mut result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     let proposal = drive(
         &mut mempool,
         proposals.expect_request_that(|request| {
@@ -626,17 +558,7 @@ async fn a_failed_verification_does_not_rebuild_the_template() {
     .await;
 
     let tx = candidate();
-    let Response::Queued(mut queued) = mempool
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
-        .await
-        .unwrap()
-    else {
-        panic!("Queue response expected")
-    };
-    let mut result = queued.remove(0).unwrap();
+    let mut result = queue_candidate(&mut mempool, &tx).await.unwrap();
 
     drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
         .await
@@ -705,20 +627,7 @@ async fn an_evicting_insertion_rebuilds_the_template() {
         .unmined_transactions_in_blocks(982_681..=982_681)
         .find(|tx| !tx.transaction.transaction.is_coinbase() && tx.transaction.id != stored_id)
         .expect("the block contains another non-conflicting transaction");
-    let Response::Queued(mut queued) = mempool
-        .ready()
-        .await
-        .unwrap()
-        .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
-        .await
-        .unwrap()
-    else {
-        panic!("Queue response expected")
-    };
-    let result = queued.remove(0).unwrap();
-    drive(&mut mempool, tx_verifier.expect_request_that(|_| true))
-        .await
-        .respond(transaction::MempoolResponse::from(tx));
+    let result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
     let error = drive(&mut mempool, result).await.unwrap().unwrap_err();
     assert_eq!(
         error.downcast_ref::<MempoolError>(),
@@ -761,21 +670,7 @@ async fn stale_proposal_reverifies_without_releasing_its_response() {
         let mut proposals = mock_proposals(&mut mempool);
         let tx = candidate();
         let id = tx.transaction.id;
-        let Response::Queued(mut queued) = mempool
-            .ready()
-            .await
-            .unwrap()
-            .call(Request::Queue(vec![Gossip::Tx(tx.transaction.clone())]))
-            .await
-            .unwrap()
-        else {
-            panic!("Queue response expected")
-        };
-        let mut result = queued.remove(0).unwrap();
-        tx_verifier
-            .expect_request_that(|_| true)
-            .await
-            .respond(transaction::MempoolResponse::from(tx));
+        let mut result = queue_verified(&mut mempool, &mut tx_verifier, &tx, Vec::new()).await;
         let held = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
         let _stale_tip_sender = if lagging_notification {
             let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
@@ -946,7 +841,7 @@ async fn assert_cached_rejection(mempool: &mut Mempool, tx: &VerifiedUnminedTx) 
 
 #[tokio::test]
 async fn failed_batch_is_split_into_concurrent_pieces_until_attributed() {
-    use super::super::config::DEFAULT_ADMISSION_SPLIT_WIDTH as WIDTH;
+    use super::super::admission::ADMISSION_SPLIT_WIDTH as WIDTH;
     use zebra_consensus::error::TransactionError::BadBalance;
 
     let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
@@ -1004,35 +899,6 @@ async fn failed_batch_is_split_into_concurrent_pieces_until_attributed() {
         );
     }
     assert_cached_rejection(&mut mempool, &txs[invalid]).await;
-}
-
-#[tokio::test]
-async fn split_width_is_configurable() {
-    let (mut mempool, _, _, _, mut tx_verifier, mut recent_syncs, _changes) =
-        setup(&Network::Mainnet, u64::MAX, true).await;
-    mempool.enable(&mut recent_syncs).await;
-    let mut proposals = mock_proposals_with_width(&mut mempool, 2);
-    let txs = block_transactions(5);
-    let ids: Vec<_> = txs.iter().map(|tx| tx.transaction.id).collect();
-
-    let results = hold_then_queue(&mut mempool, &mut tx_verifier, &mut proposals, &txs).await;
-    drive(&mut mempool, proposals.expect_request_that(|_| true))
-        .await
-        .respond(proposal_error(
-            zebra_consensus::error::TransactionError::BadBalance,
-        ));
-
-    // A width of 2 splits four candidates into halves, not single candidates.
-    let mut halves = HashSet::new();
-    for _ in 0..2 {
-        let half = drive(&mut mempool, proposals.expect_request_that(|_| true)).await;
-        halves.insert(proposed(half.request()));
-        half.respond(block::Hash([0; 32]));
-    }
-    assert_eq!(halves, ids[1..].chunks(2).map(<[_]>::to_vec).collect());
-    for result in results {
-        drive(&mut mempool, result).await.unwrap().unwrap();
-    }
 }
 
 #[tokio::test]

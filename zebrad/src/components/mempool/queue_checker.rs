@@ -38,10 +38,8 @@ pub(crate) const RATE_LIMIT_DELAY: Duration = Duration::from_secs(5);
 pub struct QueueChecker<Mempool> {
     /// The mempool service that receives crawled transaction IDs.
     mempool: Mempool,
-    /// Notified when a transaction finishes verifying.
+    /// Notified when downloads or retained background work can make progress.
     transaction_verified: Arc<Notify>,
-    /// Wakes the service when its retained background futures can make progress.
-    background_work: Arc<mempool::BackgroundWork>,
     /// Wakes the service when committed-chain notifications change.
     latest_chain_tip: LatestChainTip,
 }
@@ -56,13 +54,11 @@ where
     pub(crate) fn spawn(
         mempool: Mempool,
         transaction_verified: Arc<Notify>,
-        background_work: Arc<mempool::BackgroundWork>,
         latest_chain_tip: LatestChainTip,
     ) -> JoinHandle<Result<(), BoxError>> {
         let queue_checker = QueueChecker {
             mempool,
             transaction_verified,
-            background_work,
             latest_chain_tip,
         };
 
@@ -84,7 +80,6 @@ where
             tokio::select! {
                 // Notifications arriving during a check retain a permit for this next wait.
                 _ = self.transaction_verified.notified() => {}
-                _ = self.background_work.notify.notified() => {}
                 changed = self.latest_chain_tip.best_tip_changed() => {
                     if changed.is_err() {
                         return Ok(());

@@ -11,7 +11,6 @@ use tokio::sync::oneshot;
 use tower::ServiceExt;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{self, MAX_BLOCK_BYTES},
     ironwood, orchard,
     parameters::Network,
@@ -24,7 +23,7 @@ use zebra_chain::{
 use zebra_rpc::{
     config::mining::{self, default_miner_address, MinerAddressType},
     nsm_value_balance_for_next_block, proposal_block_from_template, BlockTemplateResponse,
-    CoinbaseCache, LongPollInput, MinerParams, TransactionTemplate,
+    CoinbaseCache, LongPollInput, MinerParams,
 };
 use zebra_state::{ReadRequest, ReadResponse};
 
@@ -45,6 +44,9 @@ pub(super) const COINBASE_RESERVE_BYTES: usize = 1_000;
 
 /// Signature operations left in a batch for the admission proposal's coinbase.
 pub(super) const COINBASE_RESERVE_SIGOPS: u32 = 20;
+
+/// The number of concurrently checked pieces a failed admission proposal is split into.
+pub(super) const ADMISSION_SPLIT_WIDTH: usize = 4;
 
 /// A deterministic failure of the bounded, mandatory transaction package.
 #[derive(Debug, thiserror::Error)]
@@ -110,7 +112,7 @@ pub(super) enum Verdict {
 ///
 /// Candidates are checked in batches: one proposal holds every waiting candidate that fits in a
 /// block without conflicting with an earlier one. A failed batch is split into up to
-/// `split_width` pieces, which are checked concurrently, until each failure is attributed to a
+/// [`ADMISSION_SPLIT_WIDTH`] pieces, checked concurrently, until each failure is attributed to a
 /// single candidate, so only single-candidate results are reported or cached as rejections.
 ///
 /// A new batch starts only after every piece of the previous one has finished, so the candidates
@@ -127,20 +129,13 @@ pub(super) struct Admission {
     /// Pieces of failed or outdated batches, checked depth-first before any new batch.
     splits: Vec<Vec<Candidate>>,
     /// Proposals retained until their blocking verification work has finished: one batch, or
-    /// up to `split_width` pieces of one.
+    /// up to [`ADMISSION_SPLIT_WIDTH`] pieces of one.
     checks: Vec<Check>,
-    /// The number of pieces a failed batch is split into, and checked at once.
-    split_width: usize,
 }
 
 impl Admission {
     /// Create the private transparent validation context, even on non-mining nodes.
-    pub fn new(
-        network: Network,
-        read_state: ReadState,
-        verifier: BlockVerifier,
-        split_width: usize,
-    ) -> Self {
+    pub fn new(network: Network, read_state: ReadState, verifier: BlockVerifier) -> Self {
         let miner_params = validation_miner_params(&network);
         Self {
             network,
@@ -151,7 +146,6 @@ impl Admission {
             waiting: Vec::new(),
             splits: Vec::new(),
             checks: Vec::new(),
-            split_width: split_width.max(2),
         }
     }
 
@@ -306,7 +300,7 @@ impl Admission {
             // Any failure of a batch may belong to one of its candidates, including errors that
             // are not cached, so each piece is checked again without its siblings.
             Err(_) if check.candidates.len() > 1 => {
-                let size = check.candidates.len().div_ceil(self.split_width);
+                let size = check.candidates.len().div_ceil(ADMISSION_SPLIT_WIDTH);
                 let mut rest = check.candidates;
                 while !rest.is_empty() {
                     // Push the last piece first, so pieces pop in arrival order.
@@ -337,7 +331,7 @@ impl Admission {
     /// finished, returning the candidates that are stale for `parent`.
     fn start_ready(&mut self, storage: &Storage, parent: block::Hash) -> Vec<(Candidate, Verdict)> {
         let mut retries = Vec::new();
-        while self.checks.len() < self.split_width {
+        while self.checks.len() < ADMISSION_SPLIT_WIDTH {
             let Some(split) = self.splits.pop() else {
                 break;
             };
@@ -790,26 +784,6 @@ where
             {
                 return Err("proposal admission requires post-Canopy chain information".into());
             }
-            let fees = package
-                .iter()
-                .map(|tx| tx.miner_fee)
-                .sum::<zebra_chain::amount::Result<Amount<NonNegative>>>()?;
-            // Use the fallible constructor before the infallible template helper, including
-            // checked fee/subsidy arithmetic. This cache never contains a mining payout.
-            if cache.get(height, fees, parent_nsm_value_balance).is_none() {
-                cache.store(
-                    height,
-                    fees,
-                    parent_nsm_value_balance,
-                    TransactionTemplate::new_coinbase_with_parent_pools(
-                        &network,
-                        height,
-                        &miner_params,
-                        fees,
-                        parent_nsm_value_balance,
-                    )?,
-                );
-            }
             let id = LongPollInput::new(
                 chain_info.tip_height,
                 parent,
@@ -825,7 +799,7 @@ where
                 id,
                 package,
                 None,
-            );
+            )?;
             let mut proposal = proposal_block_from_template(&template, None, &network)?;
             // Admission must not reuse the exact hash of a previously mined or invalidated block.
             Arc::make_mut(&mut proposal.header).nonce = rand::random::<[u8; 32]>().into();

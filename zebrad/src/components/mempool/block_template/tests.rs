@@ -175,14 +175,11 @@ impl Scheduler {
 
     fn poll(&mut self) {
         let tip = self.chain_info.borrow().tip_hash;
-        assert!(matches!(
-            self.templates.poll(
-                &mut Context::from_waker(futures::task::noop_waker_ref()),
-                Some((&self.storage, tip)),
-                Some(tip),
-            ),
-            Poll::Ready(Ok(()))
-        ));
+        self.templates.poll(
+            &mut Context::from_waker(futures::task::noop_waker_ref()),
+            Some((&self.storage, tip)),
+            Some(tip),
+        );
     }
 
     /// Drain started builds, recording real proposal requests, without advancing the paused clock.
@@ -244,14 +241,11 @@ async fn drive<F: Future>(
     tokio::pin!(future);
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        assert!(matches!(
-            templates.poll(
-                &mut Context::from_waker(futures::task::noop_waker_ref()),
-                Some((storage, tip)),
-                Some(tip),
-            ),
-            Poll::Ready(Ok(()))
-        ));
+        templates.poll(
+            &mut Context::from_waker(futures::task::noop_waker_ref()),
+            Some((storage, tip)),
+            Some(tip),
+        );
         if let Some(result) = future.as_mut().now_or_never() {
             return result;
         }

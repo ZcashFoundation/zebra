@@ -1330,15 +1330,9 @@ async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit(
     // Start the backstop only after setup, so paused time cannot consume part of its delay.
     // From here until the announcement, only the queue checker can poll the mempool.
     let transaction_verified = mempool.transaction_verified.clone();
-    let background_work = mempool.background_work();
     let latest_chain_tip = mempool.latest_chain_tip.clone();
     let mempool = Buffer::new(BoxService::new(mempool), 1);
-    let queue_checker = QueueChecker::spawn(
-        mempool,
-        transaction_verified,
-        background_work,
-        latest_chain_tip,
-    );
+    let queue_checker = QueueChecker::spawn(mempool, transaction_verified, latest_chain_tip);
     verification.respond(transaction::MempoolResponse::from(
         VerifiedUnminedTx::new(
             tx.clone(),

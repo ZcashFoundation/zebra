@@ -40,6 +40,8 @@ use super::MinerParams;
 ///
 /// Returns selected transactions from `mempool_txs`.
 ///
+/// Returns an error if the sizing coinbase cannot be constructed.
+///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
 #[allow(clippy::too_many_arguments)]
 pub fn select_mempool_transactions(
@@ -50,7 +52,7 @@ pub fn select_mempool_transactions(
     mempool_tx_deps: TransactionDependencies,
     coinbase_cache: Option<&CoinbaseCache>,
     parent_nsm_value_balance: Option<Amount<NonNegative>>,
-) -> Vec<VerifiedUnminedTx> {
+) -> Result<Vec<VerifiedUnminedTx>, Box<dyn std::error::Error + Send + Sync>> {
     if let Some(cache) = coinbase_cache {
         cache.select(height, parent_nsm_value_balance);
     }
@@ -62,22 +64,24 @@ pub fn select_mempool_transactions(
     // balance (its fee is always zero), so it's constant per block. Reuse the same per-block cache
     // as the real coinbase to avoid re-proving a shielded coinbase on every `getblocktemplate`
     // call just to read its size.
-    let fake_coinbase_tx = coinbase_cache
+    let fake_coinbase_tx = match coinbase_cache
         .and_then(|cache| cache.get(height, Amount::zero(), parent_nsm_value_balance))
-        .unwrap_or_else(|| {
+    {
+        Some(coinbase) => coinbase,
+        None => {
             let cb = TransactionTemplate::new_coinbase_with_parent_pools(
                 net,
                 height,
                 miner_params,
                 Amount::zero(),
                 parent_nsm_value_balance,
-            )
-            .expect("valid coinbase transaction template");
+            )?;
             if let Some(cache) = coinbase_cache {
                 cache.store(height, Amount::zero(), parent_nsm_value_balance, cb.clone());
             }
             cb
-        });
+        }
+    };
 
     let tx_dependencies = mempool_tx_deps.dependencies();
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
@@ -94,7 +98,7 @@ pub fn select_mempool_transactions(
     let mut selected_txs = Vec::new();
 
     // Set up limit tracking
-    let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
+    let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into()?;
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
     let mut remaining_block_unpaid_actions: u32 = BLOCK_UNPAID_ACTION_LIMIT;
     let mut remaining_shielded = ShieldedBudget::new(net, height);
@@ -109,18 +113,14 @@ pub fn select_mempool_transactions(
     // a coinbase that exhausts the byte or sigop budget without wrapping.
     let Some(block_bytes) = remaining_block_bytes.checked_sub(fake_coinbase_tx.data.as_ref().len())
     else {
-        return selected_txs;
+        return Ok(selected_txs);
     };
     let Some(block_sigops) = remaining_block_sigops.checked_sub(fake_coinbase_tx.sigops) else {
-        return selected_txs;
+        return Ok(selected_txs);
     };
-    let coinbase: Transaction = fake_coinbase_tx
-        .data
-        .as_ref()
-        .zcash_deserialize_into()
-        .expect("locally constructed coinbase must deserialize");
+    let coinbase: Transaction = fake_coinbase_tx.data.as_ref().zcash_deserialize_into()?;
     if !remaining_shielded.try_add(&coinbase) {
-        return selected_txs;
+        return Ok(selected_txs);
     }
     remaining_block_bytes = block_bytes;
     remaining_block_sigops = block_sigops;
@@ -162,17 +162,7 @@ pub fn select_mempool_transactions(
         );
     }
 
-    // Keep snapshot ordering deterministic without changing the public transaction type.
-    #[cfg(test)]
-    selected_txs.sort_by_cached_key(|tx| {
-        use zebra_chain::serialization::BytesInDisplayOrder;
-        (
-            dependencies_depth(&tx.transaction.id.mined_id(), &mempool_tx_deps),
-            tx.transaction.id.mined_id().bytes_in_display_order(),
-        )
-    });
-
-    selected_txs
+    Ok(selected_txs)
 }
 
 /// Returns the maximum possible serialized size of a block's transaction count, in bytes.
@@ -237,26 +227,6 @@ fn has_direct_dependencies(
     }
 
     false
-}
-
-/// Returns the depth of a transaction's dependencies in the block for a candidate
-/// transaction with the provided dependencies.
-#[cfg(test)]
-fn dependencies_depth(
-    dependent_tx_id: &transaction::Hash,
-    mempool_tx_deps: &TransactionDependencies,
-) -> usize {
-    let mut current_level = 0;
-    let mut current_level_deps = mempool_tx_deps.direct_dependencies(dependent_tx_id);
-    while !current_level_deps.is_empty() {
-        current_level += 1;
-        current_level_deps = current_level_deps
-            .iter()
-            .flat_map(|dep_id| mempool_tx_deps.direct_dependencies(dep_id))
-            .collect();
-    }
-
-    current_level
 }
 
 /// Chooses a random transaction from `txs` using the weighted index `tx_weights`,

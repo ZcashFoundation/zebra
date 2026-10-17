@@ -328,10 +328,10 @@ impl BlockTemplateResponse {
     /// Shielded coinbase construction can be expensive, so asynchronous callers must run this on a
     /// blocking worker.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the next height, total fees, or coinbase are invalid. Callers must preflight these
-    /// bounds and validate the resulting proposal before publishing it.
+    /// Returns an error if the next height, total fees, or coinbase are invalid. Callers must
+    /// validate the resulting proposal before publishing it.
     #[allow(clippy::too_many_arguments)]
     pub fn from_transactions(
         net: &Network,
@@ -341,12 +341,9 @@ impl BlockTemplateResponse {
         long_poll_id: LongPollId,
         mempool_txs: Vec<VerifiedUnminedTx>,
         submit_old: Option<bool>,
-    ) -> Self {
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Determine the next block height.
-        let height = chain_info
-            .tip_height
-            .next()
-            .expect("chain tip must be below Height::MAX");
+        let height = chain_info.tip_height.next()?;
 
         // Selection already orders dependencies before their spenders, including in tests.
         let mut mempool_tx_templates: Vec<TransactionTemplate<NonNegative>> =
@@ -369,35 +366,29 @@ impl BlockTemplateResponse {
                 .collect();
             template.depends.sort_unstable();
             template.depends.dedup();
-            transaction_indices.insert(
-                template.hash.0,
-                u16::try_from(index + 1)
-                    .expect("a 2 MB block has fewer than 65536 valid transactions"),
-            );
+            transaction_indices.insert(template.hash.0, u16::try_from(index + 1)?);
         }
 
         let txs_fee = mempool_txs
             .iter()
             .map(|tx| tx.miner_fee)
-            .sum::<amount::Result<Amount<NonNegative>>>()
-            .expect("mempool tx fees must be non-negative");
+            .sum::<amount::Result<Amount<NonNegative>>>()?;
 
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(net, chain_info);
 
         // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
         // shielded address) as a last resort — caching the result so subsequent requests for the
         // same height and fees reuse it.
-        let coinbase_txn = coinbase_cache
-            .get(height, txs_fee, parent_nsm_value_balance)
-            .unwrap_or_else(|| {
+        let coinbase_txn = match coinbase_cache.get(height, txs_fee, parent_nsm_value_balance) {
+            Some(coinbase_txn) => coinbase_txn,
+            None => {
                 let coinbase_txn = TransactionTemplate::new_coinbase_with_parent_pools(
                     net,
                     height,
                     miner_params,
                     txs_fee,
                     parent_nsm_value_balance,
-                )
-                .expect("valid coinbase tx");
+                )?;
 
                 coinbase_cache.store(
                     height,
@@ -407,7 +398,8 @@ impl BlockTemplateResponse {
                 );
 
                 coinbase_txn
-            });
+            }
+        };
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
@@ -435,7 +427,7 @@ impl BlockTemplateResponse {
             "creating template ... "
         );
 
-        BlockTemplateResponse {
+        Ok(BlockTemplateResponse {
             capabilities,
 
             version: ZCASH_BLOCK_VERSION,
@@ -473,7 +465,7 @@ impl BlockTemplateResponse {
             max_time: chain_info.max_time,
 
             submit_old,
-        }
+        })
     }
 
     /// Whether this template still extends the committed tip with usable time-dependent difficulty.

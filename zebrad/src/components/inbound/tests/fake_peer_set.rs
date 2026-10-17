@@ -1208,13 +1208,11 @@ async fn setup(
         added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
     }
 
-    let background_work = mempool_service.background_work();
     let mempool_service = BoxService::new(mempool_service);
     let mempool_service = ServiceBuilder::new().buffer(1).service(mempool_service);
     let _queue_checker = crate::components::mempool::QueueChecker::spawn(
         mempool_service.clone(),
         transaction_verified,
-        background_work,
         latest_chain_tip.clone(),
     );
 

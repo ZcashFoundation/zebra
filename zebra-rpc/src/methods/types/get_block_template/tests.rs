@@ -159,7 +159,8 @@ fn template_reports_selected_transaction_dependencies() {
         dependencies,
         None,
         Some(Amount::zero()),
-    );
+    )
+    .unwrap();
     let chain_info = GetBlockTemplateChainInfo {
         expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
         chain_value_pools: Default::default(),
@@ -185,7 +186,8 @@ fn template_reports_selected_transaction_dependencies() {
         long_poll_id,
         selected,
         None,
-    );
+    )
+    .unwrap();
     let [parent_index, child_index] = [parent_hash, child_hash].map(|hash| {
         template
             .transactions
@@ -821,6 +823,7 @@ fn template_with_max_time(
         vec![],
         None,
     )
+    .unwrap()
 }
 
 /// Testnet's standard difficulty expires strictly after an abbreviated timestamp range.
@@ -1050,7 +1053,8 @@ fn template_serializes_direct_transaction_dependencies() {
         LongPollInput::new(tip_height, tip_hash, time, []).generate_id(),
         txs,
         None,
-    );
+    )
+    .unwrap();
     let response = serde_json::to_value(template).unwrap();
     assert_eq!(response["transactions"].as_array().unwrap().len(), 4);
     for ((tx, expected_hash), dependencies) in response["transactions"]

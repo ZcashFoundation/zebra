@@ -20,7 +20,7 @@ use tokio::{
 use tower::{buffer::Buffer, util::BoxService, ServiceExt};
 
 use zebra_chain::{
-    amount::{Amount, NegativeOrZero, NonNegative},
+    amount::{Amount, NegativeOrZero},
     block::{self, Height, MAX_BLOCK_BYTES},
     parameters::{subsidy::nsm_reissuance_is_active, Network, NetworkUpgrade},
     serialization::{DateTime32, ZcashSerialize},
@@ -142,10 +142,10 @@ impl BlockTemplates {
         cx: &mut Context<'_>,
         storage: Option<(&Storage, block::Hash)>,
         tip: Option<block::Hash>,
-    ) -> Poll<Result<(), BoxError>> {
+    ) {
         if let Some(build) = &mut self.build {
             let Poll::Ready((mut result, next_coinbase)) = build.future.poll_unpin(cx) else {
-                return Poll::Ready(Ok(()));
+                return;
             };
             let build = self
                 .build
@@ -304,12 +304,12 @@ impl BlockTemplates {
             .is_some_and(|request| request.response.is_closed())
         {
             cx.waker().wake_by_ref();
-            return Poll::Ready(Ok(()));
+            return;
         }
         let is_override = request.is_some();
         // Same-tip changes respect both their first debounce and the completed build's cost.
         if !is_override && !prioritize_default {
-            return Poll::Ready(Ok(()));
+            return;
         }
 
         let coinbase_only = !is_override && needs_tip;
@@ -361,7 +361,6 @@ impl BlockTemplates {
         }
         // A newly stored future has not registered any wakeups yet.
         cx.waker().wake_by_ref();
-        Poll::Ready(Ok(()))
     }
 }
 
@@ -416,25 +415,6 @@ where
 
         // Await the blocking task even across tip changes; dropping it cannot cancel proving.
         let (template, proposal) = tokio::task::spawn_blocking(move || {
-            // Prepare coinbases fallibly before calling the synchronous selection/response
-            // helpers, whose cached path assumes valid payout and monetary-range inputs.
-            if coinbase_cache
-                .get(height, Amount::zero(), parent_nsm_value_balance)
-                .is_none()
-            {
-                coinbase_cache.store(
-                    height,
-                    Amount::zero(),
-                    parent_nsm_value_balance,
-                    TransactionTemplate::new_coinbase_with_parent_pools(
-                        &network,
-                        height,
-                        &miner_params,
-                        Amount::zero(),
-                        parent_nsm_value_balance,
-                    )?,
-                );
-            }
             let selected = select_mempool_transactions(
                 &network,
                 height,
@@ -443,28 +423,7 @@ where
                 dependencies,
                 Some(&coinbase_cache),
                 parent_nsm_value_balance,
-            );
-            let fees = selected
-                .iter()
-                .map(|tx| tx.miner_fee)
-                .sum::<zebra_chain::amount::Result<Amount<NonNegative>>>()?;
-            if coinbase_cache
-                .get(height, fees, parent_nsm_value_balance)
-                .is_none()
-            {
-                coinbase_cache.store(
-                    height,
-                    fees,
-                    parent_nsm_value_balance,
-                    TransactionTemplate::new_coinbase_with_parent_pools(
-                        &network,
-                        height,
-                        &miner_params,
-                        fees,
-                        parent_nsm_value_balance,
-                    )?,
-                );
-            }
+            )?;
             let template = BlockTemplateResponse::from_transactions(
                 &network,
                 &coinbase_cache,
@@ -473,7 +432,7 @@ where
                 long_poll_id,
                 selected,
                 None,
-            );
+            )?;
             let mut proposal = proposal_block_from_template(&template, None, &network)?;
             // A preflight must not reuse the exact hash of a previously mined or invalidated block.
             Arc::make_mut(&mut proposal.header).nonce = rand::random::<[u8; 32]>().into();
