@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added bounded orphan retention shared by ordinary and cached block commits, with `CommitBlockError::OrphanQueueFull` on eviction and commit-ready parents dispatched before eviction.
+time: 2026-10-14T20:27:46.895491768+02:00

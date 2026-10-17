@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Checkpoint admission bounds queued and committing work together and rejects oversized internally constructed blocks. Sequential range owners preserve committed prefixes and release uncommitted suffixes after failure so recovery fits the same budget, independently of response cancellation. Monotonic completion reports reconcile surviving ranges after recovery without letting stale reports rewind committed progress. `RouterError::is_resource_pressure` identifies local queue pressure and failed-range recovery without classifying the block as invalid.
+time: 2026-10-14T20:34:39.515118815+02:00
