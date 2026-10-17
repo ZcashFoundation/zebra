@@ -149,6 +149,8 @@ pub(super) const PARAM_POOL_DESC: &str =
 pub(super) const PARAM_START_INDEX_DESC: &str =
     "The index of the first 2^16-leaf subtree to return.";
 pub(super) const PARAM_LIMIT_DESC: &str = "The maximum number of subtrees to return.";
+pub(super) const PARAM_MAX_HEIGHT_DESC: &str =
+    "Only return subtrees whose end height is at or below this block height.";
 pub(super) const PARAM_REQUEST_DESC: &str = "The request object containing the parameters.";
 pub(super) const PARAM_INDEX_DESC: &str = "The index of the subtree to return.";
 pub(super) const PARAM_RAW_TRANSACTION_HEX_DESC: &str = "The hex-encoded raw transaction bytes.";
@@ -401,6 +403,8 @@ pub trait Rpc {
     /// - `pool`: (string, required) The pool from which subtrees should be returned. Either "sapling" or "orchard".
     /// - `start_index`: (number, required) The index of the first 2^16-leaf subtree to return.
     /// - `limit`: (number, optional) The maximum number of subtree values to return.
+    /// - `max_height`: (number, optional) Only return subtrees whose `end_height` is at or below
+    ///   this block height. If omitted or above the chain tip, subtrees up to the chain tip are returned.
     ///
     /// # Notes
     ///
@@ -408,12 +412,15 @@ pub trait Rpc {
     /// starting at the chain tip. This RPC will return an empty list if the `start_index` subtree
     /// exists, but has not been rebuilt yet. This matches `zcashd`'s behaviour when subtrees aren't
     /// available yet. (But `zcashd` does its rebuild before syncing any blocks.)
+    ///
+    /// `limit` is applied before `max_height`, so fewer than `limit` subtrees can be returned.
     #[method(name = "z_getsubtreesbyindex")]
     async fn z_get_subtrees_by_index(
         &self,
         pool: String,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
+        max_height: Option<u32>,
     ) -> Result<GetSubtreesByIndexResponse>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
@@ -2381,8 +2388,12 @@ where
         pool: String,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
+        max_height: Option<u32>,
     ) -> Result<GetSubtreesByIndexResponse> {
         let mut read_state = self.read_state.clone();
+
+        let within_height =
+            |end_height: Height| max_height.is_none_or(|max_height| end_height.0 <= max_height);
 
         const POOL_LIST: &[&str] = &["sapling", "orchard", "ironwood"];
 
@@ -2401,6 +2412,7 @@ where
 
             let subtrees = subtrees
                 .values()
+                .filter(|subtree| within_height(subtree.end_height))
                 .map(|subtree| SubtreeRpcData {
                     root: subtree.root.to_bytes().encode_hex(),
                     end_height: subtree.end_height,
@@ -2427,6 +2439,7 @@ where
 
             let subtrees = subtrees
                 .values()
+                .filter(|subtree| within_height(subtree.end_height))
                 .map(|subtree| SubtreeRpcData {
                     root: subtree.root.encode_hex(),
                     end_height: subtree.end_height,
@@ -2454,6 +2467,7 @@ where
             // Ironwood reuses the Orchard note type, so the subtree root is encoded like Orchard's.
             let subtrees = subtrees
                 .values()
+                .filter(|subtree| within_height(subtree.end_height))
                 .map(|subtree| SubtreeRpcData {
                     root: subtree.root.encode_hex(),
                     end_height: subtree.end_height,
