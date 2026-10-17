@@ -756,6 +756,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             },
             &network,
             state,
+            MockService::build().for_unit_tests(),
         )
         .await;
         let cache = TemplateCache::default();

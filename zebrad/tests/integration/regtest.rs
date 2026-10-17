@@ -34,14 +34,19 @@ async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(Default::default());
-    let state = zebra_state::init_test(&network).await;
+    let (state, read_state, _, _) = zebra_state::init_test_services(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init_test(zebra_consensus::Config::default(), &network, state)
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state,
+        read_state,
+    )
+    .await;
 
     let genesis_hash = block_verifier_router
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
@@ -439,13 +444,13 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
 
     // Replay the chain into a fresh in-process verifier and state, which is the stack the
     // syncer drives, so the error the syncer classifies on is the one asserted below.
-    let state = zebra_state::init_test(&network);
-    let state = state.await;
+    let (state, read_state, _, _) = zebra_state::init_test_services(&network).await;
     let (block_verifier_router, _tx_verifier, _download_handles, _max_checkpoint_height) =
         zebra_consensus::router::init_test(
             zebra_consensus::Config::default(),
             &network,
             state.clone(),
+            read_state,
         )
         .await;
 
@@ -812,6 +817,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -1169,6 +1175,7 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 

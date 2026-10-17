@@ -177,7 +177,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     // Services
@@ -188,7 +191,7 @@ where
     /// A service that verifies downloaded transactions.
     verifier: ZV,
 
-    /// A service that manages cached blockchain state.
+    /// A service that reads cached blockchain state without the state writer's buffer.
     state: ZS,
 
     // Internal downloads state
@@ -245,7 +248,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     type Item = Result<
@@ -326,7 +332,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     /// Initialize a new download stream with the provided services.
@@ -434,9 +443,9 @@ where
 
             trace!(?txid, "transaction is not in best chain");
 
-            let (tip_height, next_height) = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Ok((None, Height(0))),
-                Ok(zs::Response::Tip(Some((height, _hash)))) => {
+            let (tip_height, next_height) = match state.oneshot(zs::ReadRequest::Tip).await {
+                Ok(zs::ReadResponse::Tip(None)) => Ok((None, Height(0))),
+                Ok(zs::ReadResponse::Tip(Some((height, _hash)))) => {
                     let next_height =
                         (height + 1).expect("valid heights are far below the maximum");
                     Ok((Some(height), next_height))
@@ -677,11 +686,13 @@ where
             .await
             .map_err(CloneError::from)
             .map_err(TransactionDownloadVerifyError::StateError)?
-            .call(zs::Request::Transaction(txid.mined_id()))
+            .call(zs::ReadRequest::Transaction(txid.mined_id()))
             .await
         {
-            Ok(zs::Response::Transaction(None)) => Ok(()),
-            Ok(zs::Response::Transaction(Some(_))) => Err(TransactionDownloadVerifyError::InState),
+            Ok(zs::ReadResponse::Transaction(None)) => Ok(()),
+            Ok(zs::ReadResponse::Transaction(Some(_))) => {
+                Err(TransactionDownloadVerifyError::InState)
+            }
             Ok(_) => unreachable!("wrong response"),
             Err(e) => Err(TransactionDownloadVerifyError::StateError(e.into())),
         }?;
@@ -700,7 +711,10 @@ where
         + Clone
         + 'static,
     ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send,
 {
     fn drop(mut self: Pin<&mut Self>) {

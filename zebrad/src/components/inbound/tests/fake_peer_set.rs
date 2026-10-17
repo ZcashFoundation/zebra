@@ -261,12 +261,18 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     // The push path only touches the mempool; the state and block verifier are
     // wired up because `Inbound` requires them, but are never driven here.
-    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(consensus_config, &network, state_service.clone()).await;
+        zebra_consensus::router::init_test(
+            consensus_config,
+            &network,
+            state_service.clone(),
+            read_only_state_service,
+        )
+        .await;
 
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -901,7 +907,7 @@ async fn caches_getaddr_response() {
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         // UTXO verification doesn't matter for these tests.
-        let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        let (state, read_only_state_service, latest_chain_tip, _chain_tip_change) =
             zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
         let state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -916,6 +922,7 @@ async fn caches_getaddr_response() {
             consensus_config.clone(),
             &network,
             state_service.clone(),
+            read_only_state_service,
         )
         .await;
 
@@ -1020,7 +1027,7 @@ async fn setup(
     let (sync_status, mut recent_syncs) = SyncStatus::new();
 
     // UTXO verification doesn't matter for these tests.
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -1031,6 +1038,7 @@ async fn setup(
             consensus_config.clone(),
             &network,
             state_service.clone(),
+            read_only_state_service.clone(),
         )
         .await;
 
@@ -1100,6 +1108,7 @@ async fn setup(
         &MempoolConfig::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
         latest_chain_tip.clone(),
