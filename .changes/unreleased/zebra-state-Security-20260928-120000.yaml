@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Security
-body: "`Request::KnownBlock` no longer reports blocks that the finalized write task rejected, or dropped behind a rejected block, as sent. After a finalized reset the state forgets its sent hashes, and fails the blocks queued above the reset tip and the blocks of the failed range that arrive later instead of queueing them, so all of them can be downloaded and committed again without a restart ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h))."
+body: "After a checkpoint block fails to commit, the state no longer reports the blocks above the finalized tip as known, so they can be downloaded again ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h))."
 time: 2026-09-28T12:00:00.000000000-03:00
