@@ -2,13 +2,13 @@
 
 use tokio::sync::{oneshot, OwnedSemaphorePermit};
 
-use super::error::ServiceError;
+use super::{error::ServiceError, BatchControl, RequestWeight};
 
 /// Message sent to the batch worker
 #[derive(Debug)]
-pub(crate) struct Message<Request, Fut> {
-    pub(crate) request: Request,
-    pub(crate) tx: Tx<Fut>,
+pub(crate) struct Message<Request: RequestWeight, Fut> {
+    pub(crate) request: BatchControl<Request>,
+    pub(crate) tx: Option<Tx<Fut>>,
     pub(crate) span: tracing::Span,
     pub(super) _permit: OwnedSemaphorePermit,
 }
