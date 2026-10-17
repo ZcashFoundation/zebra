@@ -398,15 +398,20 @@ impl StartCmd {
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
-        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
-            zebra_consensus::router::init(
-                config.consensus.clone(),
-                &config.network.network,
-                state.clone(),
-                read_only_state_service.clone(),
-                tx_verifier_setup_rx,
-            )
-            .await;
+        let (
+            block_verifier_router,
+            tx_verifier,
+            consensus_task_handles,
+            max_checkpoint_height,
+            prepared_blocks,
+        ) = zebra_consensus::router::init(
+            config.consensus.clone(),
+            &config.network.network,
+            state.clone(),
+            read_only_state_service.clone(),
+            tx_verifier_setup_rx,
+        )
+        .await;
 
         info!("initializing syncer");
         let (mut syncer, sync_status) = ChainSync::new(
@@ -483,7 +488,9 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
-        let rpc_impl = rpc_impl.with_submitted_blocks(submitted_blocks.clone());
+        let rpc_impl = rpc_impl
+            .with_submitted_blocks(submitted_blocks.clone())
+            .with_prepared_blocks(prepared_blocks);
         let rpc_impl = rpc_impl.with_end_of_support_height(
             sync::end_of_support::end_of_support_height(&config.network.network),
         );

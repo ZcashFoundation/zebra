@@ -29,7 +29,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network},
-    serialization::{sha256d, ZcashSerialize},
+    serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize},
     transparent,
     work::equihash,
 };
@@ -56,12 +56,16 @@ pub struct SemanticBlockVerifier<S, V> {
     proposals: Arc<watch::Sender<ProposalCache>>,
 }
 
-type ProposalCache = VecDeque<(
-    [u8; 32],
-    block::Hash,
-    Arc<zs::ContextuallyVerifiedBlock>,
-    usize,
-)>;
+type ProposalCache = VecDeque<PreparedProposal>;
+
+#[derive(Debug)]
+struct PreparedProposal {
+    key: [u8; 32],
+    transaction_bytes: usize,
+    block: Arc<block::Block>,
+    contextual: Arc<zs::ContextuallyVerifiedBlock>,
+    retained_bytes: usize,
+}
 
 /// Bound retained proposal data, including unusually large spent-output scripts.
 ///
@@ -76,24 +80,101 @@ const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;
 fn cache_proposal(
     proposals: &watch::Sender<ProposalCache>,
     key: [u8; 32],
-    parent: block::Hash,
+    block: Arc<block::Block>,
+    transaction_bytes: usize,
     contextual: Box<zs::ContextuallyVerifiedBlock>,
 ) {
-    let bytes = contextual.retained_bytes();
+    let retained_bytes = contextual.retained_bytes();
     proposals.send_modify(|proposals| {
-        proposals.retain(|(old_key, old_parent, _, _)| (*old_key, *old_parent) != (key, parent));
-        proposals.push_front((key, parent, Arc::from(contextual), bytes));
+        proposals.retain(|proposal| proposal.key != key);
+        proposals.push_front(PreparedProposal {
+            key,
+            transaction_bytes,
+            block,
+            contextual: Arc::from(contextual),
+            retained_bytes,
+        });
         let mut retained_bytes = 0usize;
         let retained = proposals
             .iter()
             .take(8)
-            .take_while(|(_, _, _, bytes)| {
-                retained_bytes = retained_bytes.saturating_add(*bytes);
+            .take_while(|proposal| {
+                retained_bytes = retained_bytes.saturating_add(proposal.retained_bytes);
                 retained_bytes <= MAX_PROPOSAL_BYTES
             })
             .count();
         proposals.truncate(retained);
     });
+}
+
+/// Read-only access to successfully validated proposals for decoding mined submissions.
+///
+/// This shares the verifier's bounded cache, not its validation authority: decoded blocks must
+/// still pass the normal verifier, including checks of the submitted proof of work and live state.
+#[derive(Clone, Debug)]
+pub struct PreparedBlockCache(Arc<watch::Sender<ProposalCache>>);
+
+impl PreparedBlockCache {
+    /// Decodes a block, reusing parsed transactions only when their complete wire bytes match.
+    ///
+    /// Transaction-section length and the header with only nonce and solution normalized select a
+    /// candidate. Exact streaming byte comparison permits reuse; the returned block keeps the
+    /// submitted header. Misses, evictions and malformed input use ordinary deserialization.
+    /// No full-body hash pass or transaction-byte allocation is needed. Call from a blocking worker.
+    pub fn deserialize(&self, bytes: &[u8]) -> Result<Arc<block::Block>, SerializationError> {
+        self.reuse(bytes)
+            .map(Ok)
+            .unwrap_or_else(|| block::Block::zcash_deserialize(bytes).map(Arc::new))
+    }
+
+    fn reuse(&self, bytes: &[u8]) -> Option<Arc<block::Block>> {
+        if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
+            || self.0.borrow().is_empty()
+        {
+            return None;
+        }
+        let mut transactions = bytes;
+        let header = block::Header::zcash_deserialize(&mut transactions).ok()?;
+        let normalized_header = normalized_proposal_header(&header);
+        let block = self
+            .0
+            .borrow()
+            .iter()
+            .find(|proposal| {
+                proposal.transaction_bytes == transactions.len()
+                    && normalized_proposal_header(&proposal.block.header) == normalized_header
+            })?
+            .block
+            .clone();
+
+        // Candidate selection is not authority to substitute different transaction bytes.
+        struct Compare<'a>(&'a [u8]);
+        impl Write for Compare<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0 = self
+                    .0
+                    .strip_prefix(bytes)
+                    .ok_or(io::ErrorKind::InvalidData)?;
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut comparison = Compare(transactions);
+        block.transactions.zcash_serialize(&mut comparison).ok()?;
+        if !comparison.0.is_empty() {
+            return None;
+        }
+        if *block.header == header {
+            return Some(block);
+        }
+        Some(Arc::new(block::Block {
+            header: Arc::new(header),
+            transactions: block.transactions.clone(),
+        }))
+    }
 }
 
 /// Block verification errors.
@@ -350,6 +431,11 @@ where
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
         }
     }
+
+    /// Returns a read-only decoder sharing this verifier's successful proposal cache.
+    pub fn prepared_blocks(&self) -> PreparedBlockCache {
+        PreparedBlockCache(self.proposals.clone())
+    }
 }
 
 impl<S, V> Service<Request> for SemanticBlockVerifier<S, V>
@@ -442,18 +528,20 @@ where
                 if u64::try_from(size).expect("block sizes fit u64") > block::MAX_BLOCK_BYTES {
                     return Err(VerifyBlockError::OversizedBlock);
                 }
-                Some(key)
+                Some((key, size))
             } else {
                 None
             };
-            let cached = if let Some(key) = proposal_key.filter(|_| !request.is_proposal()) {
+            let cached = if let Some((key, _)) = proposal_key.filter(|_| !request.is_proposal()) {
                 proposals
                     .borrow()
                     .iter()
-                    .find(|(cached_key, parent, _, _)| {
-                        *cached_key == key && *parent == block.header.previous_block_hash
+                    .find(|proposal| {
+                        proposal.key == key
+                            && proposal.block.header.previous_block_hash
+                                == block.header.previous_block_hash
                     })
-                    .map(|(_, _, contextual, _)| contextual.clone())
+                    .map(|proposal| proposal.contextual.clone())
             } else {
                 None
             };
@@ -678,9 +766,9 @@ where
                 received_time: Some(received_time),
             };
 
-            let parent = prepared_block.block.header.previous_block_hash;
             // Return early for proposal requests.
             if request.is_proposal() {
+                let block = prepared_block.block.clone();
                 return match state_service
                     .ready()
                     .await
@@ -690,9 +778,10 @@ where
                     .map_err(VerifyBlockError::ValidateProposal)?
                 {
                     zs::Response::ValidBlockProposal(contextual) => {
-                        let key = proposal_key.expect("proposals always have a cache key");
+                        let (key, size) = proposal_key.expect("proposals always have a cache key");
+                        let transaction_bytes = size - block.header.zcash_serialized_size();
                         tokio::task::spawn_blocking(move || {
-                            cache_proposal(&proposals, key, parent, contextual);
+                            cache_proposal(&proposals, key, block, transaction_bytes, contextual);
                         })
                         .await
                         .expect("proposal retention accounting must not panic");
@@ -755,11 +844,7 @@ fn proposal_key_and_size(block: &block::Block) -> ([u8; 32], usize) {
         }
     }
 
-    let header = block::Header {
-        nonce: [0; 32].into(),
-        solution: equihash::Solution::Common([0; 1344]),
-        ..*block.header
-    };
+    let header = normalized_proposal_header(&block.header);
     let mut writer = Writer(sha256d::Writer::default(), 0);
     header
         .zcash_serialize(&mut writer)
@@ -774,4 +859,13 @@ fn proposal_key_and_size(block: &block::Block) -> ([u8; 32], usize) {
             equihash::Solution::SERIALIZED_SIZE - equihash::Solution::REGTEST_SERIALIZED_SIZE;
     }
     (writer.0.finish(), writer.1)
+}
+
+/// Keep byte-based decoding and parsed proposal lookup on the same normalized header.
+fn normalized_proposal_header(header: &block::Header) -> block::Header {
+    block::Header {
+        nonce: [0; 32].into(),
+        solution: equihash::Solution::Common([0; 1344]),
+        ..*header
+    }
 }

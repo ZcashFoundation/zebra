@@ -919,6 +919,9 @@ where
     /// Handler for the `getblocktemplate` RPC.
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
 
+    /// Read-only access to the block verifier's successful proposals for submission decoding.
+    prepared_blocks: Option<zebra_consensus::PreparedBlockCache>,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
@@ -1027,6 +1030,7 @@ where
             address_book,
             last_warn_error_log_rx,
             gbt,
+            prepared_blocks: None,
             #[cfg(test)]
             template_clock: None,
             #[cfg(test)]
@@ -1048,6 +1052,15 @@ where
     /// Shares locally validated pending bodies with inbound peers.
     pub fn with_submitted_blocks(mut self, cache: crate::SubmittedBlockCache) -> Self {
         self.gbt.submitted_blocks = cache;
+        self
+    }
+
+    /// Reuses the consensus verifier's parsed proposal transactions when decoding mined submissions.
+    ///
+    /// The cache must come from the same verifier supplied to [`Self::new`]. Submissions still
+    /// undergo normal verification, including the submitted header's proof of work.
+    pub fn with_prepared_blocks(mut self, cache: zebra_consensus::PreparedBlockCache) -> Self {
+        self.prepared_blocks = Some(cache);
         self
     }
 
@@ -3194,8 +3207,15 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        let block: Block = match block_bytes.zcash_deserialize_into() {
-            Ok(block_bytes) => block_bytes,
+        let prepared_blocks = self.prepared_blocks.clone();
+        let decoded = tokio::task::spawn_blocking(move || match prepared_blocks {
+            Some(cache) => cache.deserialize(&block_bytes),
+            None => block_bytes.zcash_deserialize_into::<Arc<Block>>(),
+        })
+        .await
+        .expect("block decoding task must not panic");
+        let block = match decoded {
+            Ok(block) => block,
             Err(error) => {
                 tracing::info!(
                     ?error,
@@ -3210,7 +3230,6 @@ where
             .coinbase_height()
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
-        let block = Arc::new(block);
         let (request, validated) = match self.gbt.mined_block_notifications() {
             Some((notifications, validated)) => (
                 zebra_consensus::Request::CommitMined(block, notifications),
