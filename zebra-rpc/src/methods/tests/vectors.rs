@@ -6125,7 +6125,8 @@ async fn rpc_submitblock_requires_validated_early_relay() {
             });
             let verification = verifier
                 .expect_request_that(|request| {
-                    matches!(request, zebra_consensus::Request::CommitMined(block, _) if block == &candidate)
+                    matches!(request, zebra_consensus::Request::CommitDecoded(block, Some(_))
+                        if block.block() == candidate)
                 })
                 .await;
             assert!(
