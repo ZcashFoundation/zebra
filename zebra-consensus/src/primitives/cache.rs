@@ -333,6 +333,9 @@ pub(crate) struct Cached<S> {
     /// The metric handles shared by clones of this cache.
     metrics: CacheMetrics,
 
+    /// The worker to flush after a block has enqueued this cache's misses.
+    flush_verifier: Option<super::flush::Verifier>,
+
     /// The keys of the items that reached the inner service, in call order.
     ///
     /// Test-only. See [`Self::inner_calls_for`].
@@ -346,6 +349,7 @@ impl<S: Clone> Clone for Cached<S> {
             inner: self.inner.clone(),
             verified: self.verified.clone(),
             metrics: self.metrics.clone(),
+            flush_verifier: self.flush_verifier,
             #[cfg(test)]
             inner_calls: self.inner_calls.clone(),
         }
@@ -360,9 +364,16 @@ impl<S> Cached<S> {
             inner,
             verified: Arc::new(Mutex::new(VerifiedBundles::new(capacity))),
             metrics: CacheMetrics::new(verifier_name),
+            flush_verifier: None,
             #[cfg(test)]
             inner_calls: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Associates a production cache with its batch worker's explicit flush control.
+    pub(super) fn with_flush(mut self, verifier: super::flush::Verifier) -> Self {
+        self.flush_verifier = Some(verifier);
+        self
     }
 
     /// Returns a cold cache with independent call records and the same inner verifier.
@@ -375,15 +386,12 @@ impl<S> Cached<S> {
             inner: self.inner.clone(),
             verified: Arc::new(Mutex::new(VerifiedBundles::new(CACHE_CAPACITY))),
             metrics: self.metrics.clone(),
+            flush_verifier: self.flush_verifier,
             inner_calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    /// Returns the wrapped verification service.
-    ///
-    /// Test-only: it lets a test read back the inner service it installed with
-    /// [`Self::with_inner`].
-    #[cfg(test)]
+    /// Returns the wrapped verification service, including its batch flush control.
     pub(super) fn inner(&self) -> &S {
         &self.inner
     }
@@ -421,6 +429,7 @@ impl<S> Cached<S> {
             inner,
             verified: self.verified.clone(),
             metrics: self.metrics.clone(),
+            flush_verifier: self.flush_verifier,
             inner_calls: self.inner_calls.clone(),
         }
     }
@@ -479,6 +488,7 @@ where
         let verified = self.verified.clone();
         let metrics = self.metrics.clone();
         let mut inner = self.inner.clone();
+        let queueing = super::flush::Queueing::for_request().zip(self.flush_verifier);
 
         #[cfg(test)]
         let inner_calls = self.inner_calls.clone();
@@ -496,7 +506,11 @@ where
                             .push(key);
                     }
 
-                    inner.call(item).await
+                    let response = inner.call(item);
+                    if let Some((queueing, verifier)) = queueing {
+                        queueing.enqueued(verifier);
+                    }
+                    response.await
                 }
                 Err(error) => Err(error),
             };

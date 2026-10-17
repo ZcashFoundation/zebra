@@ -280,3 +280,133 @@ async fn batch_max_items_flushes_immediately() {
     response.send_response(());
     assert_eq!(start.elapsed(), Duration::ZERO);
 }
+
+#[tokio::test(start_paused = true)]
+async fn explicit_flush_is_ordered_and_does_not_wait_for_idle() {
+    let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+    let (mut service, worker) = Batch::pair(
+        inner,
+        64,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+    let start = Instant::now();
+
+    // Empty flushes must not start CPU work or a timer.
+    assert!(service.try_flush().unwrap());
+    assert_pending!(worker.poll());
+    assert!(handle.poll_request().is_pending());
+
+    let mut checking = task::spawn(service.ready().await.unwrap().call(()));
+    assert!(service.try_flush().unwrap());
+    assert_pending!(worker.poll());
+    let (request, item_response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Item(())));
+    let (request, batch_response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Flush));
+    assert_pending!(checking.poll(), "a flush does not complete verification");
+    batch_response.send_response(());
+    item_response.send_response(());
+    assert_ready!(checking.poll()).unwrap();
+    assert_eq!(start.elapsed(), Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_flush_keeps_the_callers_readiness_reservation() {
+    let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+    let (mut service, worker) = Batch::pair(
+        inner,
+        64,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+
+    // `call` panics if a flush between `ready` and `call` spent the reservation.
+    let ready = service.ready().await.unwrap();
+    assert!(ready.try_flush().unwrap());
+    let mut checking = task::spawn(ready.call(()));
+    assert!(service.try_flush().unwrap());
+    assert_pending!(worker.poll());
+    let (request, item_response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Item(())));
+    let (request, batch_response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Flush));
+    batch_response.send_response(());
+    item_response.send_response(());
+    assert_ready!(checking.poll()).unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_flush_preserves_queue_bounds_and_worker_cleanup() {
+    let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+    let (mut service, worker) = Batch::pair(
+        inner,
+        2,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+    handle.allow(0);
+    let mut checking = task::spawn(service.ready().await.unwrap().call(()));
+    assert!(service.try_flush().unwrap());
+    assert!(
+        !service.try_flush().unwrap(),
+        "flush markers consume queue capacity"
+    );
+    assert_pending!(worker.poll());
+    drop(worker);
+    assert_ready_err!(checking.poll());
+    assert!(service.try_flush().is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_flush_releases_zero_weight_requests_without_waiting_for_idle() {
+    struct ZeroWeight;
+
+    impl tower_batch_control::RequestWeight for ZeroWeight {
+        fn request_weight(&self) -> usize {
+            0
+        }
+    }
+
+    let (done, response) = tokio::sync::oneshot::channel();
+    let mut done = Some(done);
+    let mut response = Some(response);
+    let inner = tower::service_fn(move |request: BatchControl<ZeroWeight>| {
+        let response = match request {
+            BatchControl::Item(_) => response.take(),
+            BatchControl::Flush => {
+                done.take().unwrap().send(()).unwrap();
+                None
+            }
+        };
+        async move {
+            if let Some(response) = response {
+                response.await?;
+            }
+            Ok::<_, tokio::sync::oneshot::error::RecvError>(())
+        }
+    });
+    let (mut service, worker) = Batch::pair(
+        inner,
+        64,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+    let start = Instant::now();
+    let mut checking = task::spawn(service.ready().await.unwrap().call(ZeroWeight));
+    assert_pending!(worker.poll());
+    assert_pending!(checking.poll(), "the request waits for its batch to flush");
+
+    assert!(service.try_flush().unwrap());
+    assert_pending!(worker.poll());
+    assert_ready!(checking.poll()).unwrap();
+    assert_eq!(start.elapsed(), Duration::ZERO);
+}
