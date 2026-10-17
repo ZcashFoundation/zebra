@@ -12,7 +12,7 @@ use std::{
     future::Future,
     io::{self, Write},
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Weak},
     task::{Context, Poll},
     time::Instant,
 };
@@ -54,6 +54,8 @@ pub struct SemanticBlockVerifier<S, V> {
     transaction_verifier: V,
     /// Successful proposals, newest first; shared by all outstanding verification requests.
     proposals: Arc<watch::Sender<ProposalCache>>,
+    #[cfg(test)]
+    proposal_key_computations: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 type ProposalCache = VecDeque<PreparedProposal>;
@@ -107,6 +109,49 @@ fn cache_proposal(
     });
 }
 
+/// A decoded submission, optionally carrying an exact match to a successful proposal.
+///
+/// The private match is bound to this immutable block, including its submitted header. It proves
+/// byte identity only: the verifier must still check proof of work, time, and live state. A weak
+/// handle does not retain contextual data after cache eviction or authorize reuse by another cache.
+#[derive(Clone, Debug)]
+pub struct DecodedBlock {
+    block: Arc<block::Block>,
+    matched: Option<(Weak<zs::ContextuallyVerifiedBlock>, usize)>,
+}
+
+impl DecodedBlock {
+    /// Returns the decoded block without exposing or transferring its exact-match evidence.
+    pub fn block(&self) -> Arc<block::Block> {
+        self.block.clone()
+    }
+}
+
+impl From<Arc<block::Block>> for DecodedBlock {
+    fn from(block: Arc<block::Block>) -> Self {
+        Self {
+            block,
+            matched: None,
+        }
+    }
+}
+
+impl PartialEq for DecodedBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.block == other.block
+            && self
+                .matched
+                .as_ref()
+                .map(|(entry, size)| (entry.as_ptr(), size))
+                == other
+                    .matched
+                    .as_ref()
+                    .map(|(entry, size)| (entry.as_ptr(), size))
+    }
+}
+
+impl Eq for DecodedBlock {}
+
 /// Read-only access to successfully validated proposals for decoding mined submissions.
 ///
 /// This shares the verifier's bounded cache, not its validation authority: decoded blocks must
@@ -119,15 +164,18 @@ impl PreparedBlockCache {
     ///
     /// Transaction-section length and the header with only nonce and solution normalized select a
     /// candidate. Exact streaming byte comparison permits reuse; the returned block keeps the
-    /// submitted header. Misses, evictions and malformed input use ordinary deserialization.
+    /// submitted header and a private cache handle for [`Request::CommitDecoded`]. Misses, evictions
+    /// and malformed input use ordinary deserialization.
     /// No full-body hash pass or transaction-byte allocation is needed. Call from a blocking worker.
-    pub fn deserialize(&self, bytes: &[u8]) -> Result<Arc<block::Block>, SerializationError> {
-        self.reuse(bytes)
-            .map(Ok)
-            .unwrap_or_else(|| block::Block::zcash_deserialize(bytes).map(Arc::new))
+    pub fn deserialize(&self, bytes: &[u8]) -> Result<DecodedBlock, SerializationError> {
+        self.reuse(bytes).map(Ok).unwrap_or_else(|| {
+            block::Block::zcash_deserialize(bytes)
+                .map(Arc::new)
+                .map(Into::into)
+        })
     }
 
-    fn reuse(&self, bytes: &[u8]) -> Option<Arc<block::Block>> {
+    fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
         if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
             || self.0.borrow().is_empty()
         {
@@ -136,16 +184,14 @@ impl PreparedBlockCache {
         let mut transactions = bytes;
         let header = block::Header::zcash_deserialize(&mut transactions).ok()?;
         let normalized_header = normalized_proposal_header(&header);
-        let block = self
-            .0
-            .borrow()
-            .iter()
-            .find(|proposal| {
+        let (block, matched) = {
+            let proposals = self.0.borrow();
+            let proposal = proposals.iter().find(|proposal| {
                 proposal.transaction_bytes == transactions.len()
                     && normalized_proposal_header(&proposal.block.header) == normalized_header
-            })?
-            .block
-            .clone();
+            })?;
+            (proposal.block.clone(), Arc::downgrade(&proposal.contextual))
+        };
 
         // Candidate selection is not authority to substitute different transaction bytes.
         struct Compare<'a>(&'a [u8]);
@@ -167,13 +213,18 @@ impl PreparedBlockCache {
         if !comparison.0.is_empty() {
             return None;
         }
-        if *block.header == header {
-            return Some(block);
-        }
-        Some(Arc::new(block::Block {
-            header: Arc::new(header),
-            transactions: block.transactions.clone(),
-        }))
+        let block = if *block.header == header {
+            block
+        } else {
+            Arc::new(block::Block {
+                header: Arc::new(header),
+                transactions: block.transactions.clone(),
+            })
+        };
+        Some(DecodedBlock {
+            block,
+            matched: Some((matched, bytes.len())),
+        })
     }
 }
 
@@ -429,6 +480,8 @@ where
             state_service,
             transaction_verifier,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
+            #[cfg(test)]
+            proposal_key_computations: Default::default(),
         }
     }
 
@@ -469,6 +522,8 @@ where
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
         let proposals = self.proposals.clone();
+        #[cfg(test)]
+        let proposal_key_computations = self.proposal_key_computations.clone();
 
         let block = request.block();
 
@@ -518,21 +573,48 @@ where
                 check::equihash_solution_is_valid(&block.header)?;
             }
 
-            // Hash only when populating the cache or when there is something to reuse.
-            let proposal_key = if request.is_proposal() || !proposals.borrow().is_empty() {
-                let block = block.clone();
-                let (key, size) =
-                    tokio::task::spawn_blocking(move || proposal_key_and_size(&block))
-                        .await
-                        .expect("proposal hashing serializes an already-decoded block into an infallible writer");
-                if u64::try_from(size).expect("block sizes fit u64") > block::MAX_BLOCK_BYTES {
-                    return Err(VerifyBlockError::OversizedBlock);
+            // Exact decoder matches avoid hashing the body again, but only while the matched
+            // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
+            let decoded_match = match &request {
+                Request::CommitDecoded(decoded, _) => {
+                    decoded.matched.as_ref().and_then(|(entry, size)| {
+                        proposals
+                            .borrow()
+                            .iter()
+                            .find(|proposal| Arc::as_ptr(&proposal.contextual) == entry.as_ptr())
+                            .map(|proposal| (proposal.contextual.clone(), *size))
+                    })
                 }
-                Some((key, size))
+                _ => None,
+            };
+            // Hash only when populating the cache or when an unmatched block could reuse it.
+            let proposal_key = if decoded_match.is_none()
+                && (request.is_proposal() || !proposals.borrow().is_empty())
+            {
+                let block = block.clone();
+                Some(
+                    tokio::task::spawn_blocking(move || {
+                        #[cfg(test)]
+                        proposal_key_computations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        proposal_key_and_size(&block)
+                    })
+                    .await
+                    .expect("proposal hashing serializes an already-decoded block into an infallible writer"),
+                )
             } else {
                 None
             };
-            let cached = if let Some((key, _)) = proposal_key.filter(|_| !request.is_proposal()) {
+            let size = decoded_match
+                .as_ref()
+                .map(|(_, size)| *size)
+                .or_else(|| proposal_key.map(|(_, size)| size));
+            if size.is_some_and(|size| {
+                u64::try_from(size).expect("block sizes fit u64") > block::MAX_BLOCK_BYTES
+            }) {
+                return Err(VerifyBlockError::OversizedBlock);
+            }
+            let cached = decoded_match.map(|(contextual, _)| contextual).or_else(|| {
+                let (key, _) = proposal_key.filter(|_| !request.is_proposal())?;
                 proposals
                     .borrow()
                     .iter()
@@ -542,11 +624,9 @@ where
                                 == block.header.previous_block_hash
                     })
                     .map(|proposal| proposal.contextual.clone())
-            } else {
-                None
-            };
+            });
 
-            // Cache hits already bind the Merkle root through the verified proposal key.
+            // Cache hits already bind the Merkle root through exact bytes or the proposal key.
             // On misses, bind the body before announcing early work and reuse these hashes below.
             let transaction_hashes = if cached.is_none() {
                 let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
@@ -583,10 +663,11 @@ where
                 let mut contextual = (*cached).clone();
                 contextual.rebind(block, received_time);
                 let commit = match request {
-                    Request::CommitMined(_, notifications) => {
+                    Request::CommitMined(_, notifications)
+                    | Request::CommitDecoded(_, Some(notifications)) => {
                         contextual.into_mined_request(notifications)
                     }
-                    Request::Commit(_) => {
+                    Request::Commit(_) | Request::CommitDecoded(_, None) => {
                         zs::Request::CommitContextuallyVerifiedBlock(Box::new(contextual))
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
@@ -791,12 +872,15 @@ where
                 };
             }
             let commit = match request {
-                Request::CommitMined(_, notifications) => zs::Request::CommitMinedBlock {
+                Request::CommitMined(_, notifications)
+                | Request::CommitDecoded(_, Some(notifications)) => zs::Request::CommitMinedBlock {
                     block: prepared_block,
                     contextual: None,
                     notifications,
                 },
-                Request::Commit(_) => zs::Request::CommitSemanticallyVerifiedBlock(prepared_block),
+                Request::Commit(_) | Request::CommitDecoded(_, None) => {
+                    zs::Request::CommitSemanticallyVerifiedBlock(prepared_block)
+                }
                 Request::CheckProposal(_) => unreachable!("proposals return after validation"),
             };
 
