@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.0.0] - 2026-10-17
+
+### Breaking Changes
+
+- `ReadRequest::TransactionIdsByAddresses` takes an optional `max_entries`, which bounds the address index scan and returns the first transaction IDs in chain order ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).
+
+### Fixed
+
+- Reject invalidating the root of the only non-finalized chain without changing state, and handle empty non-finalized state when updating chain-tip notifications (#11536).
+
 ## [15.0.0] - 2026-10-01
 
 ### Breaking Changes

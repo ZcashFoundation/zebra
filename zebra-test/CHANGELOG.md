@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [4.0.1] - 2026-10-17
+
+### Fixed
+
+- `TestChild::wait_with_output` drains output already taken by line readers while waiting for the child to exit, preventing deadlocks when its stdout or stderr pipe fills.
+
 ## [4.0.0] - 2026-07-02
 
 ### Removed
