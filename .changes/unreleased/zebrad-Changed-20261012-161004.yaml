@@ -1,0 +1,7 @@
+project: zebrad
+kind: Changed
+body: >-
+  Checkpoint sync commits blocks faster: authorizing data roots are computed before the
+  database writer, and large blocks are serialized and read in parallel. The RocksDB
+  write-ahead log is limited to 4 GiB.
+time: 2026-10-12T16:10:04.000000000+02:00

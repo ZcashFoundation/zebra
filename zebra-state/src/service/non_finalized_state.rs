@@ -730,6 +730,7 @@ impl NonFinalizedState {
                     block,
                     &network,
                     &history_tree,
+                    None,
                 ));
             });
 

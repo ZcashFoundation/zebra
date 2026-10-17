@@ -71,6 +71,10 @@ pub use disk_format::KV;
 
 pub use disk_format::upgrade::restorable_db_versions;
 
+/// Minimum Sapling, Orchard and Ironwood note commitments in a checkpoint block for its note
+/// commitment tree update to run alongside its history commitment check.
+const OVERLAP_COMMITMENT_THRESHOLD: usize = 32;
+
 /// The column families supported by the running `zebra-state` database code.
 ///
 /// Existing column families that aren't listed here are preserved when the database is opened.
@@ -363,34 +367,38 @@ impl FinalizedState {
                 let prev_note_commitment_trees = prev_note_commitment_trees
                     .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
-                // Update the note commitment trees.
+                // The commitment check uses only the parent history tree, so it can overlap the
+                // note commitment tree update. NU5 authorizing data is not bound by the block hash;
+                // checkpoint blocks need this check even after their headers have been verified.
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                note_commitment_trees
-                    .update_trees_parallel(&block)
-                    .map_err(ValidateContextError::from)?;
-
-                // Check the block commitment if the history tree was not
-                // supplied by the non-finalized state. Note that we don't do
-                // this check for history trees supplied by the non-finalized
-                // state because the non-finalized state checks the block
-                // commitment.
-                //
-                // For Nu5-onward, the block hash commits only to
-                // non-authorizing data (see ZIP-244). This checks the
-                // authorizing data commitment, making sure the entire block
-                // contents were committed to. The test is done here (and not
-                // during semantic validation) because it needs the history tree
-                // root. While it _is_ checked during contextual validation,
-                // that is not called by the checkpoint verifier, and keeping a
-                // history tree there would be harder to implement.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                check::block_commitment_is_valid_for_chain_history(
-                    block.clone(),
-                    &self.network(),
-                    &history_tree,
-                )?;
+                let network = self.network();
+                let precomputed_auth_data_root = checkpoint_verified.precomputed_auth_data_root();
+                let check_commitment = || {
+                    check::block_commitment_is_valid_for_chain_history(
+                        block.clone(),
+                        &network,
+                        &history_tree,
+                        precomputed_auth_data_root,
+                    )
+                };
+                // Waking the Rayon pool for every small block costs more CPU than the overlap
+                // saves, so only overlap blocks with a substantial tree update.
+                let shielded_commitments = block.sapling_note_commitments().count()
+                    + block.orchard_note_commitments().count()
+                    + block.ironwood_note_commitments().count();
+                let (tree_result, commitment_result) =
+                    if shielded_commitments >= OVERLAP_COMMITMENT_THRESHOLD {
+                        rayon::join(
+                            || note_commitment_trees.update_trees_parallel(&block),
+                            check_commitment,
+                        )
+                    } else {
+                        let tree_result = note_commitment_trees.update_trees_parallel(&block);
+                        (tree_result, check_commitment())
+                    };
+                // Keep tree errors ahead of commitment errors, regardless of completion order.
+                tree_result.map_err(ValidateContextError::from)?;
+                commitment_result?;
 
                 // Update the history tree.
                 //
