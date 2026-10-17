@@ -1726,3 +1726,36 @@ fn fork_limit_keeps_live_sibling_after_backup_restore() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// Test networks keep more equal-work sibling forks than Mainnet before evicting any.
+#[test]
+fn fork_limit_is_higher_on_test_networks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let siblings = 30u8;
+    for (network, expected_forks) in [
+        (
+            Network::Mainnet,
+            crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        ),
+        (Network::new_default_testnet(), usize::from(siblings)),
+    ] {
+        let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+        let (mut state, finalized_state) = new_invalidate_test_state(&network);
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+        for i in 0..siblings {
+            let sibling = block1
+                .make_fake_child()
+                .set_work(10)
+                .set_block_commitment([i; 32]);
+            state.commit_block(sibling.prepare(), &finalized_state)?;
+        }
+
+        assert_eq!(expected_forks, state.chain_count(), "{network}");
+    }
+
+    Ok(())
+}

@@ -19,7 +19,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
+    constants::{
+        MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
+        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    },
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{
@@ -277,7 +280,12 @@ impl NonFinalizedState {
 
         chain_filter(&mut self.chain_set);
 
-        while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
+        let max_forks = if self.network.is_a_test_network() {
+            MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS
+        } else {
+            MAX_NON_FINALIZED_CHAIN_FORKS
+        };
+        while self.chain_set.len() > max_forks {
             // Keep the inserted chain and the best chain, so late forks can grow. Evict the
             // lowest-work chain, and on a work tie the one whose tip was received first.
             let best_chain = self.chain_set.last().cloned();
@@ -296,6 +304,12 @@ impl NonFinalizedState {
                 .clone();
 
             self.chain_set.remove(&evicted);
+            tracing::warn!(
+                tip = ?evicted.non_finalized_tip_hash(),
+                height = ?evicted.non_finalized_tip_height(),
+                max_forks,
+                "the fork limit evicted a chain: if the node stops advancing, restart it"
+            );
         }
 
         self.update_metrics_bars();

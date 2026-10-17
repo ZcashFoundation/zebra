@@ -106,6 +106,12 @@ pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 100_000;
 /// `10 forks * 1000 blocks * 2 MB per block = 20 GB`
 pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 
+/// The maximum number of non-finalized chain forks Zebra will track on test networks.
+///
+/// Minimum-difficulty blocks can create many equal-work sibling forks at once, and those forks
+/// are small, so test networks keep more of them before evicting any (#11133).
+pub const MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS: usize = 100;
+
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 
