@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: Mined-block broadcasts no longer stall when queued peers disconnect or become ready in successive groups ([#11703](https://github.com/ZcashFoundation/zebra/issues/11703)).
+body: Mined-block broadcasts no longer stall when peers disconnect or become ready in successive groups ([#11703](https://github.com/ZcashFoundation/zebra/issues/11703)).
 time: 2026-10-13T02:46:09.045603452+02:00

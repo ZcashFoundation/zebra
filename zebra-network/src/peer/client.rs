@@ -48,6 +48,9 @@ pub struct Client {
     /// Used to send [`Request`]s to the remote peer.
     pub(crate) server_tx: mpsc::Sender<ClientRequest>,
 
+    /// Sends block adverts without waiting for an outstanding request's response.
+    pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<crate::peer_set::BlockAdvert>,
+
     /// Used to register missing inventory in client [`Response`]s,
     /// so that the peer set can route retries to other clients.
     pub(crate) inv_collector: broadcast::Sender<InventoryChange>,

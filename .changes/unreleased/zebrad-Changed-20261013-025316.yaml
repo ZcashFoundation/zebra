@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Block adverts reach eligible busy peers without waiting for ordinary requests to become ready. Broadcasts acknowledge completed local writes; full queues, revoked connections, and write failures are not treated as successful delivery ([#11708](https://github.com/ZcashFoundation/zebra/pull/11708)).'
+time: 2026-10-13T02:53:16+02:00
