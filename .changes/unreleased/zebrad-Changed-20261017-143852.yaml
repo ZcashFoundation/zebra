@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Start partial shielded verification batches at the end of block transaction queueing rather than waiting for the idle timer.
+time: 2026-10-17T14:38:52.338693213+02:00

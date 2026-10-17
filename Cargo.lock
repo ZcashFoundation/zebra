@@ -7245,6 +7245,7 @@ dependencies = [
  "nonempty",
  "once_cell",
  "orchard",
+ "parking_lot",
  "proptest",
  "proptest-derive",
  "rand 0.10.2",

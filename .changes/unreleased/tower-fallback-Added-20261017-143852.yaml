@@ -1,0 +1,4 @@
+project: tower-fallback
+kind: Added
+body: Added access to the primary service through `Fallback::primary()` for explicit service controls.
+time: 2026-10-17T14:38:52.33083359+02:00
