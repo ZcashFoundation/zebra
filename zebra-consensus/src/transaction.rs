@@ -398,8 +398,8 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Looks up UTXOs spent by `tx` concurrently from any chain state, also checking
-    /// `known_utxos` for UTXOs from earlier transactions in the same block.
+    /// Looks up UTXOs spent by `tx` from any chain state, concurrently for multiple external inputs,
+    /// also checking `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
     /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
     /// order as the matching inputs in `tx`.
@@ -419,23 +419,39 @@ where
         let mut spent_utxos = HashMap::new();
         // Pre-allocate with None so we can fill each slot by input index, preserving input order.
         let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
-        let mut lookups = FuturesUnordered::new();
-
-        for (input_idx, input) in inputs.iter().enumerate() {
-            if let transparent::Input::PrevOut { outpoint, .. } = input {
-                if let Some(output) = known_utxos.get(outpoint) {
-                    spent_outputs[input_idx] = Some(output.utxo.output.clone());
-                    spent_utxos.insert(*outpoint, output.utxo.clone());
-                } else {
-                    lookups.push(Self::lookup_utxo(state.clone(), *outpoint, input_idx));
-                }
+        let mut external_inputs = inputs.iter().enumerate().filter_map(|(input_idx, input)| {
+            let outpoint = input.outpoint()?;
+            if let Some(output) = known_utxos.get(&outpoint) {
+                spent_outputs[input_idx] = Some(output.utxo.output.clone());
+                spent_utxos.insert(outpoint, output.utxo.clone());
+                None
+            } else {
+                Some((input_idx, outpoint))
             }
-        }
+        });
 
-        while let Some(result) = lookups.next().await {
-            let (input_idx, outpoint, utxo) = result?;
-            spent_outputs[input_idx] = Some(utxo.output.clone());
-            spent_utxos.insert(outpoint, utxo);
+        if let Some((input_idx, outpoint)) = external_inputs.next() {
+            if let Some(second) = external_inputs.next() {
+                let mut lookups = FuturesUnordered::new();
+                for (input_idx, outpoint) in [(input_idx, outpoint), second]
+                    .into_iter()
+                    .chain(external_inputs)
+                {
+                    lookups.push(Self::lookup_utxo(state.clone(), outpoint, input_idx));
+                }
+
+                while let Some(result) = lookups.next().await {
+                    let (input_idx, outpoint, utxo) = result?;
+                    spent_outputs[input_idx] = Some(utxo.output.clone());
+                    spent_utxos.insert(outpoint, utxo);
+                }
+            } else {
+                // A single external input cannot overlap another lookup, so avoid the queue.
+                let (input_idx, outpoint, utxo) =
+                    Self::lookup_utxo(state, outpoint, input_idx).await?;
+                spent_outputs[input_idx] = Some(utxo.output.clone());
+                spent_utxos.insert(outpoint, utxo);
+            }
         }
 
         let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();
