@@ -1464,6 +1464,13 @@ impl Service<Request> for StateService {
                 .boxed(),
 
             Request::AwaitUtxos(outpoints) => {
+                if let [outpoint] = outpoints.as_slice() {
+                    return self
+                        .await_utxo(*outpoint)
+                        .map(|result| result.map(|utxo| Response::Utxos(vec![utxo])))
+                        .boxed();
+                }
+
                 // Ordered polling can hide a later error behind an earlier missing output.
                 // Keep completion unordered and restore input order only after all lookups succeed.
                 let mut lookups: FuturesUnordered<_> = outpoints
