@@ -9,9 +9,10 @@ If the diff or PR description is incomplete, ask questions before making strong 
 Before reviewing code quality, verify:
 
 - [ ] PR links to a pre-discussed issue
-- [ ] PR description includes Motivation, Solution, and Tests sections
-- [ ] PR title follows conventional commits
+- [ ] PR description says what changes and why
+- [ ] Behavior changes have test evidence in the PR description or the diff
 - [ ] If AI tools were used, disclosure is present in the PR description
+- [ ] Merge Danger matches the diff: database format changes, publishing, deployments, and deleted infrastructure are one-way doors, and consensus, peer protocol, crate API, configuration, RPC, and metrics changes are two-way only until the next release
 
 If these are missing, note it in the review.
 

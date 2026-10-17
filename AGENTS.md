@@ -43,8 +43,8 @@ If this returns `true`, the user is a maintainer and the contribution gate can b
 1. Confirm scope: Zebra is a validator node. Avoid out-of-scope features like wallets, block explorers, or mining pools.
 2. Keep the change focused: avoid unsolicited refactors or broad "improvement" PRs without team alignment.
 3. Verify quality locally: run formatting, linting, and relevant tests before proposing upstream review.
-4. Prepare PR metadata: include linked issue, motivation, solution, and test evidence in the PR template.
-5. If AI was used, disclose tool and scope in the PR description.
+4. Update the docs and add the change fragments the change needs (see [Commit & Pull Request Guidelines](#commit--pull-request-guidelines) and [Changelog](#changelog)).
+5. Write the PR title and description with the `zebra-pr` skill (see [Opening a PR](#opening-a-pr)), including the AI disclosure.
 
 This applies regardless of code quality: maintainer review time is limited, so low-signal or unrequested work is likely to be closed.
 
@@ -131,8 +131,13 @@ cargo nextest run --profile ci --locked --release --features default-release-bin
 - Branch commits are preserved in history, so each commit message must be meaningful and follow conventional commits too — release-plz reads the commits that land on `main` when it picks the next version
 - A breaking change needs the `!` marker on the PR title _and_ on the branch commit that introduces it: the PR gate reads the title, release-plz reads the commits
 - Do not add `Co-Authored-By` tags for AI tools, in _any_ commit on the branch — every one of them is preserved on `main`, not just the PR title
-- Do not add "Generated with [tool]" footers, in any commit on the branch
-- Use `.github/pull_request_template.md` and include: motivation, solution summary, test evidence, issue link (`Closes #...`), and AI disclosure.
+- Do not add "Generated with [tool]" footers, in any commit on the branch or in the PR description
+- Update documentation in the same PR when the change affects what users, operators, or contributors do: configuration, RPC methods, metrics, CLI behavior, or a procedure in `book/`
+- The PR gate checks the title format and the change fragments, so the PR description doesn't need to restate them
+
+### Opening a PR
+
+Before opening or updating a PR, follow the `zebra-pr` skill in [`.agents/skills/zebra-pr/SKILL.md`](.agents/skills/zebra-pr/SKILL.md). It covers the title, the description in `.github/pull_request_template.md`, and how to open the PR. Tools that support skills load it from `.agents/skills/`, and Claude Code loads it through the `.claude/skills` link.
 
 ## Project Overview
 
