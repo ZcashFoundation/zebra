@@ -136,30 +136,30 @@ async fn mempool_state_readiness_keeps_its_deadline() {
 /// Block siblings must not keep a failed proposal waiting indefinitely on state readiness.
 #[tokio::test(start_paused = true)]
 async fn block_state_readiness_keeps_its_deadline() {
-    let mut state = tower::limit::ConcurrencyLimit::new(
-        service_fn(|_| std::future::pending::<Result<zebra_state::Response, crate::BoxError>>()),
-        1,
-    );
-    let held = state.ready().await.unwrap().call(zebra_state::Request::Tip);
-    let lookup = BlockTxVerifier::lookup_utxo(
-        Timeout::new(state, super::UTXO_LOOKUP_TIMEOUT),
-        transparent::OutPoint {
-            hash: Hash([0; 32]),
-            index: 0,
-        },
-        0,
-    );
-    let result = timeout(
-        super::UTXO_LOOKUP_TIMEOUT + std::time::Duration::from_secs(1),
-        lookup,
-    )
-    .await
-    .expect("block state readiness must use the existing state deadline");
-    assert!(matches!(
-        result,
-        Err(TransactionError::TransparentInputNotFound)
-    ));
-    drop(held);
+    for input_count in [1, 2] {
+        let mut state = tower::limit::ConcurrencyLimit::new(
+            service_fn(|_| {
+                std::future::pending::<Result<zebra_state::Response, crate::BoxError>>()
+            }),
+            1,
+        );
+        let held = state.ready().await.unwrap().call(zebra_state::Request::Tip);
+        let lookup = BlockTxVerifier::block_spent_utxos(
+            Arc::new(block_utxo_test_transaction(input_count)),
+            Arc::new(HashMap::new()),
+            Timeout::new(state, super::UTXO_LOOKUP_TIMEOUT),
+        );
+        let started = tokio::time::Instant::now();
+        let result = timeout(
+            super::UTXO_LOOKUP_TIMEOUT + std::time::Duration::from_secs(1),
+            lookup,
+        )
+        .await
+        .expect("block state readiness must use the existing state deadline");
+        assert_eq!(result, Err(TransactionError::TransparentInputNotFound));
+        assert_eq!(started.elapsed(), super::UTXO_LOOKUP_TIMEOUT);
+        drop(held);
+    }
 }
 
 #[test]
@@ -600,6 +600,19 @@ fn v5_transaction_with_no_outputs_fails_verification() {
 
 #[tokio::test]
 async fn block_utxo_lookups_preserve_input_order_and_known_utxos() {
+    check_block_utxo_lookup_results(3, &[0, 2]).await;
+}
+
+#[tokio::test]
+async fn block_single_utxo_lookup_preserves_input_order_and_known_utxos() {
+    check_block_utxo_lookup_results(1, &[0]).await;
+    for external_index in 0..3 {
+        check_block_utxo_lookup_results(3, &[external_index]).await;
+    }
+    check_block_utxo_lookup_results(3, &[]).await;
+}
+
+async fn check_block_utxo_lookup_results(input_count: u32, external_indices: &[u32]) {
     timeout(test_timeout(), async {
         let height = NetworkUpgrade::Nu5
             .activation_height(&Network::Mainnet)
@@ -607,8 +620,8 @@ async fn block_utxo_lookups_preserve_input_order_and_known_utxos() {
         let mut inputs = Vec::new();
         let mut known_utxos = HashMap::new();
         let mut expected_outputs = Vec::new();
-        for index in 0..3 {
-            let fund_height = if index == 1 {
+        for index in 0..input_count {
+            let fund_height = if !external_indices.contains(&index) {
                 height
             } else {
                 height.previous().expect("NU5 has a previous block")
@@ -628,8 +641,7 @@ async fn block_utxo_lookups_preserve_input_order_and_known_utxos() {
             .iter()
             .map(|(outpoint, utxo)| (*outpoint, utxo.utxo.clone()))
             .collect();
-        let known_outpoint = inputs[1].outpoint().expect("mock transfer has a prevout");
-        known_utxos.retain(|outpoint, _| *outpoint == known_outpoint);
+        known_utxos.retain(|outpoint, _| !external_indices.contains(&outpoint.index));
         let tx = Transaction::test_v5(
             NetworkUpgrade::Nu5,
             inputs,
@@ -645,9 +657,9 @@ async fn block_utxo_lookups_preserve_input_order_and_known_utxos() {
         );
         tokio::pin!(lookup);
 
-        // Neither external UTXO is available until both lookups have started.
+        // All external requests must start before their UTXOs become available.
         let mut responders = Vec::new();
-        for _ in 0..2 {
+        for _ in external_indices {
             let responder = tokio::select! {
                 result = &mut lookup => panic!("lookup finished before state responded: {result:?}"),
                 responder = state.expect_request_that(|request| {
@@ -657,13 +669,16 @@ async fn block_utxo_lookups_preserve_input_order_and_known_utxos() {
             let zebra_state::Request::AwaitUtxo(outpoint) = *responder.request() else {
                 unreachable!("request was checked above")
             };
-            assert_ne!(outpoint, known_outpoint, "same-block UTXOs must not be requested");
+            assert!(
+                external_indices.contains(&outpoint.index),
+                "same-block UTXOs must not be requested"
+            );
             responders.push((outpoint, responder));
         }
         responders.sort_by_key(|(outpoint, _)| outpoint.index);
         for (index, (outpoint, responder)) in responders.into_iter().rev().enumerate() {
             responder.respond(zebra_state::Response::Utxo(expected_utxos[&outpoint].clone()));
-            if index == 0 {
+            if index + 1 < external_indices.len() {
                 // Consume the last input's response before making the first one available.
                 assert!(futures::poll!(&mut lookup).is_pending());
             }
@@ -780,26 +795,68 @@ async fn block_utxo_lookups_fail_on_completed_error_and_drop_pending() {
     .expect("a completed state error must not wait for the earlier input or its timeout");
 }
 
+#[tokio::test]
+async fn block_single_utxo_lookup_preserves_state_errors() {
+    let state = service_fn(|request| async move {
+        assert!(matches!(request, zebra_state::Request::AwaitUtxo(_)));
+        Err::<zebra_state::Response, crate::BoxError>(zebra_state::AwaitUtxoError::Cancelled.into())
+    });
+    let result = timeout(
+        test_timeout(),
+        BlockTxVerifier::block_spent_utxos(
+            Arc::new(block_utxo_test_transaction(1)),
+            Arc::new(HashMap::new()),
+            Timeout::new(state, super::UTXO_LOOKUP_TIMEOUT),
+        ),
+    )
+    .await
+    .expect("an immediate state error must complete within the test timeout");
+    assert_eq!(
+        result,
+        Err(TransactionError::from(zebra_state::BoxError::from(
+            zebra_state::AwaitUtxoError::Cancelled
+        )))
+    );
+}
+
+fn block_utxo_test_transaction(input_count: u32) -> Transaction {
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&Network::Mainnet)
+        .expect("NU5 activation height is specified");
+    let inputs = (0..input_count)
+        .map(|index| {
+            mock_transparent_transfer(
+                height.previous().expect("NU5 has a previous block"),
+                true,
+                index,
+                Amount::try_from(1).expect("positive test amount"),
+            )
+            .0
+        })
+        .collect();
+    Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        inputs,
+        vec![],
+        LockTime::unlocked(),
+        height,
+    )
+}
+
 #[tokio::test(start_paused = true)]
 async fn block_utxo_lookups_timeout_is_transparent_input_not_found() {
+    check_block_utxo_lookup_timeout(1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn block_multiple_utxo_lookups_timeout_is_transparent_input_not_found() {
+    check_block_utxo_lookup_timeout(2).await;
+}
+
+async fn check_block_utxo_lookup_timeout(input_count: u32) {
     timeout(test_timeout(), async {
-        let height = NetworkUpgrade::Nu5
-            .activation_height(&Network::Mainnet)
-            .expect("NU5 activation height is specified");
-        let (input, _, _) = mock_transparent_transfer(
-            height.previous().expect("NU5 has a previous block"),
-            true,
-            0,
-            Amount::try_from(1).expect("positive test amount"),
-        );
-        let outpoint = input.outpoint().expect("mock transfer has a prevout");
-        let tx = Transaction::test_v5(
-            NetworkUpgrade::Nu5,
-            vec![input],
-            vec![],
-            LockTime::unlocked(),
-            height,
-        );
+        let tx = block_utxo_test_transaction(input_count);
+        let outpoints: Vec<_> = tx.spent_outpoints().collect();
         let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
         let lookup_timeout = std::time::Duration::from_secs(1);
         let lookup = BlockTxVerifier::block_spent_utxos(
@@ -808,14 +865,18 @@ async fn block_utxo_lookups_timeout_is_transparent_input_not_found() {
             Timeout::new(state.clone(), lookup_timeout),
         );
         tokio::pin!(lookup);
-        let responder = tokio::select! {
-            result = &mut lookup => panic!("lookup finished before its timeout: {result:?}"),
-            responder = state.expect_request(zebra_state::Request::AwaitUtxo(outpoint)) => responder,
-        };
+        let mut responders = Vec::new();
+        for outpoint in outpoints {
+            let responder = tokio::select! {
+                result = &mut lookup => panic!("lookup finished before its timeout: {result:?}"),
+                responder = state.expect_request(zebra_state::Request::AwaitUtxo(outpoint)) => responder,
+            };
+            responders.push(responder);
+        }
 
         tokio::time::advance(lookup_timeout).await;
         assert_eq!(lookup.await, Err(TransactionError::TransparentInputNotFound));
-        drop(responder);
+        drop(responders);
     })
     .await
     .expect("the injected UTXO timeout must expire within the test timeout");
