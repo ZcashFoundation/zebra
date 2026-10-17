@@ -1813,6 +1813,81 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
     );
 }
 
+/// Test that Zebra sets `TCP_NODELAY` on the TCP sockets of inbound and outbound peer connections.
+#[tokio::test]
+async fn peer_tcp_connections_disable_nagle() {
+    let _init_guard = zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let (inbound_nodelay_tx, mut inbound_nodelay_rx) = mpsc::unbounded();
+
+    // The listener has already called `set_tcp_nodelay()` on the stream when it calls the
+    // handshaker, so this reads the option the real inbound handshake would see.
+    let nodelay_inbound_handshaker = service_fn(move |req: HandshakeRequest<TcpStream>| {
+        let inbound_nodelay_tx = inbound_nodelay_tx.clone();
+        async move {
+            inbound_nodelay_tx
+                .unbounded_send(req.data_stream.nodelay())
+                .expect("unexpected error sending to unbounded channel");
+
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+            Ok(fake_client)
+        }
+    });
+
+    let config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        ..Config::default()
+    };
+    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+
+    let (peerset_tx, _peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
+    let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
+
+    let listen_fut = accept_inbound_connections(
+        config,
+        tcp_listener,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        nodelay_inbound_handshaker,
+        peerset_tx,
+        bans_rx,
+        Vec::new(),
+    );
+    let listen_task_handle = tokio::spawn(listen_fut);
+
+    // Outbound side: the socket from the connect helper that the outbound connector uses.
+    let outbound_stream = peer::connect_tcp_nodelay(listen_addr)
+        .await
+        .expect("connecting to a local listener should succeed");
+    assert!(
+        outbound_stream
+            .nodelay()
+            .expect("reading TCP_NODELAY on an open socket should succeed"),
+        "outbound peer connections should disable Nagle's algorithm",
+    );
+
+    // Inbound side: the result from the fake handshaker, for the same connection.
+    let inbound_nodelay = tokio::time::timeout(LISTENER_TEST_DURATION, inbound_nodelay_rx.next())
+        .await
+        .expect("the listener should hand the inbound connection to the handshaker")
+        .expect("the handshaker keeps its sender until it is dropped with the listener");
+    assert!(
+        inbound_nodelay.expect("reading TCP_NODELAY on an open socket should succeed"),
+        "inbound peer connections should disable Nagle's algorithm",
+    );
+
+    listen_task_handle.abort();
+    tokio::task::yield_now().await;
+    assert_listener_task_cancelled(listen_task_handle);
+
+    std::mem::drop(outbound_stream);
+}
+
 /// Test if the initial seed peer connections is rate-limited.
 #[tokio::test]
 async fn add_initial_peers_is_rate_limited() {

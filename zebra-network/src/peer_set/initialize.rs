@@ -867,6 +867,8 @@ where
 
     debug!("got incoming connection");
 
+    peer::set_tcp_nodelay(&tcp_stream);
+
     // # Correctness
     //
     // Holding the drop guard returned by Span::enter across .await points will
