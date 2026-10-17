@@ -44,7 +44,7 @@ use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// A timeout applied to UTXO lookup requests.
 ///
@@ -307,6 +307,10 @@ where
         let known_utxos = req.known_utxos.clone();
         let nu = NetworkUpgrade::current(&network, height);
         let span = tracing::debug_span!("tx", ?tx_id);
+        let queueing = tx
+            .has_shielded_data()
+            .then(|| primitives::flush::Queueing::for_transaction(&known_utxos))
+            .flatten();
 
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
@@ -340,13 +344,20 @@ where
             tracing::trace!(?tx_id, "got state UTXOs");
 
             // Select version-specific async verification pipeline
-            let async_checks = dispatch_version_verification(
-                tx.as_ref(),
-                nu,
-                script_verifier,
-                cached_ffi_transaction.clone(),
-                tx_id,
-            )?;
+            let dispatch = || {
+                dispatch_version_verification(
+                    tx.as_ref(),
+                    nu,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    tx_id,
+                )
+            };
+            let async_checks = match queueing.as_ref() {
+                Some(queueing) => queueing.scope(dispatch),
+                None => dispatch(),
+            }?;
+            drop(queueing);
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
@@ -1369,14 +1380,21 @@ fn verify_sprout_shielded_data(
         //
         // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-        let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
+        let mut ed25519_verifier = primitives::ed25519::VERIFIER.clone();
         let pub_key = zebra_chain::primitives::ed25519::VerificationKeyBytes::from(
             sprout_bundle.joinsplit_pubkey,
         );
         let sig = zebra_chain::primitives::ed25519::Signature::from(sprout_bundle.joinsplit_sig);
         let ed25519_item = (pub_key, sig, shielded_sighash).into();
 
-        checks.push(ed25519_verifier.oneshot(ed25519_item));
+        let queueing = primitives::flush::Queueing::for_request();
+        checks.push(async move {
+            let response = ed25519_verifier.ready().await?.call(ed25519_item);
+            if let Some(queueing) = queueing {
+                queueing.enqueued(primitives::flush::Verifier::Ed25519);
+            }
+            response.await
+        });
     }
 
     Ok(checks)
@@ -1441,13 +1459,14 @@ fn verify_sapling_bundle(
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     if let Some(bundle) = bundle {
-        let verifier = primitives::sapling::VERIFIER.clone();
+        #[cfg(not(test))]
+        let mut verifier = primitives::sapling::VERIFIER.clone();
         #[cfg(test)]
-        let verifier = tests::SAPLING_CACHE_VERIFIER
+        let mut verifier = tests::SAPLING_CACHE_VERIFIER
             .try_with(Clone::clone)
-            .unwrap_or(verifier);
-        async_checks
-            .push(verifier.oneshot(primitives::sapling::Item::new(bundle, *sighash, tx_id)));
+            .unwrap_or_else(|_| primitives::sapling::VERIFIER.clone());
+        // The cache is always ready; constructing its call here tracks actual queue admission.
+        async_checks.push(verifier.call(primitives::sapling::Item::new(bundle, *sighash, tx_id)));
     }
 
     async_checks
@@ -1530,12 +1549,14 @@ fn queue_orchard_bundle(
             None => primitives::halo2::Item::new(bundle, *sighash),
         };
 
-        let verifier = select_verifier().clone();
+        #[cfg(not(test))]
+        let mut verifier = select_verifier().clone();
         #[cfg(test)]
-        let verifier = tests::HALO2_CACHE_VERIFIER
+        let mut verifier = tests::HALO2_CACHE_VERIFIER
             .try_with(Clone::clone)
-            .unwrap_or(verifier);
-        async_checks.push(verifier.oneshot(item));
+            .unwrap_or_else(|_| select_verifier().clone());
+        // The cache is always ready; constructing its call here tracks actual queue admission.
+        async_checks.push(verifier.call(item));
     }
 
     async_checks
