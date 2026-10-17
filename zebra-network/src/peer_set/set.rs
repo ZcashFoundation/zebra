@@ -205,6 +205,17 @@ struct QueuedFindRequest {
     response_sender: oneshot::Sender<ResponseFuture>,
 }
 
+/// What routing queued inventory requests did with the ready peers.
+#[derive(Clone, Copy, Debug, Default)]
+struct QueuedInvRouting {
+    /// Whether any queued request was sent to a ready peer.
+    routed_any: bool,
+
+    /// Whether a queued request that could use the last ready peer stayed queued, so the request
+    /// the Buffer is holding can use that peer.
+    kept_last_peer: bool,
+}
+
 /// Where the peer set routes an inventory request.
 enum InvRoute<K> {
     /// Send the request to this ready peer.
@@ -418,6 +429,21 @@ where
     /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] expires, or once no busy peer might have the block.
     queued_inv_requests: VecDeque<QueuedInvRequest>,
 
+    /// Whether queued block requests took the last ready peer the last time the peer set
+    /// wasn't ready, leaving the request that the [`Buffer`] is holding waiting.
+    ///
+    /// The Buffer only calls the peer set with that request once the peer set is ready. Queued
+    /// block requests can usually use every ready serving peer, so without a turn, the held
+    /// request, which can be discovery, would wait until the whole queue drains. So the next
+    /// readiness pass keeps one ready peer for it.
+    queued_inv_requests_took_last_peer: bool,
+
+    /// Whether [`Self::poll_ready`] kept a ready peer for the request the Buffer is holding,
+    /// even though queued block requests could use it.
+    ///
+    /// [`Self::call`] gives that peer to queued block requests if the held request doesn't use it.
+    ready_peer_kept_for_buffered_request: bool,
+
     /// Wakes the task that polls the peer set, and the task that runs
     /// [`poll_peer_set_on_notify`], while requests are queued.
     queued_request_waker: Arc<QueuedRequestWaker>,
@@ -569,6 +595,8 @@ where
             zcashd_compat_peer_keys: HashSet::new(),
             serving_peer_keys: HashSet::new(),
             queued_inv_requests: VecDeque::new(),
+            queued_inv_requests_took_last_peer: false,
+            ready_peer_kept_for_buffered_request: false,
             queued_request_waker: Arc::default(),
             queued_sidecar_broadcast: None,
 
@@ -694,6 +722,8 @@ where
 
         // Refuse queued requests, because there are no peers left to route them to.
         self.queued_inv_requests.clear();
+        self.queued_inv_requests_took_last_peer = false;
+        self.ready_peer_kept_for_buffered_request = false;
         self.queued_find_requests.clear();
         self.queued_find_request_timer = None;
 
@@ -1838,7 +1868,14 @@ where
     /// peer events notify [`poll_peer_set_on_notify`], which polls the peer set.
     ///
     /// Reconsiders candidates on every poll, including advertisements, failures and removals.
-    fn route_queued_inv_requests(&mut self, cx: &mut Context<'_>) {
+    ///
+    /// If `keep_last_peer` is true, doesn't route a queued request to the last ready peer, so the
+    /// request the Buffer is holding can use it. See [`Self::queued_inv_requests_took_last_peer`].
+    fn route_queued_inv_requests(
+        &mut self,
+        cx: &mut Context<'_>,
+        keep_last_peer: bool,
+    ) -> QueuedInvRouting {
         // Register caller cancellation too, so an expired operation releases its queue entry
         // even when no connection or inventory event follows it.
         self.queued_inv_requests.retain_mut(|queued| {
@@ -1848,18 +1885,33 @@ where
                 && queued.response_sender.poll_canceled(cx).is_pending()
         });
 
-        let mut routed_any = false;
+        self.dispatch_queued_inv_requests(keep_last_peer)
+    }
+
+    /// Routes queued inventory requests like [`Self::route_queued_inv_requests`], without
+    /// registering expiry or cancellation wakeups.
+    fn dispatch_queued_inv_requests(&mut self, keep_last_peer: bool) -> QueuedInvRouting {
+        let mut routing = QueuedInvRouting::default();
         for _ in 0..self.queued_inv_requests.len() {
             let queued = self
                 .queued_inv_requests
                 .pop_front()
                 .expect("each original queue entry is visited once");
 
+            // Don't use a peer for a request whose caller has gone.
+            if queued.response_sender.is_canceled() {
+                continue;
+            }
+
             match self.select_inv_route(&queued.request, queued.hash) {
+                InvRoute::Peer(_) if keep_last_peer && self.ready_services.len() == 1 => {
+                    routing.kept_last_peer = true;
+                    self.queued_inv_requests.push_back(queued);
+                }
                 InvRoute::Peer(peer) => {
                     let _span = queued.span.enter();
                     let response_fut = self.call_inv_peer(peer, queued.request, queued.hash);
-                    routed_any = true;
+                    routing.routed_any = true;
                     // If the receiver was dropped since the check above, dropping the response
                     // future cancels the peer's request.
                     let _ = queued.response_sender.send(response_fut);
@@ -1871,9 +1923,11 @@ where
         }
 
         // Poll the newly busy peer's readiness future even if another peer stays ready.
-        if routed_any && !self.queued_inv_requests.is_empty() {
+        if routing.routed_any && !self.queued_inv_requests.is_empty() {
             self.queued_request_waker.notify.notify_one();
         }
+
+        routing
     }
 
     /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
@@ -2324,32 +2378,46 @@ where
             return Poll::Pending;
         }
 
-        // Waiting block requests still take priority over broadcasts.
-        self.route_queued_inv_requests(&mut peer_cx);
+        // Waiting block requests still take priority over broadcasts. But if they took the last
+        // ready peer last time, keep one for the request the Buffer is holding.
+        let keep_last_peer = std::mem::take(&mut self.queued_inv_requests_took_last_peer);
+        let first_routing = self.route_queued_inv_requests(&mut peer_cx, keep_last_peer);
         self.broadcast_all_queued();
         self.send_queued_sidecar_broadcast();
 
         if self.ready_services.is_empty() {
             if self.poll_peers(&mut peer_cx)?.is_pending() {
+                self.queued_inv_requests_took_last_peer = first_routing.routed_any;
                 return Poll::Pending;
             }
             // A peer can recover capacity while the first queued request is dispatched.
-            // Do not expose that capacity to the Buffer's held request before queued work.
+            // Queued discovery gets that capacity before the Buffer's held request. Queued block
+            // requests do too, unless they already took a ready peer from that request.
             self.route_queued_find_requests(&mut peer_cx);
-            self.route_queued_inv_requests(&mut peer_cx);
+            let second_routing = self.route_queued_inv_requests(
+                &mut peer_cx,
+                keep_last_peer || first_routing.routed_any,
+            );
             if self.ready_services.is_empty() {
+                self.queued_inv_requests_took_last_peer =
+                    first_routing.routed_any || second_routing.routed_any;
                 // Newly inserted readiness futures need a first poll even with an idle Buffer.
                 cx.waker().wake_by_ref();
                 Poll::Pending
             } else {
+                self.ready_peer_kept_for_buffered_request = second_routing.kept_last_peer;
                 Poll::Ready(Ok(()))
             }
         } else {
+            self.ready_peer_kept_for_buffered_request = first_routing.kept_last_peer;
             Poll::Ready(Ok(()))
         }
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
+        let kept_ready_peer = std::mem::take(&mut self.ready_peer_kept_for_buffered_request);
+        let is_poll_request = matches!(req, Request::PollPeerSet);
+
         let fut = match req {
             Request::BlockDownload { hash, .. } => self.route_inv(req, hash.into()),
             // Only do inventory-aware routing on individual items.
@@ -2371,12 +2439,29 @@ where
                 self.route_sidecar_broadcast(req)
             }
 
-            // Queued requests were already routed by `poll_ready()`.
-            Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
+            // `poll_ready()` already routed queued requests, unless it kept a ready peer for the
+            // request the Buffer was holding. This was that request, so queued requests get it.
+            Request::PollPeerSet => {
+                if kept_ready_peer {
+                    self.dispatch_queued_inv_requests(false);
+                }
+                async { Ok(Response::Nil) }.boxed()
+            }
 
             // Find requests rotate across serving peers with a bounded wait; others use P2C.
             _ => self.route_request(req),
         };
+
+        // If the request didn't use the peer kept for it, queued requests can. Their expiry and
+        // cancellation wakeups are registered when the peer set is polled, so poll it again.
+        if kept_ready_peer
+            && !is_poll_request
+            && !self.ready_services.is_empty()
+            && !self.queued_inv_requests.is_empty()
+        {
+            self.queued_request_waker.notify.notify_one();
+        }
+
         self.update_metrics();
 
         fut
