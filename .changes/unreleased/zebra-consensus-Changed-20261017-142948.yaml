@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Avoid concurrency-queue allocations when a block transaction needs only one state UTXO lookup, preserving lookup deadlines and errors.
+time: 2026-10-17T14:29:48.999730104+02:00
