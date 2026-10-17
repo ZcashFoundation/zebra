@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: "Relay mining submissions matching the published template's parent, height, and difficulty after proof of work and body authentication, before full verification. Early relay uses ordinary gossip without delaying committed-tip gossip or replacing deferred all-peer adverts. RPC responses and all-peer delivery still wait for commit; rejected pending bodies are withdrawn and logged unless the failure is known to be inconclusive."
+time: 2026-10-11T12:00:00.000000000+00:00

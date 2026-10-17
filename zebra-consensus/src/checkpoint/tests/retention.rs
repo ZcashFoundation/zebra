@@ -581,6 +581,368 @@ async fn reset_cleans_stale_queue_without_releasing_running_owner() {
     .expect("reset must clean stale indexes without cancelling accepted work");
 }
 
+/// Failed-range recovery and surviving owners must allow the following checkpoint range to finish.
+///
+/// The synthetic chain is trusted by this test's checkpoints; it is not a full-consensus fixture.
+/// Commits and the notification-capacity failure run through the real finalized state writer.
+#[tokio::test]
+async fn failed_checkpoint_range_releases_capacity_for_real_state_recovery() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(3 * VERIFY_TIMEOUT_SECONDS), async {
+        let blocks = blocks_through(RETAINED_BLOCK_LIMIT + MAX_CHECKPOINT_HEIGHT_GAP);
+        let checkpoints: Vec<_> = blocks
+            .iter()
+            .step_by(MAX_CHECKPOINT_HEIGHT_GAP)
+            .map(|block| (block.coinbase_height().unwrap(), block.hash()))
+            .collect();
+        let state = zs::init_test(&Mainnet).await;
+        state
+            .clone()
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
+                blocks[0].clone().into(),
+            ))
+            .await
+            .unwrap();
+        let initial_tip = Some((block::Height(0), blocks[0].hash()));
+        let (release_descendants, descendants_released) = tokio::sync::watch::channel(false);
+        let (forwarded, mut forwarded_heights) = tokio::sync::mpsc::channel(RETAINED_BLOCK_LIMIT);
+        let inner_state = state.clone();
+        let gated_state = tower::service_fn(move |request: zs::Request| {
+            let mut state = inner_state.clone();
+            let mut descendants_released = descendants_released.clone();
+            let forwarded = forwarded.clone();
+            async move {
+                let height = match &request {
+                    zs::Request::CommitCheckpointVerifiedBlock(block)
+                    | zs::Request::CommitMinedCheckpointVerifiedBlock { block, .. } => {
+                        Some(block.height)
+                    }
+                    _ => None,
+                };
+                let descendant = height.is_some_and(|height| height > block::Height(1));
+                if descendant {
+                    descendants_released
+                        .wait_for(|released| *released)
+                        .await
+                        .unwrap();
+                }
+                let response = state.ready().await?.call(request);
+                if descendant {
+                    let _ = forwarded.try_send(height.unwrap());
+                }
+                response.await
+            }
+        });
+        let mut verifier = CheckpointVerifier::from_list(
+            checkpoints,
+            &network_without_pow(),
+            initial_tip,
+            gated_state,
+        )
+        .unwrap();
+        assert_eq!(verifier.retained_block_limit, RETAINED_BLOCK_LIMIT);
+
+        // Force block 1 to fail at the real writer's pre-mutation boundary, then let later
+        // accepted descendants arrive only after that failure has reset the state's send tip.
+        let (committed, _commits) = tokio::sync::mpsc::channel(1);
+        committed
+            .try_send((block::Hash([9; 32]), block::Height(0)))
+            .unwrap();
+        let (validated, _validation) = tokio::sync::watch::channel(None);
+        let first = verifier.verify(
+            blocks[1].clone(),
+            Some(zs::MinedBlockNotifications::new(committed, validated)),
+        );
+        let mut second = None;
+        let mut descendants = FuturesUnordered::new();
+        for block in blocks.iter().skip(2).take(RETAINED_BLOCK_LIMIT - 1) {
+            let response = verifier.call(block.clone());
+            if block.coinbase_height() == Some(block::Height(2)) {
+                second = Some(response);
+            } else {
+                descendants.push(response);
+            }
+        }
+        let error = first.await.unwrap_err();
+        let VerifyCheckpointError::CommitCheckpointVerified(source) = error else {
+            panic!("the first request must preserve the real state commit error")
+        };
+        assert!(matches!(
+            source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .unwrap()
+                .inner(),
+            zs::CommitBlockError::MinedBlockNotificationFull
+        ));
+        release_descendants.send(true).unwrap();
+
+        // Either the failed range rejects its unsent suffix, or old per-block owners forward
+        // height 2 after the failure. Both paths reach the same recovery attempt below.
+        let mut second = second.unwrap();
+        let second_resolved = loop {
+            tokio::select! {
+                result = &mut second => {
+                    assert!(result.is_err(), "height 2 cannot commit before its failed parent");
+                    break true;
+                }
+                Some(height) = forwarded_heights.recv() => {
+                    if height == block::Height(2) {
+                        break false;
+                    }
+                }
+            }
+        };
+        assert_eq!(
+            state.clone().oneshot(zs::Request::Tip).await.unwrap(),
+            zs::Response::Tip(initial_tip),
+            "the failed block and its descendants have not mutated the real chain",
+        );
+
+        let mut recovery = Vec::with_capacity(MAX_CHECKPOINT_HEIGHT_GAP);
+        for block in blocks.iter().skip(1).take(MAX_CHECKPOINT_HEIGHT_GAP) {
+            let mut response = verifier.call(block.clone());
+            let immediate = response.as_mut().now_or_never();
+            assert!(
+                immediate.is_none(),
+                "recovery block {:?} must fit under the unchanged cap: {immediate:?}",
+                block.coinbase_height(),
+            );
+            recovery.push((block.hash(), response));
+        }
+        for (hash, response) in recovery {
+            assert_eq!(response.await.unwrap(), hash);
+        }
+        let recovered_tip = &blocks[MAX_CHECKPOINT_HEIGHT_GAP];
+        assert_eq!(
+            state
+                .clone()
+                .oneshot(zs::Request::Block(recovered_tip.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(Some(recovered_tip.clone())),
+        );
+        if !second_resolved {
+            let _ = second.await;
+        }
+        while descendants.next().await.is_some() {}
+        assert_eq!(
+            verifier.retained_blocks.load(Ordering::Relaxed),
+            0,
+            "every accepted response and retained owner must finish after recovery",
+        );
+
+        let surviving_tip = &blocks[RETAINED_BLOCK_LIMIT];
+        assert_eq!(
+            state.clone().oneshot(zs::Request::Tip).await.unwrap(),
+            zs::Response::Tip(Some((
+                surviving_tip.coinbase_height().unwrap(),
+                surviving_tip.hash(),
+            ))),
+            "surviving pre-reset owners must have committed through height 2,000",
+        );
+        let next_range: Vec<_> = blocks
+            .iter()
+            .skip(RETAINED_BLOCK_LIMIT + 1)
+            .map(|block| (block.hash(), verifier.call(block.clone())))
+            .collect();
+        timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+            for (hash, response) in next_range {
+                assert_eq!(response.await.unwrap(), hash);
+            }
+        })
+        .await
+        .expect("surviving committed ranges must not strand verification of heights 2,001–2,400");
+        let next_tip = blocks.last().unwrap();
+        assert_eq!(
+            state.oneshot(zs::Request::Tip).await.unwrap(),
+            zs::Response::Tip(Some(
+                (next_tip.coinbase_height().unwrap(), next_tip.hash(),)
+            )),
+        );
+        assert_eq!(verifier.retained_blocks.load(Ordering::Relaxed), 0);
+    })
+    .await
+    .expect("a failed checkpoint range must not strand the capacity needed to retry it");
+}
+
+#[derive(Clone, Copy)]
+enum ReplacementObserver {
+    Healthy,
+    Full,
+    Closed,
+}
+
+async fn ordinary_checkpoint_replacement(observer: ReplacementObserver) {
+    timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let genesis = genesis();
+        let child =
+            Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+                .unwrap();
+        let state = zs::init_test(&Mainnet).await;
+        let mut verifier = CheckpointVerifier::from_list(
+            [
+                (block::Height(0), genesis.hash()),
+                (block::Height(1), child.hash()),
+            ],
+            &Mainnet,
+            None,
+            state.clone(),
+        )
+        .unwrap();
+        let (committed, mut commits) = tokio::sync::mpsc::channel(1);
+        let existing = (block::Hash([9; 32]), block::Height(0));
+        match observer {
+            ReplacementObserver::Healthy => {}
+            ReplacementObserver::Full => committed.try_send(existing).unwrap(),
+            ReplacementObserver::Closed => commits.close(),
+        }
+        let (validated, validation) = tokio::sync::watch::channel(None);
+        drop(verifier.verify(
+            child.clone(),
+            Some(zs::MinedBlockNotifications::new(committed, validated)),
+        ));
+        let replacement = verifier.call(child.clone());
+        assert_eq!(
+            verifier.call(genesis.clone()).await.unwrap(),
+            genesis.hash()
+        );
+        assert_eq!(replacement.await.unwrap(), child.hash());
+        assert_eq!(
+            state
+                .oneshot(zs::Request::Block(child.hash().into()))
+                .await
+                .unwrap(),
+            zs::Response::Block(Some(child.clone())),
+        );
+        assert!(validation.borrow().is_none());
+        match observer {
+            ReplacementObserver::Healthy => assert_eq!(
+                commits.recv().await,
+                Some((child.hash(), block::Height(1))),
+                "ordinary replacement must retain the healthy mined observer",
+            ),
+            ReplacementObserver::Full => {
+                assert_eq!(commits.recv().await, Some(existing));
+                assert!(commits.try_recv().is_err());
+            }
+            ReplacementObserver::Closed => assert!(commits.recv().await.is_none()),
+        }
+    })
+    .await
+    .expect("a superseded mined observer must not gate the ordinary replacement");
+}
+
+#[tokio::test]
+async fn ordinary_checkpoint_duplicate_preserves_healthy_mined_observer() {
+    let _init_guard = zebra_test::init();
+    ordinary_checkpoint_replacement(ReplacementObserver::Healthy).await;
+}
+
+#[tokio::test]
+async fn ordinary_checkpoint_duplicate_ignores_unavailable_mined_observers() {
+    let _init_guard = zebra_test::init();
+    ordinary_checkpoint_replacement(ReplacementObserver::Full).await;
+    ordinary_checkpoint_replacement(ReplacementObserver::Closed).await;
+}
+
+#[tokio::test]
+async fn failed_checkpoint_range_preserves_committed_prefix_and_first_error() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let blocks: Vec<_> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .map(|bytes| Arc::<Block>::zcash_deserialize(*bytes).unwrap())
+            .collect();
+        let state = zs::init_test(&Mainnet).await;
+        state
+            .clone()
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
+                blocks[0].clone().into(),
+            ))
+            .await
+            .unwrap();
+        let initial_tip = (block::Height(0), blocks[0].hash());
+        let last = blocks.last().unwrap();
+        let mut verifier = CheckpointVerifier::from_list(
+            [initial_tip, (last.coinbase_height().unwrap(), last.hash())],
+            &Mainnet,
+            Some(initial_tip),
+            state.clone(),
+        )
+        .unwrap();
+        let (committed, _commits) = tokio::sync::mpsc::channel(1);
+        committed
+            .try_send((block::Hash([9; 32]), block::Height(0)))
+            .unwrap();
+        let (validated, _validation) = tokio::sync::watch::channel(None);
+        let mut notifications = Some(zs::MinedBlockNotifications::new(committed, validated));
+        let mut responses = Vec::new();
+        for block in blocks.iter().skip(1) {
+            let height = block.coinbase_height().unwrap();
+            let observer = if height == block::Height(3) {
+                notifications.take()
+            } else {
+                None
+            };
+            responses.push((
+                height,
+                block.hash(),
+                verifier.verify(block.clone(), observer),
+            ));
+        }
+        for (height, hash, response) in responses {
+            let result = response.await;
+            if height < block::Height(3) {
+                assert_eq!(result.unwrap(), hash);
+            } else if height == block::Height(3) {
+                let VerifyCheckpointError::CommitCheckpointVerified(source) = result.unwrap_err()
+                else {
+                    panic!("the first failing block must retain its actual state error")
+                };
+                assert!(matches!(
+                    source
+                        .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                        .unwrap()
+                        .inner(),
+                    zs::CommitBlockError::MinedBlockNotificationFull
+                ));
+            } else {
+                let error = result.unwrap_err();
+                assert!(matches!(
+                    error,
+                    VerifyCheckpointError::RangeAborted { failed_hash }
+                        if failed_hash == blocks[3].hash()
+                ));
+                let error = crate::RouterError::from(error);
+                assert!(error.is_resource_pressure());
+                assert!(!error.is_duplicate_request());
+                assert!(!error.is_auth_commitment_mismatch());
+                assert_eq!(error.misbehavior_score(), 0);
+            }
+        }
+        assert_eq!(
+            state.clone().oneshot(zs::Request::Tip).await.unwrap(),
+            zs::Response::Tip(Some((block::Height(2), blocks[2].hash()))),
+            "the committed prefix must survive the failed range",
+        );
+        assert_eq!(verifier.retained_blocks.load(Ordering::Relaxed), 0);
+        let recovery: Vec<_> = blocks
+            .iter()
+            .skip(3)
+            .map(|block| (block.hash(), verifier.call(block.clone())))
+            .collect();
+        for (hash, response) in recovery {
+            assert_eq!(response.await.unwrap(), hash);
+        }
+        assert_eq!(
+            state.oneshot(zs::Request::Tip).await.unwrap(),
+            zs::Response::Tip(Some((last.coinbase_height().unwrap(), last.hash()))),
+        );
+    })
+    .await
+    .expect("range recovery must retain the committed prefix and resolve every suffix response");
+}
+
 #[tokio::test]
 async fn delayed_checkpoint_completion_and_reset_do_not_rewind_confirmed_progress() {
     let _init_guard = zebra_test::init();

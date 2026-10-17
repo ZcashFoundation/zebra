@@ -74,6 +74,8 @@ struct QueuedBlock {
     block: CheckpointVerifiedBlock,
     /// The transmitting end of the oneshot channel for this block's result.
     tx: oneshot::Sender<Result<block::Hash, VerifyCheckpointError>>,
+    /// Optional local mining notifications, without reserving notification capacity.
+    notifications: Option<zs::MinedBlockNotifications>,
     /// Counts this body through queueing, hashing, state commit, and failure recovery.
     retained: RetainedBlockPermit,
 }
@@ -785,6 +787,7 @@ where
     fn queue_block(
         &mut self,
         block: Arc<Block>,
+        notifications: Option<zs::MinedBlockNotifications>,
     ) -> Result<oneshot::Receiver<Result<block::Hash, VerifyCheckpointError>>, VerifyCheckpointError>
     {
         let block = self.check_block(block)?;
@@ -798,7 +801,14 @@ where
                 .find(|previous| previous.block.hash == hash)
         }) {
             // Replace the entire body: block hashes do not always commit to authorizing data.
+            // Ordinary supersession keeps a healthy mined observer without requiring its capacity.
             previous.block = block;
+            previous.notifications = notifications.or_else(|| {
+                previous.notifications.take().map(|mut observer| {
+                    observer.allow_ordinary_commit();
+                    observer
+                })
+            });
             let old_tx = std::mem::replace(&mut previous.tx, tx);
             let _ = old_tx.send(Err(VerifyCheckpointError::NewerRequest { height, hash }));
             return Ok(rx);
@@ -825,6 +835,7 @@ where
         let queued = QueuedBlock {
             block,
             tx,
+            notifications,
             retained: RetainedBlockPermit(self.retained_blocks.clone()),
         };
         let blocks = self
@@ -1242,7 +1253,7 @@ where
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
-        self.verify(block)
+        self.verify(block, None)
     }
 }
 
@@ -1270,10 +1281,17 @@ where
                 let QueuedBlock {
                     block,
                     tx,
+                    notifications,
                     retained,
                 } = queued;
                 let hash = block.hash;
-                let commit = zs::Request::CommitCheckpointVerifiedBlock(block);
+                let commit = match notifications {
+                    Some(notifications) => zs::Request::CommitMinedCheckpointVerifiedBlock {
+                        block,
+                        notifications,
+                    },
+                    None => zs::Request::CommitCheckpointVerifiedBlock(block),
+                };
                 let result = async { state_service.ready().await?.call(commit).await }
                     .await
                     .map_err(VerifyCheckpointError::CommitCheckpointVerified)
@@ -1304,9 +1322,10 @@ where
                         let QueuedBlock {
                             block,
                             tx,
+                            notifications,
                             retained,
                         } = queued;
-                        drop((block, retained));
+                        drop((block, notifications, retained));
                         let _ = tx.send(Err(VerifyCheckpointError::RangeAborted {
                             failed_hash: hash,
                         }));
@@ -1332,11 +1351,16 @@ where
         }));
     }
 
-    /// Verify a checkpointed block independently of its response receiver.
+    /// Verify a checkpointed block, carrying mining metadata with the retained body.
     ///
-    /// Dropping the response neither drops queued work nor cancels an accepted commit.
-    #[instrument(name = "checkpoint", skip(self, block))]
-    pub(crate) fn verify(&mut self, block: Arc<Block>) -> <Self as Service<Arc<Block>>>::Future {
+    /// No notification capacity is reserved before commit readiness. Dropping the response
+    /// neither drops queued work nor cancels an accepted commit.
+    #[instrument(name = "checkpoint", skip(self, block, notifications))]
+    pub(crate) fn verify(
+        &mut self,
+        block: Arc<Block>,
+        notifications: Option<zs::MinedBlockNotifications>,
+    ) -> <Self as Service<Arc<Block>>>::Future {
         if self.reset_receiver.has_changed().unwrap_or(false) {
             let tip = *self.reset_receiver.borrow_and_update();
             self.reset_progress(tip);
@@ -1357,7 +1381,7 @@ where
         if let FinalCheckpoint = self.previous_checkpoint_height() {
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
-        let receiver = match self.queue_block(block) {
+        let receiver = match self.queue_block(block, notifications) {
             Ok(receiver) => receiver,
             Err(error) => return async { Err(error) }.boxed(),
         };

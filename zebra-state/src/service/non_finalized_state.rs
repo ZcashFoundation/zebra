@@ -27,7 +27,7 @@ use crate::{
         finalized_state::{calculate_deferred_pool_balance_change, ZebraDb},
         InvalidateError,
     },
-    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    MinedBlockNotifications, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
 mod backup;
@@ -387,10 +387,13 @@ impl NonFinalizedState {
     /// Apply an exact proposal verdict to its solved block and original parent.
     ///
     /// Normal chain application rebuilds indexes and the history leaf using the solved hash.
+    /// Mined bodies are published only after checking current invalidation and resolving the parent.
+    /// A changed wall clock can suppress early relay without changing the normal commit policy.
     pub(super) fn commit_prevalidated_contextual(
         &mut self,
         contextual: ContextuallyVerifiedBlock,
         finalized_state: &ZebraDb,
+        notifications: Option<&MinedBlockNotifications>,
     ) -> Result<(), ValidateContextError> {
         // Local invalidation refers to solved hashes, which proposals do not bind.
         if self
@@ -417,6 +420,16 @@ impl NonFinalizedState {
         } else {
             self.parent_chain(parent_hash)?
         };
+        if let Some(notifications) = notifications {
+            if contextual
+                .block
+                .header
+                .time_is_valid_at(chrono::Utc::now(), &height, &hash)
+                .is_ok()
+            {
+                let _ = notifications.validated.send(Some(contextual.block.clone()));
+            }
+        }
         let chain = Arc::unwrap_or_clone(parent_chain).push(contextual)?;
         self.insert_with(Arc::new(chain), |chains| {
             chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
