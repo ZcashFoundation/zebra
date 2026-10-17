@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Duplicate spend and nullifier checks no longer allocate a hash set for transactions with at most four inputs or nullifiers ([#11714](https://github.com/ZcashFoundation/zebra/issues/11714)).
+time: 2026-10-13T15:31:29.115527456+02:00

@@ -27,6 +27,9 @@ use zebra_chain::{
 
 use crate::error::TransactionError;
 
+#[cfg(test)]
+mod tests;
+
 /// Checks if the transaction's lock time allows this transaction to be included in a block.
 ///
 /// Arguments:
@@ -427,12 +430,44 @@ fn check_for_duplicates<'t, T>(
 where
     T: Clone + Eq + Hash + 't,
 {
-    let mut hash_set = HashSet::new();
+    const MAX_INITIAL_CAPACITY: usize = 1_024;
 
-    for item in items {
-        if let Some(duplicate) = hash_set.replace(item) {
-            return Err(error_wrapper(duplicate.into_owned()));
+    let mut items = items.into_iter();
+    // Avoid allocating a hash table for groups with at most four items.
+    let mut small: [Option<Cow<'t, T>>; 4] = [None, None, None, None];
+    let mut small_len = 0;
+
+    while let Some(item) = items.next() {
+        for previous in small[..small_len].iter_mut().flatten() {
+            if *previous == item {
+                return Err(error_wrapper(
+                    std::mem::replace(previous, item).into_owned(),
+                ));
+            }
         }
+
+        if small_len < small.len() {
+            small[small_len] = Some(item);
+            small_len += 1;
+            continue;
+        }
+
+        // Early duplicates must not eagerly allocate for every remaining untrusted input.
+        let capacity = small
+            .len()
+            .saturating_add(1)
+            .saturating_add(items.size_hint().1.unwrap_or(0))
+            .min(MAX_INITIAL_CAPACITY);
+        let mut hash_set = HashSet::with_capacity(capacity);
+        hash_set.extend(small.into_iter().flatten());
+
+        for item in std::iter::once(item).chain(items) {
+            if let Some(duplicate) = hash_set.replace(item) {
+                return Err(error_wrapper(duplicate.into_owned()));
+            }
+        }
+
+        return Ok(());
     }
 
     Ok(())
