@@ -401,12 +401,13 @@ impl Handler {
                 }
             }
 
-            // TODO:
-            // - use `any(inv)` rather than `all(inv)`?
+            // An empty inventory can be a late mempool reply after cancellation.
+            // Zebra and zcashd send no message for an empty getblocks result.
             (Handler::FindBlocks, Message::Inv(items))
-                if items
-                    .iter()
-                    .all(|item| matches!(item, InventoryHash::Block(_))) =>
+                if !items.is_empty()
+                    && items
+                        .iter()
+                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
                 Handler::Finished(Ok(Response::BlockHashes(
                     block_hashes(&items[..]).collect(),
@@ -1323,7 +1324,7 @@ where
                 [] => {
                     debug!(%msg, "ignoring empty inv");
 
-                    // This might be a minor protocol error, or it might mean "not found".
+                    // A reply can arrive after its mempool or block-locator request was canceled.
                     Unused
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
