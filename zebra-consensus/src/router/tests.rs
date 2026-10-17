@@ -285,9 +285,9 @@ async fn mined_checkpoint_notifications_follow_commit() {
         invalid.transactions.push(invalid.transactions[0].clone());
         assert!(router
             .clone()
-            .oneshot(Request::CommitMined(
-                Arc::new(invalid),
-                notifications.clone()
+            .oneshot(Request::CommitDecoded(
+                Arc::new(invalid).into(),
+                Some(notifications.clone()),
             ))
             .await
             .is_err());
@@ -321,7 +321,10 @@ async fn mined_checkpoint_notifications_follow_commit() {
         assert_eq!(
             router
                 .clone()
-                .oneshot(Request::CommitMined(genesis.clone(), notifications.clone()))
+                .oneshot(Request::CommitDecoded(
+                    genesis.clone().into(),
+                    Some(notifications.clone()),
+                ))
                 .await
                 .unwrap(),
             genesis.hash(),

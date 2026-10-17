@@ -970,7 +970,10 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             let verifier = real_verifier.clone();
             let completed = completed.clone();
             async move {
-                let mined = matches!(&request, VerifyRequest::CommitMined(_, _));
+                let mined = matches!(
+                    &request,
+                    VerifyRequest::CommitMined(_, _) | VerifyRequest::CommitDecoded(_, Some(_))
+                );
                 let hash = request.block().hash();
                 let result = verifier.oneshot(request).await;
                 if mined {

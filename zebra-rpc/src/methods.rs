@@ -3241,12 +3241,14 @@ where
         let prepared_blocks = self.prepared_blocks.clone();
         let decoded = tokio::task::spawn_blocking(move || match prepared_blocks {
             Some(cache) => cache.deserialize(&block_bytes),
-            None => block_bytes.zcash_deserialize_into::<Arc<Block>>(),
+            None => block_bytes
+                .zcash_deserialize_into::<Arc<Block>>()
+                .map(zebra_consensus::DecodedBlock::from),
         })
         .await
         .expect("block deserialization reports malformed input as an error rather than panicking");
-        let block = match decoded {
-            Ok(block) => block,
+        let decoded = match decoded {
+            Ok(decoded) => decoded,
             Err(error) => {
                 tracing::info!(
                     ?error,
@@ -3256,6 +3258,7 @@ where
                 return Ok(SubmitBlockErrorResponse::Rejected.into());
             }
         };
+        let block = decoded.block();
 
         let height = block
             .coinbase_height()
@@ -3263,10 +3266,10 @@ where
         let block_hash = block.hash();
         let (request, validated) = match self.gbt.mined_block_notifications() {
             Some((notifications, validated)) => (
-                zebra_consensus::Request::CommitMined(block, notifications),
+                zebra_consensus::Request::CommitDecoded(decoded, Some(notifications)),
                 Some(validated),
             ),
-            None => (zebra_consensus::Request::Commit(block), None),
+            None => (zebra_consensus::Request::CommitDecoded(decoded, None), None),
         };
         let verification = block_verifier_router
             .ready()
