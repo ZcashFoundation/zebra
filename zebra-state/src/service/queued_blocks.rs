@@ -407,32 +407,6 @@ impl SentHashes {
         }
     }
 
-    /// Removes every sent hash above `height_bound` (or all of them if it is `None`),
-    /// dropping their outpoints from `known_utxos`.
-    ///
-    /// Called when a finalized block commit fails: the write task drops every block after
-    /// the failed one, so those hashes must become downloadable again.
-    pub fn remove_above_height(&mut self, height_bound: Option<block::Height>) {
-        let sent = &mut self.sent;
-        let known_utxos = &mut self.known_utxos;
-
-        for buf in self.bufs.iter_mut().chain(iter::once(&mut self.curr_buf)) {
-            buf.retain(|(hash, height)| {
-                if height_bound.is_some_and(|bound| *height <= bound) {
-                    return true;
-                }
-
-                for outpoint in sent.remove(hash).unwrap_or_default() {
-                    known_utxos.remove(&outpoint);
-                }
-
-                false
-            });
-        }
-
-        self.update_metrics_for_cache();
-    }
-
     /// Returns true if the chain can be forked at the provided hash
     pub fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.can_fork_chain_at_hashes && self.contains(hash)

@@ -1,6 +1,6 @@
 //! Fixed test vectors for the syncer's block download stream.
 
-use std::{iter, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::stream::StreamExt;
 use proptest::{
@@ -99,7 +99,9 @@ fn coinbase_authorization_twin(block: &Arc<Block>) -> Arc<Block> {
 async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::BoxError> {
     let _init_guard = zebra_test::init();
 
+    // Keep this early-upgrade schedule within the monetary cap.
     let network_builder = ParametersBuilder::default()
+        .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             before_overwinter: Some(1),
             overwinter: Some(2),
@@ -118,7 +120,8 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         .with_target_difficulty_limit(U256::MAX)
         .expect("valid permissive test difficulty limit")
         .with_disable_pow(true)
-        .extend_funding_streams();
+        .extend_funding_streams()
+        .expect("valid funding streams");
     let generation_network = network_builder
         .clone()
         .to_network()
@@ -130,7 +133,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             .new_tree(&mut runner)
             .expect("ledger strategy generates")
             .current();
-    let mut chain =
+    let chain =
         Block::partial_chain_strategy(ledger, 10, allow_all_transparent_coinbase_spends, true)
             .new_tree(&mut runner)
             .expect("chain strategy generates")
@@ -141,20 +144,6 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         .iter()
         .position(|block| block.coinbase_height() == Some(Height(7)))
         .expect("generated chain reaches NU5");
-    let target_merkle_root = chain[target_index].transactions.iter().collect();
-    Arc::make_mut(&mut chain[target_index]).header = {
-        let mut header = *chain[target_index].header;
-        header.merkle_root = target_merkle_root;
-        Arc::new(header)
-    };
-    let target_hash = chain[target_index].hash();
-    let child_merkle_root = chain[target_index + 1].transactions.iter().collect();
-    Arc::make_mut(&mut chain[target_index + 1]).header = {
-        let mut header = *chain[target_index + 1].header;
-        header.previous_block_hash = target_hash;
-        header.merkle_root = child_merkle_root;
-        Arc::new(header)
-    };
     let honest = chain[target_index].clone();
     let child = chain[target_index + 1].clone();
     let twin = coinbase_authorization_twin(&honest);
@@ -244,9 +233,10 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         .await
         .expect("sync download is queued");
     let sync_request = peer_set_handle
-        .expect_request(zn::Request::BlocksByHash(
-            iter::once(honest.hash()).collect(),
-        ))
+        .expect_request(zn::Request::BlockDownload {
+            hash: honest.hash(),
+            advertiser: None,
+        })
         .await;
     let attacker_h: PeerSocketAddr = "192.168.180.28:10000".parse().unwrap();
     sync_request.respond(zn::Response::Blocks(vec![Available((
@@ -268,9 +258,10 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         zn::Response::Nil
     );
     peer_set_handle
-        .expect_request(zn::Request::BlocksByHash(
-            iter::once(honest.hash()).collect(),
-        ))
+        .expect_request(zn::Request::BlockDownload {
+            hash: honest.hash(),
+            advertiser: Some(attacker_h),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             twin.clone(),
@@ -290,9 +281,10 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         zn::Response::Nil
     );
     peer_set_handle
-        .expect_request(zn::Request::BlocksByHash(
-            iter::once(child.hash()).collect(),
-        ))
+        .expect_request(zn::Request::BlockDownload {
+            hash: child.hash(),
+            advertiser: Some(attacker_b),
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             child.clone(),
@@ -325,7 +317,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     })
     .await
     .expect("the twin's peer is reported")?;
-    assert_eq!(report, (attacker_h, 100));
+    assert_eq!((report.addr, report.score), (attacker_h, 100));
 
     // The honest block and its dropped child must not be reported as known any more.
     for hash in [honest.hash(), child.hash()] {
@@ -353,25 +345,31 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             .await
             .expect("sync download is queued");
         peer_set_handle
-            .expect_request(zn::Request::BlocksByHash(
-                iter::once(block.hash()).collect(),
-            ))
+            .expect_request(zn::Request::BlockDownload {
+                hash: block.hash(),
+                advertiser: None,
+            })
             .await
             .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
     }
-    // The honest block commits and the tip reaches the child. If the child's first copy reached
-    // the state after the reset was applied, it is still queued there and commits behind the
-    // honest block, and the re-downloaded copy stays queued: then only the honest download
-    // resolves.
+    // Both re-downloads commit. If the child's first copy reached the state after the reset,
+    // the state failed it instead of queueing it, so it can't hold up the re-downloaded copy.
     let mut committed = Vec::new();
     for _ in 0..2 {
-        match timeout(MAX_STATE_COMMIT_DELAY, sync_downloads.next()).await {
-            Ok(Some(result)) => committed.push(result.expect("re-downloaded block commits").0),
-            Ok(None) => panic!("sync downloads is non-empty"),
-            Err(_elapsed) => break,
-        }
+        let result = timeout(MAX_STATE_COMMIT_DELAY, sync_downloads.next())
+            .await
+            .expect("re-downloaded block resolves")
+            .expect("sync downloads is non-empty");
+        committed.push(result.expect("re-downloaded block commits").0);
     }
-    assert!(committed.contains(&honest.coinbase_height().unwrap()));
+    committed.sort();
+    assert_eq!(
+        committed,
+        vec![
+            honest.coinbase_height().unwrap(),
+            child.coinbase_height().unwrap()
+        ]
+    );
     timeout(MAX_STATE_COMMIT_DELAY, async {
         while latest_chain_tip.best_tip_height() != child.coinbase_height() {
             tokio::time::sleep(Duration::from_millis(25)).await;

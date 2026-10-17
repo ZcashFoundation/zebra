@@ -147,6 +147,12 @@ pub(crate) struct StateService {
     /// - the hash of the last valid committed block (the parent of the invalid block).
     finalized_block_write_last_sent_hash: block::Hash,
 
+    /// After a finalized reset, the height the checkpoint verifier restarts from.
+    ///
+    /// Until a block at this height is queued, higher blocks are leftovers of the failed range:
+    /// they can never chain to the reset tip, so they are rejected instead of being queued.
+    finalized_reset_next_height: Option<block::Height>,
+
     /// A set of block hashes that have been sent to the block write task.
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     non_finalized_block_write_sent_hashes: SentHashes,
@@ -436,6 +442,7 @@ impl StateService {
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
             finalized_block_write_last_sent_hash,
+            finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
             non_finalized_rejected_receiver,
@@ -518,6 +525,19 @@ impl StateService {
 
         // Apply pending resets first, so they can't remove the hash of the block sent below.
         self.drain_finalized_resets();
+
+        if let Some(next_height) = self.finalized_reset_next_height {
+            if queued_height > next_height {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                Self::send_checkpoint_verified_block_error(
+                    (checkpoint_verified, rsp_tx),
+                    CommitBlockError::WriteTaskExited,
+                );
+                return rsp_rx;
+            } else if queued_height == next_height {
+                self.finalized_reset_next_height = None;
+            }
+        }
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
         // semantic block verification, even when it is in the channel.
@@ -633,8 +653,8 @@ impl StateService {
     }
 
     /// Applies every reset queued on `invalid_block_write_reset_receiver`: rewinds the last
-    /// sent hash to the finalized tip, and forgets the sent hashes above it, so the rejected
-    /// block and the descendants the write task dropped can be downloaded again.
+    /// sent hash to the finalized tip, forgets the sent hashes, and fails the queued blocks, so
+    /// the rejected block and every block above it can be downloaded again.
     ///
     /// Returns `false` if the write task closed the reset channel.
     fn drain_finalized_resets(&mut self) -> bool {
@@ -644,8 +664,16 @@ impl StateService {
             match self.invalid_block_write_reset_receiver.try_recv() {
                 Ok((reset_tip_height, reset_tip_hash)) => {
                     self.finalized_block_write_last_sent_hash = reset_tip_hash;
-                    self.non_finalized_block_write_sent_hashes
-                        .remove_above_height(reset_tip_height);
+                    self.finalized_reset_next_height = Some(
+                        reset_tip_height
+                            .map(|height| (height + 1).expect("committed heights are valid"))
+                            .unwrap_or(block::Height(0)),
+                    );
+                    // During checkpoint sync, sent hashes at or below the tip are also in the db.
+                    self.non_finalized_block_write_sent_hashes = SentHashes::default();
+                    // Queued blocks are above the tip, and their pending responses would keep
+                    // the syncer from downloading them again.
+                    self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 }
                 Err(TryRecvError::Empty) => return true,
                 Err(TryRecvError::Disconnected) => {
@@ -1213,6 +1241,7 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
+                self.drain_finalized_resets();
                 self.drain_non_finalized_rejected_hashes();
 
                 if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
