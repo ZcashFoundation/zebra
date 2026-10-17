@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.0] - 2026-10-17
+
+### Breaking Changes
+
+- Added `Request::PollPeerSet`, which the peer set sends itself from a new background task, so it routes queued block requests as soon as a busy peer becomes ready. Peers never send it, so services that handle inbound peer requests can treat it as unreachable ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+- The misbehavior sender returned by `init` and `init_with_block_gossip_peer_ips` now takes a `MisbehaviorReport` instead of a `(PeerSocketAddr, u32)` tuple; the report also carries the `reason` the peer was scored. `MetaAddrChange::UpdateMisbehavior` has a new `reason` field, `MetaAddr::new_misbehavior` takes a `reason` argument, and `MetaAddrChange::misbehavior_reason` returns it.
+- `init` and `init_with_block_gossip_peer_ips` now return `NetworkService` instead of a raw Tower `Buffer`. Releasing the last owning handle and unfinished `NetworkResponseFuture` stops the buffer worker, crawler, listener, and pending handshakes. Pass `NetworkService::background_service()` to inbound handlers and their downloaders so internally retained handles and requests do not prevent shutdown ([#11749](https://github.com/ZcashFoundation/zebra/issues/11749)).
+- Added `Request::BlockDownload { hash, advertiser }` for outbound single-block downloads that retain a known advertiser and wait for eligible capacity without consuming retries on local refusals. Update exhaustive `Request` matches; inbound handlers can treat this variant as unreachable, and callers must bound readiness plus the complete response with a deadline ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+
+### Added
+
+- `constants::INVENTORY_BUSY_PEER_WAIT_TIMEOUT` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11521](https://github.com/ZcashFoundation/zebra/pull/11521))
+- Expose `constants::FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`, the serving-peer preference timeout for `FindBlocks` and `FindHeaders` requests ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).
+- With the `proptest-impl` feature, `test_support::PeerSetHarness` provides a buffered peer set and real client channels for consumer tests, including inventory advertisements and busy-peer control ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+
+### Changed
+
+- `Request::{FindBlocks, FindHeaders}` rotate fairly across ready block-serving connections. When all serving peers are busy, discovery waits up to 1.5 seconds and takes priority over queued block downloads, then falls back to any ready peer. With no serving peers connected, any ready peer is eligible immediately. Successful replies, including empty ones, reset failure counts. Completed failures count regardless of sync state; configured zcashd-compat sidecars remain exempt ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).
+- Prefer eligible block-serving peers for single-block requests without a ready advertiser. General `BlocksByHash` requests wait up to `INVENTORY_BUSY_PEER_WAIT_TIMEOUT` from enqueueing for busy peers. Queued requests reconsider advertisements and disconnected candidates without requiring unrelated traffic. Banned, outdated, and indefinitely backpressured connections do not suppress fallback. Canceled older connections cannot disconnect a replacement at the same address or pass on their recorded or delayed discovery failures. Busy connections that remain unready past `REQUEST_TIMEOUT` are dropped when the peer set is next polled, releasing their connection slots. Queue and refusal counters include the network label ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748), [#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+- Only retry peers that recently failed to return a block when no other peer might have it, whether the last-resort peer is ready or busy. Completed peer errors and response timeouts record failures; explicit missing responses and caller cancellations do not. Repeated failures refresh bounded cache recency, and failed advertisements do not enable speculative non-serving fallback. Failures belong to their connection, so a replacement inherits neither cached failures nor delayed predecessor errors ([#11525](https://github.com/ZcashFoundation/zebra/pull/11525)).
+- Limit the combined `FindBlocks` and `FindHeaders` queue to 16 requests, falling back to any ready peer on overflow. Count queued requests in `zcash.net.peer_set.find_queued` and non-serving discovery fallbacks in `zcash.net.peer_set.find_fallback` with `reason` labels `queue_full`, `no_serving_peer`, and `expired` ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).
+- Peer connections now ignore `notfound` messages that name none of a pending request's blocks or transactions, instead of failing the request with `NotFoundResponse`.
+
 ## [14.0.0] - 2026-10-01
 
 ### Breaking Changes

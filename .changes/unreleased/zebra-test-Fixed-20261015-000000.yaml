@@ -1,4 +1,0 @@
-project: zebra-test
-kind: Fixed
-body: '`TestChild::wait_with_output` drains output already taken by line readers while waiting for the child to exit, preventing deadlocks when its stdout or stderr pipe fills.'
-time: 2026-10-15T00:00:00.000000000Z
