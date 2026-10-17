@@ -231,6 +231,31 @@ where
             Some(worker_handle);
     }
 
+    /// Queues an explicit flush after all requests already sent through this batch service.
+    ///
+    /// Returns `Ok(false)` if the bounded queue is full, or an error if its worker has stopped.
+    /// A full queue continues to flush on the normal size and timer bounds. This does not wait
+    /// for verification: callers must still await every request's response.
+    pub fn try_flush(&mut self) -> Result<bool, crate::BoxError> {
+        // A separate permit: `self.permit` may be a caller's reservation from `poll_ready`, which
+        // its next `call` needs.
+        let permit = match self.semaphore.clone_inner().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => return Ok(false),
+            Err(tokio::sync::TryAcquireError::Closed) => return Err(self.get_worker_error()),
+        };
+
+        self.tx
+            .send(Message {
+                request: BatchControl::Flush,
+                tx: None,
+                span: tracing::Span::current(),
+                _permit: permit,
+            })
+            .map_err(|_| self.get_worker_error())?;
+        Ok(true)
+    }
+
     /// Returns the error from the batch worker's `error_handle`.
     fn get_worker_error(&self) -> crate::BoxError {
         self.error_handle.get_error_on_closed()
@@ -343,8 +368,8 @@ where
         let (tx, rx) = oneshot::channel();
 
         match self.tx.send(Message {
-            request,
-            tx,
+            request: BatchControl::Item(request),
+            tx: Some(tx),
             span,
             _permit,
         }) {

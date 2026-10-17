@@ -280,8 +280,15 @@ pub(crate) type VerifierService = Cached<BatchFallbackService>;
 /// gossiped into the mempool does not have to be verified again when the block that mines it
 /// arrives. One cache covers all of Sapling: its spend and output verifying keys have never
 /// changed, so unlike Orchard there are no circuit eras to keep apart.
-pub(crate) static VERIFIER: Lazy<VerifierService> =
-    Lazy::new(|| Cached::new(batch_fallback_verifier(), CACHE_CAPACITY, "groth16_sapling"));
+pub(crate) static VERIFIER: Lazy<VerifierService> = Lazy::new(|| {
+    Cached::new(batch_fallback_verifier(), CACHE_CAPACITY, "groth16_sapling")
+        .with_flush(super::flush::Verifier::Sapling)
+});
+
+/// Queues a flush without bypassing the batch worker's queue or concurrency bounds.
+pub(super) fn try_flush() -> Result<bool, BoxError> {
+    VERIFIER.inner().primary().clone().try_flush()
+}
 
 /// Returns how many times `item` reached this verifier's inner service.
 #[cfg(test)]
@@ -290,7 +297,7 @@ pub(crate) fn inner_calls_for(verifier: &VerifierService, item: &Item) -> usize 
 }
 
 /// Builds the uncached batching-and-fallback stack.
-fn batch_fallback_verifier() -> BatchFallbackService {
+pub(super) fn batch_fallback_verifier() -> BatchFallbackService {
     Fallback::new(
         Batch::new(
             Verifier::default(),
