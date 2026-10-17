@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: Submission verification now receives `Request::CommitDecoded`, preserving exact proposal matches from decoding without repeating body identity hashing. Custom block verifier services must handle the new request variant.
+time: 2026-10-17T14:33:05.281470418+02:00

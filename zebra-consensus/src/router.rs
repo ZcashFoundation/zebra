@@ -249,12 +249,15 @@ where
             }
 
             Some(height) if height <= self.max_checkpoint_height => match request {
-                Request::CommitMined(_, notifications) => self
+                Request::CommitMined(_, notifications)
+                | Request::CommitDecoded(_, Some(notifications)) => self
                     .checkpoint
                     .verify(block, Some(notifications))
                     .map_err(Into::into)
                     .boxed(),
-                Request::Commit(_) => self.checkpoint.call(block).map_err(Into::into).boxed(),
+                Request::Commit(_) | Request::CommitDecoded(_, None) => {
+                    self.checkpoint.call(block).map_err(Into::into).boxed()
+                }
                 Request::CheckProposal(_) => {
                     unreachable!("proposals below the checkpoint were rejected")
                 }
