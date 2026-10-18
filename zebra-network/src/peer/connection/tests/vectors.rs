@@ -342,6 +342,54 @@ async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
     assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
+/// An empty `getblocks` result sends nothing, so peers can't take it for an empty mempool reply,
+/// while a nonempty result is still sent as an inventory.
+#[tokio::test(start_paused = true)]
+async fn empty_find_blocks_result_sends_no_inventory() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, _client_tx, mut inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+    let get_blocks = Message::GetBlocks {
+        known_blocks: Vec::new(),
+        stop: None,
+    };
+    let find_blocks = Request::FindBlocks {
+        known_blocks: Vec::new(),
+        stop: None,
+    };
+
+    peer_tx.send(Ok(get_blocks.clone())).await.unwrap();
+    inbound_service
+        .expect_request(find_blocks.clone())
+        .await
+        .respond(Response::BlockHashes(Vec::new()));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .is_err(),
+        "an empty getblocks result must not be sent as an empty inventory",
+    );
+
+    let hash = zebra_chain::block::Hash([1; 32]);
+    peer_tx.send(Ok(get_blocks)).await.unwrap();
+    inbound_service
+        .expect_request(find_blocks)
+        .await
+        .respond(Response::BlockHashes(vec![hash]));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Inv(vec![InventoryHash::Block(hash)])),
+    );
+
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
 /// Test that the connection run loop fails correctly when dropped
 #[tokio::test]
 async fn connection_run_loop_future_drop() {

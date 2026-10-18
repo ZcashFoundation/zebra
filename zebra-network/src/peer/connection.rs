@@ -1546,6 +1546,9 @@ where
                     }
                 }
             }
+            // Like zcashd, send nothing for an empty `getblocks` result, so an empty inventory only
+            // ever answers an empty mempool.
+            Response::BlockHashes(hashes) if hashes.is_empty() => {}
             Response::BlockHashes(hashes) => {
                 if let Err(e) = self
                     .peer_tx

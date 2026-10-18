@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Changed
-body: Empty inventory messages no longer complete block-locator requests, preventing late mempool replies from being mistaken for locator results.
+body: Empty inventory messages no longer complete block-locator requests, preventing late mempool replies from being mistaken for locator results. An empty `Response::BlockHashes` from the inbound service now sends no message, like zcashd, instead of an empty inventory.
 time: 2026-10-17T13:41:21.198667129+02:00
