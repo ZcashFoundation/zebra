@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Start shielded transaction verification before transparent transaction verification to reduce mixed-block verification latency ([#11805](https://github.com/ZcashFoundation/zebra/pull/11805)).
+time: 2026-10-19T13:11:26.184553768+02:00
