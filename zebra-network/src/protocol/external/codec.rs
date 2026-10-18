@@ -47,6 +47,12 @@ const HEADER_LEN: usize = 24usize;
 /// verack is 0 bytes. 1 KB provides headroom for future protocol changes.
 const MAX_HANDSHAKE_BODY_LEN: usize = 1024;
 
+/// Initial cap on reserved body capacity, before any body bytes have arrived.
+///
+/// `body_len` is peer-declared and untrusted; this bounds the upfront cost of
+/// a header-only peer to one step instead of the full declared length.
+const INITIAL_BODY_RESERVATION_STEP: usize = 16 * 1024;
+
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
     builder: Builder,
@@ -420,8 +426,9 @@ impl Decoder for Codec {
                         .increment((body_len + HEADER_LEN) as u64);
                 }
 
-                // Reserve buffer space for the expected body and the following header.
-                src.reserve(body_len + HEADER_LEN);
+                // Cap the upfront reservation instead of trusting body_len; grows
+                // further in the same step as more of the body arrives (below).
+                src.reserve(HEADER_LEN + body_len.min(INITIAL_BODY_RESERVATION_STEP));
 
                 self.state = DecodeState::Body {
                     body_len,
@@ -438,7 +445,11 @@ impl Decoder for Codec {
                 checksum,
             } => {
                 if src.len() < body_len {
-                    // Need to wait for the full body
+                    // Grow in the same bounded step as the body arrives, instead
+                    // of trusting the peer-declared remaining length upfront.
+                    let remaining = body_len - src.len();
+                    src.reserve(remaining.min(INITIAL_BODY_RESERVATION_STEP));
+
                     trace!(?self.state, len = src.len(), "src buffer does not have an entire body, waiting");
                     return Ok(None);
                 }
