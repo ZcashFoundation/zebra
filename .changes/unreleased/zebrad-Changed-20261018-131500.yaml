@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Without `SENTRY_DSN`, the node no longer installs the Sentry tracing layer, avoiding unused INFO-level span bookkeeping.'
+time: 2026-10-18T13:15:00.000000000+00:00

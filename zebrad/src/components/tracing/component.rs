@@ -268,8 +268,12 @@ impl Tracing {
         #[cfg(feature = "journald")]
         let subscriber = subscriber.with(journaldlayer);
 
+        // Sentry is only initialized when `SENTRY_DSN` is set. Without it, the layer would still
+        // perform unused Sentry span bookkeeping.
         #[cfg(feature = "sentry")]
-        let subscriber = subscriber.with(crate::sentry::tracing_layer());
+        let sentry_configured = std::env::var_os("SENTRY_DSN").is_some();
+        #[cfg(feature = "sentry")]
+        let subscriber = subscriber.with(sentry_configured.then(crate::sentry::tracing_layer));
 
         // OpenTelemetry layer - zero overhead when config.opentelemetry_endpoint is None
         #[cfg(feature = "opentelemetry")]
@@ -350,7 +354,9 @@ impl Tracing {
         }
 
         #[cfg(feature = "sentry")]
-        info!("installed sentry tracing layer");
+        if sentry_configured {
+            info!("installed sentry tracing layer");
+        }
 
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         info!(
