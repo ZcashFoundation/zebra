@@ -83,6 +83,27 @@ impl<S> HttpRequestMiddleware<S> {
         })
     }
 
+    /// Returns the HTTP 401 response sent when the request has no valid cookie credentials.
+    ///
+    /// The body is a JSON-RPC error object, so clients see why the request was refused
+    /// instead of an empty reply.
+    fn unauthenticated_response() -> HttpResponse<HttpBody> {
+        let error = ErrorObject::borrowed(401, "unauthenticated method", None);
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": error,
+            "id": null,
+        });
+
+        let mut response = HttpResponse::new(HttpBody::from(body.to_string()));
+        *response.status_mut() = hyper::StatusCode::UNAUTHORIZED;
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("application/json"),
+        );
+        response
+    }
+
     /// Insert or replace client supplied `content-type` HTTP header to `application/json` in the following cases:
     ///
     /// - no `content-type` supplied.
@@ -222,9 +243,7 @@ where
     fn call(&mut self, mut request: HttpRequest<HttpBody>) -> Self::Future {
         // Check if the request is authenticated
         if !self.check_credentials(request.headers_mut()) {
-            let error = ErrorObject::borrowed(401, "unauthenticated method", None);
-            // TODO: Error object is not being returned to the user but an empty response.
-            return future::err(BoxError::from(error)).boxed();
+            return future::ok(Self::unauthenticated_response()).boxed();
         }
 
         // Fix the request headers.
@@ -347,5 +366,42 @@ impl JsonRpcResponse {
             JsonRpcVersion::Unknown => (),
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tower::{service_fn, ServiceExt};
+
+    #[tokio::test]
+    async fn request_without_credentials_gets_a_401_response() {
+        let inner = service_fn(|_request: HttpRequest| async {
+            Ok::<_, BoxError>(HttpResponse::new(HttpBody::from("inner service reached")))
+        });
+        let mut middleware = HttpRequestMiddleware::new(inner, Some(Cookie::default()), 1024);
+
+        let request = HttpRequest::new(HttpBody::from(
+            r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}"#,
+        ));
+        let response = middleware
+            .ready()
+            .await
+            .expect("the middleware is always ready")
+            .call(request)
+            .await
+            .expect("an unauthenticated request gets an HTTP response, not a transport error");
+
+        assert_eq!(response.status(), hyper::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("application/json"))
+        );
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"]["code"], 401);
+        assert_eq!(body["error"]["message"], "unauthenticated method");
     }
 }

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: 'RPC requests without valid cookie credentials now get an HTTP 401 response with a JSON-RPC error body instead of an empty reply ([#9190](https://github.com/ZcashFoundation/zebra/issues/9190)).'
+time: 2026-10-18T21:11:48.000000+00:00
