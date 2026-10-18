@@ -72,6 +72,8 @@ Change the `network` field to `Testnet`. The `Mainnet` should work but it is unt
 
 Add your elastic password generated when running the database for the first time into the `elasticsearch_password` field.
 
+Zebra validates the Elasticsearch server certificate. The database started above uses a self-signed certificate, so for this local setup also set `elasticsearch_skip_cert_validation = true`. Leave it at its default of `false` for any cluster you reach over a network.
+
 ## Run Zebra
 
 If the config is in the default path then just running the binary will start the sync.

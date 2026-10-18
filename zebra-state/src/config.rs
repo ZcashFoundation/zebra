@@ -170,6 +170,14 @@ pub struct Config {
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database password.
     pub elasticsearch_password: RedactedString,
+
+    #[cfg(feature = "elasticsearch")]
+    /// Skip TLS certificate validation when connecting to elasticsearch.
+    ///
+    /// Set to `false` by default, so the server certificate is validated. Set to `true` only
+    /// for a trusted local cluster with a self-signed certificate: it makes the connection,
+    /// including the credentials sent over it, open to interception.
+    pub elasticsearch_skip_cert_validation: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -241,6 +249,20 @@ impl Config {
     }
 }
 
+#[cfg(feature = "elasticsearch")]
+impl Config {
+    /// Returns how the elasticsearch server certificate is validated.
+    pub(crate) fn elasticsearch_cert_validation(
+        &self,
+    ) -> elasticsearch::cert::CertificateValidation {
+        if self.elasticsearch_skip_cert_validation {
+            elasticsearch::cert::CertificateValidation::None
+        } else {
+            elasticsearch::cert::CertificateValidation::Default
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -257,6 +279,8 @@ impl Default for Config {
             elasticsearch_username: "elastic".to_string(),
             #[cfg(feature = "elasticsearch")]
             elasticsearch_password: RedactedString::default(),
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_skip_cert_validation: false,
         }
     }
 }
@@ -622,5 +646,27 @@ mod tests {
         };
 
         assert!(!format!("{config:?}").contains("hunter2"));
+    }
+
+    #[cfg(feature = "elasticsearch")]
+    #[test]
+    fn elasticsearch_validates_certificates_unless_skipped() {
+        use elasticsearch::cert::CertificateValidation;
+
+        let config = Config::default();
+        assert!(!config.elasticsearch_skip_cert_validation);
+        assert!(matches!(
+            config.elasticsearch_cert_validation(),
+            CertificateValidation::Default
+        ));
+
+        let config = Config {
+            elasticsearch_skip_cert_validation: true,
+            ..Config::default()
+        };
+        assert!(matches!(
+            config.elasticsearch_cert_validation(),
+            CertificateValidation::None
+        ));
     }
 }

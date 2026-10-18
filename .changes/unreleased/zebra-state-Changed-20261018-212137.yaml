@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'With the experimental `elasticsearch` feature, Zebra now validates the Elasticsearch server TLS certificate instead of always skipping validation. The new `elasticsearch_skip_cert_validation` option (default `false`) restores the old behavior for a trusted local cluster with a self-signed certificate ([#10754](https://github.com/ZcashFoundation/zebra/issues/10754)).'
+time: 2026-10-18T21:21:37.000000+00:00
