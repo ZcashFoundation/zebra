@@ -29,6 +29,64 @@ use super::*;
 
 mod nu7;
 
+/// Shielded transactions must reach the transaction verifier before transparent transactions.
+#[tokio::test]
+async fn block_dispatches_shielded_transactions_first() {
+    let _init_guard = zebra_test::init();
+    let (_, tx) = transaction::tests::cacheable_mainnet_sapling_transaction();
+    let tx_hash = tx.hash();
+    let block: Arc<Block> = zebra_test::vectors::MAINNET_BLOCKS
+        .values()
+        .map(|bytes| bytes.zcash_deserialize_into::<Block>().unwrap())
+        .find(|block| block.transactions.iter().any(|tx| tx.hash() == tx_hash))
+        .unwrap()
+        .into();
+    let transaction_count = block.transactions.len();
+    let shielded_count = block
+        .transactions
+        .iter()
+        .filter(|tx| tx.has_shielded_data())
+        .count();
+    assert!(shielded_count > 0);
+    assert!(!block.transactions[0].has_shielded_data());
+
+    let requested = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let order = requested.clone();
+    let transactions = tower::service_fn(move |request: transaction::BlockRequest| {
+        // Record service calls, not future polls, to observe dispatch order directly.
+        order.lock().push(request.transaction.has_shielded_data());
+        // Stop before fee accounting and contextual validation, which are unrelated to dispatch.
+        std::future::ready(Err::<transaction::BlockResponse, BoxError>(
+            TransactionError::BadBalance.into(),
+        ))
+    });
+    let state = tower::service_fn(|request| async move {
+        assert!(matches!(request, zs::Request::KnownBlock(_)));
+        Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+    });
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
+            .oneshot(Request::CheckProposal(block)),
+    )
+    .await
+    .expect("transaction dispatch must finish");
+    assert!(matches!(
+        result,
+        Err(VerifyBlockError::Transaction(TransactionError::BadBalance))
+    ));
+
+    let requested = requested.lock();
+    assert_eq!(requested.len(), transaction_count);
+    assert!(
+        requested[..shielded_count].iter().all(|shielded| *shielded),
+        "every shielded transaction must be dispatched before any transparent transaction"
+    );
+    assert!(requested[shielded_count..]
+        .iter()
+        .all(|shielded| !*shielded));
+}
+
 /// A proposal error must retain transaction siblings whose Rayon work is already dispatched.
 #[tokio::test]
 async fn proposal_error_waits_for_dispatched_transaction_siblings() {
