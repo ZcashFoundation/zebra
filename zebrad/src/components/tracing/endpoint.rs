@@ -33,20 +33,34 @@ pub struct TracingEndpoint {
     addr: Option<SocketAddr>,
 }
 
+/// The maximum size of a `POST /filter` request body, in bytes.
+///
+/// Tracing filters are short strings, so this is far above any real filter.
 #[cfg(feature = "filter-reload")]
-async fn read_filter(req: Request<impl Body>) -> Result<String, String> {
-    use http_body_util::BodyExt;
+const MAX_FILTER_BODY_BYTES: usize = 16 * 1024;
 
-    std::str::from_utf8(
-        req.into_body()
-            .collect()
-            .await
-            .map_err(|_| "Error reading body".to_owned())?
-            .to_bytes()
-            .as_ref(),
-    )
-    .map(|s| s.to_owned())
-    .map_err(|_| "Filter must be UTF-8".to_owned())
+#[cfg(feature = "filter-reload")]
+async fn read_filter<B>(req: Request<B>) -> Result<String, String>
+where
+    B: Body,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    use http_body_util::{BodyExt, LengthLimitError, Limited};
+
+    let body = Limited::new(req.into_body(), MAX_FILTER_BODY_BYTES)
+        .collect()
+        .await
+        .map_err(|err| {
+            if err.downcast_ref::<LengthLimitError>().is_some() {
+                format!("Filter must be at most {MAX_FILTER_BODY_BYTES} bytes")
+            } else {
+                "Error reading body".to_owned()
+            }
+        })?;
+
+    std::str::from_utf8(body.to_bytes().as_ref())
+        .map(|s| s.to_owned())
+        .map_err(|_| "Filter must be UTF-8".to_owned())
 }
 
 impl TracingEndpoint {
@@ -176,4 +190,40 @@ To set the filter, POST the new filter string to /filter:
             .expect("response with known status cannot fail"),
     };
     Ok(rsp)
+}
+
+#[cfg(all(test, feature = "filter-reload"))]
+mod tests {
+    use bytes::Bytes;
+    use http_body_util::Full;
+
+    use super::*;
+
+    fn post(body: Vec<u8>) -> Request<Full<Bytes>> {
+        Request::post("/filter")
+            .body(Full::new(Bytes::from(body)))
+            .expect("valid request")
+    }
+
+    #[tokio::test]
+    async fn read_filter_accepts_a_filter_up_to_the_size_limit() {
+        let filter = "a".repeat(MAX_FILTER_BODY_BYTES);
+
+        assert_eq!(
+            read_filter(post(filter.clone().into_bytes())).await,
+            Ok(filter)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_filter_rejects_a_body_over_the_size_limit() {
+        let body = vec![b'a'; MAX_FILTER_BODY_BYTES + 1];
+
+        assert_eq!(
+            read_filter(post(body)).await,
+            Err(format!(
+                "Filter must be at most {MAX_FILTER_BODY_BYTES} bytes"
+            ))
+        );
+    }
 }

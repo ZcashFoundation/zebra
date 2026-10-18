@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'With the `filter-reload` feature, the tracing endpoint now rejects a `POST /filter` body larger than 16 KiB instead of buffering it without a limit ([#10755](https://github.com/ZcashFoundation/zebra/issues/10755)).'
+time: 2026-10-18T21:17:04.000000+00:00
