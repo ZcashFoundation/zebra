@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{collections::HashSet, iter, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
@@ -867,7 +867,10 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
 
     // Block is fetched, and committed to the state
     peer_set
-        .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
+        .expect_request(Request::BlockDownload {
+            hash: block_hash,
+            advertiser: None,
+        })
         .await
         .respond(Response::Blocks(vec![Available((block, None))]));
 
@@ -903,7 +906,10 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
 
     // Block is fetched, but the downloader drops it because it is too high
     peer_set
-        .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
+        .expect_request(Request::BlockDownload {
+            hash: block_hash,
+            advertiser: None,
+        })
         .await
         .respond(Response::Blocks(vec![Available((block, None))]));
 
@@ -1429,7 +1435,10 @@ async fn advertise_and_serve_block(
     );
 
     peer_set
-        .expect_request(Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
         .await
         .respond(Response::Blocks(vec![Available((
             block,
@@ -1638,7 +1647,7 @@ async fn gossiped_block_verify_timeout_does_not_score_serving_peer() -> Result<(
 
     // Make sure the assertion above isn't vacuous: the timed-out download must actually
     // have been drained by the cleanup loop. If it were still in flight, the per-IP and
-    // per-hash caps would drop this second advertisement, and no `BlocksByHash` request
+    // per-hash caps would drop this second advertisement, and no `BlockDownload` request
     // would reach the peer set.
     advertise_and_serve_block(&mut inbound, &mut peer_set, block, peer, peer).await?;
 

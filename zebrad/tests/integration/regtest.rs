@@ -1302,6 +1302,38 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
         );
     }
 
+    // Reject removing the only non-finalized root through the real RPC path (#11536).
+    // Only 50 blocks were mined, so no blocks above the checkpoints have finalized.
+    let root_height = net.checkpoint_list().max_height().next().unwrap();
+    let root = rpc_client
+        .get_block(root_height.0.try_into()?)
+        .await
+        .map_err(|err| eyre!(err))?
+        .expect("the first non-finalized block should exist");
+    let tip_before: String = rpc_client
+        .json_result_from_call("getbestblockhash", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    let root_params = serde_json::to_string(&vec![root.hash().to_string()])?;
+    let error = rpc_client
+        .json_result_from_call::<()>("invalidateblock", &root_params)
+        .await
+        .expect_err("invalidating the only non-finalized root must return an RPC error");
+    assert!(
+        error
+            .to_string()
+            .contains("root of the only non-finalized chain"),
+        "expected the root-invalidation error, got: {error}"
+    );
+    let tip_after: String = rpc_client
+        .json_result_from_call("getbestblockhash", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+    assert_eq!(
+        tip_after, tip_before,
+        "rejected invalidation must preserve the tip"
+    );
+
     tracing::info!("invalidating blocks");
 
     // Note: This is the block at height 7, it's the 6th generated block.

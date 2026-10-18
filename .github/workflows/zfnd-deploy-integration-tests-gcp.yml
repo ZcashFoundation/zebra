@@ -141,7 +141,7 @@ jobs:
   # instance labels, where there is no 63-character budget to compete for.
   determine-environment:
     name: Determine environment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       environment: ${{ steps.set.outputs.environment }}
@@ -602,7 +602,7 @@ jobs:
   # generation tests.
   upload-checkpoint-artifact:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, test-result ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
@@ -665,7 +665,7 @@ jobs:
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, test-result ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
@@ -1027,7 +1027,7 @@ jobs:
   # delete the Google Cloud instance for this test
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, create-state-image, upload-checkpoint-artifact ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
@@ -1112,7 +1112,7 @@ jobs:
 
   deployment-success:
     name: Integration test deployment success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Always run this job to check the status of dependent jobs
     if: always()
     needs:

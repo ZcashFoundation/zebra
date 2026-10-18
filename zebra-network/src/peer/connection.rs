@@ -245,14 +245,16 @@ impl Handler {
                     }
                 }
             }
-            // `zcashd` peers actually return this response
+            // `zcashd` peers actually return this response.
+            // A `notfound` naming none of the pending IDs is for a cancelled request or
+            // unsolicited, so it isn't a response to this request.
             (
                 Handler::TransactionsById {
                     pending_ids,
                     transactions,
                 },
                 Message::NotFound(missing_invs),
-            ) => {
+            ) if transaction_ids(&missing_invs).any(|id| pending_ids.contains(&id)) => {
                 // assumptions:
                 //   - the peer eventually returns a transaction or a `notfound` entry
                 //     for each hash
@@ -354,14 +356,16 @@ impl Handler {
                     }
                 }
             }
-            // peers are allowed to return this response, but `zcashd` never does
+            // Peers are allowed to return this response, but `zcashd` never does.
+            // A `notfound` naming none of the pending hashes is for a cancelled request or
+            // unsolicited, so it isn't a response to this request.
             (
                 Handler::BlocksByHash {
                     pending_hashes,
                     blocks,
                 },
                 Message::NotFound(missing_invs),
-            ) => {
+            ) if block_hashes(&missing_invs).any(|hash| pending_hashes.contains(&hash)) => {
                 // assumptions:
                 //   - the peer eventually returns a block or a `notfound` entry
                 //     for each hash
@@ -1057,6 +1061,14 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
+            (AwaitingRequest, BlockDownload { hash, .. }) => self
+                .peer_tx
+                .send(Message::GetData(vec![hash.into()]))
+                .await
+                .map(|()| Handler::BlocksByHash {
+                    blocks: Vec::with_capacity(1),
+                    pending_hashes: HashSet::from([hash]),
+                }),
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
                     .peer_tx
@@ -1163,6 +1175,8 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
+            // The peer set handles this request itself, so there is nothing to send to the peer.
+            (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
 
         // Update the connection state with a new handler, or fail with an error.

@@ -100,6 +100,9 @@ Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/
 
 - [ ] Wait for `PR Gate / Release readiness` and every other required check to pass on the latest Release PR commit.
 - [ ] Double-check the correctness of the version bumps and changelogs. Common pitfalls:
+    - Check each crate's bump against the "Public API diff since zebrad vX"
+      comment on the Release PR: removed or changed public API items need a
+      semver-breaking bump
     - A major bump in e.g. `zebra-chain` requires a major bump in most of its
       users (because they re-export types from it)
     - zebrad should get major bumps only on breaking changes for _users_ (e.g.

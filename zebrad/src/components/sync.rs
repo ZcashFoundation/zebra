@@ -21,8 +21,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tower::{
-    builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
-    Service, ServiceExt,
+    builder::ServiceBuilder, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout, Service,
+    ServiceExt,
 };
 
 use zebra_chain::{
@@ -40,6 +40,7 @@ use crate::{
 mod downloads;
 pub mod end_of_support;
 mod gossip;
+mod hedge;
 mod progress;
 mod recent_sync_lengths;
 mod status;
@@ -47,13 +48,20 @@ mod status;
 #[cfg(test)]
 mod tests;
 
-use downloads::{AlwaysHedge, Downloads};
+use downloads::Downloads;
+use hedge::SuccessHedge;
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
+
+/// Match the missing-block errors used by both hedging and sync recovery.
+fn is_not_found(error: &dyn std::error::Error) -> bool {
+    // TODO: improve this by checking the type (#2908).
+    format!("{error:?}").contains("NotFound")
+}
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
@@ -143,23 +151,18 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// If this timeout is set too low, the peer set and remote peers can get overloaded.
 pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 
-/// Controls how long we wait for a block download request to complete.
+/// The per-peer wire-response budget used to derive complete download deadlines.
 ///
-/// This timeout makes sure that the syncer doesn't hang when:
-///   - the lookahead queue is full, and
-///   - we are waiting for a request that is stuck.
+/// Connections start this timeout at dispatch, not while waiting for capacity. The complete sync
+/// operation is separately bounded by [`BLOCK_DOWNLOAD_ROUND_TIMEOUT`].
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = zn::constants::REQUEST_TIMEOUT;
+
+/// Bounds one complete block download round, including readiness, capacity waits and both hedges.
 ///
-/// See [`BLOCK_VERIFY_TIMEOUT`] for details.
-///
-/// ## Correctness
-///
-/// If this timeout is removed (or set too high), the syncer will sometimes hang.
-///
-/// If this timeout is set too low, the syncer will sometimes get stuck in a
-/// failure loop.
-///
-/// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+/// Reuse the existing four-attempt response budget rather than charging capacity waits as attempts.
+/// The retry limit is the constant 3, so conversion to u32 is lossless.
+const BLOCK_DOWNLOAD_ROUND_TIMEOUT: Duration =
+    BLOCK_DOWNLOAD_TIMEOUT.saturating_mul(BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -341,7 +344,7 @@ where
         + Sync
         + Clone
         + 'static,
-    ZN::Future: Send,
+    ZN::Future: Send + 'static,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
         + Send
         + Sync
@@ -392,7 +395,7 @@ where
     downloads: Pin<
         Box<
             Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                ConcurrencyLimit<SuccessHedge<ConcurrencyLimit<Retry<zn::RetryLimit, ZN>>>>,
                 Timeout<ZV>,
                 ZSR,
                 ZSTip,
@@ -447,7 +450,7 @@ where
         + Sync
         + Clone
         + 'static,
-    ZN::Future: Send,
+    ZN::Future: Send + 'static,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
         + Send
         + Sync
@@ -522,26 +525,21 @@ where
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
 
-        // The Hedge middleware is the outermost layer, hedging requests
-        // between two retry-wrapped networks.  The innermost timeout
-        // layer is relatively unimportant, because slow requests will
-        // probably be preemptively hedged.
-        //
-        // The Hedge goes outside the Retry, because the Retry layer
-        // abstracts away spurious failures from individual peers
-        // making a less-fallible network service, and the Hedge layer
-        // tries to reduce latency of that less-fallible service.
-        let block_network = Hedge::new(
+        // Capacity waiting stays inside the network request and does not consume a retry.
+        // Connections start response deadlines at wire dispatch; Downloads bounds readiness
+        // and the complete hedged retry operation with one absolute deadline.
+        // Hedge entire retry sequences so individual peer failures are retried before hedging.
+        // The inner limit bounds active sequences across both arms; exhausted arms release it
+        // immediately so their delayed siblings can start even at a limit of one.
+        // The outer limit bounds logical downloads, holding admission while any arm can succeed.
+        // Success, final failure, or cancellation releases it before block verification starts.
+        let block_network = SuccessHedge::new(
             ServiceBuilder::new()
                 .concurrency_limit(download_concurrency_limit)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
-            AlwaysHedge,
-            20,
-            0.95,
-            2 * SYNC_RESTART_DELAY,
         );
+        let block_network = ConcurrencyLimit::new(block_network, download_concurrency_limit);
 
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
@@ -1295,7 +1293,7 @@ where
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
             Err(BlockDownloadVerifyError::DownloadFailed { error, hash })
-                if format!("{error:?}").contains("NotFound") =>
+                if is_not_found(error.as_ref()) =>
             {
                 Some(*hash)
             }
@@ -1528,7 +1526,7 @@ where
             }
 
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{error:?}").contains("NotFound") =>
+                if is_not_found(error.as_ref()) =>
             {
                 // Covers these errors:
                 // - NotFoundResponse

@@ -229,7 +229,7 @@ async fn peer_limit_zero_mainnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book =
+    let (_network, address_book) =
         init_with_peer_limit(0, unreachable_inbound_service, Mainnet, None, None).await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
@@ -251,7 +251,7 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         0,
         unreachable_inbound_service,
         Network::new_default_testnet(),
@@ -279,7 +279,7 @@ async fn peer_limit_one_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -298,7 +298,7 @@ async fn peer_limit_one_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         1,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -324,7 +324,7 @@ async fn peer_limit_two_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -343,7 +343,7 @@ async fn peer_limit_two_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         2,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -1898,7 +1898,7 @@ async fn self_connections_should_fail() {
         ..Config::default()
     };
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         TEST_PEERSET_INITIAL_TARGET_SIZE,
         unreachable_inbound_service,
         Mainnet,
@@ -2188,14 +2188,14 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
 /// Uses `default_config` or Zebra's defaults for the rest of the configuration.
 ///
-/// Returns the newly created [`AddressBook`] for testing.
+/// Returns the network owner and newly created [`AddressBook`] for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
     network: Network,
     force_listen_addr: impl Into<Option<SocketAddr>>,
     default_config: impl Into<Option<Config>>,
-) -> Arc<std::sync::Mutex<AddressBook>>
+) -> (crate::NetworkService, Arc<std::sync::Mutex<AddressBook>>)
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
@@ -2215,7 +2215,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (peer_service, address_book, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2223,7 +2223,7 @@ where
     )
     .await;
 
-    address_book
+    (peer_service, address_book)
 }
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.

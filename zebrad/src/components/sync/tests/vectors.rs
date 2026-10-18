@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{collections::HashMap, iter, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use futures::{Future, FutureExt};
@@ -86,7 +86,10 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // Block 0 is fetched and committed to the state
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block0.clone(),
@@ -162,14 +165,20 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block2_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block2.clone(),
@@ -231,14 +240,20 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     // Blocks 3 & 4 are fetched in order, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block3_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block3.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block4_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block4.clone(),
@@ -306,7 +321,10 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .respond(zs::Response::KnownBlock(None));
 
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block0.clone(),
@@ -367,7 +385,10 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
         .respond(zs::Response::KnownBlock(None));
 
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
@@ -470,14 +491,20 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 
     // Both blocks are downloaded, so the missing parent reaches the state.
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block2_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block2.clone(),
@@ -546,7 +573,10 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
         .respond(zs::Response::KnownBlock(None));
 
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block0.clone(),
@@ -611,14 +641,20 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
         .respond(zs::Response::KnownBlock(None));
 
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block2_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block2.clone(),
@@ -676,7 +712,10 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     state_service.expect_no_requests().await;
 
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block3_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block3.clone(),
@@ -743,7 +782,10 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // Block 0 is fetched and committed to the state
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block0.clone(),
@@ -821,14 +863,20 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block2_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block2.clone(),
@@ -892,14 +940,20 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     // Blocks 3 & 4 are fetched in order, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block3_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block3.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block4_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block4.clone(),
@@ -973,7 +1027,10 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // (Mismatching hashes are usually ignored by the network service,
     // but we use them here to test the syncer lookahead.)
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block982k.clone(),
@@ -1038,7 +1095,10 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 
     // Block 0 is fetched and committed to the state
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block0.clone(),
@@ -1120,23 +1180,30 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     // Blocks 982k, 1, 2 are fetched in order, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
     peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            iter::once(block982k_hash).collect(),
-        ))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block982k_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block982k.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block2_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block2.clone(),
@@ -1207,7 +1274,10 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // Block 0 is fetched and committed to the state
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block0_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block0.clone(),
@@ -1283,14 +1353,20 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block1.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block2_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block2.clone(),
@@ -1354,23 +1430,30 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     // Blocks 3, 4, 982k are fetched in order, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block3_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block3.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block4_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block4.clone(),
             None,
         ))]));
     peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            iter::once(block982k_hash).collect(),
-        ))
+        .expect_request(zn::Request::BlockDownload {
+            hash: block982k_hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block982k.clone(),
@@ -2092,7 +2175,7 @@ async fn download_failed_is_only_requeued_for_not_found() {
 /// blocks still must.
 ///
 /// Far-ahead hashes from a malicious `FindBlocks` response carry no peer attribution,
-/// so the follow-up `BlocksByHash` request is routed to an independently chosen,
+/// so the follow-up `BlockDownload` request is routed to an independently chosen,
 /// honest peer. That serving peer did not choose the height, so scoring this path bans
 /// honest peers at the attacker's direction.
 #[tokio::test]
@@ -2155,7 +2238,7 @@ async fn far_ahead_block_does_not_produce_misbehavior_score() {
 /// Unlike [`setup`], this returns the `ChainSync` value itself rather than its `sync` future, so a
 /// test can call response-handling methods directly.
 #[allow(clippy::type_complexity)]
-fn new_chain_sync_with_misbehavior() -> (
+pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
     ChainSync<
         MockService<zn::Request, zn::Response, PanicAssertion>,
         MockService<zs::Request, zs::Response, PanicAssertion>,

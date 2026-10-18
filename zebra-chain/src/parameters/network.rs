@@ -77,9 +77,9 @@ impl NetworkKind {
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_protocol::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_address::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_protocol::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+                zcash_address::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
             }
         }
     }
@@ -88,9 +88,9 @@ impl NetworkKind {
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_protocol::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_address::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_protocol::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+                zcash_address::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
             }
         }
     }
