@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: The peer crawler started by `init` now resolves and dials the configured initial peers again when it has no outbound connections and no ready candidates for two crawl intervals, at most once every `constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL` (5 minutes). Each attempt waits at most `constants::INITIAL_PEER_RECOVERY_TIMEOUT` for DNS ([#11504](https://github.com/ZcashFoundation/zebra/issues/11504)).
+time: 2026-10-19T11:07:04.383228275Z

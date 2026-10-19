@@ -16,7 +16,10 @@
 use std::{
     collections::HashSet,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -898,6 +901,276 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
     );
 
     // Stop the crawler and check for panics or errors.
+    crawl_task_handle.abort();
+    tokio::task::yield_now().await;
+
+    let crawl_result = crawl_task_handle.now_or_never();
+    assert!(
+        crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
+        "unexpected error or panic in peer crawler task: {crawl_result:?}",
+    );
+}
+
+/// Test that a crawler whose initial peers all failed resolves and dials them again,
+/// and connects once they start accepting connections.
+#[tokio::test]
+async fn crawler_recovers_after_every_initial_peer_fails() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 2;
+    // Fail the first dial of each peer, then every dial in the first recovery.
+    const FAILED_DIALS: usize = PEER_COUNT * 2;
+
+    let (outbound_connector, dial_count, mut peer_tracker_rx) = counting_connector(FAILED_DIALS);
+    let (mut peerset_rx, crawl_task_handle) =
+        spawn_crawler_with_initial_peers(PEER_COUNT, outbound_connector).await;
+
+    let connected_peer = tokio::time::timeout(CRAWLER_TEST_DURATION, peerset_rx.next())
+        .await
+        .expect("crawler connects to a recovered initial peer before the timeout")
+        .expect("crawler holds the peer set sender while it is running");
+
+    assert!(
+        dial_count.load(Ordering::SeqCst) > FAILED_DIALS,
+        "expected a successful dial after the failed dials",
+    );
+    let _peer_tracker = peer_tracker_rx
+        .try_recv()
+        .expect("the connector sends a tracker before returning the connected peer");
+
+    let initial_peers = initial_peer_addrs(PEER_COUNT);
+    assert!(
+        initial_peers.contains(&connected_peer.0),
+        "expected a connection to an initial peer, got {:?}",
+        connected_peer.0,
+    );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Test that the crawler doesn't dial any initial peers again while it has an open
+/// outbound connection, even if it has no other candidates.
+#[tokio::test]
+async fn crawler_does_not_recover_while_connected() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 1;
+
+    let (outbound_connector, dial_count, mut peer_tracker_rx) = counting_connector(0);
+    let (mut peerset_rx, crawl_task_handle) =
+        spawn_crawler_with_initial_peers(PEER_COUNT, outbound_connector).await;
+
+    tokio::time::timeout(CRAWLER_TEST_DURATION, peerset_rx.next())
+        .await
+        .expect("crawler connects to the initial peer before the timeout")
+        .expect("crawler holds the peer set sender while it is running");
+    let _peer_tracker = peer_tracker_rx
+        .next()
+        .await
+        .expect("the connector sends a tracker before returning the connected peer");
+
+    // Leave time for several recoveries, if they were wrongly triggered.
+    tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL * 6).await;
+
+    assert_eq!(
+        dial_count.load(Ordering::SeqCst),
+        PEER_COUNT,
+        "expected no recovery dials while an outbound connection is open",
+    );
+    assert!(
+        peerset_rx.try_recv().is_err(),
+        "expected no extra peer connections",
+    );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Test that recoveries are rate-limited when every dial fails.
+#[tokio::test]
+async fn crawler_recovery_is_rate_limited() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 2;
+
+    let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(usize::MAX);
+
+    let start = Instant::now();
+    let (_peerset_rx, crawl_task_handle) =
+        spawn_crawler_with_initial_peers(PEER_COUNT, outbound_connector).await;
+
+    tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL * 6).await;
+
+    let dials = dial_count.load(Ordering::SeqCst);
+    let elapsed = start.elapsed();
+
+    stop_crawler(crawl_task_handle).await;
+
+    // Each peer is dialed once as a new candidate, then once per recovery.
+    // Recoveries start at least `MIN_INITIAL_PEER_RECOVERY_INTERVAL` apart.
+    let max_recoveries =
+        1 + elapsed.as_millis() / constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL.as_millis();
+    let max_recoveries =
+        usize::try_from(max_recoveries).expect("the test runs for a few recovery intervals");
+    let max_dials = PEER_COUNT * (1 + max_recoveries);
+
+    assert!(
+        dials >= PEER_COUNT * 2,
+        "expected at least one recovery after every initial peer failed, got {dials} dials",
+    );
+    assert!(
+        dials <= max_dials,
+        "expected at most {max_dials} dials in {elapsed:?}, got {dials}",
+    );
+}
+
+/// Returns a fake outbound connector that fails its first `fail_first` dials, then connects
+/// and keeps each connection open, the dial count, and a receiver for the open connections.
+fn counting_connector(
+    fail_first: usize,
+) -> (
+    impl Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+            Future: Send,
+        > + Clone
+        + Send
+        + 'static,
+    Arc<AtomicUsize>,
+    mpsc::UnboundedReceiver<ConnectionTracker>,
+) {
+    let dial_count = Arc::new(AtomicUsize::new(0));
+    let (peer_tracker_tx, peer_tracker_rx) = mpsc::unbounded();
+
+    let outbound_connector = {
+        let dial_count = dial_count.clone();
+        service_fn(move |req: OutboundConnectorRequest| {
+            let previous_dials = dial_count.fetch_add(1, Ordering::SeqCst);
+            let peer_tracker_tx = peer_tracker_tx.clone();
+            async move {
+                if previous_dials < fail_first {
+                    return Err("test outbound connector fails the first dials".into());
+                }
+
+                let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+                // Make the connection stay open.
+                peer_tracker_tx
+                    .unbounded_send(req.connection_tracker)
+                    .expect("unexpected error sending to unbounded channel");
+
+                Ok((req.addr, fake_client))
+            }
+        })
+    };
+
+    (outbound_connector, dial_count, peer_tracker_rx)
+}
+
+/// Returns the initial peer addresses used by [`spawn_crawler_with_initial_peers`].
+fn initial_peer_addrs(peer_count: usize) -> HashSet<PeerSocketAddr> {
+    (0..peer_count)
+        .map(|address_number| {
+            let address_number = u8::try_from(address_number).expect("tests use a few peers");
+            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number).into(), 1).into()
+        })
+        .collect()
+}
+
+/// Starts a crawler configured with `peer_count` initial peers and no other peers,
+/// using short crawl intervals.
+///
+/// Adds the initial peers to the address book like startup does, so the crawler
+/// dials them as new candidates before any recovery.
+async fn spawn_crawler_with_initial_peers<C>(
+    peer_count: usize,
+    outbound_connector: C,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+)
+where
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    C::Future: Send + 'static,
+{
+    // This address isn't actually bound - it just gets passed to the address book.
+    let unused_v4 = "0.0.0.0:0".parse().unwrap();
+
+    let config = Config {
+        initial_mainnet_peers: initial_peer_addrs(peer_count)
+            .iter()
+            .map(|addr| addr.remove_socket_addr_privacy().to_string())
+            .collect(),
+        // We want exactly the above list of peers, without any cached peers.
+        cache_dir: CacheDir::disabled(),
+        network: Network::Mainnet,
+        listen_addr: unused_v4,
+        peerset_initial_target_size: peer_count,
+        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        ..Config::default()
+    };
+
+    let (
+        _address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, unused_v4);
+
+    let initial_peers = limit_initial_peers(&config, address_book_updater.clone()).await;
+    assert_eq!(initial_peers.len(), peer_count);
+
+    // A peer set whose crawl responses never contain any addresses.
+    let empty_peer_set = service_fn(|req| async move {
+        match req {
+            Request::Peers => Ok(Response::Peers(Vec::new())),
+            _ => unreachable!("unexpected request: {:?}", req),
+        }
+    });
+
+    // Leave room for every connection and failed dial demand signal.
+    let channel_size = config.peerset_outbound_connection_limit() * 2;
+    let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(channel_size);
+    let (demand_tx, demand_rx) = mpsc::channel::<MorePeers>(channel_size);
+
+    let (next_peer_service, crawl_service) =
+        crawler_services(address_book_service.clone(), empty_peer_set);
+
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
+        outbound_connector,
+        peerset_tx,
+        ActiveConnectionCounter::new_counter(),
+        address_book_updater,
+    ));
+
+    (peerset_rx, crawl_task_handle)
+}
+
+/// Stops the crawler task, and checks it didn't panic or return an error.
+async fn stop_crawler(crawl_task_handle: JoinHandle<Result<(), BoxError>>) {
     crawl_task_handle.abort();
     tokio::task::yield_now().await;
 
@@ -2246,7 +2519,7 @@ where
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
 ///
-/// Uses the default values for all other config fields.
+/// Uses the default values for all other config fields, except the initial peers, which are empty.
 /// Does not bind a local listener.
 ///
 /// Returns the generated [`Config`], and the peer set receiver.
@@ -2267,6 +2540,10 @@ where
     // Create a test config.
     let mut config = Config {
         crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        // Without initial peers, a crawler with no connections can't resolve the DNS seeders
+        // again, which would add live peers to the address book.
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
         ..Config::default()
     };
     if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
