@@ -347,7 +347,7 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 2;
 pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize = MAX_ADDRS_IN_MESSAGE * 5;
 
 /// The maximum number of gossiped addresses applied to the address book in one request.
-pub const GOSSIPED_ADDRS_PER_REQUEST: usize = 100;
+pub(crate) const GOSSIPED_ADDRS_PER_REQUEST: usize = 100;
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
