@@ -2,8 +2,6 @@
 
 use std::task::{Context, Poll};
 
-use futures::FutureExt as _;
-
 use super::*;
 
 #[test]

@@ -2,7 +2,7 @@
 
 use std::{future::Future, sync::Arc};
 
-use futures::{channel::mpsc, FutureExt as _, SinkExt};
+use futures::{channel::mpsc, SinkExt};
 use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
