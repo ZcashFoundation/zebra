@@ -2199,6 +2199,82 @@ async fn download_round_timeout_is_requeued_without_restart() {
     );
 }
 
+/// A network service that never becomes ready, like a peer set without ready peers.
+#[derive(Clone, Debug)]
+struct NeverReadyNetwork;
+
+impl tower::Service<zn::Request> for NeverReadyNetwork {
+    type Response = zn::Response;
+    type Error = crate::BoxError;
+    type Future = futures::future::Pending<Result<zn::Response, crate::BoxError>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Pending
+    }
+
+    fn call(&mut self, _request: zn::Request) -> Self::Future {
+        unreachable!("callers wait for readiness, and this service is never ready")
+    }
+}
+
+/// A re-download that can't get network capacity before its deadline stays queued for a later
+/// sync round, along with the blocks queued after it, which don't wait out their own deadlines.
+#[tokio::test(start_paused = true)]
+async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    let (mut chain_sync, _sync_status): (
+        ChainSync<
+            NeverReadyNetwork,
+            MockService<zs::Request, zs::Response, PanicAssertion>,
+            MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+            MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+            MockChainTip,
+        >,
+        SyncStatus,
+    ) = ChainSync::new(
+        &config,
+        Height(0),
+        NeverReadyNetwork,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    let missing = [block::Hash::from([0xB1; 32]), block::Hash::from([0xB2; 32])];
+    chain_sync.reobtain_hashes.extend(missing);
+
+    let started = tokio::time::Instant::now();
+    chain_sync.reobtain_missing_blocks().await;
+
+    assert_eq!(
+        chain_sync
+            .reobtain_hashes
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        missing,
+        "blocks that couldn't be re-requested must stay queued for the next sync round"
+    );
+    assert_eq!(
+        tokio::time::Instant::now() - started,
+        sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+        "only the first block waits out its download deadline"
+    );
+}
+
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
 /// height limit must NOT score the peer that served it, while consensus-invalid
 /// blocks still must.

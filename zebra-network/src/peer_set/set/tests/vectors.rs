@@ -1937,6 +1937,77 @@ fn peer_set_gives_buffered_request_a_turn_behind_queued_blocks() {
     });
 }
 
+/// A queued broadcast that takes the ready peer kept for the request held in the `Buffer` must
+/// not cancel that request's turn.
+#[test]
+fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+    tokio::time::pause();
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&[PeerServices::NODE_NETWORK; 2]);
+
+        // Only the first serving peer can serve these blocks, but the second one keeps the peer
+        // set ready, so the last block queues behind the first one.
+        peer_set.ready().await.expect("peers connect");
+        let missing: Vec<InventoryHash> = [1, 9, 2]
+            .into_iter()
+            .map(|byte| InventoryHash::Block(block::Hash([byte; 32])))
+            .collect();
+        send_inventory(
+            &mut peer_set_guard,
+            InventoryChange::new_missing_multi(missing.iter(), addrs[1])
+                .expect("hashes are not empty"),
+        );
+        let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+        let _queued_fut = peer_set
+            .ready()
+            .await
+            .expect("the second serving peer keeps the peer set ready")
+            .call(Request::BlockDownload {
+                hash: block::Hash([2; 32]),
+                advertiser: None,
+            });
+        // Make the second serving peer busy too, so the peer set has no ready peers.
+        let mut other_futs = Vec::new();
+        for _ in 0..2 {
+            other_futs.push(
+                peer_set
+                    .ready()
+                    .await
+                    .expect("the second serving peer is ready")
+                    .call(Request::Peers),
+            );
+        }
+
+        // Queued block requests already took the last ready peer from the held request, and a
+        // block advert is queued for the first peer.
+        peer_set.queued_inv_requests_took_last_peer = true;
+        let advert = Request::AdvertiseBlockToAll(block::Hash([7; 32]));
+        let (advert_tx, _advert_rx) = tokio::sync::mpsc::channel(3);
+        peer_set.queued_broadcast_all =
+            Some((advert.clone(), advert_tx, HashSet::from([addrs[0]])));
+
+        // Free one slot on the first peer: the peer kept for the held request then only has room
+        // for the queued advert.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
+        assert!(
+            futures::poll!(std::future::poll_fn(|cx| peer_set.poll_ready(cx))).is_pending(),
+            "the queued advert takes the only ready peer",
+        );
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        assert_eq!(received_request(&mut handles[0]), Some(advert));
+        assert!(
+            peer_set.queued_inv_requests_took_last_peer,
+            "the held request must still get the next ready peer",
+        );
+
+        drop(other_futs);
+    });
+}
+
 /// The deadline starts when discovery is queued, even if its response future is never polled.
 #[test]
 fn peer_set_routes_queued_find_to_non_serving_peer_after_wait_timeout() {

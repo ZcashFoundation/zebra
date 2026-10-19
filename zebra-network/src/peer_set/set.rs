@@ -432,6 +432,9 @@ where
     /// Whether queued block requests took the last ready peer the last time the peer set
     /// wasn't ready, leaving the request that the [`Buffer`] is holding waiting.
     ///
+    /// It stays set until the peer set is ready, even if a queued broadcast takes the peer kept
+    /// for the held request.
+    ///
     /// The Buffer only calls the peer set with that request once the peer set is ready. Queued
     /// block requests can usually use every ready serving peer, so without a turn, the held
     /// request, which can be discovery, would wait until the whole queue drains. So the next
@@ -2387,7 +2390,10 @@ where
 
         if self.ready_services.is_empty() {
             if self.poll_peers(&mut peer_cx)?.is_pending() {
-                self.queued_inv_requests_took_last_peer = first_routing.routed_any;
+                // A queued broadcast can take a peer kept for the held request, so it is still
+                // owed a turn until the peer set is ready.
+                self.queued_inv_requests_took_last_peer =
+                    keep_last_peer || first_routing.routed_any;
                 return Poll::Pending;
             }
             // A peer can recover capacity while the first queued request is dispatched.
@@ -2400,7 +2406,7 @@ where
             );
             if self.ready_services.is_empty() {
                 self.queued_inv_requests_took_last_peer =
-                    first_routing.routed_any || second_routing.routed_any;
+                    keep_last_peer || first_routing.routed_any || second_routing.routed_any;
                 // Newly inserted readiness futures need a first poll even with an idle Buffer.
                 cx.waker().wake_by_ref();
                 Poll::Pending

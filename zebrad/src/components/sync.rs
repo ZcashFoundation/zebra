@@ -752,17 +752,36 @@ where
     /// checkpoint verifier from advancing. Waiting for the lookahead pause to
     /// clear would deadlock — the pause cannot clear until this block arrives.
     /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
+    /// Blocks that can't get network capacity before the download deadline stay queued for the
+    /// next sync round.
     async fn reobtain_missing_blocks(&mut self) {
         if self.reobtain_hashes.is_empty() {
             return;
         }
 
-        for hash in std::mem::take(&mut self.reobtain_hashes) {
+        let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
+        while let Some(hash) = hashes.next() {
             // The block was removed from the in-flight set when its download
-            // failed, so this re-queues it. A residual duplicate/queue error is
-            // benign — it means the block is already being handled.
-            if let Err(error) = self.downloads.download_and_verify(hash).await {
-                trace!(?hash, ?error, "re-download of missing block not queued");
+            // failed, so this re-queues it.
+            match self.downloads.download_and_verify(hash).await {
+                Ok(()) => {}
+                // The block is already being handled.
+                Err(error @ BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                    trace!(?hash, ?error, "re-download of missing block already queued");
+                }
+                // The network didn't have capacity before the download deadline. Keep this block
+                // and the rest for the next sync round, rather than dropping blocks the verifier is
+                // waiting for, or waiting out a deadline for each of them.
+                Err(error) => {
+                    debug!(
+                        ?hash,
+                        ?error,
+                        "re-download of missing block not queued, retrying later"
+                    );
+                    self.reobtain_hashes.insert(hash);
+                    self.reobtain_hashes.extend(hashes);
+                    return;
+                }
             }
         }
     }
