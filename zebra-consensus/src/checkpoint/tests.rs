@@ -10,6 +10,7 @@ use tokio::time::timeout;
 use tracing_futures::Instrument;
 
 use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
+use zebra_test::mock_service::MockService;
 
 use super::*;
 
@@ -866,4 +867,102 @@ fn state_auth_commitment_errors_score_the_serving_peer() {
         100,
         "an authorizing-data commitment mismatch must score the peer that served the body"
     );
+}
+
+/// A checkpoint block that fails to commit must reset the verifier to the state
+/// tip, even if the caller dropped its verify future before the commit failed.
+///
+/// The syncer drops in-flight verify futures when it cancels its downloads.
+/// If the reset depended on that future, the verifier would stay ahead of the
+/// state, and reject the honest block as `Finished`.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_failure_resets_progress_after_dropped_future() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let genesis =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+    let block_1 = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?;
+    let genesis_tip = (block::Height(0), genesis.hash());
+    let block_1_hash = block_1.hash();
+
+    let mut state_service = MockService::build().for_unit_tests();
+    let mut checkpoint_verifier = CheckpointVerifier::from_list(
+        [genesis_tip, (block::Height(1), block_1_hash)],
+        &Mainnet,
+        Some(genesis_tip),
+        state_service.clone(),
+    )
+    .map_err(|e| eyre!(e))?;
+
+    // Verify the final checkpoint, then drop the verify future before it commits.
+    let verify_future = checkpoint_verifier
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(block_1.clone());
+    drop(verify_future);
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+
+    // The state rejects the block, and its tip is still the genesis block.
+    state_service
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                zs::Request::CommitCheckpointVerifiedBlock(block) if block.hash == block_1_hash
+            )
+        })
+        .await
+        .respond_error("forged block body".into());
+    state_service
+        .expect_request(zs::Request::Tip)
+        .await
+        .respond(zs::Response::Tip(Some(genesis_tip)));
+
+    // Once the reset arrives, the verifier accepts the block again.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(VERIFY_TIMEOUT_SECONDS);
+    let mut verify_future = loop {
+        let mut verify_future = checkpoint_verifier
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block_1.clone());
+
+        match (&mut verify_future).now_or_never() {
+            Some(Err(VerifyCheckpointError::Finished)) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the verifier was not reset to the state tip"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Some(result) => panic!("unexpected verify result before commit: {result:?}"),
+            None => break verify_future,
+        }
+    };
+
+    state_service
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                zs::Request::CommitCheckpointVerifiedBlock(block) if block.hash == block_1_hash
+            )
+        })
+        .await
+        .respond(zs::Response::Committed(block_1_hash));
+
+    let verified_hash = timeout(
+        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+        &mut verify_future,
+    )
+    .await??;
+    assert_eq!(verified_hash, block_1_hash);
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+
+    Ok(())
 }

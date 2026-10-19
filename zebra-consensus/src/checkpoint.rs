@@ -1140,46 +1140,40 @@ where
         // If the state commit fails due to corrupt block data,
         // we don't reject the entire checkpoint.
         // Instead, we reset the verifier to the successfully committed state tip.
-        let state_service = self.state_service.clone();
-        let commit_checkpoint_verified = tokio::spawn(async move {
-            let hash = req_block
-                .rx
-                .await
-                .map_err(Into::into)
-                .map_err(VerifyCheckpointError::CommitCheckpointVerified)
-                .expect("CheckpointVerifier does not leave dangling receivers")?;
-
-            // We use a `ServiceExt::oneshot`, so that every state service
-            // `poll_ready` has a corresponding `call`. See #1593.
-            match state_service
-                .oneshot(zs::Request::CommitCheckpointVerifiedBlock(req_block.block))
-                .map_err(VerifyCheckpointError::CommitCheckpointVerified)
-                .await?
-            {
-                zs::Response::Committed(committed_hash) => {
-                    assert_eq!(committed_hash, hash, "state must commit correct hash");
-                    Ok(hash)
-                }
-                _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),
-            }
-        });
-
+        //
+        // The reset happens in the spawned task, because the verifier has
+        // already advanced its progress past this block. If the reset happened
+        // in the returned future, a caller that dropped it (like the syncer
+        // cancelling its downloads) would leave the verifier ahead of the
+        // state, and it would reject the blocks it is missing.
         let state_service = self.state_service.clone();
         let reset_sender = self.reset_sender.clone();
-        async move {
-            let result = commit_checkpoint_verified.await;
-            // Avoid a panic on shutdown
-            //
-            // When `zebrad` is terminated using Ctrl-C, the `commit_checkpoint_verified` task
-            // can return a `JoinError::Cancelled`. We expect task cancellation on shutdown,
-            // so we don't need to panic here. The persistent state is correct even when the
-            // task is cancelled, because block data is committed inside transactions, in
-            // height order.
-            let result = if zebra_chain::shutdown::is_shutting_down() {
-                Err(VerifyCheckpointError::ShuttingDown)
-            } else {
-                result.expect("commit_checkpoint_verified should not panic")
-            };
+        let commit_checkpoint_verified = tokio::spawn(async move {
+            let commit_state_service = state_service.clone();
+            let result = async move {
+                let hash = req_block
+                    .rx
+                    .await
+                    .map_err(Into::into)
+                    .map_err(VerifyCheckpointError::CommitCheckpointVerified)
+                    .expect("CheckpointVerifier does not leave dangling receivers")?;
+
+                // We use a `ServiceExt::oneshot`, so that every state service
+                // `poll_ready` has a corresponding `call`. See #1593.
+                match commit_state_service
+                    .oneshot(zs::Request::CommitCheckpointVerifiedBlock(req_block.block))
+                    .map_err(VerifyCheckpointError::CommitCheckpointVerified)
+                    .await?
+                {
+                    zs::Response::Committed(committed_hash) => {
+                        assert_eq!(committed_hash, hash, "state must commit correct hash");
+                        Ok::<_, VerifyCheckpointError>(hash)
+                    }
+                    _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),
+                }
+            }
+            .await;
+
             // Only reset the verifier's progress when a block that the verifier
             // accepted failed to commit to the state. Then the verifier's
             // progress can be ahead of the state's committed blocks, so it must
@@ -1213,7 +1207,24 @@ where
                 // is being dropped, and then it doesn't matter anymore.
                 let _ = reset_sender.send(tip);
             }
+
             result
+        });
+
+        async move {
+            let result = commit_checkpoint_verified.await;
+            // Avoid a panic on shutdown
+            //
+            // When `zebrad` is terminated using Ctrl-C, the `commit_checkpoint_verified` task
+            // can return a `JoinError::Cancelled`. We expect task cancellation on shutdown,
+            // so we don't need to panic here. The persistent state is correct even when the
+            // task is cancelled, because block data is committed inside transactions, in
+            // height order.
+            if zebra_chain::shutdown::is_shutting_down() {
+                Err(VerifyCheckpointError::ShuttingDown)
+            } else {
+                result.expect("commit_checkpoint_verified should not panic")
+            }
         }
         .boxed()
     }
