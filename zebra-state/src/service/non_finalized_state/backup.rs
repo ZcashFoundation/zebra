@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::DirEntry,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -85,9 +85,12 @@ pub(super) fn update_non_finalized_state_backup(
     non_finalized_state: &NonFinalizedState,
     mut backup_blocks: HashMap<block::Hash, PathBuf>,
 ) {
+    let mut seen = HashSet::new();
     for block in non_finalized_state
         .chain_iter()
         .flat_map(|chain| chain.blocks.values())
+        // Chains share the blocks below their fork point, so only check each block once.
+        .filter(|block| seen.insert(block.hash))
         // Remove blocks from `backup_blocks` that are present in the non-finalized state
         .filter(|block| backup_blocks.remove(&block.hash).is_none())
     {
