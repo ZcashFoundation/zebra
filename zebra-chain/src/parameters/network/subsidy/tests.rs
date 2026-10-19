@@ -869,3 +869,23 @@ fn zero_subsidy_still_requires_fixed_lockbox_disbursements() -> Result<(), Repor
     )?;
     Ok(())
 }
+
+/// Checks that the founders reward uses truncating division, like zcashd,
+/// when a configured slow-start interval gives a subsidy that is not a multiple of 5.
+#[test]
+fn founders_reward_with_slow_start_interval_three() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    let network = Parameters::build()
+        .with_slow_start_interval(Height(3))
+        .with_funding_streams(Vec::new())
+        .to_network()?;
+
+    let height = Height(1);
+    let subsidy = block_subsidy(height, &network)?;
+    assert_eq!(subsidy.zatoshis(), 833_333_332);
+    assert_ne!(subsidy.zatoshis() % 5, 0);
+
+    assert_eq!(founders_reward(&network, height).zatoshis(), 166_666_666);
+
+    Ok(())
+}
