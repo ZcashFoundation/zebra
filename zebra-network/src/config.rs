@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    fmt,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -110,10 +111,22 @@ pub struct Config {
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
+    ///
+    /// This can also be a comma-separated string, which lets `zebrad` set it
+    /// from an environment variable:
+    /// `ZEBRA_NETWORK__INITIAL_MAINNET_PEERS='203.0.113.1:8233,mainnet.seeder.example.com:8233'`.
+    /// Whitespace around each peer is ignored, and an empty string means no
+    /// initial peers.
     pub initial_mainnet_peers: IndexSet<String>,
 
     /// A list of initial peers for the peerset when operating on
     /// testnet.
+    ///
+    /// This can also be a comma-separated string, which lets `zebrad` set it
+    /// from an environment variable:
+    /// `ZEBRA_NETWORK__INITIAL_TESTNET_PEERS='203.0.113.1:18233,testnet.seeder.example.com:18233'`.
+    /// Whitespace around each peer is ignored, and an empty string means no
+    /// initial peers.
     pub initial_testnet_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
@@ -676,7 +689,9 @@ struct DConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     testnet_parameters: Option<DTestnetParameters>,
 
+    #[serde(deserialize_with = "deserialize_peer_list")]
     initial_mainnet_peers: IndexSet<String>,
+    #[serde(deserialize_with = "deserialize_peer_list")]
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
     peerset_initial_target_size: usize,
@@ -701,6 +716,50 @@ impl Default for DConfig {
             max_connections_per_ip: Some(config.max_connections_per_ip),
         }
     }
+}
+
+/// Deserializes an initial peer list from a sequence, or from a comma-separated
+/// string so it can be set through an environment variable, which cannot
+/// express a TOML array.
+///
+/// Peer addresses never contain commas, including bracketed IPv6 addresses.
+/// Whitespace around each peer is trimmed and empty entries are dropped,
+/// because a padded peer would fail DNS resolution and an empty one would
+/// panic during peer resolution.
+fn deserialize_peer_list<'de, D>(deserializer: D) -> Result<IndexSet<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct PeerListVisitor;
+
+    impl<'de> de::Visitor<'de> for PeerListVisitor {
+        type Value = IndexSet<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a list of peer addresses, or a comma-separated string of them")
+        }
+
+        fn visit_str<E>(self, peers: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(peers
+                .split(',')
+                .map(str::trim)
+                .filter(|peer| !peer.is_empty())
+                .map(String::from)
+                .collect())
+        }
+
+        fn visit_seq<A>(self, peers: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            IndexSet::deserialize(de::value::SeqAccessDeserializer::new(peers))
+        }
+    }
+
+    deserializer.deserialize_any(PeerListVisitor)
 }
 
 impl From<Arc<testnet::Parameters>> for DTestnetParameters {
