@@ -228,7 +228,7 @@ pub fn spawn_zebra_checkpoints_direct(
 
     let mut zebra_checkpoints = zebra_checkpoints_dir
         .spawn_zebra_checkpoints_child(arguments)?
-        .with_timeout(test_type.zebrad_timeout())
+        .with_timeout(test_type.zebrad_timeout())?
         .with_failure_regex_iter(
             zebra_checkpoints_failure_messages,
             zebra_checkpoints_ignore_messages,
