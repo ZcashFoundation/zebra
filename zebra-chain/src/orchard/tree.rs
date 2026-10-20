@@ -35,6 +35,7 @@ use crate::{
 pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
 
+mod batch;
 #[cfg(test)]
 mod tests;
 
@@ -72,6 +73,39 @@ fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pal
                 .chain(right[..255].iter().by_vals()),
         )
         .unwrap_or(pallas::Base::zero())
+}
+
+/// Packs the public MerkleCRH message into its 52 little-endian 10-bit words.
+fn merkle_crh_words(level: u8, left: pallas::Base, right: pallas::Base) -> [u16; 52] {
+    let left = BitArray::<_, Lsb0>::from(left.to_repr());
+    let right = BitArray::<_, Lsb0>::from(right.to_repr());
+    let mut words = [0; 52];
+    words[0] = u16::from(level);
+    for i in 0..25 {
+        words[i + 1] = left[i * 10..i * 10 + 10].load_le();
+    }
+    words[26] = left[250..255].load_le::<u16>() | (right[..5].load_le::<u16>() << 5);
+    for i in 0..25 {
+        words[i + 27] = right[i * 10 + 5..i * 10 + 15].load_le();
+    }
+    words
+}
+
+/// Hashes a level of public node pairs, preserving the specification's bottom-to-zero mapping.
+fn merkle_crh_orchard_batch(
+    domain: &sinsemilla::HashDomain,
+    level: u8,
+    nodes: &[Node],
+    out: &mut [Node],
+) {
+    assert_eq!(nodes.len(), out.len() * 2, "one output per node pair");
+    let words: Vec<_> = nodes
+        .chunks_exact(2)
+        .map(|pair| merkle_crh_words(level, pair[0].0, pair[1].0))
+        .collect();
+    for (out, hash) in out.iter_mut().zip(domain.hash_many_vartime(&words)) {
+        *out = Node(hash.unwrap_or(pallas::Base::zero()));
+    }
 }
 
 lazy_static! {
@@ -198,6 +232,17 @@ impl Node {
     /// `zcashd`'s `z_getsubtreesbyindex` does not reverse the byte order of subtree roots.
     pub fn bytes_in_display_order(&self) -> [u8; 32] {
         self.to_repr()
+    }
+
+    /// Combines independent public node pairs at the same level.
+    fn combine_batch(level: u8, nodes: &[Self], out: &mut [Self]) {
+        if out.len() <= 1 {
+            for (pair, out) in nodes.chunks_exact(2).zip(out) {
+                *out = Self::combine(level.into(), &pair[0], &pair[1]);
+            }
+        } else {
+            merkle_crh_orchard_batch(&MERKLE_CRH_DOMAIN, level, nodes, out);
+        }
     }
 }
 
@@ -406,7 +451,7 @@ impl NoteCommitmentTree {
         }
     }
 
-    /// Appends commitments in order, hashing independent subtrees in parallel.
+    /// Appends commitments in order, batching independent parent hashes by tree level.
     ///
     /// Returns the last [`TRACKED_SUBTREE_HEIGHT`] subtree completed by these commitments,
     /// or `None` if none was completed. A block can complete at most one such subtree.

@@ -150,6 +150,8 @@ pub enum NoteCommitmentTreeError {
     FullTree,
 }
 
+impl crate::parallel::batch_frontier::BatchNode for sapling_crypto::Node {}
+
 /// Sapling Incremental Note Commitment Tree.
 ///
 /// Note that the default value of the [`Root`] type is `[0, 0, 0, 0]`. However, this value differs

@@ -18,6 +18,8 @@ impl Hashable for Node {
     }
 }
 
+impl BatchNode for Node {}
+
 #[test]
 fn append_batch_keeps_last_completed_subtree() {
     let mut sequential = Frontier::<Node, DEPTH>::empty();

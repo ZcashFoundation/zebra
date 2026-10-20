@@ -15,6 +15,23 @@ const DEPTH: u8 = 32;
 // Keep small batches and reduction tasks serial to amortize scheduling over dozens of hashes.
 const PARALLEL_THRESHOLD: usize = 32;
 
+/// A tree node type that chooses how batch appends hash aligned chunks of new leaves.
+pub(crate) trait BatchNode: Hashable + Copy + Send + Sync {
+    /// Returns the subtree roots of `chunks`, aligned power-of-two leaf runs in leaf order.
+    ///
+    /// By default, independent subtrees are hashed in parallel.
+    fn chunk_roots<C, F>(chunks: &[&[C]], to_node: &F) -> Vec<Self>
+    where
+        C: Sync,
+        F: Fn(&C) -> Self + Sync,
+    {
+        chunks
+            .par_iter()
+            .map(|leaves| perfect_subtree_root(leaves, to_node))
+            .collect()
+    }
+}
+
 /// Appends in order and returns the last completed tracked subtree, if any.
 /// On overflow, retains the prefix that fits, matching sequential `Frontier::append` calls.
 #[allow(clippy::unwrap_in_result)]
@@ -24,7 +41,7 @@ pub(crate) fn append_batch<H, C, F>(
     to_node: F,
 ) -> Result<Option<(NoteCommitmentSubtreeIndex, H)>, FrontierError>
 where
-    H: Hashable + Copy + Send + Sync,
+    H: BatchNode,
     C: Sync,
     F: Fn(&C) -> H + Sync,
 {
@@ -63,7 +80,7 @@ where
 /// Appends a nonempty segment that fits in the current tracked subtree.
 fn append_segment<H, C, F>(frontier: &mut Frontier<H, DEPTH>, commitments: &[C], to_node: &F)
 where
-    H: Hashable + Copy + Send + Sync,
+    H: BatchNode,
     C: Sync,
     F: Fn(&C) -> H + Sync,
 {
@@ -105,21 +122,15 @@ where
             .expect("a segment has at most 2^16 leaves");
         let count = 1usize << level;
         let (chunk, rest) = leaves.split_at(count);
-        chunks.push((level, chunk, None));
+        chunks.push(chunk);
         leaves = rest;
         position += 1u64 << level;
     }
 
-    chunks.par_iter_mut().for_each(|(_, leaves, root)| {
-        *root = Some(perfect_subtree_root(leaves, to_node));
-    });
     // Chunks stay in leaf order; carries must merge left to right.
-    for (level, _, root) in chunks {
-        merge(
-            &mut slots,
-            level,
-            root.expect("every chunk was reduced by the parallel iterator"),
-        );
+    for (chunk, root) in chunks.iter().zip(H::chunk_roots(&chunks, to_node)) {
+        let level = u8::try_from(chunk.len().ilog2()).expect("a segment has at most 2^16 leaves");
+        merge(&mut slots, level, root);
     }
 
     *frontier = Frontier::from_parts(

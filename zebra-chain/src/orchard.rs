@@ -6,7 +6,6 @@ mod action;
 mod address;
 mod commitment;
 mod note;
-mod sinsemilla;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
