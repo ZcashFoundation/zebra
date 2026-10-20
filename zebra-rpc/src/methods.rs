@@ -1241,7 +1241,10 @@ where
         let version = GetInfoResponse::version_from_string(&self.build_version)
             .expect("invalid version string");
 
-        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+        let connections = read_address_book(&self.address_book, |book| {
+            book.recently_live_peers(Utc::now()).len()
+        })
+        .await?;
 
         let last_error_recorded = self.last_warn_error_log_rx.borrow().clone();
         let (last_error_log, _level, last_error_log_time) = last_error_recorded.unwrap_or((
@@ -3152,7 +3155,10 @@ where
         // Deprecated: zcashd always returns 0.
         let timeoffset = 0;
 
-        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+        let connections = read_address_book(&self.address_book, |book| {
+            book.recently_live_peers(Utc::now()).len()
+        })
+        .await?;
 
         // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
         let networks = vec![
@@ -3187,15 +3193,17 @@ where
     }
 
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {
-        let address_book = self.address_book.clone();
-        Ok(address_book
-            .recently_live_peers(chrono::Utc::now())
-            .into_iter()
-            .map(|meta_addr| {
-                let banscore = address_book.misbehavior_score(meta_addr.addr());
-                PeerInfo::from_meta_addr(meta_addr, banscore)
-            })
-            .collect())
+        read_address_book(&self.address_book, |address_book| {
+            address_book
+                .recently_live_peers(chrono::Utc::now())
+                .into_iter()
+                .map(|meta_addr| {
+                    let banscore = address_book.misbehavior_score(meta_addr.addr());
+                    PeerInfo::from_meta_addr(meta_addr, banscore)
+                })
+                .collect()
+        })
+        .await
     }
 
     async fn ping(&self) -> Result<()> {
@@ -5050,6 +5058,22 @@ impl IronwoodTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }
+}
+
+/// Runs `read` against the address book on a blocking thread, so waiting on its
+/// mutex doesn't park an async runtime worker (#11618).
+async fn read_address_book<AddressBook, T>(
+    address_book: &AddressBook,
+    read: impl FnOnce(AddressBook) -> T + Send + 'static,
+) -> Result<T>
+where
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+    T: Send + 'static,
+{
+    let address_book = address_book.clone();
+    tokio::task::spawn_blocking(move || read(address_book))
+        .await
+        .map_misc_error()
 }
 
 /// Build a valid height range from the given optional start and end numbers.

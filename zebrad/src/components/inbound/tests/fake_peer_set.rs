@@ -62,6 +62,35 @@ use InventoryResponse::*;
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
 #[tokio::test(flavor = "multi_thread")]
+async fn empty_mempool_requests_return_empty_inventory() {
+    let (
+        inbound_service,
+        _mempool_guard,
+        _committed_blocks,
+        _added_transactions,
+        _mock_tx_verifier,
+        mut peer_set,
+        _state_guard,
+        _chain_tip_change,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+
+    let response = timeout(
+        Duration::from_secs(1),
+        inbound_service.oneshot(Request::MempoolTransactionIds),
+    )
+    .await
+    .expect("the empty mempool must answer promptly")
+    .expect("the initialized mempool answers transaction ID requests");
+    // A nil response sends nothing on the wire and leaves the peer waiting for its timeout.
+    assert_eq!(response, Response::TransactionIds(Vec::new()));
+    peer_set.expect_no_requests().await;
+    sync_gossip_task_handle.abort();
+    tx_gossip_task_handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_requests_for_transactions() {
     let (
         inbound_service,
@@ -87,17 +116,11 @@ async fn mempool_requests_for_transactions() {
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
+    // Even an empty mempool must produce an inventory reply, not leave the peer waiting.
     match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        Ok(Response::Nil) => assert!(
-            added_transaction_ids.is_empty(),
-            "`MempoolTransactionIds` request should match added_transaction_ids {added_transaction_ids:?}, got Ok(Nil)"
-        ),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`, got {:?}",
-            response
-        ),
-    };
+        response => panic!("Mempool requests must return transaction IDs, got {response:?}"),
+    }
 
     // Test `Request::TransactionsById`
     let hash_set = added_transaction_ids
@@ -277,7 +300,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -495,7 +518,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -596,7 +619,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx1_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Add a new block to the state (make the chain tip advance)
@@ -659,18 +682,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![tx1_id])
-        }
-        Ok(Response::Nil) => panic!(
-            "response to `MempoolTransactionIds` request should match {:?}",
-            vec![tx1_id]
-        ),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
-        ),
-    };
+    assert_eq!(
+        request.expect("the initialized mempool answers transaction ID requests"),
+        Response::TransactionIds(vec![tx1_id]),
+    );
 
     // As our test transaction will expire at a block height greater or equal to 3 we need to push block 3.
     let block_three: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
@@ -735,7 +750,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx2_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Check if tx1 was added to the rejected list as well
@@ -804,18 +819,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await;
 
         // tx2 is still in the mempool as the blockchain progress because the zero expiration height
-        match request {
-            Ok(Response::TransactionIds(response)) => {
-                assert_eq!(response, vec![tx2_id])
-            }
-            Ok(Response::Nil) => panic!(
-                "response to `MempoolTransactionIds` request should match {:?}",
-                vec![tx2_id]
-            ),
-            _ => unreachable!(
-                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
-            ),
-        };
+        assert_eq!(
+            request.expect("the initialized mempool answers transaction ID requests"),
+            Response::TransactionIds(vec![tx2_id]),
+        );
     }
 
     // check that nothing unexpected happened

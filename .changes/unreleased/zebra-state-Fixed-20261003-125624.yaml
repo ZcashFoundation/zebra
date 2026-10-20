@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: The fork limit no longer evicts the chain just committed or the best chain, and equal-work ties evict the earliest-received chain. Test networks keep up to 100 forks instead of 10 ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+time: 2026-10-03T12:56:24.000000+00:00
