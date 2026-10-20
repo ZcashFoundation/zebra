@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce Orchard proof verification cost by reusing gate evaluation plans and reducing scalar work.
+time: 2026-10-20T04:57:01.196308546+02:00
