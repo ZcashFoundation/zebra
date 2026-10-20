@@ -84,7 +84,7 @@ Zebra uses [config-rs](https://crates.io/crates/config) to layer configuration f
 2. **Use the default config file:** Mount a config file to `/home/zebra/.config/zebrad.toml` (for example using the `configs:` mapping in `docker-compose.yml`). This file is loaded if `CONFIG_FILE_PATH` is not set.
 3. **Use environment variables:** Set `ZEBRA_`-prefixed environment variables to override settings from the config file. Examples: `ZEBRA_NETWORK__NETWORK`, `ZEBRA_RPC__LISTEN_ADDR`, `ZEBRA_RPC__ENABLE_COOKIE_AUTH`, `ZEBRA_RPC__COOKIE_DIR`, `ZEBRA_METRICS__ENDPOINT_ADDR`, `ZEBRA_MINING__MINER_ADDRESS`.
 
-To set the initial peers through environment variables, use a comma-separated list of addresses with ports, such as `ZEBRA_NETWORK__INITIAL_MAINNET_PEERS='203.0.113.1:8233,mainnet.seeder.example.com:8233'`, or `ZEBRA_NETWORK__INITIAL_TESTNET_PEERS` on Testnet. The list replaces the peers in the config file. An empty value means no initial peers.
+`ZEBRA_NETWORK__INITIAL_MAINNET_PEERS` and `ZEBRA_NETWORK__INITIAL_TESTNET_PEERS` take comma-separated peers with ports, such as `'203.0.113.1:8233,mainnet.seeder.example.com:8233'`. They replace the config file's list, and an empty value means no initial peers.
 
 You can verify your configuration by inspecting Zebra's logs at startup.
 

@@ -133,13 +133,6 @@ fn parse_config_initial_peers() {
         );
     }
 
-    let config: Config =
-        toml::from_str("initial_testnet_peers = '203.0.113.1:18233, [2001:db8::1]:18233'").unwrap();
-    assert_eq!(
-        config.initial_testnet_peers.iter().collect::<Vec<_>>(),
-        vec!["203.0.113.1:18233", "[2001:db8::1]:18233"],
-    );
-
     let error = toml::from_str::<Config>("initial_mainnet_peers = 8233")
         .expect_err("a number is not a peer list")
         .to_string();

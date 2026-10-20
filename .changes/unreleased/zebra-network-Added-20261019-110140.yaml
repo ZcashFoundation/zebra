@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Added
-body: Added support for deserializing `Config::initial_mainnet_peers` and `Config::initial_testnet_peers` from a comma-separated string, as well as from a sequence. Whitespace around each peer is trimmed, and empty entries are dropped ([#10658](https://github.com/ZcashFoundation/zebra/issues/10658)).
+body: Added support for deserializing `Config::initial_mainnet_peers` and `Config::initial_testnet_peers` from a comma-separated string ([#10658](https://github.com/ZcashFoundation/zebra/issues/10658)).
 time: 2026-10-19T11:01:40.933107685Z

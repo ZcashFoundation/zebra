@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: Allowed `ZEBRA_NETWORK__INITIAL_MAINNET_PEERS` and `ZEBRA_NETWORK__INITIAL_TESTNET_PEERS` to set the initial peers as a comma-separated list, such as `203.0.113.1:8233,mainnet.seeder.example.com:8233`. These variables previously failed to load with a type error, so container deployments had to mount a config file to pin peers ([#10658](https://github.com/ZcashFoundation/zebra/issues/10658)).
+body: Fixed `ZEBRA_NETWORK__INITIAL_MAINNET_PEERS` and `ZEBRA_NETWORK__INITIAL_TESTNET_PEERS` failing to load with a type error. They now take a comma-separated list of peers, so container deployments no longer need a config file to pin peers ([#10658](https://github.com/ZcashFoundation/zebra/issues/10658)).
 time: 2026-10-19T11:01:40.931264295Z
