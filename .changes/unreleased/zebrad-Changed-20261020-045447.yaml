@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce proof-of-work verification cost with AVX2 and NEON leaf hashing on supported CPUs.
+time: 2026-10-20T04:54:47.775201689+02:00
