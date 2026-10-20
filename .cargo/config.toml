@@ -11,6 +11,8 @@ rustdocflags = [
 
 [env]
 RUST_BACKTRACE="1"
+# Cover all 52 words of an Orchard Merkle parent with 53 position-weighted rows.
+SINSEMILLA_TABLE_LIMIT = { value = "3473408", force = true }
 
 [resolver]
 # Prefer dependency versions that build on our MSRV, instead of picking the
