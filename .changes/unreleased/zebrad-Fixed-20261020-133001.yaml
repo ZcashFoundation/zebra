@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed `zebrad` panicking after startup when an `initial_mainnet_peers` or `initial_testnet_peers` entry has no port or an invalid one. The config now fails to load with an error that names the entry.
+time: 2026-10-20T13:30:01.469200047Z

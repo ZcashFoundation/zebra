@@ -714,8 +714,7 @@ impl Default for DConfig {
 /// because environment variables cannot express a TOML array.
 ///
 /// Peer addresses never contain commas. Entries are trimmed and empty ones
-/// dropped, because a padded entry fails DNS resolution and an empty one
-/// panics in `Config::resolve_host_once`.
+/// dropped, so padding and trailing commas are harmless.
 fn deserialize_peer_list<'de, D>(deserializer: D) -> Result<IndexSet<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -864,6 +863,18 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
+        for (field_name, peers) in [
+            ("initial_mainnet_peers", &initial_mainnet_peers),
+            ("initial_testnet_peers", &initial_testnet_peers),
+        ] {
+            if let Some(peer) = peers.iter().find(|peer| !is_valid_peer_addr(peer)) {
+                return Err(de::Error::custom(format!(
+                    "invalid peer {peer:?} in {field_name}; Hint: peers must be an IPv4 address, \
+                     IPv6 address (with brackets), or DNS name, followed by a port"
+                )));
+            }
+        }
+
         let network = match (dnetwork, testnet_parameters) {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
@@ -945,6 +956,16 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         })
     }
+}
+
+/// Returns true if `peer` has the `host:port` shape that peer resolution accepts.
+///
+/// This doesn't resolve DNS names, so a well-formed name can still fail to resolve.
+fn is_valid_peer_addr(peer: &str) -> bool {
+    peer.parse::<SocketAddr>().is_ok()
+        || peer
+            .rsplit_once(':')
+            .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok())
 }
 
 /// Returns true for a public DNS seed hostname, regardless of case, trailing dot, or port.
