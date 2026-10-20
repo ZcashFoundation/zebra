@@ -167,6 +167,11 @@ impl std::str::FromStr for Address {
                 validating_key_hash: hash_bytes,
             }),
 
+            zcash_address::constants::regtest::HRP_TEX_ADDRESS => Ok(Address::Tex {
+                network_kind: NetworkKind::Regtest,
+                validating_key_hash: hash_bytes,
+            }),
+
             _ => Err(SerializationError::Parse("unknown Bech32 HRP")),
         }
     }

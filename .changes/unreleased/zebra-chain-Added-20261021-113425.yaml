@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Parse Regtest TEX addresses, which use the `texregtest` HRP. `transparent::Address::from_str` previously accepted only the Mainnet and Testnet HRPs, so Regtest TEX addresses were rejected as unparseable.
+time: 2026-10-21T11:34:25.923109+02:00

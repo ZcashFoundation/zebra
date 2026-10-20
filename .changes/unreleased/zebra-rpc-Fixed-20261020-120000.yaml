@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Reject TEX addresses in `getaddressbalance`, `getaddressutxos` and `getaddresstxids`, and in the lightwalletd gRPC address methods that share their validation. They previously parsed successfully but could never match an index entry, so queries returned an empty result instead of an error.
+time: 2026-10-20T12:00:00.000000+00:00
