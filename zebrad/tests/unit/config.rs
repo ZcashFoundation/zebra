@@ -1100,6 +1100,24 @@ initial_testnet_peers = ["203.0.113.1:18233"]
 }
 
 #[test]
+fn config_zebra_network_initial_peers_env_without_port_errors() {
+    let env = EnvGuard::new();
+
+    env.set_var(
+        "ZEBRA_NETWORK__INITIAL_MAINNET_PEERS",
+        "203.0.113.1:8233,203.0.113.2",
+    );
+
+    let error = ZebradConfig::load(None)
+        .expect_err("a peer without a port fails to load")
+        .to_string();
+    assert!(
+        error.contains("\"203.0.113.2\" in initial_mainnet_peers"),
+        "{error}"
+    );
+}
+
+#[test]
 fn config_zebra_rpc_listen_addr_env() {
     let env = EnvGuard::new();
 
