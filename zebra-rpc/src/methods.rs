@@ -1140,7 +1140,8 @@ where
         }
     }
 
-    /// Waits briefly for current work, rereading the committed tip after every publication.
+    /// Waits briefly for current work, rereading the committed tip after every publication or tip
+    /// change.
     async fn precomputed_template_for_state_tip(
         &self,
         templates: &mut watch::Receiver<Option<Arc<BlockTemplateResponse>>>,
@@ -1154,6 +1155,7 @@ where
         } else {
             NEW_TIP_TIMEOUT
         };
+        let mut tip_change = self.latest_chain_tip.clone();
         tokio::time::timeout(timeout, async {
             loop {
                 templates.has_changed().map_err(|_| {
@@ -1161,6 +1163,8 @@ where
                 })?;
                 // A publication during the state read must remain unseen if this snapshot is stale.
                 let template = templates.borrow_and_update().clone();
+                // A tip change during the state read must wake the wait below.
+                tip_change.mark_best_tip_seen();
                 // State commits before updating its tip watch. Never trust just that watch or
                 // a tip captured before waiting for a publication.
                 let ReadResponse::Tip(Some((_, tip_hash))) = self
@@ -1194,9 +1198,15 @@ where
                         }
                     }
                 }
-                templates.changed().await.map_err(|_| {
-                    ErrorObject::owned(0, "block template provider has stopped", None::<()>)
-                })?;
+                // Invalidation and reconsideration acknowledge before the state publishes the new
+                // tip, so the tip read above can be stale while the provider already holds work for
+                // the new one, and has nothing new to publish.
+                tokio::select! {
+                    changed = templates.changed() => changed.map_err(|_| {
+                        ErrorObject::owned(0, "block template provider has stopped", None::<()>)
+                    })?,
+                    changed = tip_change.best_tip_changed() => changed.map_misc_error()?,
+                }
             }
         })
         .await
