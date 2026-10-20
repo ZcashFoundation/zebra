@@ -4421,8 +4421,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a70b6dbd7b3277cbd4d89ee750a30bebab3b9951ee4e166ce15c00975fe410f"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91#da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91"
 dependencies = [
  "blake2b_simd",
  "byteorder",
