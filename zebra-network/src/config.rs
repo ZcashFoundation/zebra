@@ -112,21 +112,13 @@ pub struct Config {
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
     ///
-    /// This can also be a comma-separated string, which lets `zebrad` set it
-    /// from an environment variable:
-    /// `ZEBRA_NETWORK__INITIAL_MAINNET_PEERS='203.0.113.1:8233,mainnet.seeder.example.com:8233'`.
-    /// Whitespace around each peer is ignored, and an empty string means no
-    /// initial peers.
+    /// Also accepts a comma-separated string, so environment variables can set it.
     pub initial_mainnet_peers: IndexSet<String>,
 
     /// A list of initial peers for the peerset when operating on
     /// testnet.
     ///
-    /// This can also be a comma-separated string, which lets `zebrad` set it
-    /// from an environment variable:
-    /// `ZEBRA_NETWORK__INITIAL_TESTNET_PEERS='203.0.113.1:18233,testnet.seeder.example.com:18233'`.
-    /// Whitespace around each peer is ignored, and an empty string means no
-    /// initial peers.
+    /// Also accepts a comma-separated string, so environment variables can set it.
     pub initial_testnet_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
@@ -718,14 +710,12 @@ impl Default for DConfig {
     }
 }
 
-/// Deserializes an initial peer list from a sequence, or from a comma-separated
-/// string so it can be set through an environment variable, which cannot
-/// express a TOML array.
+/// Deserializes a peer list from a sequence, or from a comma-separated string,
+/// because environment variables cannot express a TOML array.
 ///
-/// Peer addresses never contain commas, including bracketed IPv6 addresses.
-/// Whitespace around each peer is trimmed and empty entries are dropped,
-/// because a padded peer would fail DNS resolution and an empty one would
-/// panic during peer resolution.
+/// Peer addresses never contain commas. Entries are trimmed and empty ones
+/// dropped, because a padded entry fails DNS resolution and an empty one
+/// panics in `Config::resolve_host_once`.
 fn deserialize_peer_list<'de, D>(deserializer: D) -> Result<IndexSet<String>, D::Error>
 where
     D: Deserializer<'de>,
