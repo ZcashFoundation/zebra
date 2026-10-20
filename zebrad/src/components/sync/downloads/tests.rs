@@ -352,24 +352,31 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             .await
             .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
     }
-    // Both re-downloads commit. If the child's first copy reached the state after the reset,
-    // the state failed it instead of queueing it, so it can't hold up the re-downloaded copy.
+    // The honest block commits. The verifier queued the child's dropped copy again, so the
+    // re-downloaded child either commits, or arrives after the queued copy completed the final
+    // checkpoint range. If the child's first copy reached the state after the reset, the state
+    // failed it instead of queueing it, so it can't hold up the re-downloaded copy.
     let mut committed = Vec::new();
     for _ in 0..2 {
         let result = timeout(MAX_STATE_COMMIT_DELAY, sync_downloads.next())
             .await
             .expect("re-downloaded block resolves")
             .expect("sync downloads is non-empty");
-        committed.push(result.expect("re-downloaded block commits").0);
+        match result {
+            Ok((height, _)) => committed.push(height),
+            Err(BlockDownloadVerifyError::Invalid {
+                error: zebra_consensus::RouterError::Checkpoint { source },
+                hash,
+                ..
+            }) if hash == child.hash()
+                && matches!(
+                    source.as_ref(),
+                    zebra_consensus::VerifyCheckpointError::Finished
+                ) => {}
+            Err(error) => panic!("re-downloaded block commits: {error:?}"),
+        }
     }
-    committed.sort();
-    assert_eq!(
-        committed,
-        vec![
-            honest.coinbase_height().unwrap(),
-            child.coinbase_height().unwrap()
-        ]
-    );
+    assert!(committed.contains(&honest.coinbase_height().unwrap()));
     timeout(MAX_STATE_COMMIT_DELAY, async {
         while latest_chain_tip.best_tip_height() != child.coinbase_height() {
             tokio::time::sleep(Duration::from_millis(25)).await;

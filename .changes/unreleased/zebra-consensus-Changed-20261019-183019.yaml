@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: "`CheckpointVerifier` queues the children of a checkpoint block that failed to commit again, so only the invalid block needs to be submitted again. It sends verified blocks to the state in height order, and ignores late commit failures from before its last reset."
+time: 2026-10-19T18:30:19.000000000Z
