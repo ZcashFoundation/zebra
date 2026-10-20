@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Migrated to `equihash 0.3.1` with accelerated verification enabled. Its types appear in the public API; downstream callers should check their Equihash dependency compatibility ([#11842](https://github.com/ZcashFoundation/zebra/pull/11842)).
+time: 2026-11-14T00:23:31.372932663+01:00
