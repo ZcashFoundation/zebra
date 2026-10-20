@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: "Update `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.10 to distrust the compromised eMudhra intermediate CA keys. Zebra peer and RPC connections do not use TLS, so only outbound HTTPS clients such as the managed `zcashd` download (which is also SHA256-pinned), `sentry`, OpenTelemetry and Elasticsearch are affected."
+time: 2026-10-20T18:30:00.000000000Z
