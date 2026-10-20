@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce Orchard note commitment tree update cost with a reusable 3.75 MiB hashing table.
+time: 2026-10-20T05:02:25.745140742+02:00
