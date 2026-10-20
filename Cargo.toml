@@ -69,7 +69,7 @@ derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "5.0.0"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
-equihash = "0.3"
+equihash = { version = "0.3", features = ["unsafe-verifier"] }
 ff = "0.14"
 futures = "0.3.32"
 futures-core = "0.3.31"
@@ -392,3 +392,4 @@ result_large_err = "allow"
 
 [patch.crates-io]
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91" }
+equihash = { git = "https://github.com/zcash/librustzcash", rev = "ea8ff760cb5b21ac5d244dfb1d2f1b4e277c22ea" }
