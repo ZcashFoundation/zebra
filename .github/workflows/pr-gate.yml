@@ -337,7 +337,9 @@ jobs:
           persist-credentials: false
       - name: Check declaration and package changelogs
         env:
-          BASE_REF: ${{ github.base_ref }}
+          # The PR's direct base. GitHub runs a stacked PR's workflows as if it targeted the stack's
+          # base, so `github.base_ref` would attribute lower PRs' fragments to this one.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BREAKING: ${{ needs.changes.outputs.breaking }}
           CONVENTIONAL: ${{ needs.changes.outputs.conventional }}
           DECLARED_TYPE: ${{ needs.changes.outputs.type }}
