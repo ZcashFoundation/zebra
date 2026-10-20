@@ -243,18 +243,7 @@ impl NoteCommitmentTrees {
         // It is impossible for blocks to contain more than one level 16 orchard root:
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        let mut subtree_root = None;
-
-        for orchard_note_commitment in orchard_note_commitments {
-            orchard_nct.append(orchard_note_commitment)?;
-
-            // Subtrees end heights come from the blocks they are completed in,
-            // so we check for new subtrees after appending the note.
-            // (If we check before, subtrees at the end of blocks have the wrong heights.)
-            if let Some(index_and_node) = orchard_nct.completed_subtree_index_and_root() {
-                subtree_root = Some(index_and_node);
-            }
-        }
+        let subtree_root = orchard_nct.append_batch(&orchard_note_commitments)?;
 
         // Re-calculate and cache the tree root.
         let _ = orchard_nct.root();

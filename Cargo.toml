@@ -407,3 +407,7 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+# Await the checked public-input batch API in https://github.com/zcash/sinsemilla/pull/17.
+sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "09b92cf4e87bb3f5a803053d457f6604d1a1dce5" }

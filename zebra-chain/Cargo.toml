@@ -92,7 +92,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent = { workspace = true }
-sinsemilla = { workspace = true }
+sinsemilla = { workspace = true, features = ["runtime-precomputation"] }
 
 # Time
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
@@ -137,6 +137,7 @@ zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
 bounded-vec = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+sinsemilla = { workspace = true, features = ["test-dependencies"] }
 # Benchmarks
 criterion = { workspace = true, features = ["html_reports"] }
 
