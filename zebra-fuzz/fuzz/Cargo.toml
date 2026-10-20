@@ -153,3 +153,4 @@ doc = false
 # Cargo ignores patches from other workspaces, so this one repeats the root manifest's.
 [patch.crates-io]
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91" }
+equihash = { git = "https://github.com/zcash/librustzcash", rev = "ea8ff760cb5b21ac5d244dfb1d2f1b4e277c22ea" }
