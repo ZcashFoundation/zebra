@@ -2084,7 +2084,7 @@ fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
         // block advert is queued for the first peer.
         peer_set.queued_inv_requests_took_last_peer = true;
         let advert = Request::AdvertiseBlockToAll(block::Hash([7; 32]));
-        let (advert_tx, _advert_rx) = tokio::sync::mpsc::channel(3);
+        let (advert_tx, _advert_rx) = tokio::sync::mpsc::unbounded_channel();
         peer_set.queued_broadcast_all =
             Some((advert.clone(), advert_tx, HashSet::from([addrs[0]])));
 
