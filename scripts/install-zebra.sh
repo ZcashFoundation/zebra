@@ -1914,7 +1914,7 @@ docker_image_available_or_pull() {
   docker pull "$image" >/dev/null 2>&1
 }
 
-compat_run_privileged_or_current_user() {
+run_privileged_or_current_user() {
   if ((EUID == 0)); then
     "$@"
     return
@@ -1928,7 +1928,7 @@ compat_run_privileged_or_current_user() {
   "$@"
 }
 
-compat_prepare_docker_owned_directory() {
+prepare_docker_owned_directory() {
   local label="$1"
   local dir="$2"
   local owner="${ZEBRA_DOCKER_RUNTIME_UID}:${ZEBRA_DOCKER_RUNTIME_GID}"
@@ -1947,7 +1947,7 @@ compat_prepare_docker_owned_directory() {
     return
   fi
 
-  if ! compat_run_privileged_or_current_user chown -R "$owner" "$dir"; then
+  if ! run_privileged_or_current_user chown -R "$owner" "$dir"; then
     add_error "failed to chown $label $dir to Docker runtime user $owner; run: sudo chown -R $owner $(shell_quote "$dir")"
   fi
 }
@@ -2352,7 +2352,7 @@ default_prepare_docker_mounts() {
     return
   fi
 
-  compat_prepare_docker_owned_directory "Zebra state directory" "$ZEBRA_STATE_DIR"
+  prepare_docker_owned_directory "Zebra state directory" "$ZEBRA_STATE_DIR"
   finalize_checks
 }
 
