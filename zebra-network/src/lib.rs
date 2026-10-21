@@ -170,8 +170,6 @@ mod protocol;
 #[cfg(feature = "fuzzing")]
 pub mod protocol;
 
-// Used by the version 2 handshake and peer set, which later commits add.
-#[allow(dead_code)]
 mod quic;
 
 #[allow(unused)]
@@ -204,8 +202,8 @@ pub use crate::{
         SharedPeerError,
     },
     peer_set::{
-        init, init_with_block_gossip_peer_ips, BlockAdvertiser, NetworkResponseFuture,
-        NetworkService,
+        close_v2_endpoint, init, init_with_block_gossip_peer_ips, BlockAdvertiser,
+        NetworkResponseFuture, NetworkService,
     },
     policies::RetryLimit,
     protocol::{

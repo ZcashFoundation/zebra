@@ -65,6 +65,50 @@ fn ensure_peer_connection_limits_consistent() {
     );
 }
 
+/// The peer set's total connection limit has room for the version 2 connections when they are
+/// enabled, and is unchanged when they are not.
+#[test]
+fn total_connection_limit_includes_v2_share_only_when_enabled() {
+    let _init_guard = zebra_test::init();
+
+    let legacy = Config::default();
+    assert_eq!(legacy.v2_outbound_connection_limit(), 0);
+    assert_eq!(legacy.v2_inbound_connection_limit(), 0);
+    assert_eq!(
+        legacy.peerset_total_connection_limit(),
+        legacy.peerset_outbound_connection_limit() + legacy.peerset_inbound_connection_limit(),
+    );
+
+    let v2 = Config {
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        ..Config::default()
+    };
+    assert_eq!(
+        v2.v2_outbound_connection_limit(),
+        v2.peerset_outbound_connection_limit() / 2
+    );
+    assert_eq!(
+        v2.v2_inbound_connection_limit(),
+        v2.peerset_inbound_connection_limit() / 2
+    );
+    assert_eq!(
+        v2.peerset_total_connection_limit(),
+        v2.peerset_outbound_connection_limit()
+            + v2.peerset_inbound_connection_limit()
+            + v2.v2_outbound_connection_limit()
+            + v2.v2_inbound_connection_limit(),
+    );
+
+    // A configured endpoint gets at least one connection of each kind, even with tiny limits.
+    let tiny = Config {
+        peerset_initial_target_size: 0,
+        ..v2
+    };
+    assert_eq!(tiny.v2_outbound_connection_limit(), 1);
+    assert_eq!(tiny.v2_inbound_connection_limit(), 1);
+    assert_eq!(tiny.peerset_total_connection_limit(), 2);
+}
+
 #[test]
 fn testnet_params_serialization_roundtrip() {
     let _init_guard = zebra_test::init();

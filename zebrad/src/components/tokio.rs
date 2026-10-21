@@ -20,6 +20,10 @@ use crate::prelude::*;
 /// When Zebra is shutting down, wait this long for tokio tasks to finish.
 const TOKIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// How long shutdown waits for version 2 peers to acknowledge that the node is closing its
+/// QUIC endpoint. The close itself is sent at once; this only bounds the wait for the peers.
+const V2_CLOSE_GRACE_PERIOD: Duration = Duration::from_secs(1);
+
 /// An Abscissa component which owns a Tokio runtime.
 ///
 /// The runtime is stored as an `Option` so that when it's time to enter an async
@@ -71,6 +75,11 @@ impl RuntimeRun for Runtime {
                 result = fut => result,
             }
         });
+
+        // Tell version 2 peers this node is going away while the runtime still drives the QUIC
+        // endpoint, so they do not keep a dead connection until their idle timeout. This does
+        // nothing when the version 2 protocol is not enabled.
+        self.block_on(zebra_network::close_v2_endpoint(V2_CLOSE_GRACE_PERIOD));
 
         // Don't wait for long blocking tasks before shutting down
         info!(
