@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: The `banned ip and removed banned peer addresses from address book` warning now logs the misbehavior `score` and the `reason` the peer was banned, such as the block or transaction verification error.
-time: 2026-10-05T17:14:51.510087278+00:00

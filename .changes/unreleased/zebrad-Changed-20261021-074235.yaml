@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Stopped installing the Sentry tracing layer when Sentry is not configured, which removes per-span overhead from block verification and commit on nodes without a valid `SENTRY_DSN`.
-time: 2026-10-21T07:42:35.560619384Z

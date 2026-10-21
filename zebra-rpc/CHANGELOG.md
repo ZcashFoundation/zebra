@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [19.0.0] - 2026-10-21
+
+### Breaking Changes
+
+- Updated `zcash_primitives` to 0.31.0-pre.1, `zcash_address` to 0.14.0-pre.1, `zcash_transparent` to 0.11.0-pre.1 and `zcash_keys` to 0.17.0-pre.1, whose `address::Address` is returned by `MinerParams::addr`. ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614))
+- Updated `zcash_primitives` to 0.31.0-pre.2, `zcash_address` to 0.14.0-pre.2, `zcash_transparent` to 0.11.0-pre.2, `zcash_protocol` to 0.11.0-pre.1 and `zcash_keys` to 0.17.0-pre.2, whose `address::Address` is returned by `MinerParams::addr`.
+
+### Changed
+
+- The JSON-RPC compatibility middleware that rewrites `InvalidParams` error codes to the `zcashd`-compatible `Misc` code now changes only the error code, preserving the original error's `data` field (previously dropped) instead of rebuilding the response by hand ([#9097](https://github.com/ZcashFoundation/zebra/issues/9097)).
+- The JSON-RPC version compatibility middleware no longer copies the request body an extra time when building the rewritten request ([#10574](https://github.com/ZcashFoundation/zebra/issues/10574)).
+- RPC requests with an explicit `"id": null` are now answered. The JSON-RPC compatibility middleware used to drop the `id`, which turned the request into a notification whose response was discarded.
+- `getaddresstxids` and `getaddressutxos` return an `InvalidParameter` error when a query matches more than 100,000 results or `maxEntries` is above 100,000, and the address methods reject more than 10,000 addresses ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).
+
+### Fixed
+
+- `Zec` amounts parsed from JSON floats are rounded to the nearest zatoshi instead of being rejected when the float times `COIN` is not an integer. About one in six amounts Zebra itself serializes failed to parse back into `GetBlockchainInfoResponse`, `GetBlockSubsidyResponse` and `getrawmempool` objects. ([#11562](https://github.com/ZcashFoundation/zebra/pull/11562))
+- `getinfo`, `getnetworkinfo` and `getpeerinfo` read the address book on a blocking thread, so waiting on its lock no longer parks an async runtime worker and stalls other RPC requests ([#11702](https://github.com/ZcashFoundation/zebra/pull/11702)).
+- The indexer's non-finalized state subscription accepts up to 100 chain tips on test networks, matching the test-network fork limit ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+
 ## [18.0.0] - 2026-10-01
 
 ### Breaking Changes

@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [17.0.1] - 2026-10-21
+
+### Breaking Changes
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.31.0-pre.1 and `zcash_transparent` to 0.11.0-pre.1. ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614))
+- Updated `zcash_primitives` and `zcash_proofs` to 0.31.0-pre.2, `zcash_transparent` to 0.11.0-pre.2 and `zcash_protocol` to 0.11.0-pre.1.
+
 ## [17.0.0] - 2026-10-01
 
 ### Breaking Changes

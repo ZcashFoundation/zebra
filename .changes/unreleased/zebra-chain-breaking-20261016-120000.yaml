@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: 'Updated `zcash_primitives` to 0.31.0-pre.2, `zcash_address` to 0.14.0-pre.2, `zcash_transparent` to 0.11.0-pre.2, `zcash_protocol` to 0.11.0-pre.1 and `zcash_history` to 0.6.0, whose `V1`, `V2` and `V3` are re-exported from `primitives::zcash_history`. Their types appear in the public API.'
-time: 2026-10-16T12:00:00.000000000-03:00

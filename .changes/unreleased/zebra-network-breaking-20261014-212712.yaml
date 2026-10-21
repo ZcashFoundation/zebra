@@ -1,4 +1,0 @@
-project: zebra-network
-kind: breaking
-body: Added `Request::BlockDownload { hash, advertiser }` for outbound single-block downloads that retain a known advertiser and wait for eligible capacity without consuming retries on local refusals. Update exhaustive `Request` matches; inbound handlers can treat this variant as unreachable, and callers must bound readiness plus the complete response with a deadline ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
-time: 2026-10-14T21:27:12.754240476+02:00
