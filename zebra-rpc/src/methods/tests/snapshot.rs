@@ -1181,7 +1181,10 @@ pub async fn test_mining_rpcs<State, ReadState>(
     snapshot_rpc_getblocksubsidy("tip_height", get_block_subsidy, &settings);
 
     let get_block_subsidy = rpc.get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT)).await;
-    if network.is_default_testnet() {
+    if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(
+        zebra_chain::block::Height(EXCESSIVE_BLOCK_HEIGHT),
+        network,
+    ) {
         // Post-D subsidy depends on the unavailable future parent's NSM reserve.
         assert_eq!(
             get_block_subsidy
@@ -1386,8 +1389,9 @@ pub async fn test_mining_rpcs<State, ReadState>(
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
 
-    // Mainnet still accepts verifier-approved proposals without the reserve preflight.
-    // Public Testnet requires the live parent even before NU7, because reissuance is scheduled.
+    // Networks without scheduled reissuance accept verifier-approved proposals without the
+    // reserve preflight. Networks with scheduled reissuance, like Mainnet and public Testnet,
+    // require the live parent even before NU7.
     let proposal = network.blockchain_map()[&1].to_vec();
     let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
         mode: GetBlockTemplateRequestMode::Proposal,
@@ -1395,7 +1399,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         ..Default::default()
     }));
     tokio::time::timeout(Duration::from_secs(10), async {
-        if network.is_mainnet() {
+        if network.nsm_reissuance_height().is_none() {
             let verifier_response = async {
                 mock_block_verifier_router
                     .expect_request_that(|request| matches!(request, Request::CheckProposal(_)))

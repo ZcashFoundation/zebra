@@ -197,7 +197,10 @@ fn nu7_branch_id_and_transaction_formats() {
         assert!(NetworkUpgrade::try_from(obsolete_id).is_err());
         assert!(BranchId::try_from(obsolete_id).is_err());
     }
-    assert_eq!(Nu7.activation_height(&Mainnet), None);
+    assert_eq!(
+        Nu7.activation_height(&Mainnet),
+        Some(block::Height(3_543_405))
+    );
 
     // Empty codec/digest fixtures from librustzcash PR 3047 at 517047de130e.
     // These are not spendable transactions. They pin the NU7 header and both
@@ -323,8 +326,6 @@ fn public_testnet_nu7_activation() -> Result<(), color_eyre::Report> {
         ));
     }
 
-    assert_eq!(Nu7.activation_height(&Mainnet), None);
-    assert_eq!(Mainnet.nsm_reissuance_height(), None);
     Ok(())
 }
 
@@ -447,9 +448,7 @@ fn full_activation_list_contains_all_upgrades() {
     let network = Network::Mainnet;
     let full_list = network.full_activation_list();
 
-    // NU7 is unscheduled on Mainnet (no activation height committed), so it is absent from the
-    // full activation list even though it is always present in the iter.
-    assert_eq!(full_list.len(), NetworkUpgrade::iter().count() - 1);
+    assert_eq!(full_list.len(), NetworkUpgrade::iter().count());
 }
 
 /// Minimum difficulty keeps its historical start gate and strict timestamp boundary through NU7.
@@ -548,7 +547,8 @@ fn duration_between_heights_matches_per_block_sum() {
     assert_eq!(between(400_010, 299_990), -per_block_sum(299_990, 400_010));
     assert_eq!(between(400_000, 400_000), Duration::zero());
 
-    // Mainnet has no NU7 height, so 84 days is exactly 84 * 1152 post-Blossom blocks.
+    // This range ends before Mainnet's NU7 activation at 3,543,405, so 84 days is exactly
+    // 84 * 1152 post-Blossom blocks.
     let release = block::Height(3_444_000);
     assert_eq!(
         NetworkUpgrade::duration_between_heights(
@@ -557,5 +557,17 @@ fn duration_between_heights_matches_per_block_sum() {
             block::Height(release.0 + 84 * 1152)
         ),
         Duration::days(84)
+    );
+
+    // Each block takes the spacing active at its own height, so from the block before NU7
+    // activation at 3,543,405, a day is 3 * 1152 blocks at 25-second spacing.
+    let before_nu7 = block::Height(3_543_404);
+    assert_eq!(
+        NetworkUpgrade::duration_between_heights(
+            &Mainnet,
+            block::Height(before_nu7.0 - 1152),
+            block::Height(before_nu7.0 + 3 * 1152)
+        ),
+        Duration::days(2)
     );
 }
