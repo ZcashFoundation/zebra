@@ -1222,6 +1222,7 @@ where
                 trace!(?height, ?hash, "verified and committed block to state");
 
                 // The block arrived, so forget any re-request bookkeeping for it.
+                self.reobtain_hashes.shift_remove(&hash);
                 self.block_reobtain_retries.remove(&hash);
                 self.utxo_race_drops = 0;
 

@@ -2199,6 +2199,26 @@ async fn download_round_timeout_is_requeued_without_restart() {
     );
 }
 
+/// A block that arrives while its hash is queued for re-download is not re-requested.
+#[tokio::test]
+async fn verified_block_is_removed_from_reobtain_queue() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0xC3; 32]);
+    chain_sync.reobtain_hashes.insert(hash);
+    chain_sync.block_reobtain_retries.insert(hash, 1);
+
+    chain_sync
+        .handle_block_response(Ok((Height(1), hash)))
+        .expect("a verified block is not an error");
+
+    assert!(
+        !chain_sync.reobtain_hashes.contains(&hash),
+        "a verified block must not be re-requested"
+    );
+    assert!(!chain_sync.block_reobtain_retries.contains_key(&hash));
+}
+
 /// A re-download that can't get network capacity before its deadline stays queued for a later
 /// sync round, along with the blocks queued after it, which don't wait out their own deadlines.
 #[tokio::test(start_paused = true)]
