@@ -786,6 +786,90 @@ async fn connection_run_loop_send_timeout_expect_response() {
     assert_eq!(outbound_message, None);
 }
 
+/// Test that the connection returns an error to the client, rather than panicking,
+/// when the connection task is cancelled while it is sending a message to a peer.
+///
+/// Regression test for [GHSA-6v36-c42v-v98p].
+///
+/// [GHSA-6v36-c42v-v98p]: https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p
+#[tokio::test]
+async fn connection_run_loop_cancelled_during_send() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::pause();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (_peer_tx, peer_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+
+    // Spawn the connection run loop
+    let connection_join_handle = tokio::spawn(connection.run(peer_rx));
+
+    let (request_tx, mut request_rx) = oneshot::channel();
+    let request = ClientRequest {
+        request: Request::AdvertiseTransactionIds(HashSet::new(), None),
+        tx: request_tx,
+        inv_collector: None,
+        transient_addr: None,
+        span: Span::current(),
+    };
+
+    client_tx.try_send(request).expect("channel is valid");
+
+    // The peer isn't reading messages, so the send blocks.
+    // Let the connection start sending, but stop before the send times out.
+    tokio::time::sleep(REQUEST_TIMEOUT / 2).await;
+
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none(), "unexpected error: {error:?}");
+    assert!(
+        matches!(request_rx.try_recv(), Ok(None)),
+        "the request should still be sending",
+    );
+
+    // Simulate `Client::drop()`, which sets the error slot, then aborts the connection task.
+    shared_error_slot
+        .try_update_error(PeerError::ClientDropped.into())
+        .expect("the connection hasn't errored yet");
+    connection_join_handle.abort();
+
+    let connection_result = connection_join_handle.await;
+    assert!(
+        connection_result
+            .as_ref()
+            .is_err_and(|error| error.is_cancelled()),
+        "expected cancelled run loop, but it panicked or finished: {connection_result:?}",
+    );
+
+    let peer_response = request_rx.try_recv();
+    assert_eq!(
+        peer_response
+            .expect("response sender was used before it was dropped")
+            .expect("response is present")
+            .expect_err("response is an error (not a message)")
+            .inner_debug(),
+        "ClientDropped",
+    );
+
+    assert!(client_tx.is_closed());
+
+    inbound_service.expect_no_requests().await;
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, Some(Message::Inv(Vec::new())));
+
+    let outbound_message = peer_outbound_messages.next().await;
+    assert_eq!(outbound_message, None);
+}
+
 /// Test that the connection run loop continues but returns an error to the client,
 /// when a peer accepts a message, but does not send an expected response.
 #[tokio::test]
