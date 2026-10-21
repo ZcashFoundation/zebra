@@ -2199,31 +2199,12 @@ async fn download_round_timeout_is_requeued_without_restart() {
     );
 }
 
-/// A network service that never becomes ready, like a peer set without ready peers.
-#[derive(Clone, Debug)]
-struct NeverReadyNetwork;
-
-impl tower::Service<zn::Request> for NeverReadyNetwork {
-    type Response = zn::Response;
-    type Error = crate::BoxError;
-    type Future = futures::future::Pending<Result<zn::Response, crate::BoxError>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Pending
-    }
-
-    fn call(&mut self, _request: zn::Request) -> Self::Future {
-        unreachable!("callers wait for readiness, and this service is never ready")
-    }
-}
-
 /// A re-download that can't get network capacity before its deadline stays queued for a later
 /// sync round, along with the blocks queued after it, which don't wait out their own deadlines.
 #[tokio::test(start_paused = true)]
 async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
+    use tower::limit::ConcurrencyLimit;
+
     let _init_guard = zebra_test::init();
 
     let config = ZebradConfig {
@@ -2233,19 +2214,12 @@ async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
     };
     let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
-    let (mut chain_sync, _sync_status): (
-        ChainSync<
-            NeverReadyNetwork,
-            MockService<zs::Request, zs::Response, PanicAssertion>,
-            MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
-            MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
-            MockChainTip,
-        >,
-        SyncStatus,
-    ) = ChainSync::new(
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
         &config,
         Height(0),
-        NeverReadyNetwork,
+        never_ready_network,
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
