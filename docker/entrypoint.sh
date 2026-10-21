@@ -16,9 +16,11 @@ set -eo pipefail
 
 # ZCASHD_COMPAT_ENABLED was the opt-in for the removed zcashd-compat image. Warn
 # rather than exit: saved commands also pass --zcashd-compat, which still works.
-if [[ -n ${ZCASHD_COMPAT_ENABLED:-} ]]; then
+case "${ZCASHD_COMPAT_ENABLED:-}" in
+true | TRUE | 1 | yes | YES | on | ON)
   echo "WARNING: ZCASHD_COMPAT_ENABLED is no longer supported and is ignored; pass --zcashd-compat or set ZEBRA_ZCASHD_COMPAT__ENABLED=true instead" >&2
-fi
+  ;;
+esac
 
 # Use setpriv to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
