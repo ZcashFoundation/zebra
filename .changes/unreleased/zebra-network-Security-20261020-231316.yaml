@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Security
+body: "Fix a panic when a peer connection task is cancelled while it is sending a request to the peer, for example when its `Client` is dropped. The request now fails with the connection's error instead ([GHSA-6v36-c42v-v98p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p))."
+time: 2026-10-20T23:13:16.000000000Z

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: "Fix a panic that could abort `zebrad` when Zebra disconnected a peer while it was still waiting for that peer to accept a request ([GHSA-6v36-c42v-v98p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p)). Thanks to @SphereDonout for reporting the issue."
+time: 2026-10-20T23:13:16.000000000Z

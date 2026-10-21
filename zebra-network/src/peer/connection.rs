@@ -560,6 +560,17 @@ where
     /// The state of this connection's current request or response.
     pub(super) state: State,
 
+    /// The response sender for a client request, while that request is being sent to the peer.
+    ///
+    /// # Security
+    ///
+    /// The connection task can be cancelled while it waits for a slow peer to accept a request,
+    /// for example when the peer set drops a busy [`Client`](super::Client). A response sender
+    /// held by the request future would then be dropped unused, which panics. Instead, the
+    /// connection holds the sender, so [`Connection::shutdown()`] sends an error on it when the
+    /// connection is dropped.
+    sending_request_tx: Option<MustUseClientResponseSender>,
+
     /// A timeout for a client request. This is stored separately from
     /// State so that we can move the future out of it independently of
     /// other state handling.
@@ -660,6 +671,7 @@ where
         Connection {
             connection_info,
             state: State::AwaitingRequest,
+            sending_request_tx: None,
             request_timer: None,
             cached_addrs: initial_cached_addrs,
             svc: inbound_service,
@@ -1013,6 +1025,12 @@ where
         .increment(1);
         self.update_state_metrics(format!("Out::Req::{}", request.command()));
 
+        // # Security
+        //
+        // This future can be cancelled while it awaits a send, so the connection must own the
+        // response sender until the send finishes. See `sending_request_tx` for details.
+        self.sending_request_tx = Some(tx);
+
         let new_handler = match (&self.state, request) {
             (Failed, request) => panic!(
                 "failed connection cannot handle new request: {:?}, client_receiver: {:?}",
@@ -1175,6 +1193,11 @@ where
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
+
+        let tx = self.sending_request_tx.take().expect(
+            "sender is stored before sending, and the only other place that takes it is \
+             shutdown(), which the request arms never call",
+        );
 
         // Update the connection state with a new handler, or fail with an error.
         match new_handler {
@@ -1803,6 +1826,11 @@ where
             // Accessing the error slot locks a threaded std::sync::Mutex, which
             // can block the current async task thread. We briefly lock the mutex
             // to clone the error.
+            let _ = tx.send(Err(error.clone()));
+        }
+
+        // Or the connection task may have been cancelled while it was sending a client request.
+        if let Some(tx) = self.sending_request_tx.take() {
             let _ = tx.send(Err(error.clone()));
         }
 

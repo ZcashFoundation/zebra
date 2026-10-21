@@ -69,6 +69,17 @@ proptest! {
         assert_transaction_roundtrip(tx)?;
     }
 
+    /// `has_transparent_inputs()` and `has_transparent_outputs()` read the bundle lengths
+    /// directly instead of rebuilding the input and output vectors; they must agree with the
+    /// allocating accessors.
+    #[test]
+    fn transparent_presence_matches_accessors(tx in any::<Transaction>()) {
+        let _init_guard = zebra_test::init();
+
+        prop_assert_eq!(tx.has_transparent_inputs(), !tx.inputs().is_empty());
+        prop_assert_eq!(tx.has_transparent_outputs(), !tx.outputs().is_empty());
+    }
+
     #[test]
     fn transaction_hash_struct_display_roundtrip(hash in any::<Hash>()) {
         let _init_guard = zebra_test::init();
