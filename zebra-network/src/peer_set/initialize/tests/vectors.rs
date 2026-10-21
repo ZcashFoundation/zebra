@@ -391,22 +391,17 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
     let (
         address_book,
         _bans_receiver,
-        address_book_updater,
+        _address_book_updater,
         address_book_service,
         _address_metrics,
-        address_book_updater_task_handle,
+        _address_book_updater_task_handle,
     ) = AddressBookUpdater::spawn(&config, config.listen_addr);
 
     // Exercise the startup loader without opening sockets or handshaking with public peers.
-    let initial_peers = limit_initial_peers(&config, address_book_updater).await;
+    let initial_peers = limit_initial_peers(&config, &address_book_service).await;
     assert_eq!(initial_peers, expected_peers);
 
-    // The loader drops the last change sender. Wait for its queued address updates to drain.
-    drop(address_book_service);
-    let _ = tokio::time::timeout(Duration::from_secs(5), address_book_updater_task_handle)
-        .await
-        .expect("queued address updates should drain before the timeout")
-        .expect("the address book updater should shut down without panicking");
+    // The loader adds the peers to the address book before returning.
     let loaded_peers: HashSet<_> = address_book
         .lock()
         .expect("previous thread panicked while holding address book lock")
@@ -916,8 +911,15 @@ async fn crawler_dials_readded_initial_peers() {
 
     let (outbound_connector, _dial_count, _peer_tracker_rx) = counting_connector(0);
     // Start with an empty address book, so the crawler can only dial re-added peers.
-    let (_address_book, mut peerset_rx, crawl_task_handle) =
-        spawn_crawler_with_initial_peers(PEER_COUNT, false, outbound_connector).await;
+    // The crawl timer only ticks once during the test, so the dials must come from the
+    // demand that the re-add queues.
+    let (_address_book, mut peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        false,
+        CRAWLER_TEST_DURATION * 2,
+        outbound_connector,
+    )
+    .await;
 
     let connected_peer = tokio::time::timeout(CRAWLER_TEST_DURATION, peerset_rx.next())
         .await
@@ -945,8 +947,13 @@ async fn crawler_readds_failed_initial_peers_at_most_once_per_interval() {
     const PEER_COUNT: usize = 2;
 
     let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(usize::MAX);
-    let (address_book, _peerset_rx, crawl_task_handle) =
-        spawn_crawler_with_initial_peers(PEER_COUNT, true, outbound_connector).await;
+    let (address_book, _peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        true,
+        CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        outbound_connector,
+    )
+    .await;
 
     // The address book uses `std::time::Instant`, which doesn't advance while tokio time is
     // paused, so the re-added peers stay within their reconnection delay for the whole test.
@@ -1018,8 +1025,13 @@ async fn crawler_does_not_readd_initial_peers_while_connected() {
 
     // The first dial fails, so the crawler is left with one connection and one failed peer.
     let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(1);
-    let (address_book, mut peerset_rx, crawl_task_handle) =
-        spawn_crawler_with_initial_peers(PEER_COUNT, true, outbound_connector).await;
+    let (address_book, mut peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        true,
+        CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        outbound_connector,
+    )
+    .await;
 
     tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL * 2).await;
 
@@ -1052,8 +1064,13 @@ async fn crawler_does_not_readd_banned_initial_peers() {
     const PEER_COUNT: usize = 1;
 
     let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(usize::MAX);
-    let (address_book, _peerset_rx, crawl_task_handle) =
-        spawn_crawler_with_initial_peers(PEER_COUNT, true, outbound_connector).await;
+    let (address_book, _peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        true,
+        CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        outbound_connector,
+    )
+    .await;
 
     // Wait for the first dial to fail, then ban the peer.
     while dial_count.load(Ordering::SeqCst) < PEER_COUNT {
@@ -1152,7 +1169,7 @@ fn initial_peers_in_address_book(
 }
 
 /// Starts a crawler configured with `peer_count` initial peers and no other peers,
-/// using short crawl intervals.
+/// using `crawl_new_peer_interval`.
 ///
 /// If `add_to_address_book` is true, adds the initial peers to the address book like startup
 /// does, so the crawler dials them as new candidates before any re-add.
@@ -1161,6 +1178,7 @@ fn initial_peers_in_address_book(
 async fn spawn_crawler_with_initial_peers<C>(
     peer_count: usize,
     add_to_address_book: bool,
+    crawl_new_peer_interval: Duration,
     outbound_connector: C,
 ) -> (
     Arc<std::sync::Mutex<AddressBook>>,
@@ -1190,7 +1208,7 @@ where
         network: Network::Mainnet,
         listen_addr: unused_v4,
         peerset_initial_target_size: peer_count,
-        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        crawl_new_peer_interval,
         ..Config::default()
     };
 
@@ -1204,14 +1222,15 @@ where
     ) = AddressBookUpdater::spawn(&config, unused_v4);
 
     if add_to_address_book {
-        let initial_peers = limit_initial_peers(&config, address_book_updater.clone()).await;
+        let initial_peers = limit_initial_peers(&config, &address_book_service).await;
         assert_eq!(initial_peers.len(), peer_count);
     }
 
-    // A peer set whose crawl responses never contain any addresses.
+    // A peer set with no peers to crawl. Any crawl response, even an empty one, queues
+    // demand, so fail the crawl like a peer set with no ready peers does.
     let empty_peer_set = service_fn(|req| async move {
         match req {
-            Request::Peers => Ok(Response::Peers(Vec::new())),
+            Request::Peers => Err::<Response, BoxError>("test peer set has no peers".into()),
             _ => unreachable!("unexpected request: {:?}", req),
         }
     });
@@ -2927,13 +2946,13 @@ where
     let (
         _address_book,
         _bans_receiver,
-        address_book_updater,
-        _address_book_service,
+        _address_book_updater,
+        address_book_service,
         _address_metrics,
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, unused_v4);
 
-    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
+    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_service);
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx, address_book_updater_guard)

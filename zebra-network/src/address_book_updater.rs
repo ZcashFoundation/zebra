@@ -38,9 +38,10 @@ pub const MIN_CHANNEL_SIZE: usize = 10;
 /// add new initial peers to the address book.
 ///
 /// It also serves [`AddressBookRequest`]s through a [`Buffer`]-wrapped
-/// [`AddressBookService`], which shares a single ordered request queue with
-/// the change events. This makes compound operations like
-/// [`AddressBookRequest::NextReconnectPeer`] atomic by construction.
+/// [`AddressBookService`]. Each request holds the address book mutex while it
+/// runs, which makes compound operations like
+/// [`AddressBookRequest::NextReconnectPeer`] atomic. Change events use a
+/// separate queue, so they aren't ordered with service requests.
 #[derive(Debug, Eq, PartialEq)]
 pub struct AddressBookUpdater;
 
@@ -127,8 +128,9 @@ pub struct AddressBookCall {
 /// A cheap cloneable handle that sends fire-and-forget [`MetaAddrChange`]
 /// events to the address book updater task.
 ///
-/// Changes share the updater's single ordered queue with
-/// [`AddressBookService`] requests.
+/// Changes aren't ordered with [`AddressBookService`] requests. Send a
+/// [`AddressBookRequest::Change`] to the service when a later request must
+/// see the change.
 #[derive(Clone, Debug)]
 pub struct AddressBookChangeSender(mpsc::Sender<AddressBookCall>);
 
@@ -331,9 +333,8 @@ impl AddressBookUpdater {
         watch::Receiver<AddressMetrics>,
         JoinHandle<Result<(), BoxError>>,
     ) {
-        // Create an mpsc channel for both fire-and-forget address book update
-        // events and buffered service requests, so all address book writes go
-        // through a single ordered queue.
+        // Create an mpsc channel for fire-and-forget address book update events.
+        // Service requests are queued separately by the `Buffer` below.
         let (worker_tx, mut worker_rx) = mpsc::channel::<AddressBookCall>(channel_size);
 
         let address_metrics = address_book.address_metrics_watcher();

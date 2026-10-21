@@ -32,7 +32,8 @@ use zebra_chain::{
 
 use crate::{
     address_book_updater::{
-        AddressBookChangeSender, AddressBookService, AddressBookUpdater, MIN_CHANNEL_SIZE,
+        AddressBookChangeSender, AddressBookRequest, AddressBookService, AddressBookUpdater,
+        MIN_CHANNEL_SIZE,
     },
     connection_metrics::{
         network_kind_label, record_connection_attempt_finished, record_connection_attempt_started,
@@ -312,7 +313,7 @@ where
         config.clone(),
         outbound_connector.clone(),
         peerset_tx.clone(),
-        address_book_updater.clone(),
+        address_book_service.clone(),
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
     peer_set.extend_tasks([initial_peers_join.abort_handle()]);
@@ -387,13 +388,13 @@ where
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
 /// disk cache initial peers, then send the resulting peer connections over `peerset_tx`.
 ///
-/// Also sends every initial peer address to the `address_book_updater`.
-#[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
+/// Also adds every initial peer address to the address book.
+#[instrument(skip(config, outbound_connector, peerset_tx, address_book_service))]
 async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: AddressBookChangeSender,
+    address_book_service: AddressBookService,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<
@@ -405,7 +406,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    let initial_peers = limit_initial_peers(&config, address_book_updater).await;
+    let initial_peers = limit_initial_peers(&config, &address_book_service).await;
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
@@ -542,10 +543,10 @@ where
 /// Returns randomly chosen entries from the provided set of addresses,
 /// in a random order.
 ///
-/// Also sends every initial peer to the `address_book_updater`.
+/// Also adds every initial peer to the address book, before returning.
 async fn limit_initial_peers(
     config: &Config,
-    address_book_updater: AddressBookChangeSender,
+    address_book_service: &AddressBookService,
 ) -> HashSet<PeerSocketAddr> {
     let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
@@ -585,11 +586,24 @@ async fn limit_initial_peers(
     // - the number of initial peers is limited
     // - this code runs at startup, then at most once every
     //   `MIN_INITIAL_PEER_RECOVERY_INTERVAL` while the node has no outbound peers
+    //
+    // # Correctness
+    //
+    // Add peers through the address book service, rather than the change channel,
+    // so later service requests, like the crawler's ready peer count, see them.
     for peer in preferred_peers.values().flatten() {
-        let peer_addr = MetaAddr::new_initial_peer(*peer);
-        // `send` only waits when the channel is full.
-        // The address book updater runs in its own thread, so we will only wait for a short time.
-        let _ = address_book_updater.send(peer_addr).await;
+        // The address book serves each request without waiting, so this is quick.
+        let added = address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::Change(MetaAddr::new_initial_peer(
+                *peer,
+            )))
+            .boxed()
+            .await;
+        if let Err(error) = added {
+            debug!(?error, "error adding initial peer, is Zebra shutting down?");
+            break;
+        }
     }
 
     // Split out the `initial_peers` that will be shuffled and returned,
@@ -1201,7 +1215,6 @@ where
                     last_initial_peer_readd = Some(Instant::now());
 
                     let config = config.clone();
-                    let address_book_updater = address_book_updater.clone();
                     let address_book_service = address_book_service.clone();
                     let demand_tx = demand_tx.clone();
                     // There are no outbound connections, so every outbound slot is spare.
@@ -1213,7 +1226,7 @@ where
                             // cached peers, so stop it before the next re-add.
                             let readd = tokio::time::timeout(
                                 constants::INITIAL_PEER_RECOVERY_TIMEOUT,
-                                limit_initial_peers(&config, address_book_updater),
+                                limit_initial_peers(&config, &address_book_service),
                             )
                             .await;
                             if readd.is_err() {
