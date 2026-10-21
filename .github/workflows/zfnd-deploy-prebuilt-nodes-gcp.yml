@@ -56,6 +56,10 @@ on:
         description: Whether to bind the environment's reserved external address
         required: true
         type: boolean
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        description: Sentry organization token used to record releases and deploys. Without it, nothing is recorded.
+        required: false
 
 permissions:
   contents: read
@@ -520,6 +524,101 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: get-disk-name-mainnet, get-disk-name-testnet
+
+  # Sentry only creates bare releases from events, and its GitHub integration never
+  # records deploys or release commits, so record both here. Dev deploys come from
+  # arbitrary branches and are not recorded.
+  #
+  # Reading the release name needs Google Cloud credentials, so it runs apart from the
+  # Sentry action, which runs a container image that Sentry publishes by tag.
+  sentry-release-name:
+    name: Read Sentry release name
+    needs: [deploy-nodes]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.deploy-nodes.result == 'success' &&
+        (inputs.environment == 'stage' || inputs.environment == 'prod')
+      }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # The Google Cloud identity provider and service accounts are environment variables.
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # pull the deployed image from Artifact Registry
+    outputs:
+      name: ${{ steps.release-name.outputs.name }}
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
+          token_format: access_token
+          access_token_lifetime: 600s
+
+      # Ask the deployed image itself, so the release recorded is the one its nodes report.
+      - name: Read Sentry release name from the image
+        id: release-name
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          IMAGE: ${{ inputs.image }}
+        run: |
+          docker login --username oauth2accesstoken --password-stdin "${IMAGE%%/*}" <<< "${ACCESS_TOKEN}"
+          # Nodes use the build version that `zebrad --version` prints as their release.
+          VERSION_OUTPUT=$(docker run --rm --entrypoint zebrad "${IMAGE}" --version)
+          if [[ ! "${VERSION_OUTPUT}" =~ ^zebrad\ ([^[:space:]]+)$ ]]; then
+            echo "::error::zebrad --version printed unexpected output: ${VERSION_OUTPUT}"
+            exit 1
+          fi
+          echo "name=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+  sentry-release:
+    name: Record Sentry release and deploy
+    needs: [sentry-release-name]
+    if: ${{ !cancelled() && needs.sentry-release-name.result == 'success' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      deployments: read # find the previous successful deploy to this environment
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    steps:
+      # Without an explicit range, Sentry starts from its newest release in any
+      # environment, which is often a dev or test build without commits.
+      - name: Find the previously deployed commit
+        id: previous
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          gh api "repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=50" \
+            --jq ".[] | select(.sha != \"${SOURCE_SHA}\") | \"\(.id) \(.sha)\"" |
+          while read -r ID SHA; do
+            STATE=$(gh api "repos/${REPOSITORY}/deployments/${ID}/statuses?per_page=1" --jq '.[0].state')
+            if [ "${STATE}" = "success" ]; then
+              echo "commit=${SHA}" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+
+      - uses: getsentry/action-release@6fb9aeade7061441cf3864e34fbe11a1457ad7dc #v3.7.1
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        env:
+          SENTRY_ORG: zfnd
+          SENTRY_PROJECT: zebrad
+        with:
+          release: ${{ needs.sentry-release-name.outputs.name }}
+          environment: ${{ inputs.environment }}
+          set_commits: manual
+          repo: ${{ github.repository }}
+          commit: ${{ inputs.source_sha }}
+          previous_commit: ${{ steps.previous.outputs.commit }}
+          disable_telemetry: true
 
   failure-issue:
     name: Open or update issues for deploy failures
