@@ -92,3 +92,24 @@ front end that you can visualize:
 ![image info](grafana.png)
 
 [metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html
+
+## Network metric aggregation
+
+Connection state, request, response, message, and byte metrics are aggregated across
+peers: they no longer have an `addr` label. `zebra.net.connection.state` counts live
+connections by `command`, decrementing the old state on transitions and disconnects.
+Request, response, and message counters retain their `command` labels.
+
+Handshake counters (`zcash.net.peers.connected`, `zcash.net.peers.obsolete`, and
+`zcash.net.peers.missing_services`) no longer have `remote_ip` or `user_agent` labels.
+The `zcash.net.peers.version.connected` and `zcash.net.peers.version.obsolete` gauges
+report the remote protocol version of the most recent corresponding handshake,
+without a `remote_ip` label. `zebra.net.in.errors` also omits `addr`.
+
+Update custom dashboards to remove selectors and joins using these removed labels.
+The supplied dashboards use aggregate totals and the bounded `implementation` label
+on `zcash.net.peer.version.outcomes.total` for successful handshake software breakdowns.
+These are cumulative handshake counts, not counts of currently connected peers.
+Peer addresses and full user agents remain available in logs and peer metadata.
+Protocol-version labels and inbound error descriptions are unchanged, so this change
+does not bound every network metric's cardinality.

@@ -1,0 +1,12 @@
+project: zebrad
+kind: breaking
+body: >-
+  Peer connection, request, response, message, byte and handshake metrics no longer carry
+  their per-peer `addr`, `remote_ip` or `user_agent` labels, and neither do
+  `zcash.net.peers.initial` or `zcash.net.peers.cache`. `zebra.net.connection.state` now counts
+  connections in each state, and `zcash.net.peers.version.connected` and
+  `zcash.net.peers.version.obsolete` report only the most recent handshake. RPC metrics label
+  unregistered method names as `unknown`, as does the `rpc.method` field of RPC tracing spans.
+  Update dashboards and alerts that select or group by these labels; the bundled dashboards are
+  updated.
+time: 2026-10-12T16:00:05.000000000+02:00

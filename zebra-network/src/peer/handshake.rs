@@ -302,7 +302,7 @@ impl ConnectedAddr {
         }
     }
 
-    /// Returns the metrics label for this connection's address.
+    /// Returns the log label for this connection's address.
     pub fn get_transient_addr_label(&self) -> String {
         self.get_transient_addr()
             .map_or_else(|| "isolated".to_string(), |addr| addr.to_string())
@@ -772,22 +772,16 @@ where
             "disconnecting from peer with obsolete network protocol version",
         );
 
-        // the value is the number of rejected handshakes, by peer IP and protocol version
+        // Count rejected handshakes by protocol version, without per-peer labels.
         metrics::counter!(
             "zcash.net.peers.obsolete",
-            "remote_ip" => their_addr.to_string(),
             "remote_version" => remote.version.to_string(),
             "min_version" => min_version.to_string(),
-            "user_agent" => remote.user_agent.clone(),
         )
         .increment(1);
 
-        // the value is the remote version of the most recent rejected handshake from each peer
-        metrics::gauge!(
-            "zcash.net.peers.version.obsolete",
-            "remote_ip" => their_addr.to_string(),
-        )
-        .set(remote.version.0 as f64);
+        // Record the remote version of the most recently rejected handshake.
+        metrics::gauge!("zcash.net.peers.version.obsolete").set(f64::from(remote.version.0));
 
         // Disconnect if peer is using an obsolete version.
         return Err(
@@ -817,12 +811,10 @@ where
             "disconnecting from non-serving peer",
         );
 
-        // the value is the number of rejected handshakes, by peer IP and advertised services
+        // Count rejected handshakes by advertised services, without per-peer labels.
         metrics::counter!(
             "zcash.net.peers.missing_services",
-            "remote_ip" => their_addr.to_string(),
             "remote_services" => format!("{:?}", remote.services),
-            "user_agent" => remote.user_agent.clone(),
         )
         .increment(1);
 
@@ -852,23 +844,18 @@ where
         "negotiated network protocol version with peer",
     );
 
-    // the value is the number of connected handshakes, by peer IP and protocol version
+    // Count connected handshakes by protocol version, without per-peer labels.
     metrics::counter!(
         "zcash.net.peers.connected",
-        "remote_ip" => their_addr.to_string(),
         "remote_version" => connection_info.remote.version.to_string(),
         "negotiated_version" => negotiated_version.to_string(),
         "min_version" => min_version.to_string(),
-        "user_agent" => connection_info.remote.user_agent.clone(),
     )
     .increment(1);
 
-    // the value is the remote version of the most recent connected handshake from each peer
-    metrics::gauge!(
-        "zcash.net.peers.version.connected",
-        "remote_ip" => their_addr.to_string(),
-    )
-    .set(connection_info.remote.version.0 as f64);
+    // Record the remote version of the most recently connected handshake.
+    metrics::gauge!("zcash.net.peers.version.connected")
+        .set(f64::from(connection_info.remote.version.0));
 
     if let Err(error) = peer_conn.send(Message::Verack).await {
         return Err(remote_version_outcome.record_error(HandshakeError::from(error)));
@@ -990,10 +977,7 @@ where
 
             let mut peer_conn = Framed::new(
                 data_stream,
-                Codec::builder()
-                    .for_network(&config.network)
-                    .with_metrics_addr_label(connected_addr.get_transient_addr_label())
-                    .finish(),
+                Codec::builder().for_network(&config.network).finish(),
             );
 
             let connection_info = match negotiate_version(
@@ -1100,7 +1084,6 @@ where
                 metrics::counter!(
                     "zcash.net.out.messages",
                     "command" => msg.command(),
-                    "addr" => connected_addr.get_transient_addr_label(),
                 )
                 .increment(1);
                 // We need to use future::ready rather than an async block here,
@@ -1137,7 +1120,6 @@ where
                                 metrics::counter!(
                                     "zcash.net.in.messages",
                                     "command" => msg.command(),
-                                    "addr" => connected_addr.get_transient_addr_label(),
                                 )
                                 .increment(1);
 
@@ -1150,7 +1132,6 @@ where
                                 metrics::counter!(
                                     "zebra.net.in.errors",
                                     "error" => err.to_string(),
-                                    "addr" => connected_addr.get_transient_addr_label(),
                                 )
                                 .increment(1);
 
