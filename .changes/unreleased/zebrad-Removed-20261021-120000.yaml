@@ -1,0 +1,4 @@
+project: zebrad
+kind: Removed
+body: 'Removed the Docker options for zcashd-compat mode, since Zebra no longer publishes zcashd-compat Docker images: the `docker-split-containers` and `docker-supervised` modes and the `--zcashd-docker-image` flag of `scripts/install-zebra.sh`, the `runtime-zcashd-compat` Dockerfile stage, the `compat-docker-build` and `compat-docker-start` make targets, and the `ZCASHD_COMPAT_ENABLED` variable of the Docker entrypoint. Use the installer''s `split-binary`, `supervised`, or `build-from-source` modes instead.'
+time: 2026-10-21T12:00:00.000000000Z
