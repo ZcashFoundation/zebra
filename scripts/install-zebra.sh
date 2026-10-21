@@ -1963,10 +1963,6 @@ quote_env_value() {
   fi
 }
 
-# Zebra Docker containers use host networking so the Zcash TCP P2P listener
-# binds and advertises the host's real addresses (not the Docker bridge IP
-# 172.17.0.x). Linux-only (this installer already requires Linux).
-
 # Shared Zebra env block for the binary/source start commands. Trailing
 # backslash but no final newline: callers put this on its own heredoc line.
 compat_print_zebrad_env_lines() {
@@ -2369,6 +2365,9 @@ $(shell_quote "$ZEBRAD_PATH") start
 EOF
 }
 
+# Zebra Docker containers use host networking so the Zcash TCP P2P listener
+# binds and advertises the host's real addresses (not the Docker bridge IP
+# 172.17.0.x). Linux-only (this installer already requires Linux).
 default_print_docker_command() {
   local port
   port="$(default_p2p_port)"
