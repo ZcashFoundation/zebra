@@ -143,12 +143,13 @@ impl RpcServer {
 
         let rpc = rpc.into_rpc();
         let registered_methods: Arc<HashSet<_>> = Arc::new(rpc.method_names().collect());
+        let traced_methods = registered_methods.clone();
 
         let rpc_middleware = RpcServiceBuilder::new()
             .rpc_logger(1024)
             .layer_fn(FixRpcResponseMiddleware::new)
             .layer_fn(move |service| RpcMetricsMiddleware::new(service, registered_methods.clone()))
-            .layer_fn(RpcTracingMiddleware::new);
+            .layer_fn(move |service| RpcTracingMiddleware::new(service, traced_methods.clone()));
 
         let server = Server::builder()
             .http_only()

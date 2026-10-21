@@ -3,5 +3,6 @@ kind: breaking
 body: >-
   Removed `protocol::external::codec::Builder::with_metrics_addr_label`: peer connection,
   request, message, byte and handshake metrics no longer carry per-peer `addr`, `remote_ip` or
-  `user_agent` labels.
+  `user_agent` labels, and `zcash.net.peers.initial` and `zcash.net.peers.cache` count peers
+  without a `remote_ip` label.
 time: 2026-10-12T16:00:04.000000000+02:00

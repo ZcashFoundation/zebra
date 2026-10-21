@@ -47,11 +47,17 @@ impl<S> RpcMetricsMiddleware<S> {
     }
 
     fn method_label(&self, method: &str) -> &'static str {
-        self.registered_methods
-            .get(method)
-            .copied()
-            .unwrap_or("unknown")
+        method_label(&self.registered_methods, method)
     }
+}
+
+/// The registered name of `method`, or `unknown` for names the server does not register, so
+/// labels stay bounded whatever clients send.
+pub(crate) fn method_label(
+    registered_methods: &HashSet<&'static str>,
+    method: &str,
+) -> &'static str {
+    registered_methods.get(method).copied().unwrap_or("unknown")
 }
 
 impl<'a, S> RpcServiceT<'a> for RpcMetricsMiddleware<S>
