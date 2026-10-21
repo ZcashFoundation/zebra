@@ -6,6 +6,7 @@
 
 use std::{
     collections::HashSet,
+    sync::Arc,
     task::Poll,
     time::{Duration, Instant},
 };
@@ -18,7 +19,11 @@ use futures::{
 use tower::load_shed::error::Overloaded;
 use tracing::Span;
 
-use zebra_chain::serialization::SerializationError;
+use zebra_chain::{
+    block::Block,
+    serialization::{SerializationError, ZcashDeserializeInto},
+    transaction::UnminedTx,
+};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
@@ -27,7 +32,10 @@ use crate::{
         connection::{overload_drop_connection_probability, Connection, State},
         ClientRequest, ErrorSlot,
     },
-    protocol::external::Message,
+    protocol::{
+        external::{InventoryHash, Message},
+        internal::InventoryResponse,
+    },
     types::Nonce,
     PeerError, Request, Response,
 };
@@ -187,6 +195,199 @@ async fn connection_run_loop_message_ok() {
     connection_join_handle.abort();
     let outbound_message = peer_outbound_messages.next().await;
     assert_eq!(outbound_message, None);
+}
+
+/// An empty mempool reply releases the connection before the request timeout.
+#[tokio::test(start_paused = true)]
+async fn empty_mempool_reply_unblocks_queued_block_request() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, _inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+
+    let (mempool_tx, mempool_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::MempoolTransactionIds,
+            tx: mempool_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Mempool),
+    );
+
+    let hash = zebra_chain::block::Hash([1; 32]);
+    let (block_tx, block_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::BlockDownload {
+                hash,
+                advertiser: None,
+            },
+            tx: block_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(outbound.next().now_or_never().is_none());
+
+    peer_tx.send(Ok(Message::Inv(Vec::new()))).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        assert_eq!(
+            mempool_rx.await.unwrap().unwrap(),
+            Response::TransactionIds(Vec::new()),
+        );
+        assert_eq!(
+            outbound.next().await,
+            Some(Message::GetData(vec![InventoryHash::Block(hash)])),
+        );
+    })
+    .await
+    .expect("an empty mempool reply must release the queued block request without a timeout");
+
+    assert!(error_slot.try_get_error().is_none());
+    drop(block_rx);
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// A late empty mempool reply must not finish a later block-locator request.
+#[tokio::test(start_paused = true)]
+async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, _inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+
+    let (mempool_tx, mempool_rx) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::MempoolTransactionIds,
+            tx: mempool_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Mempool),
+    );
+    drop(mempool_rx);
+
+    let (find_tx, mut find_rx) = oneshot::channel();
+    client_tx
+        .send(ClientRequest {
+            request: Request::FindBlocks {
+                known_blocks: Vec::new(),
+                stop: None,
+            },
+            tx: find_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::GetBlocks {
+            known_blocks: Vec::new(),
+            stop: None,
+        }),
+    );
+
+    peer_tx.send(Ok(Message::Inv(Vec::new()))).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), &mut find_rx)
+            .await
+            .is_err(),
+        "the late empty mempool reply must leave the block-locator request pending",
+    );
+
+    let hashes = vec![
+        zebra_chain::block::Hash([1; 32]),
+        zebra_chain::block::Hash([2; 32]),
+    ];
+    peer_tx
+        .send(Ok(Message::Inv(
+            hashes.iter().copied().map(InventoryHash::Block).collect(),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), find_rx)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        Response::BlockHashes(hashes),
+    );
+
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
+/// An empty `getblocks` result sends nothing, so peers can't take it for an empty mempool reply,
+/// while a nonempty result is still sent as an inventory.
+#[tokio::test(start_paused = true)]
+async fn empty_find_blocks_result_sends_no_inventory() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, _client_tx, mut inbound_service, mut outbound, error_slot) =
+        new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+    let get_blocks = Message::GetBlocks {
+        known_blocks: Vec::new(),
+        stop: None,
+    };
+    let find_blocks = Request::FindBlocks {
+        known_blocks: Vec::new(),
+        stop: None,
+    };
+
+    peer_tx.send(Ok(get_blocks.clone())).await.unwrap();
+    inbound_service
+        .expect_request(find_blocks.clone())
+        .await
+        .respond(Response::BlockHashes(Vec::new()));
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .is_err(),
+        "an empty getblocks result must not be sent as an empty inventory",
+    );
+
+    let hash = zebra_chain::block::Hash([1; 32]);
+    peer_tx.send(Ok(get_blocks)).await.unwrap();
+    inbound_service
+        .expect_request(find_blocks)
+        .await
+        .respond(Response::BlockHashes(vec![hash]));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), outbound.next())
+            .await
+            .unwrap(),
+        Some(Message::Inv(vec![InventoryHash::Block(hash)])),
+    );
+
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
 /// Test that the connection run loop fails correctly when dropped
@@ -959,6 +1160,133 @@ async fn connection_ping_pong_round_trip() {
 
     drop(peer_tx);
     let _ = connection.await;
+}
+
+/// Test that a `notfound` for a cancelled request doesn't end a later request for other inventory.
+#[tokio::test]
+async fn connection_ignores_notfound_for_cancelled_requests() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = [
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
+        zebra_test::vectors::BLOCK_MAINNET_2_BYTES.as_slice(),
+    ]
+    .into_iter()
+    .map(|bytes| {
+        bytes
+            .zcash_deserialize_into()
+            .expect("block vectors are valid")
+    })
+    .collect();
+    let transactions: Vec<UnminedTx> = blocks
+        .iter()
+        .map(|block| UnminedTx::from(&block.transactions[0]))
+        .collect();
+    let block_request = |block: &Arc<Block>| Request::BlocksByHash(HashSet::from([block.hash()]));
+    let transaction_request = |tx: &UnminedTx| Request::TransactionsById(HashSet::from([tx.id]));
+
+    // A cancelled transaction request, then a block request.
+    let response = cancelled_notfound_then_response(
+        transaction_request(&transactions[0]),
+        transactions[0].id.into(),
+        block_request(&blocks[1]),
+        Message::Block(blocks[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Blocks(vec![InventoryResponse::Available((
+            blocks[1].clone(),
+            None
+        ))])
+    );
+
+    // A cancelled block request, then a transaction request.
+    let response = cancelled_notfound_then_response(
+        block_request(&blocks[0]),
+        blocks[0].hash().into(),
+        transaction_request(&transactions[1]),
+        Message::Tx(transactions[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Transactions(vec![InventoryResponse::Available((
+            transactions[1].clone(),
+            None
+        ))])
+    );
+
+    // A cancelled block request, then a request for a different block.
+    let response = cancelled_notfound_then_response(
+        block_request(&blocks[0]),
+        blocks[0].hash().into(),
+        block_request(&blocks[1]),
+        Message::Block(blocks[1].clone()),
+    )
+    .await;
+    assert_eq!(
+        response,
+        Response::Blocks(vec![InventoryResponse::Available((
+            blocks[1].clone(),
+            None
+        ))])
+    );
+}
+
+/// Cancels `cancelled`, sends `request`, then delivers the peer's `notfound` for `missing` from
+/// the cancelled request before `reply`. Returns the response to `request`.
+async fn cancelled_notfound_then_response(
+    cancelled: Request,
+    missing: InventoryHash,
+    request: Request,
+    reply: Message,
+) -> Response {
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, mut inbound_service, mut peer_outbound_messages, error_slot) =
+        new_test_connection();
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    let mut response_rx = None;
+    for request in [cancelled, request] {
+        // Dropping the previous receiver cancels its request.
+        drop(response_rx.take());
+        let (tx, rx) = oneshot::channel();
+        client_tx
+            .send(ClientRequest {
+                request,
+                tx,
+                inv_collector: None,
+                transient_addr: None,
+                span: Span::none(),
+            })
+            .await
+            .expect("connection accepts requests");
+        assert!(matches!(
+            peer_outbound_messages.next().await,
+            Some(Message::GetData(_))
+        ));
+        response_rx = Some(rx);
+    }
+
+    for message in [Message::NotFound(vec![missing]), reply] {
+        peer_tx
+            .send(Ok(message))
+            .await
+            .expect("connection is running");
+    }
+    let response = response_rx
+        .expect("the loop sends the request")
+        .await
+        .expect("connection responds")
+        .expect("the notfound for the cancelled request is ignored");
+
+    assert!(error_slot.try_get_error().is_none());
+    inbound_service.expect_no_requests().await;
+
+    drop(peer_tx);
+    let _ = connection.await;
+    response
 }
 
 /// Creates a new [`Connection`] instance for unit tests.

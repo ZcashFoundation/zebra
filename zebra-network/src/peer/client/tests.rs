@@ -50,6 +50,26 @@ pub struct ClientTestHarness {
     heartbeat_aborter: AbortHandle,
 }
 
+/// A client request using the same response and missing-inventory handling as a connection.
+pub struct ReceivedClientRequest(super::InProgressClientRequest);
+
+impl ReceivedClientRequest {
+    /// Returns the request sent through the real client channel.
+    pub fn request(&self) -> &crate::Request {
+        &self.0.request
+    }
+
+    /// Sends a response through the production response sender and inventory collector.
+    pub fn respond(self, response: Result<crate::Response, SharedPeerError>) {
+        let _ = self.0.tx.send(response);
+    }
+
+    /// Returns whether the caller dropped its response future.
+    pub fn is_canceled(&self) -> bool {
+        self.0.tx.is_canceled()
+    }
+}
+
 impl ClientTestHarness {
     /// Create a [`ClientTestHarnessBuilder`] instance to help create a new [`Client`] instance
     /// and a [`ClientTestHarness`] to track it.
@@ -57,6 +77,7 @@ impl ClientTestHarness {
         ClientTestHarnessBuilder {
             version: None,
             services: None,
+            start_height: None,
             connection_task: None,
             heartbeat_task: None,
             connected_addr: None,
@@ -115,6 +136,13 @@ impl ClientTestHarness {
         self.client_request_receiver
             .take()
             .expect("request receiver endpoint has already been dropped");
+    }
+
+    /// Receives a request with production response handling for cross-crate consumer tests.
+    pub fn take_request(&mut self) -> Option<ReceivedClientRequest> {
+        self.try_to_receive_outbound_client_request()
+            .request()
+            .map(|request| ReceivedClientRequest(request.into()))
     }
 
     /// Tries to receive a [`ClientRequest`] sent by the [`Client`] instance.
@@ -255,6 +283,7 @@ pub struct ClientTestHarnessBuilder<C = future::Ready<()>, H = future::Ready<()>
     version: Option<Version>,
     services: Option<PeerServices>,
     connected_addr: Option<ConnectedAddr>,
+    start_height: Option<Height>,
 }
 
 impl<C, H> ClientTestHarnessBuilder<C, H>
@@ -280,6 +309,12 @@ where
         self
     }
 
+    /// Configure the peer's advertised handshake height.
+    pub fn with_start_height(mut self, start_height: Height) -> Self {
+        self.start_height = Some(start_height);
+        self
+    }
+
     /// Configure the mock connection task future to use.
     pub fn with_connection_task<NewC>(
         self,
@@ -291,6 +326,7 @@ where
             version: self.version,
             services: self.services,
             connected_addr: self.connected_addr,
+            start_height: self.start_height,
         }
     }
 
@@ -305,6 +341,7 @@ where
             version: self.version,
             services: self.services,
             connected_addr: self.connected_addr,
+            start_height: self.start_height,
         }
     }
 
@@ -339,7 +376,7 @@ where
             ),
             nonce: Nonce::default(),
             user_agent: "client test harness".to_string(),
-            start_height: Height(0),
+            start_height: self.start_height.unwrap_or(Height(0)),
             relay: true,
         };
 

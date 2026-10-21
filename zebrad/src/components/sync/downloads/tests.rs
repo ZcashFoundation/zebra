@@ -1,9 +1,10 @@
 //! Fixed test vectors for the syncer's block download stream.
 
-use std::{iter, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
-use futures::stream::StreamExt;
+use futures::{stream::StreamExt, FutureExt};
 use tokio::sync::watch;
+use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -17,7 +18,9 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use zebra_network as zn;
 use zebra_state as zs;
 
-use crate::components::sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT;
+use crate::components::sync::{
+    ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, MIN_CHECKPOINT_CONCURRENCY_LIMIT, SYNC_RESTART_DELAY,
+};
 
 use super::{BlockDownloadVerifyError, Downloads};
 
@@ -102,6 +105,103 @@ fn genesis() -> Arc<Block> {
         .expect("hard-coded block vector deserializes")
 }
 
+/// A failed primary frees active-attempt capacity, not admission for another logical download.
+#[tokio::test(start_paused = true)]
+async fn logical_download_limit_holds_until_completion_or_cancellation() {
+    let _init_guard = zebra_test::init();
+    let mut config = crate::config::ZebradConfig::default();
+    config.sync.download_concurrency_limit = 1;
+    let mut peers: MockNetwork = MockService::build().for_unit_tests();
+    let verifier: MockVerifier = MockService::build().for_unit_tests();
+    let state: MockService<zs::Request, zs::Response, _> = MockService::build().for_unit_tests();
+    let read_state: MockState = MockService::build().for_unit_tests();
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &config,
+        Height(0),
+        peers.clone(),
+        verifier,
+        state,
+        read_state,
+        tip,
+        misbehavior_tx,
+    );
+    let network = &mut chain_sync.downloads.network;
+
+    // Warm the actual production stack with a positive delay, then rotate its histogram.
+    for _ in 0..20 {
+        let mut response = Box::pin(network.ready().await.unwrap().call(zn::Request::Peers));
+        assert!(response.as_mut().now_or_never().is_none());
+        tokio::time::advance(Duration::from_millis(100)).await;
+        peers
+            .expect_request(zn::Request::Peers)
+            .await
+            .respond(zn::Response::Peers(Vec::new()));
+        tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, response)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    tokio::time::advance(2 * SYNC_RESTART_DELAY).await;
+
+    for succeeds in [Some(true), Some(false), None] {
+        let hash = block::Hash::from([0xAB; 32]);
+        let request = zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        };
+        let mut pending = Box::pin(network.ready().await.unwrap().call(request.clone()));
+        for _ in 0..=BLOCK_DOWNLOAD_RETRY_LIMIT {
+            tokio::select! {
+                result = &mut pending => panic!("the primary must not finish the hedge: {result:?}"),
+                response = peers.expect_request(request.clone()) => {
+                    response.respond(Err::<zn::Response, _>(zn::BoxError::from("exhausted")));
+                }
+            }
+        }
+        assert!(pending.as_mut().now_or_never().is_none());
+        assert!(
+            network.ready().now_or_never().is_none(),
+            "a pending delayed arm must retain the logical download permit",
+        );
+
+        if let Some(succeeds) = succeeds {
+            tokio::time::advance(Duration::from_millis(100)).await;
+            let retries = if succeeds {
+                0
+            } else {
+                BLOCK_DOWNLOAD_RETRY_LIMIT
+            };
+            for _ in 0..=retries {
+                tokio::select! {
+                    result = &mut pending => panic!("the delayed arm must be served: {result:?}"),
+                    response = peers.expect_request(request.clone()) => {
+                        response.respond(if succeeds {
+                            Ok(zn::Response::Peers(Vec::new()))
+                        } else {
+                            Err(zn::BoxError::from("exhausted"))
+                        });
+                    }
+                }
+            }
+            assert_eq!(
+                tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, pending)
+                    .await
+                    .unwrap()
+                    .is_ok(),
+                succeeds,
+            );
+        } else {
+            drop(pending);
+        }
+        assert!(
+            network.ready().now_or_never().is_some(),
+            "success, final error, and cancellation must release the logical download permit",
+        );
+    }
+}
+
 /// Regression test for GHSA-g95h-hw6g-pvgv: a body whose claimed height contradicts the parent we
 /// already hold is attributed to the peer that supplied it, and never reaches consensus.
 ///
@@ -145,7 +245,10 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -211,7 +314,10 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -276,7 +382,10 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -332,7 +441,10 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -383,7 +495,10 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
         .expect("download is queued");
 
     network
-        .expect_request(zn::Request::BlocksByHash(iter::once(hash).collect()))
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
         .await
         .respond(zn::Response::Blocks(vec![Available((
             block.clone(),
@@ -406,4 +521,64 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
     );
 
     state.expect_no_requests().await;
+}
+
+/// Network readiness and an unanswered response share one absolute download deadline.
+#[tokio::test(start_paused = true)]
+async fn download_deadline_includes_readiness_and_response() {
+    use tokio::time::{sleep, timeout_at, Instant};
+    use tower::{limit::ConcurrencyLimit, ServiceExt};
+
+    let _init_guard = zebra_test::init();
+    let budget = super::BLOCK_DOWNLOAD_ROUND_TIMEOUT;
+    for release_capacity in [false, true] {
+        let mut network: MockNetwork = MockService::build().for_unit_tests();
+        let limited = ConcurrencyLimit::new(network.clone(), 1);
+        let mut reservation = limited.clone();
+        reservation.ready().await.unwrap();
+        let verifier: MockVerifier = MockService::build().for_unit_tests();
+        let state: MockState = MockService::build().for_unit_tests();
+        let (tip, _sender) = MockChainTip::new();
+        let mut downloads = Downloads::new(
+            limited,
+            verifier,
+            state,
+            tip,
+            watch::channel(false).0,
+            MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            Height(1_000_000),
+        );
+        let hash = block_1().hash();
+        let started = Instant::now();
+        let queued = {
+            let enqueue = downloads.download_and_verify(hash);
+            tokio::pin!(enqueue);
+            assert!(futures::poll!(&mut enqueue).is_pending());
+            if release_capacity {
+                sleep(budget / 2).await;
+                drop(reservation);
+            }
+            timeout_at(started + budget + Duration::from_secs(1), enqueue)
+                .await
+                .expect("network readiness must be bounded")
+        };
+        let result = if release_capacity {
+            queued.expect("capacity becomes available before the deadline");
+            let _response = network
+                .expect_request(zn::Request::BlockDownload {
+                    hash,
+                    advertiser: None,
+                })
+                .await;
+            timeout_at(started + budget + Duration::from_secs(1), downloads.next())
+                .await
+                .expect("the response must use the remaining deadline")
+                .expect("the queued download has a result")
+                .map(|_| ())
+        } else {
+            queued
+        };
+        assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
+        assert_eq!(Instant::now() - started, budget);
+    }
 }

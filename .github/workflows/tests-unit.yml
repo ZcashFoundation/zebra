@@ -9,14 +9,16 @@ on:
   merge_group:
     types: [checks_requested]
 
-# Cancel obsolete test runs after new commits. Unrelated label events use a
-# separate group so they cannot cancel the required unit test run.
+# Cancel obsolete test runs after new commits. Unrelated label events get a group of
+# their own, keyed by run id, so they can cancel neither the required unit test run
+# nor each other: cancelling one would report the required check as failed, because
+# `alls-green` reads a cancelled need as a failure.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       github.event.action == 'labeled' &&
       github.event.label.name != 'release' &&
-      'ignored-label' ||
+      format('ignored-label-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
@@ -34,8 +36,7 @@ env:
 
 jobs:
   changes:
-    if: github.event.action != 'labeled' || github.event.label.name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       unit_tests: ${{ steps.filter.outputs.unit_tests || 'true' }}
@@ -53,11 +54,18 @@ jobs:
   run-unit-tests:
     name: stable 1.97.0
     needs: changes
-    if: needs.changes.outputs.unit_tests == 'true'
+    # Adding a label that is not `release` cannot change the result of a test run on a
+    # head commit that did not move, and this is the longest job in CI, so it must not
+    # re-run for one. `allowed-skips` tolerates the skip; the tests still have to pass on
+    # the merge group before anything reaches main.
+    if: >-
+      needs.changes.outputs.unit_tests == 'true' &&
+      (github.event.action != 'labeled' ||
+      github.event.label.name == 'release')
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     env:
       # Thin LTO roughly doubles the time to link the release test binaries and
@@ -87,6 +95,25 @@ jobs:
       - name: Run unit tests
         run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
+  run-zebra-test-windows:
+    name: zebra-test Windows 1.97.0
+    needs: changes
+    if: needs.changes.outputs.unit_tests == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: 1.97.0
+          cache-key: unit-tests-1.97.0-zebra-test-windows
+          cache-on-failure: true
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run zebra-test on Windows
+        run: cargo test --locked -p zebra-test
+
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
@@ -94,7 +121,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -112,22 +139,12 @@ jobs:
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
   unit-tests:
-    # Keep skipped unrelated-label runs from replacing the required check.
-    name: >-
-      ${{
-        github.event.action == 'labeled' &&
-        github.event.label.name != 'release' &&
-        'Label does not require unit tests' ||
-        'unit-tests'
-      }}
-    runs-on: ubuntu-latest
-    if: >-
-      always() &&
-      (github.event.action != 'labeled' ||
-      github.event.label.name == 'release')
+    runs-on: ubuntu-26.04
+    if: always()
     needs:
       - changes
       - run-unit-tests
+      - run-zebra-test-windows
       - check-no-git-dependencies
     timeout-minutes: 30
     steps:
@@ -135,4 +152,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: run-unit-tests, check-no-git-dependencies
+          allowed-skips: run-unit-tests, run-zebra-test-windows, check-no-git-dependencies

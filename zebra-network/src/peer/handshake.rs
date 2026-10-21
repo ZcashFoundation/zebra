@@ -22,7 +22,7 @@ use tokio::{
     time::{error, timeout, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
-use tokio_util::codec::Framed;
+use tokio_util::{codec::Framed, task::AbortOnDropHandle};
 use tower::Service;
 use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
@@ -1250,8 +1250,8 @@ where
         // Correctness: As a defence-in-depth against hangs, wrap the entire handshake in a timeout.
         let fut = timeout(constants::HANDSHAKE_TIMEOUT, fut);
 
-        // Spawn a new task to drive this handshake, forwarding panics to the calling task.
-        tokio::spawn(fut.instrument(negotiator_span))
+        // Forward panics, but cancel negotiation if the owning listener, crawler, or caller stops.
+        AbortOnDropHandle::new(tokio::spawn(fut.instrument(negotiator_span)))
             .map(
                 |join_result: Result<
                     Result<Result<Client, HandshakeError>, error::Elapsed>,

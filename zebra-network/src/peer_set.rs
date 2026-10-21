@@ -2,7 +2,8 @@ pub(crate) mod candidate_set;
 mod initialize;
 mod inventory_registry;
 mod limit;
-mod set;
+mod service;
+pub(crate) mod set;
 mod stall_tracker;
 mod unready_service;
 
@@ -17,3 +18,4 @@ use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
 
 pub use initialize::{init, init_with_block_gossip_peer_ips};
+pub use service::{NetworkResponseFuture, NetworkService};

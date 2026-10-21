@@ -5450,3 +5450,79 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
         None,
     )
 }
+
+/// A contended address book must not prevent other RPC runtime tasks from progressing.
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
+    use std::{sync::mpsc, time::Duration};
+
+    let _init_guard = zebra_test::init();
+
+    let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
+        ([127, 0, 0, 1], Mainnet.default_port()).into(),
+        &Mainnet,
+        zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
+        tracing::Span::none(),
+    )));
+
+    let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        address_book.clone(),
+        log_rx,
+        None,
+    );
+
+    let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let lock_holder = std::thread::spawn(move || {
+        let guard = address_book
+            .lock()
+            .expect("no previous holder poisoned the mutex");
+        locked_tx.send(()).expect("test is waiting for the lock");
+
+        // An OS-thread watchdog releases the mutex even if the only async worker blocks.
+        let progress = release_rx.recv_timeout(Duration::from_secs(5));
+        drop(guard);
+        progress
+    });
+
+    tokio::time::timeout(Duration::from_secs(10), locked_rx)
+        .await
+        .expect("lock holder should start within the timeout")
+        .expect("lock holder should signal that it holds the mutex");
+
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let request = tokio::spawn(async move {
+        started_tx.send(()).expect("test is waiting for the RPC");
+        rpc.get_network_info().await
+    });
+
+    // On this single-thread runtime, the RPC must yield before this task can resume.
+    tokio::time::timeout(Duration::from_secs(10), started_rx)
+        .await
+        .expect("RPC task should start within the timeout")
+        .expect("RPC task should signal that it started");
+    let _ = release_tx.send(());
+    lock_holder
+        .join()
+        .expect("lock holder should not panic")
+        .expect("RPC blocked the async worker until the address-book watchdog expired");
+
+    let response = tokio::time::timeout(Duration::from_secs(10), request)
+        .await
+        .expect("RPC should complete after the mutex is released")
+        .expect("RPC task should not panic")
+        .expect("RPC should succeed");
+    assert_eq!(response.connections, 0);
+}

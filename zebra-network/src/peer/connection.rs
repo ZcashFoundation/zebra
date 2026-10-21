@@ -245,14 +245,16 @@ impl Handler {
                     }
                 }
             }
-            // `zcashd` peers actually return this response
+            // `zcashd` peers actually return this response.
+            // A `notfound` naming none of the pending IDs is for a cancelled request or
+            // unsolicited, so it isn't a response to this request.
             (
                 Handler::TransactionsById {
                     pending_ids,
                     transactions,
                 },
                 Message::NotFound(missing_invs),
-            ) => {
+            ) if transaction_ids(&missing_invs).any(|id| pending_ids.contains(&id)) => {
                 // assumptions:
                 //   - the peer eventually returns a transaction or a `notfound` entry
                 //     for each hash
@@ -354,14 +356,16 @@ impl Handler {
                     }
                 }
             }
-            // peers are allowed to return this response, but `zcashd` never does
+            // Peers are allowed to return this response, but `zcashd` never does.
+            // A `notfound` naming none of the pending hashes is for a cancelled request or
+            // unsolicited, so it isn't a response to this request.
             (
                 Handler::BlocksByHash {
                     pending_hashes,
                     blocks,
                 },
                 Message::NotFound(missing_invs),
-            ) => {
+            ) if block_hashes(&missing_invs).any(|hash| pending_hashes.contains(&hash)) => {
                 // assumptions:
                 //   - the peer eventually returns a block or a `notfound` entry
                 //     for each hash
@@ -397,12 +401,13 @@ impl Handler {
                 }
             }
 
-            // TODO:
-            // - use `any(inv)` rather than `all(inv)`?
+            // An empty inventory can be a late mempool reply after cancellation.
+            // Zebra and zcashd send no message for an empty getblocks result.
             (Handler::FindBlocks, Message::Inv(items))
-                if items
-                    .iter()
-                    .all(|item| matches!(item, InventoryHash::Block(_))) =>
+                if !items.is_empty()
+                    && items
+                        .iter()
+                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
                 Handler::Finished(Ok(Response::BlockHashes(
                     block_hashes(&items[..]).collect(),
@@ -1057,6 +1062,14 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
+            (AwaitingRequest, BlockDownload { hash, .. }) => self
+                .peer_tx
+                .send(Message::GetData(vec![hash.into()]))
+                .await
+                .map(|()| Handler::BlocksByHash {
+                    blocks: Vec::with_capacity(1),
+                    pending_hashes: HashSet::from([hash]),
+                }),
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
                     .peer_tx
@@ -1163,6 +1176,8 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
+            // The peer set handles this request itself, so there is nothing to send to the peer.
+            (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
 
         // Update the connection state with a new handler, or fail with an error.
@@ -1309,7 +1324,7 @@ where
                 [] => {
                     debug!(%msg, "ignoring empty inv");
 
-                    // This might be a minor protocol error, or it might mean "not found".
+                    // A reply can arrive after its mempool or block-locator request was canceled.
                     Unused
                 }
                 [InventoryHash::Block(_), InventoryHash::Block(_), ..] => {
@@ -1531,6 +1546,9 @@ where
                     }
                 }
             }
+            // Like zcashd, send nothing for an empty `getblocks` result, so an empty inventory only
+            // ever answers an empty mempool.
+            Response::BlockHashes(hashes) if hashes.is_empty() => {}
             Response::BlockHashes(hashes) => {
                 if let Err(e) = self
                     .peer_tx

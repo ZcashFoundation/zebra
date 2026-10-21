@@ -149,23 +149,24 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 
 
 /// Zebra rotates its peer inventory registry every time this interval elapses.
 ///
-/// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
+/// Available, missing, and failed inventory entries expire after two rotations. Delayed polling
+/// restarts this interval instead of replaying missed rotations.
 pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
-/// How long the peer set waits before refusing a block request that no ready peer can serve,
-/// while a busy peer might still have the block.
+/// How long a single-hash [`Request::BlocksByHash`](crate::Request::BlocksByHash) waits for
+/// eligible busy capacity before returning a local refusal.
 ///
-/// Refusing instantly lets callers exhaust their retries in microseconds while every
-/// block-serving peer is busy with other downloads, which stalls the syncer (the dropped block is
-/// only re-requested after the sync restarts). Block downloads typically finish in under a second,
-/// so after this delay a retry usually finds a block-serving peer ready.
+/// Sync and gossip downloaders use [`Request::BlockDownload`](crate::Request::BlockDownload)
+/// instead: capacity waits do not consume peer attempts, and the caller bounds the complete
+/// readiness and response operation. The connection's [`REQUEST_TIMEOUT`] starts at wire dispatch.
+pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// How long a find-blocks or find-headers request waits for a busy serving peer before it can
+/// fall back to any ready peer.
 ///
-/// A busy peer can take up to [`REQUEST_TIMEOUT`] to become ready again, so the syncer's retries
-/// must keep waiting for longer than that. It makes 16 attempts for a missing block, with
-/// zebrad's `BLOCK_DOWNLOAD_RETRY_LIMIT` and `MAX_BLOCK_REOBTAIN_RETRIES`, so this delay gives it
-/// about 24 seconds. zebrad's timing tests check this. A malicious list of fake block hashes
-/// drains more slowly for the same reason, bounded by the download concurrency limit.
-pub const INVENTORY_BUSY_PEER_REFUSAL_DELAY: Duration = Duration::from_millis(1500);
+/// This wait starts when the request enters the peer set and counts towards the syncer's
+/// six-second request timeout, leaving time for the fallback peer to respond.
+pub const FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// The default peer address crawler interval.
 ///
@@ -344,6 +345,9 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 2;
 /// [`ADDR_RESPONSE_LIMIT_DENOMINATOR`], so the temporary denominator change
 /// above does not shrink the address book (see #11103).
 pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize = MAX_ADDRS_IN_MESSAGE * 5;
+
+/// The maximum number of gossiped addresses applied to the address book in one request.
+pub(crate) const GOSSIPED_ADDRS_PER_REQUEST: usize = 100;
 
 /// Truncate timestamps in outbound address messages to this time interval.
 ///

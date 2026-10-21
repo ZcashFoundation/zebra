@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`init` and `init_with_block_gossip_peer_ips` now return `NetworkService` instead of a raw Tower `Buffer`. Releasing the last owning handle and unfinished `NetworkResponseFuture` stops the buffer worker, crawler, listener, and pending handshakes. Pass `NetworkService::background_service()` to inbound handlers and their downloaders so internally retained handles and requests do not prevent shutdown ([#11749](https://github.com/ZcashFoundation/zebra/issues/11749)).'
+time: 2026-10-14T18:54:11.8262647+02:00

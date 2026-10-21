@@ -84,7 +84,7 @@ jobs:
   # consumers route to the same dev/stage/prod GitHub environment.
   determine-environment:
     name: Determine environment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       environment: ${{ steps.set.outputs.environment }}
@@ -107,14 +107,14 @@ jobs:
 
   prepare-matrix:
     name: Prepare build matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Set build matrix
         id: set-matrix
         env:
-          AMD64_RUNNER: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
+          AMD64_RUNNER: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-26.04' }}
           ARM64_RUNNER: ${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
           DOCKERFILE_TARGET: ${{ inputs.dockerfile_target }}
         run: |
@@ -305,7 +305,7 @@ jobs:
   # and applies all necessary tags to both GCP Artifact Registry and DockerHub
   merge:
     name: Create multi-arch manifest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [determine-environment, prepare-matrix, build]
     environment: ${{ needs.determine-environment.outputs.environment }}
     permissions:
