@@ -134,7 +134,8 @@ pub(crate) fn network_kind_label(network: &Network) -> &'static str {
     }
 }
 
-/// Records that Zebra started a TCP connection attempt.
+/// Records that Zebra started a connection attempt, over TCP or (for the version 2 protocol)
+/// QUIC.
 pub(crate) fn record_connection_attempt_started(
     network: &Network,
     direction: ConnectionDirection,
@@ -149,7 +150,9 @@ pub(crate) fn record_connection_attempt_started(
     .increment(1);
 }
 
-/// Records the terminal result of a TCP connection and Zcash handshake attempt.
+/// Records the terminal result of a connection and Zcash handshake attempt, over TCP or QUIC.
+///
+/// Only connect-stage failures are labelled by transport (`tcp_connect` or `quic_connect`).
 pub(crate) fn record_connection_attempt_finished(
     network: &Network,
     direction: ConnectionDirection,
@@ -175,7 +178,7 @@ pub(crate) fn record_connection_attempt_finished(
     .increment(1);
 }
 
-/// Records an inbound TCP connection that Zebra rejected before its Zcash handshake.
+/// Records an inbound TCP or QUIC connection that Zebra rejected before its Zcash handshake.
 pub(crate) fn record_inbound_connection_rejected(
     network: &Network,
     addr: PeerSocketAddr,

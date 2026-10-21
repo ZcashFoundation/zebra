@@ -55,6 +55,13 @@ pub use cache_dir::CacheDir;
 /// or failed DNS attempt.
 const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 
+/// The share of each legacy connection limit the version 2 transport adds on top of it: with
+/// version 2 enabled a node has up to half as many connections again (draft, "Connection
+/// Management": bound the share of inbound connections from any one transport).
+///
+/// See [`Config::v2_outbound_connection_limit`] and [`Config::v2_inbound_connection_limit`].
+const V2_CONNECTION_SHARE: usize = 2;
+
 /// Public DNS seed endpoints, also used to isolate configured networks.
 const DEFAULT_MAINNET_PEERS: [&str; 5] = [
     "dnsseed.str4d.xyz:8233",
@@ -115,6 +122,49 @@ pub struct Config {
     /// A list of initial peers for the peerset when operating on
     /// testnet.
     pub initial_testnet_peers: IndexSet<String>,
+
+    /// The UDP address of the experimental version 2 peer-to-peer protocol
+    /// (QUIC) endpoint.
+    ///
+    /// `None`, the default, disables the version 2 protocol: Zebra neither
+    /// listens for nor makes QUIC connections, and behaves exactly as before.
+    /// When set, Zebra accepts version 2 connections on this address and uses
+    /// the same endpoint for the connections it makes to `initial_v2_peers`.
+    /// The legacy TCP protocol on `listen_addr` keeps running either way.
+    ///
+    /// An IPv4 address, like `0.0.0.0:8233`, can only reach IPv4 peers: IPv6
+    /// addresses in `initial_v2_peers` are skipped with a warning. An IPv6
+    /// address, like `[::]:8233`, also reaches IPv4 peers where the operating
+    /// system allows dual-stack sockets by default (Linux and macOS, but not
+    /// Windows).
+    ///
+    /// # Experimental
+    ///
+    /// The version 2 protocol is a draft and this implementation is incomplete.
+    /// Peers are keyed by address and port whatever their protocol, and
+    /// `max_connections_per_ip` applies across both protocols, so while Zebra
+    /// has a legacy connection to a host listed in `initial_v2_peers`, the
+    /// version 2 connection to it is dropped and redialled after the
+    /// reconnection delay. While Zebra has a version 2 connection to such a
+    /// host, the legacy crawler may still dial its address over TCP, and that
+    /// connection is dropped. Configured version 2 peers are redialled after a
+    /// disconnection, but are not discovered from the network. Version 2
+    /// connections add up to half of each legacy connection limit, on top of
+    /// it.
+    pub v2_listen_addr: Option<SocketAddr>,
+
+    /// Peers to connect to over the version 2 protocol at startup, as
+    /// `host:port` strings.
+    ///
+    /// Only used when `v2_listen_addr` is set. The port is the peer's QUIC
+    /// (UDP) port, which the protocol expects to be the network's default
+    /// port. Version 2 peers are not discovered from the network yet, so
+    /// these are the only version 2 peers Zebra connects to.
+    ///
+    /// A host name that does not resolve is retried after the reconnection
+    /// delay. Once it resolves, Zebra keeps using that address until it
+    /// restarts.
+    pub initial_v2_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
     ///
@@ -254,10 +304,43 @@ impl Config {
         self.peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER
     }
 
+    /// The maximum number of outbound version 2 connections that Zebra will open at the same
+    /// time, on top of [`Self::peerset_outbound_connection_limit`]: a share of the legacy limit,
+    /// at least one, when `v2_listen_addr` is set, and zero otherwise.
+    pub(crate) fn v2_outbound_connection_limit(&self) -> usize {
+        Self::v2_share_of(
+            self.v2_listen_addr,
+            self.peerset_outbound_connection_limit(),
+        )
+    }
+
+    /// The maximum number of inbound version 2 connections that Zebra will accept at the same
+    /// time, on top of [`Self::peerset_inbound_connection_limit`]: a share of the legacy limit,
+    /// at least one, when `v2_listen_addr` is set, and zero otherwise.
+    pub(crate) fn v2_inbound_connection_limit(&self) -> usize {
+        Self::v2_share_of(self.v2_listen_addr, self.peerset_inbound_connection_limit())
+    }
+
+    /// The version 2 share of `legacy_limit`: a configured endpoint always gets at least one
+    /// connection of each kind, whatever the legacy limits are.
+    fn v2_share_of(v2_listen_addr: Option<SocketAddr>, legacy_limit: usize) -> usize {
+        if v2_listen_addr.is_some() {
+            (legacy_limit / V2_CONNECTION_SHARE).max(1)
+        } else {
+            0
+        }
+    }
+
     /// The maximum number of inbound and outbound connections that Zebra will have
-    /// at the same time.
+    /// at the same time, over both peer-to-peer protocols.
+    ///
+    /// The peer set, and the channels and registries sized from it, must have room for every
+    /// connection the legacy and version 2 limits allow, so this is the sum of all four.
     pub fn peerset_total_connection_limit(&self) -> usize {
-        self.peerset_outbound_connection_limit() + self.peerset_inbound_connection_limit()
+        self.peerset_outbound_connection_limit()
+            + self.peerset_inbound_connection_limit()
+            + self.v2_outbound_connection_limit()
+            + self.v2_inbound_connection_limit()
     }
 
     /// Returns the initial seed peer hostnames for the configured network.
@@ -272,6 +355,32 @@ impl Config {
                 .collect(),
             Network::Testnet(_params) => self.initial_testnet_peers.clone(),
         }
+    }
+
+    /// Resolves the configured version 2 initial peer `hosts`, in configuration
+    /// order: the addresses, and the hosts that did not resolve, for the caller
+    /// to retry.
+    pub(crate) async fn resolve_initial_v2_peers(
+        hosts: &IndexSet<String>,
+    ) -> (IndexSet<PeerSocketAddr>, IndexSet<String>) {
+        let lookups = hosts.iter().map(|host| async move {
+            // `MAX_SINGLE_SEED_PEER_DNS_RETRIES` is 0: one lookup per host, like the seed peers.
+            let addrs = Config::resolve_host(host, MAX_SINGLE_SEED_PEER_DNS_RETRIES).await;
+            if addrs.is_empty() {
+                warn!(%host, "configured initial version 2 peer did not resolve, will retry");
+            }
+            (host, addrs)
+        });
+        let mut resolved = IndexSet::new();
+        let mut unresolved = IndexSet::new();
+        for (host, addrs) in futures::future::join_all(lookups).await {
+            if addrs.is_empty() {
+                unresolved.insert(host.clone());
+            } else {
+                resolved.extend(addrs);
+            }
+        }
+        (resolved, unresolved)
     }
 
     /// Resolve initial seed peer IP addresses, based on the configured network,
@@ -588,6 +697,8 @@ impl Default for Config {
             network: Network::Mainnet,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
+            v2_listen_addr: None,
+            initial_v2_peers: IndexSet::new(),
             cache_dir: CacheDir::default(),
             crawl_new_peer_interval: DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
@@ -678,6 +789,8 @@ struct DConfig {
 
     initial_mainnet_peers: IndexSet<String>,
     initial_testnet_peers: IndexSet<String>,
+    v2_listen_addr: Option<SocketAddr>,
+    initial_v2_peers: IndexSet<String>,
     cache_dir: CacheDir,
     peerset_initial_target_size: usize,
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
@@ -695,6 +808,8 @@ impl Default for DConfig {
             testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
+            v2_listen_addr: config.v2_listen_addr,
+            initial_v2_peers: config.initial_v2_peers,
             cache_dir: config.cache_dir,
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
@@ -755,6 +870,8 @@ impl From<Config> for DConfig {
             network,
             initial_mainnet_peers,
             initial_testnet_peers,
+            v2_listen_addr,
+            initial_v2_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -789,6 +906,8 @@ impl From<Config> for DConfig {
             testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
+            v2_listen_addr,
+            initial_v2_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -809,6 +928,8 @@ impl<'de> Deserialize<'de> for Config {
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
+            v2_listen_addr,
+            initial_v2_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -884,12 +1005,21 @@ impl<'de> Deserialize<'de> for Config {
             non_zero_config_field.filter(|config_value| config_value > &0).unwrap_or(default_config_value)
         });
 
+        if v2_listen_addr.is_none() && !initial_v2_peers.is_empty() {
+            warn!(
+                "initial_v2_peers is set but v2_listen_addr is not, so the version 2 protocol is \
+                 disabled and these peers are ignored. Hint: set network.v2_listen_addr."
+            );
+        }
+
         Ok(Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
             initial_mainnet_peers,
             initial_testnet_peers,
+            v2_listen_addr,
+            initial_v2_peers,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,

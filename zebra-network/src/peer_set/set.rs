@@ -1194,11 +1194,6 @@ where
         }
     }
 
-    /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
-    fn select_ready_p2c_peer(&self) -> Option<D::Key> {
-        self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
-    }
-
     /// Rotates find requests across ready connections, restricting them to serving peers until
     /// the queued wait expires, unless no serving peers are connected.
     fn select_ready_find_peer(&mut self, allow_non_serving: bool) -> Option<D::Key> {
@@ -1218,6 +1213,18 @@ where
         let key = *key;
         self.find_peer_queue.rotate_left(index + 1);
         Some(key)
+    }
+
+    /// Performs P2C on the ready peers whose connection can serve `req`
+    /// (see [`LoadTrackedClient::supports`]).
+    fn select_ready_p2c_peer_for(&self, req: &Request) -> Option<D::Key> {
+        let capable_peers: HashSet<D::Key> = self
+            .ready_services
+            .iter()
+            .filter(|(_, service)| service.supports(req))
+            .map(|(key, _)| *key)
+            .collect();
+        self.select_p2c_peer_from_list(&capable_peers)
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
@@ -1364,7 +1371,7 @@ where
             // Fast empty responses must not gain a latency-based routing advantage.
             self.select_ready_find_peer(false)
         } else {
-            self.select_ready_p2c_peer()
+            self.select_ready_p2c_peer_for(&req)
         };
 
         if let Some(peer_key) = peer_key {
