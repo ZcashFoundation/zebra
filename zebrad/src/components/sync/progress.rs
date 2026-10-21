@@ -120,6 +120,9 @@ pub async fn show_block_chain_progress(
 
     let mut last_network_upgrade = None;
 
+    // Logs while waiting for the genesis block start immediately, then follow `LOG_INTERVAL`.
+    let mut last_genesis_wait_log: Option<Instant> = None;
+
     #[cfg(feature = "progress-bar")]
     let block_bar = howudoin::new().label("Blocks");
     let mut is_chain_metrics_chan_closed = false;
@@ -362,7 +365,14 @@ pub async fn show_block_chain_progress(
             #[cfg(feature = "progress-bar")]
             let network_upgrade = NetworkUpgrade::Genesis;
 
-            if is_syncer_stopped {
+            let should_log = last_genesis_wait_log.is_none_or(|last_log| {
+                instant_now.saturating_duration_since(last_log) >= LOG_INTERVAL
+            });
+            if should_log {
+                last_genesis_wait_log = Some(instant_now);
+            }
+
+            if is_syncer_stopped && should_log {
                 // We've stopped syncing blocks,
                 // but we haven't downloaded and verified the genesis block.
                 warn!(
@@ -372,10 +382,7 @@ pub async fn show_block_chain_progress(
                      Hint: check your network connection, \
                      and your computer clock and time zone",
                 );
-
-                #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{network_upgrade}: can't download genesis block"));
-            } else {
+            } else if should_log {
                 // We're waiting for the genesis block to be committed to the state,
                 // before we can estimate the best chain tip.
                 info!(
@@ -383,8 +390,12 @@ pub async fn show_block_chain_progress(
                     current_height = %"None",
                     "initial sync is waiting to download the genesis block",
                 );
+            }
 
-                #[cfg(feature = "progress-bar")]
+            #[cfg(feature = "progress-bar")]
+            if is_syncer_stopped {
+                block_bar.desc(format!("{network_upgrade}: can't download genesis block"));
+            } else {
                 block_bar.desc(format!(
                     "{network_upgrade}: waiting to download genesis block"
                 ));
