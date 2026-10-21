@@ -82,7 +82,7 @@ Zebra's own tests show how to drive these in-process: `zebrad/tests/common/` lau
 
 **Fuzzing**
 
-`zebra-fuzz/fuzz/fuzz_targets/` has libFuzzer targets for the wire codec, block and transaction deserialization, script verification, Equihash, addresses, note commitment trees, and the RPC dispatch layer. If the nightly toolchain and `cargo-fuzz` installed during the build, run one with `cd /src/zebra-fuzz/fuzz && cargo +nightly fuzz run <target> -- -max_total_time=60`. The dictionaries in `dicts/` help. Targets build in release mode with sanitizers, which takes a while on two CPUs.
+`zebra-fuzz/fuzz/fuzz_targets/` has libFuzzer targets for the wire codec, block and transaction deserialization, script verification, Equihash, addresses, note commitment trees, and the RPC dispatch layer. If the nightly toolchain and `cargo-fuzz` installed during the build, run one from `/src` with `cargo +nightly fuzz run --fuzz-dir zebra-fuzz/fuzz <target> -- -max_total_time=60`; the `--fuzz-dir` flag is required because the fuzz crate is not at the default `fuzz/` path. The dictionaries in `zebra-fuzz/fuzz/dicts/` help. Targets build in release mode with sanitizers, which takes a while on two CPUs.
 
 ## How you rate severity
 
@@ -94,7 +94,7 @@ Zebra builds with `panic = "abort"` in both the dev and release profiles, so any
   - Consensus divergence: Zebra accepts a block or transaction that the Zcash protocol rejects, or rejects one it accepts, in a way another node or `zcashd` would decide differently. This includes accepting an invalid block into the non-finalized state, even if it is never finalized. Any path to a chain split.
   - Loss or counterfeiting of funds: wrong value balance or pool accounting, a transaction spending more than it has, a double spend accepted, a wrong block subsidy or funding stream, or a bypassed nullifier or anchor check.
   - Remote code execution or memory corruption, in Rust `unsafe` code or across the `libzcash_script` FFI boundary.
-  - Persistent corruption of the state database from network input, so that the node cannot recover without a resync.
+  - Persistent corruption of the state database from any input, network or RPC, so that the node cannot recover without a resync.
   - A remote peer halting the node permanently, for example a crash loop on restart because the triggering data is persisted and replayed.
 - **High**
   - A remote peer, without authentication, crashing the node (a panic, abort, stack overflow, or OOM), hanging it, or growing its memory, disk, or CPU use without bound with cheap input.
@@ -102,7 +102,7 @@ Zebra builds with `panic = "abort"` in both the dev and release profiles, so any
   - A transaction author evicting arbitrary transactions from every node's mempool, keeping the mempool full for free, or making transaction verification cost far more than its fee and size justify.
   - A bypass of a `TrustedPreallocate` bound, a message size limit, a per-IP connection limit, or a rate limit, with demonstrated resource impact.
   - A light client crashing the node, or reading data the RPC or gRPC method is not meant to return.
-  - An RPC client crashing the node or corrupting its state.
+  - An RPC client crashing the node, where a restart recovers it.
 - **Medium**
   - Denial of service bounded to one connection or one peer slot that does not affect other peers or the node's progress, and clears when the peer disconnects or is banned.
   - A crash that needs a non-default compile-time feature, such as `indexer`.
