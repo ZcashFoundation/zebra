@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, env, sync::Arc};
 use sentry::{
     integrations::tracing::EventFilter,
     protocol::{Context, Event, Exception, Log, LogAttribute, Map, Mechanism, Value},
-    ClientInitGuard, ClientOptions, Scope,
+    ClientInitGuard, ClientOptions, Hub, Scope,
 };
 use tracing::Level;
 
@@ -130,15 +130,25 @@ pub(crate) fn init() -> ClientInitGuard {
     guard
 }
 
-pub(crate) fn tracing_layer<S>() -> impl tracing_subscriber::Layer<S>
+/// Returns the Sentry tracing layer, or `None` if [`init`] has not bound an enabled client.
+///
+/// Without a client the layer sends nothing, but it still creates a Sentry span for every
+/// INFO-level span. Must be called after [`init`].
+pub(crate) fn tracing_layer<S>() -> Option<impl tracing_subscriber::Layer<S>>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
-    sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
-        Level::ERROR => EventFilter::Event | EventFilter::Log,
-        Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
-        Level::INFO => EventFilter::Breadcrumb,
-        _ => EventFilter::Ignore,
+    let client_enabled = Hub::current()
+        .client()
+        .is_some_and(|client| client.is_enabled());
+
+    client_enabled.then(|| {
+        sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
+            Level::ERROR => EventFilter::Event | EventFilter::Log,
+            Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
+            Level::INFO => EventFilter::Breadcrumb,
+            _ => EventFilter::Ignore,
+        })
     })
 }
 
@@ -253,14 +263,50 @@ where
 mod tests {
     use std::{
         collections::{BTreeMap, HashMap},
+        sync::Arc,
         time::SystemTime,
     };
 
-    use sentry::protocol::{Log, LogAttribute, LogLevel};
+    use sentry::{
+        protocol::{Log, LogAttribute, LogLevel},
+        Client, ClientOptions, Hub, Scope,
+    };
+    use tracing_subscriber::Registry;
 
     use crate::application::build_version;
 
-    use super::{merge_log_attributes, release_name_from, Metadata};
+    use super::{merge_log_attributes, release_name_from, tracing_layer, Metadata};
+
+    fn tracing_layer_installed_with(client: Option<Client>) -> bool {
+        let hub = Hub::new(client.map(Arc::new), Arc::new(Scope::default()));
+        Hub::run(Arc::new(hub), || tracing_layer::<Registry>().is_some())
+    }
+
+    #[test]
+    fn tracing_layer_requires_a_client() {
+        assert!(!tracing_layer_installed_with(None));
+    }
+
+    #[test]
+    fn tracing_layer_requires_an_enabled_client() {
+        let disabled = Client::from(ClientOptions::default());
+
+        assert!(!tracing_layer_installed_with(Some(disabled)));
+    }
+
+    #[test]
+    fn tracing_layer_is_installed_with_an_enabled_client() {
+        let enabled = Client::from(sentry::apply_defaults(ClientOptions {
+            dsn: Some(
+                "https://public@example.com/1"
+                    .parse()
+                    .expect("hard-coded DSN is valid"),
+            ),
+            ..Default::default()
+        }));
+
+        assert!(tracing_layer_installed_with(Some(enabled)));
+    }
 
     #[test]
     fn metadata_ignores_empty_values() {
