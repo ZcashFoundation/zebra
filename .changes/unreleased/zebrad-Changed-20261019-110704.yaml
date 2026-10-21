@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: A node with no outbound peer connections and no peer addresses to try now resolves its configured initial peers and DNS seeders again and dials them, at most once every 5 minutes, instead of staying without peers until it is restarted. It logs a warning each time it does this ([#11504](https://github.com/ZcashFoundation/zebra/issues/11504)).
+body: A node with no outbound peer connections and no peer addresses to try now resolves its DNS seeders and reloads its configured and cached peers again, at most once every 5 minutes, and retries peers that failed, instead of staying without peers until it is restarted. It logs a warning each time it does this. Zebra also starts with its cached peers when DNS resolution fails, instead of waiting for DNS to succeed ([#11504](https://github.com/ZcashFoundation/zebra/issues/11504)).
 time: 2026-10-19T11:07:04.381225315Z

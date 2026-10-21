@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Changed
-body: The peer crawler started by `init` now resolves and dials the configured initial peers again when it has no outbound connections and no ready candidates for two crawl intervals, at most once every `constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL` (5 minutes). Each attempt waits at most `constants::INITIAL_PEER_RECOVERY_TIMEOUT` for DNS ([#11504](https://github.com/ZcashFoundation/zebra/issues/11504)).
+body: The peer crawler started by `init` now adds the initial peers to the address book again when a crawl finds no outbound connections and no peers ready to connect to, at most once every `constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL` (5 minutes). A `MetaAddrChange::NewInitial` for a failed peer now makes it eligible for another connection attempt after the usual reconnection delay, and `Config::initial_peers` returns the cached peers without retrying failed DNS lookups ([#11504](https://github.com/ZcashFoundation/zebra/issues/11504)).
 time: 2026-10-19T11:07:04.383228275Z
