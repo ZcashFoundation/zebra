@@ -980,21 +980,30 @@ mod tests {
             exception.mechanism.as_ref().and_then(|m| m.handled),
             Some(false)
         );
-        // Optimized builds can inline the panicking closure, so check only that the newest frame
-        // is not part of the panic handling.
-        let newest_frame = exception
+        // Optimized builds can inline the panicking closure and shorten function names, so check
+        // that no frame that handles the panic remains, rather than naming the newest frame. Older
+        // frames, such as the test's own `catch_unwind`, are expected to remain.
+        let frames = &exception
             .stacktrace
             .as_ref()
-            .and_then(|stacktrace| stacktrace.frames.last())
-            .and_then(|frame| frame.function.as_deref())
-            .expect("panic events carry a stack trace");
-        assert!(
-            !newest_frame.starts_with("std::")
-                && !newest_frame.starts_with("core::")
-                && !newest_frame.ends_with("rust_begin_unwind")
-                && !newest_frame.contains("panic_event_from"),
-            "the newest frame is the code that panicked, not the panic handling: {newest_frame}",
-        );
+            .expect("panic events carry a stack trace")
+            .frames;
+        let panic_handling = [
+            "current_stacktrace",
+            "panic_event_from",
+            "rust_begin_unwind",
+            "begin_panic_handler",
+            "rust_panic_with_hook",
+            "panic_with_hook",
+            "panic_fmt",
+        ];
+        assert!(!frames.is_empty(), "the stack keeps the code that panicked");
+        for function in frames.iter().filter_map(|frame| frame.function.as_deref()) {
+            assert!(
+                !panic_handling.iter().any(|name| function.contains(name)),
+                "the stack ends at the code that panicked, without the panic handling: {function}",
+            );
+        }
 
         let Some(Context::Other(panic_context)) = event.contexts.get("panic") else {
             panic!("panic events carry the panic report");
