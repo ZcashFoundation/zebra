@@ -217,6 +217,17 @@ fn classify_connection_error(
         return classify_io_error("tcp_connect", io_error);
     }
 
+    if let Some(connect_error) = error.downcast_ref::<crate::quic::ConnectError>() {
+        use crate::quic::ConnectError::*;
+        return ConnectionErrorLabels {
+            stage: "quic_connect",
+            outcome: match connect_error {
+                Timeout => "timeout",
+                Start(_) | Handshake(_) => "transport",
+            },
+        };
+    }
+
     let Some(handshake_error) = error.downcast_ref::<HandshakeError>() else {
         return ConnectionErrorLabels {
             stage: "unknown",
