@@ -147,16 +147,22 @@ pub(crate) struct StateService {
     /// - the hash of the last valid committed block (the parent of the invalid block).
     finalized_block_write_last_sent_hash: block::Hash,
 
+    /// After a finalized reset, the height the checkpoint verifier restarts from.
+    ///
+    /// Until a block at this height is queued, higher blocks are leftovers of the failed range:
+    /// they can never chain to the reset tip, so they are rejected instead of being queued.
+    finalized_reset_next_height: Option<block::Height>,
+
     /// A set of block hashes that have been sent to the block write task.
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     non_finalized_block_write_sent_hashes: SentHashes,
 
-    /// If an invalid block is sent on `finalized_block_write_sender`
-    /// or `non_finalized_block_write_sender`,
-    /// this channel gets the [`block::Hash`] of the valid tip.
+    /// If an invalid block is sent on `finalized_block_write_sender`,
+    /// this channel gets the height and [`block::Hash`] of the valid finalized tip.
     //
-    // TODO: add tests for finalized and non-finalized resets (#2654)
-    invalid_block_write_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+    // TODO: add tests for non-finalized resets (#2654)
+    invalid_block_write_reset_receiver:
+        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
 
     /// Receives the hash of every non-finalized block that the write task
     /// rejected, so the corresponding entry can be removed from
@@ -436,6 +442,7 @@ impl StateService {
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
             finalized_block_write_last_sent_hash,
+            finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
             non_finalized_rejected_receiver,
@@ -516,11 +523,20 @@ impl StateService {
         let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
         let queued_height = checkpoint_verified.height;
 
-        // If we're close to the final checkpoint, make the block's UTXOs available for
-        // semantic block verification, even when it is in the channel.
-        if self.is_close_to_final_checkpoint(queued_height) {
-            self.non_finalized_block_write_sent_hashes
-                .add_finalized(&checkpoint_verified)
+        // Apply pending resets first, so they can't fail the block queued below.
+        self.drain_finalized_resets();
+
+        if let Some(next_height) = self.finalized_reset_next_height {
+            if queued_height > next_height {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                Self::send_checkpoint_verified_block_error(
+                    (checkpoint_verified, rsp_tx),
+                    CommitBlockError::WriteTaskExited,
+                );
+                return rsp_rx;
+            } else if queued_height == next_height {
+                self.finalized_reset_next_height = None;
+            }
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -587,7 +603,7 @@ impl StateService {
     ///
     /// Returns an error if the block commit channel has been closed.
     pub fn drain_finalized_queue_and_commit(&mut self) {
-        use tokio::sync::mpsc::error::{SendError, TryRecvError};
+        use tokio::sync::mpsc::error::SendError;
 
         // # Correctness & Performance
         //
@@ -595,14 +611,8 @@ impl StateService {
         // because it is called directly from the tokio executor's Future threads.
 
         // If a block failed, we need to start again from a valid tip.
-        match self.invalid_block_write_reset_receiver.try_recv() {
-            Ok(reset_tip_hash) => self.finalized_block_write_last_sent_hash = reset_tip_hash,
-            Err(TryRecvError::Disconnected) => {
-                info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
-                return;
-            }
-            // There are no errors, so we can just use the last block hash we sent
-            Err(TryRecvError::Empty) => {}
+        if !self.drain_finalized_resets() {
+            return;
         }
 
         while let Some(queued_block) = self
@@ -612,6 +622,16 @@ impl StateService {
             let last_sent_finalized_block_height = queued_block.0.height;
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
+
+            // If we're close to the final checkpoint, make the block's UTXOs available for
+            // semantic block verification, even when it is in the channel.
+            // Blocks waiting in the queue are not recorded, so they can be downloaded again.
+            if self.block_write_sender.finalized.is_some()
+                && self.is_close_to_final_checkpoint(last_sent_finalized_block_height)
+            {
+                self.non_finalized_block_write_sent_hashes
+                    .add_finalized(&queued_block.0);
+            }
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
@@ -631,6 +651,40 @@ impl StateService {
                     metrics::gauge!("state.checkpoint.sent.block.height")
                         .set(last_sent_finalized_block_height.0 as f64);
                 };
+            }
+        }
+    }
+
+    /// Applies every reset queued on `invalid_block_write_reset_receiver`: rewinds the last
+    /// sent hash to the finalized tip, forgets the sent hashes, and fails the queued blocks, so
+    /// the rejected block and every block above it can be downloaded again.
+    ///
+    /// Returns `false` if the write task closed the reset channel.
+    fn drain_finalized_resets(&mut self) -> bool {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        loop {
+            match self.invalid_block_write_reset_receiver.try_recv() {
+                Ok((reset_tip_height, reset_tip_hash)) => {
+                    self.finalized_block_write_last_sent_hash = reset_tip_hash;
+                    self.finalized_reset_next_height = Some(
+                        reset_tip_height
+                            .map(|height| (height + 1).expect("committed heights are valid"))
+                            .unwrap_or(block::Height(0)),
+                    );
+                    // During checkpoint sync, sent hashes at or below the tip are also in the db.
+                    self.non_finalized_block_write_sent_hashes = SentHashes::default();
+                    // Queued blocks are above the tip, and their pending responses would keep
+                    // the syncer from downloading them again.
+                    self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
+                }
+                Err(TryRecvError::Empty) => return true,
+                Err(TryRecvError::Disconnected) => {
+                    info!(
+                        "Block commit task closed the block reset channel. Is Zebra shutting down?"
+                    );
+                    return false;
+                }
             }
         }
     }
@@ -1190,6 +1244,7 @@ impl Service<Request> for StateService {
                 }
 
                 // Check the sent non-finalized blocks
+                self.drain_finalized_resets();
                 self.drain_non_finalized_rejected_hashes();
 
                 if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
@@ -1252,6 +1307,8 @@ impl Service<Request> for StateService {
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
 
+                // Rejected blocks must not be reported as sent, or they never get re-downloaded.
+                self.drain_finalized_resets();
                 self.drain_non_finalized_rejected_hashes();
 
                 let known_sent_hash = self.known_sent_hash(&hash);

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Security
+body: "After a checkpoint block fails to commit, the state no longer reports the blocks above the finalized tip as known, so they can be downloaded again ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h))."
+time: 2026-09-28T12:00:00.000000000-03:00
