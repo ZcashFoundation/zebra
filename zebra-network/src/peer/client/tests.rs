@@ -25,7 +25,7 @@ use crate::{
     constants,
     peer::{
         error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ConnectedAddr,
-        ConnectionInfo, ErrorSlot,
+        ConnectionInfo, ErrorSlot, RemoteHandshake,
     },
     peer_set::InventoryChange,
     protocol::{
@@ -382,7 +382,7 @@ where
 
         let connection_info = Arc::new(ConnectionInfo {
             connected_addr: self.connected_addr.unwrap_or(ConnectedAddr::Isolated),
-            remote,
+            remote: RemoteHandshake::Version(remote),
             negotiated_version,
         });
 

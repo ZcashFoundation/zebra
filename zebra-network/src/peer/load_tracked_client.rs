@@ -55,12 +55,12 @@ impl From<Client> for LoadTrackedClient {
 impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
-        self.connection_info.remote.version
+        self.connection_info.remote.version()
     }
 
-    /// Retrieve the services the peer advertised in its `version` message.
+    /// Retrieve the services the peer advertised in its handshake.
     pub fn remote_services(&self) -> PeerServices {
-        self.connection_info.remote.services
+        self.connection_info.remote.services()
     }
 
     /// Returns the shared metadata allocation identifying this connection.

@@ -1020,7 +1020,7 @@ where
         let minimum_version = self.minimum_peer_version.current();
         let bans = self.bans_receiver.borrow();
         self.find_peer_queue.retain(|(key, info)| {
-            !bans.is_banned(key.ip()) && info.remote.version >= minimum_version
+            !bans.is_banned(key.ip()) && info.remote.version() >= minimum_version
         });
         self.ready_services.retain(|key, service| {
             let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;

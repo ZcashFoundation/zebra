@@ -195,7 +195,10 @@ pub use crate::{
     config::{CacheDir, Config},
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
-    peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
+    peer::{
+        Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, RemoteHandshake,
+        SharedPeerError,
+    },
     peer_set::{init, init_with_block_gossip_peer_ips, NetworkResponseFuture, NetworkService},
     policies::RetryLimit,
     protocol::{
@@ -204,13 +207,15 @@ pub use crate::{
     },
 };
 
-/// Types used in the definition of [`Request`], [`Response`], and [`VersionMessage`].
+/// Types used in the definition of [`Request`], [`Response`], [`VersionMessage`],
+/// and [`RemoteHandshake`].
 pub mod types {
     pub use crate::{
         meta_addr::MetaAddr,
         protocol::{
             external::{types::Version, AddrInVersion, Nonce},
             types::PeerServices,
+            v2::handshake::InitRecord,
         },
     };
 

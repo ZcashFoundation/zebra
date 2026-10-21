@@ -104,7 +104,7 @@ async fn negotiate_with_remote_services(
 
     remote_peer.abort();
 
-    result
+    result.map(|(connection_info, _remote_canonical_addr)| connection_info)
 }
 
 /// Returns a [`ChainTip`] that reports the local node as being at the network tip,
@@ -171,7 +171,7 @@ async fn inbound_direct_accepts_non_serving_peer() {
         negotiate_with_remote_services(connected_addr, PeerServices::empty(), NoChainTip).await;
 
     let connection_info = result.expect("inbound handshake with a non-serving peer succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::empty());
+    assert_eq!(connection_info.remote.services(), PeerServices::empty());
 }
 
 /// Isolated handshakes must accept peers that don't advertise `NODE_NETWORK`.
@@ -199,7 +199,7 @@ async fn outbound_direct_accepts_non_serving_peer_at_tip() {
 
     let connection_info =
         result.expect("outbound handshake with a non-serving peer at the network tip succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::empty());
+    assert_eq!(connection_info.remote.services(), PeerServices::empty());
 }
 
 /// Outbound handshakes must accept peers that advertise `NODE_NETWORK`.
@@ -213,7 +213,10 @@ async fn outbound_direct_accepts_serving_peer() {
             .await;
 
     let connection_info = result.expect("outbound handshake with a serving peer succeeds");
-    assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
+    assert_eq!(
+        connection_info.remote.services(),
+        PeerServices::NODE_NETWORK
+    );
 }
 
 /// A rejected non-serving outbound peer must NOT have its advertised services recorded by the
@@ -274,4 +277,55 @@ async fn rejected_non_serving_peer_is_not_recorded_with_services() {
         address_book_rx.try_recv().is_err(),
         "unexpected address book update from a rejected handshake for {book_addr}",
     );
+}
+
+/// The shared accessors return the same fields from a legacy `version` message and a version 2
+/// `init` record.
+#[test]
+fn remote_handshake_accessors_match_both_protocols() {
+    use zebra_chain::block;
+
+    use crate::protocol::{
+        external::{types::*, AddrInVersion},
+        v2::handshake::InitRecord,
+    };
+
+    let version = Version(170_180);
+    let services = PeerServices::NODE_NETWORK;
+    let user_agent = "/Zebra:test/".to_string();
+    let start_height = block::Height(1_000);
+    let addr: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket address");
+
+    let legacy = RemoteHandshake::Version(VersionMessage {
+        version,
+        services,
+        timestamp: chrono::Utc::now(),
+        address_recv: AddrInVersion::new(addr, services),
+        address_from: AddrInVersion::new(addr, services),
+        nonce: Nonce(7),
+        user_agent: user_agent.clone(),
+        start_height,
+        relay: false,
+    });
+    let init_record = InitRecord {
+        version,
+        services,
+        nonce: Nonce(7),
+        user_agent: user_agent.clone(),
+        start_height,
+        relay: false,
+        announce: true,
+        full_ids: true,
+    };
+    let v2 = RemoteHandshake::Init(init_record.clone());
+
+    for remote in [&legacy, &v2] {
+        assert_eq!(remote.version(), version);
+        assert_eq!(remote.services(), services);
+        assert_eq!(remote.user_agent(), user_agent);
+        assert_eq!(remote.start_height(), start_height);
+        assert!(!remote.relay());
+    }
+    assert_eq!(legacy.as_init_record(), None);
+    assert_eq!(v2.as_init_record(), Some(&init_record));
 }
