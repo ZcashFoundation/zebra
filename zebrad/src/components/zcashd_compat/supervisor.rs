@@ -536,8 +536,10 @@ where
         while let Ok(Some(line)) = reader.next_line().await {
             let line = sanitize_child_log_line(&line);
 
+            // zcashd writes errors, warnings, and informational messages to
+            // stderr alike, so the stream does not tell us a line's severity.
             if stream_name == "stderr" {
-                error!(target: "zcashd_compat.zcashd", stream = stream_name, "{line}");
+                warn!(target: "zcashd_compat.zcashd", stream = stream_name, "{line}");
             } else {
                 info!(target: "zcashd_compat.zcashd", stream = stream_name, "{line}");
             }
@@ -976,6 +978,44 @@ mod tests {
             .expect("wait task should not panic");
 
         assert!(was_shutdown);
+    }
+
+    #[tokio::test]
+    async fn child_stderr_is_logged_at_warn() {
+        use std::sync::{Arc, Mutex};
+
+        use tracing::{Event, Level, Subscriber};
+        use tracing_subscriber::{layer::Context, prelude::*, Layer};
+
+        #[derive(Clone, Default)]
+        struct LevelRecorder(Arc<Mutex<Vec<(String, Level)>>>);
+
+        impl<S: Subscriber> Layer<S> for LevelRecorder {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                let metadata = event.metadata();
+                self.0
+                    .lock()
+                    .expect("recorder lock is only held to push or read events")
+                    .push((metadata.target().to_owned(), *metadata.level()));
+            }
+        }
+
+        let recorder = LevelRecorder::default();
+        let _guard =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(recorder.clone()));
+
+        // The current-thread test runtime polls the spawned task on this
+        // thread, so it logs through the thread-local subscriber above.
+        super::spawn_log_task(&b"Warning: deprecated option\n"[..], "stderr")
+            .await
+            .expect("log task should not panic");
+
+        let events = recorder.0.lock().expect("log task has finished").clone();
+        assert_eq!(
+            events,
+            vec![("zcashd_compat.zcashd".to_owned(), Level::WARN)],
+            "zcashd stderr is not only error output, so it must not be logged at ERROR",
+        );
     }
 
     #[test]
