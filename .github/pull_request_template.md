@@ -25,10 +25,10 @@ Delete this section when there is no behavior to show, such as a docs change.
 ## Merge Danger
 
 <!--
-Door: "two-way" if reverting this PR fully undoes it. "One-way" if it acts
+Door: "two-way" if reverting this PR fully undoes it, or "one-way" if it acts
 outside the repository in a way a revert doesn't undo: a database format
 upgrade, a publish, a production deployment, or deleted data or infrastructure.
-"Two-way until the next release" for consensus, peer protocol, crate API,
+"two-way until the next release" for consensus, peer protocol, crate API,
 configuration, RPC, or metrics changes.
 
 Blast radius: what a defect would affect, in a few words, such as "sync",
