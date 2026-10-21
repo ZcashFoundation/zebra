@@ -17,9 +17,11 @@ pub mod arbitrary;
 mod tests;
 
 pub(crate) use addr::connection_limit_key;
+pub(crate) use addr::AddrV2;
 pub use addr::{canonical_peer_addr, canonical_socket_addr, AddrInVersion};
 pub use codec::Codec;
 pub use inv::{InventoryHash, MAX_TX_INV_IN_SENT_MESSAGE};
+pub(crate) use message::MAX_USER_AGENT_LENGTH;
 pub use message::{Message, VersionMessage};
 pub use types::{Nonce, Version};
 
