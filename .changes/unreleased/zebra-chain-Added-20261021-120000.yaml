@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'Added the NU7 Mainnet activation height, `parameters::constants::activation_heights::mainnet::NU7` (3,543,405).'
+time: 2026-10-21T12:00:00.000000000Z

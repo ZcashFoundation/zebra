@@ -53,9 +53,14 @@ fn nu7_peer_versions_support_public_and_configured_activation() {
         Version::min_remote_for_height(&testnet, activation),
         Version(170_180),
     );
+    let activation = block::Height(3_543_405);
     assert_eq!(
-        Version::min_remote_for_height(&Mainnet, block::Height::MAX),
+        Version::min_remote_for_height(&Mainnet, activation.previous().unwrap()),
         Version(170_160),
+    );
+    assert_eq!(
+        Version::min_remote_for_height(&Mainnet, activation),
+        Version(170_190),
     );
 }
 
