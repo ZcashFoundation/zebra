@@ -160,6 +160,11 @@ error is that every attempt dies at the same point with the same message — rea
 zcashd's output above the warning. Do not expect matching uptimes: an identical
 failure measured 425 s then 295 s here, the cache being warm the second time.
 
+When zcashd fails three times in a row without staying up for
+`restart_reset_after` (1 hour by default), Zebra also logs one error per loop,
+`zcashd-compat zcashd keeps failing`, with zcashd's last 20 stderr lines in
+`stderr_tail`. Zebra keeps restarting zcashd after that error.
+
 **A stalled sidecar usually means a stalled Zebra**, since zcashd can never be
 ahead of its only peer. The tell is that the heights are _equal_ rather than
 the sidecar trailing. Run a current `zebrad`: a stale build stalled a migration

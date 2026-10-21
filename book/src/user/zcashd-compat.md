@@ -199,8 +199,9 @@ On start, Zebra:
    logs.
 
 4. supervises it: restarts on unexpected exit with capped exponential
-   backoff, and shuts it down gracefully (SIGTERM, then a configurable grace
-   period) when Zebra stops.
+   backoff, logs an error once zcashd fails three times in a row, and shuts it
+   down gracefully (SIGTERM, then a configurable grace period) when Zebra
+   stops.
 
 The forced peer-pinning arguments are placed _after_ `zcashd_extra_args`
 because zcashd takes the last occurrence of a single-valued command-line

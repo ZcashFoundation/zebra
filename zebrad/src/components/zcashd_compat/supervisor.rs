@@ -1,9 +1,14 @@
 use std::{
     borrow::Cow,
+    collections::VecDeque,
+    fmt::Display,
     net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex, MutexGuard,
+    },
     time::{Duration, Instant},
 };
 
@@ -24,6 +29,15 @@ use super::{effective_zcashd_datadir, ensure_zcashd_datadir, resolve_zcashd_data
 const SUPERVISOR_ACTIVE_METRIC: &str = "zcashd.compat.supervisor.active";
 const SUPERVISOR_DISABLED_METRIC: &str = "zcashd.compat.supervisor.disabled";
 const SUPERVISOR_EXHAUSTED_METRIC: &str = "zcashd.compat.supervisor.exhausted";
+
+/// Consecutive zcashd failures at which the supervisor reports a crash loop.
+const CRASH_LOOP_THRESHOLD: u32 = 3;
+
+/// Number of recent zcashd stderr lines attached to a crash-loop report.
+const STDERR_TAIL_LINES: usize = 20;
+
+/// How long to wait for an exited zcashd's remaining stderr lines to be logged.
+const STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The pid of the currently running supervised zcashd child, or `0` when none.
 ///
@@ -215,6 +229,7 @@ pub async fn run(
     }
 
     let mut consecutive_restart_count = 0u32;
+    let stderr_tail = StderrTail::default();
 
     loop {
         if *shutdown_rx.borrow() {
@@ -223,8 +238,8 @@ pub async fn run(
             return Ok(());
         }
 
-        let mut child = match spawn_zcashd(&config) {
-            Ok(child) => child,
+        let (mut child, stderr_task) = match spawn_zcashd(&config, &stderr_tail) {
+            Ok(spawned) => spawned,
             Err(error) => {
                 consecutive_restart_count = consecutive_restart_count.saturating_add(1);
                 warn!(
@@ -232,6 +247,7 @@ pub async fn run(
                     restart_count = consecutive_restart_count,
                     "failed to spawn zcashd-compat zcashd child, retrying after backoff"
                 );
+                report_crash_loop(consecutive_restart_count, &error, &stderr_tail);
 
                 let restart_delay = restart_backoff_delay(
                     config.restart_backoff,
@@ -278,6 +294,7 @@ pub async fn run(
             }
             ChildOutcome::Exited(status) => {
                 SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
+                drain_child_stderr(stderr_task).await;
                 let child_uptime = child_started_at.elapsed();
                 if should_reset_restart_count(child_uptime, config.restart_reset_after) {
                     info!(
@@ -297,6 +314,7 @@ pub async fn run(
                     child_uptime_secs = child_uptime.as_secs(),
                     "zcashd-compat zcashd child exited before shutdown, restarting"
                 );
+                report_crash_loop(consecutive_restart_count, &status, &stderr_tail);
 
                 let restart_delay = restart_backoff_delay(
                     config.restart_backoff,
@@ -332,8 +350,14 @@ pub async fn run(
                     ));
                 }
                 SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
+                drain_child_stderr(stderr_task).await;
 
                 consecutive_restart_count = consecutive_restart_count.saturating_add(1);
+                report_crash_loop(
+                    consecutive_restart_count,
+                    &"waiting on the child failed",
+                    &stderr_tail,
+                );
                 let restart_delay = restart_backoff_delay(
                     config.restart_backoff,
                     config.restart_backoff_max,
@@ -464,6 +488,23 @@ fn set_supervision_inactive_metrics() {
     metrics::gauge!(SUPERVISOR_ACTIVE_METRIC).set(0.0);
 }
 
+/// Reports a crash loop when consecutive zcashd failures reach [`CRASH_LOOP_THRESHOLD`].
+///
+/// Each failure is already logged at WARN. This logs one ERROR per crash loop,
+/// rather than one per restart, with the cause zcashd wrote to stderr.
+fn report_crash_loop(restart_count: u32, last_failure: &dyn Display, stderr_tail: &StderrTail) {
+    if restart_count != CRASH_LOOP_THRESHOLD {
+        return;
+    }
+
+    error!(
+        restart_count,
+        %last_failure,
+        stderr_tail = ?stderr_tail.lines(),
+        "zcashd-compat zcashd keeps failing; restarting it with backoff"
+    );
+}
+
 /// Returns `true` when a child ran long enough to make previous failures stale.
 fn should_reset_restart_count(child_uptime: Duration, restart_reset_after: Duration) -> bool {
     restart_reset_after != Duration::ZERO && child_uptime >= restart_reset_after
@@ -487,6 +528,8 @@ fn restart_backoff_delay(
 
 /// Spawns `zcashd` with zcashd-compat arguments and connects child output streams.
 ///
+/// Returns the child and the task that logs its stderr into `stderr_tail`.
+///
 /// `kill_on_drop` is intentionally disabled: a dropped child handle (zebrad
 /// panic, supervisor task abort) must not SIGKILL a zcashd that may be flushing
 /// its chainstate and wallet. An abandoned zcashd finishes any SIGTERM-initiated
@@ -498,7 +541,10 @@ fn restart_backoff_delay(
 /// # Errors
 ///
 /// Returns an error if the child process cannot be spawned.
-fn spawn_zcashd(config: &SupervisorConfig) -> Result<Child, Report> {
+fn spawn_zcashd(
+    config: &SupervisorConfig,
+    stderr_tail: &StderrTail,
+) -> Result<(Child, Option<JoinHandle<()>>), Report> {
     let args = config.command_args();
 
     let mut command = Command::new(&config.zcashd_path);
@@ -516,17 +562,25 @@ fn spawn_zcashd(config: &SupervisorConfig) -> Result<Child, Report> {
         .map_err(|err| eyre!("failed to spawn zcashd-compat zcashd process: {err}"))?;
 
     if let Some(stdout) = child.stdout.take() {
-        spawn_log_task(stdout, "stdout");
+        spawn_log_task(stdout, ChildStream::Stdout);
     }
-    if let Some(stderr) = child.stderr.take() {
-        spawn_log_task(stderr, "stderr");
-    }
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(|stderr| spawn_log_task(stderr, ChildStream::Stderr(stderr_tail.clone())));
 
-    Ok(child)
+    Ok((child, stderr_task))
+}
+
+/// A zcashd output stream forwarded into Zebra logs.
+enum ChildStream {
+    Stdout,
+    /// Stderr lines are also kept in a [`StderrTail`] for crash-loop reports.
+    Stderr(StderrTail),
 }
 
 /// Forwards a child output stream into Zebra logs under `zcashd_compat.zcashd`.
-fn spawn_log_task<T>(stream: T, stream_name: &'static str) -> JoinHandle<()>
+fn spawn_log_task<T>(stream: T, child_stream: ChildStream) -> JoinHandle<()>
 where
     T: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
@@ -536,15 +590,51 @@ where
         while let Ok(Some(line)) = reader.next_line().await {
             let line = sanitize_child_log_line(&line);
 
-            // zcashd writes errors, warnings, and informational messages to
-            // stderr alike, so the stream does not tell us a line's severity.
-            if stream_name == "stderr" {
-                warn!(target: "zcashd_compat.zcashd", stream = stream_name, "{line}");
-            } else {
-                info!(target: "zcashd_compat.zcashd", stream = stream_name, "{line}");
+            match &child_stream {
+                // zcashd writes errors, warnings, and informational messages to
+                // stderr alike, so the stream does not tell us a line's severity.
+                ChildStream::Stderr(tail) => {
+                    warn!(target: "zcashd_compat.zcashd", stream = "stderr", "{line}");
+                    tail.push(&line);
+                }
+                ChildStream::Stdout => {
+                    info!(target: "zcashd_compat.zcashd", stream = "stdout", "{line}");
+                }
             }
         }
     })
+}
+
+/// Waits briefly for an exited child's stderr task to log its last lines.
+async fn drain_child_stderr(stderr_task: Option<JoinHandle<()>>) {
+    if let Some(stderr_task) = stderr_task {
+        // A process that inherited the pipe can hold it open after zcashd exits.
+        let _ = timeout(STDERR_DRAIN_TIMEOUT, stderr_task).await;
+    }
+}
+
+/// The most recent zcashd stderr lines, across restarts.
+#[derive(Clone, Debug, Default)]
+struct StderrTail(Arc<Mutex<VecDeque<String>>>);
+
+impl StderrTail {
+    fn push(&self, line: &str) {
+        let mut lines = self.lock();
+        if lines.len() == STDERR_TAIL_LINES {
+            lines.pop_front();
+        }
+        lines.push_back(line.to_owned());
+    }
+
+    fn lines(&self) -> Vec<String> {
+        self.lock().iter().cloned().collect()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, VecDeque<String>> {
+        self.0
+            .lock()
+            .expect("the lock is only held by push and lines, which do not panic")
+    }
 }
 
 /// Returns a sanitized log line with ANSI escape/control noise removed.
@@ -794,14 +884,26 @@ fn is_executable(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::{
+        collections::BTreeMap,
+        fmt,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
 
     use tokio::sync::watch;
+    use tracing::{
+        field::{Field, Visit},
+        Event, Level, Subscriber,
+    };
+    use tracing_subscriber::{layer::Context, prelude::*, Layer};
     use zebra_chain::parameters::NetworkKind;
 
     use super::{
         reject_peer_selection_extra_args, restart_backoff_delay, should_reset_restart_count,
-        wait_for_delay_or_shutdown, SupervisorConfig,
+        wait_for_delay_or_shutdown, ChildStream, StderrTail, SupervisorConfig,
+        CRASH_LOOP_THRESHOLD, STDERR_TAIL_LINES,
     };
 
     fn test_supervisor_config(extra_args: Vec<String>) -> SupervisorConfig {
@@ -980,41 +1082,164 @@ mod tests {
         assert!(was_shutdown);
     }
 
-    #[tokio::test]
-    async fn child_stderr_is_logged_at_warn() {
-        use std::sync::{Arc, Mutex};
+    /// A tracing event captured by [`EventRecorder`].
+    #[derive(Clone, Debug)]
+    struct RecordedEvent {
+        target: String,
+        level: Level,
+        fields: BTreeMap<String, String>,
+    }
 
-        use tracing::{Event, Level, Subscriber};
-        use tracing_subscriber::{layer::Context, prelude::*, Layer};
+    /// Records every event logged through the thread-local default subscriber.
+    #[derive(Clone, Default)]
+    struct EventRecorder(Arc<Mutex<Vec<RecordedEvent>>>);
 
-        #[derive(Clone, Default)]
-        struct LevelRecorder(Arc<Mutex<Vec<(String, Level)>>>);
-
-        impl<S: Subscriber> Layer<S> for LevelRecorder {
-            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-                let metadata = event.metadata();
-                self.0
-                    .lock()
-                    .expect("recorder lock is only held to push or read events")
-                    .push((metadata.target().to_owned(), *metadata.level()));
-            }
+    impl EventRecorder {
+        /// Records events logged on this thread until the guard is dropped.
+        ///
+        /// The current-thread test runtime polls spawned tasks on this thread,
+        /// so their events are recorded too.
+        fn set_default(&self) -> tracing::subscriber::DefaultGuard {
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(self.clone()))
         }
 
-        let recorder = LevelRecorder::default();
-        let _guard =
-            tracing::subscriber::set_default(tracing_subscriber::registry().with(recorder.clone()));
+        fn events(&self) -> Vec<RecordedEvent> {
+            self.0
+                .lock()
+                .expect("the lock is only held to push or clone events")
+                .clone()
+        }
+    }
 
-        // The current-thread test runtime polls the spawned task on this
-        // thread, so it logs through the thread-local subscriber above.
-        super::spawn_log_task(&b"Warning: deprecated option\n"[..], "stderr")
-            .await
-            .expect("log task should not panic");
+    impl<S: Subscriber> Layer<S> for EventRecorder {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            struct FieldVisitor<'a>(&'a mut BTreeMap<String, String>);
 
-        let events = recorder.0.lock().expect("log task has finished").clone();
+            impl Visit for FieldVisitor<'_> {
+                fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+                    self.0.insert(field.name().to_owned(), format!("{value:?}"));
+                }
+            }
+
+            let mut fields = BTreeMap::new();
+            event.record(&mut FieldVisitor(&mut fields));
+
+            self.0
+                .lock()
+                .expect("the lock is only held to push or clone events")
+                .push(RecordedEvent {
+                    target: event.metadata().target().to_owned(),
+                    level: *event.metadata().level(),
+                    fields,
+                });
+        }
+    }
+
+    #[tokio::test]
+    async fn child_stderr_is_logged_at_warn_and_kept_in_tail() {
+        let recorder = EventRecorder::default();
+        let _guard = recorder.set_default();
+        let tail = StderrTail::default();
+
+        super::spawn_log_task(
+            &b"Warning: deprecated option\n"[..],
+            ChildStream::Stderr(tail.clone()),
+        )
+        .await
+        .expect("log task should not panic");
+
+        let levels: Vec<_> = recorder
+            .events()
+            .into_iter()
+            .map(|event| (event.target, event.level))
+            .collect();
         assert_eq!(
-            events,
+            levels,
             vec![("zcashd_compat.zcashd".to_owned(), Level::WARN)],
             "zcashd stderr is not only error output, so it must not be logged at ERROR",
+        );
+        assert_eq!(tail.lines(), vec!["Warning: deprecated option"]);
+    }
+
+    #[test]
+    fn stderr_tail_keeps_only_the_most_recent_lines() {
+        let tail = StderrTail::default();
+
+        for line in 0..STDERR_TAIL_LINES + 5 {
+            tail.push(&line.to_string());
+        }
+
+        let lines = tail.lines();
+        assert_eq!(lines.len(), STDERR_TAIL_LINES);
+        assert_eq!(lines.first().map(String::as_str), Some("5"));
+        assert_eq!(lines.last(), Some(&(STDERR_TAIL_LINES + 4).to_string()),);
+    }
+
+    /// A zcashd that keeps failing produces one ERROR, carrying its stderr,
+    /// however many times the supervisor restarts it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn crash_loop_is_reported_once_with_stderr_tail() {
+        let recorder = EventRecorder::default();
+        let _guard = recorder.set_default();
+        let datadir = tempfile::tempdir().expect("temporary directories can be created in tests");
+
+        // `/bin/sh` rejects the `-datadir=` argument as an unknown option,
+        // writes the error to stderr, and exits, like a zcashd that cannot start.
+        let config = SupervisorConfig {
+            zcashd_path: PathBuf::from("/bin/sh"),
+            zcashd_datadir: datadir.path().to_path_buf(),
+            startup_delay: Duration::ZERO,
+            restart_backoff: Duration::from_millis(1),
+            restart_backoff_max: Duration::from_millis(1),
+            ..test_supervisor_config(Vec::new())
+        };
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let supervisor = tokio::spawn(super::run(config, shutdown_rx));
+
+        let restarts_past_threshold = || {
+            recorder.events().iter().any(|event| {
+                event.fields.get("restart_count") == Some(&(CRASH_LOOP_THRESHOLD + 1).to_string())
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !restarts_past_threshold() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a child that always exits is restarted past the threshold promptly");
+
+        shutdown_tx
+            .send(true)
+            .expect("shutdown receiver exists because the supervisor task owns it");
+        supervisor
+            .await
+            .expect("supervisor task should not panic")
+            .expect("supervisor should shut down cleanly");
+
+        let errors: Vec<_> = recorder
+            .events()
+            .into_iter()
+            .filter(|event| event.level == Level::ERROR)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "one crash loop is reported once: {errors:?}"
+        );
+
+        let fields = &errors[0].fields;
+        assert_eq!(
+            fields.get("restart_count"),
+            Some(&CRASH_LOOP_THRESHOLD.to_string()),
+        );
+        let stderr_tail = fields
+            .get("stderr_tail")
+            .expect("the crash-loop report carries the stderr tail");
+        assert!(
+            stderr_tail.contains("-d"),
+            "the stderr tail includes the shell's option error: {stderr_tail}",
         );
     }
 
