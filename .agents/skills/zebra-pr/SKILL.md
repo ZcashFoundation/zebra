@@ -49,13 +49,11 @@ Use conventional commit format: `type(scope): description`. The title is the mer
 
 ## 4. Write the description
 
-Build the body from `.github/pull_request_template.md` and remove its HTML comments. Write for a reviewer who hasn't opened the code, and scale the body to the change: a one-line workflow fix needs a sentence or two per section, and a new subsystem needs more. For a draft, say what is missing before it is ready for review.
+Build the body from `.github/pull_request_template.md` and remove its HTML comments. Write for a reviewer who hasn't opened the code. The body grows with the change only in Reviewer Notes and Evidence. The links and the Summary stay short for every PR, even a new subsystem. For a draft, say what is missing before it is ready for review.
 
-### Summary
+### Links
 
-Explain the problem, then how Zebra behaves after the change. Add the design choices, changed contracts, and tradeoffs a reviewer can't reconstruct from the diff. When a reviewer might expect the PR to fix something nearby, say what it deliberately leaves unchanged.
-
-Put each link on its own line:
+The body's first lines say how the PR relates to issues and other PRs, so a reviewer sees what it fixes before reading anything else. Put each link on its own line, above `## Summary`:
 
 ```markdown
 Fixes #123
@@ -69,13 +67,26 @@ Depends on #789: review only the last commit until it merges
 - `Closes` is for another PR it replaces, with a one-line reason. GitHub doesn't close a PR through this keyword, so close the replaced PR by hand once this one merges.
 - `Depends on` is for a PR this one is stacked on. Say which commits to review, and describe only this PR's layer.
 
-A maintainer change with no issue explains why it is needed instead.
+A maintainer change with no issue has no links. Its Summary says why the change is needed.
 
-When users must act after the change, give that action its own paragraph: operators updating dashboards that group by a removed metric label, RPC clients handling a new response shape, or crate users replacing a removed API.
+### Summary
 
-When the change follows an external source, link it: a ZIP or protocol specification section, zcashd behavior pinned to a commit, a GitHub or tool changelog, or the commits of code ported from another project.
+Say what changes and why, in at most three sentences or four short bullets. A reviewer reads it to decide what the PR is, not to learn how it works. Name outcomes, such as "each panic becomes its own Sentry issue", not mechanisms, such as how the panic hook builds the event.
 
-Add a visual only for what the file diff doesn't show at a glance, and place it beside the sentence it supports:
+Design choices, tradeoffs, and what users must do go in Reviewer Notes, not here.
+
+### Reviewer Notes
+
+Add only what a reviewer needs and can't get from the diff, as a short paragraph each:
+
+- a design choice or tradeoff a reviewer would otherwise question, with the constraint that forced it
+- what users must do after the change: operators updating dashboards that group by a removed metric label, RPC clients handling a new response shape, or crate users replacing a removed API
+- what the PR deliberately leaves unchanged, when a reviewer might expect it to fix that too
+- the external source the change follows: a ZIP or protocol specification section, zcashd behavior pinned to a commit, a GitHub or tool changelog, or the commits of code ported from another project
+
+Implementation details that matter only to someone editing the code, such as why a value is read from an atomic, belong in a code comment.
+
+Add a visual only when it shows something faster than prose, and place it beside the sentence it supports:
 
 - A pseudocode `diff` when the control flow is the point:
 
@@ -88,14 +99,15 @@ Add a visual only for what the file diff doesn't show at a glance, and place it 
   +    ignore it as unsolicited
   ```
 
+- A Mermaid `stateDiagram` or `sequenceDiagram` for a lifecycle or a message exchange between components. GitHub renders it.
 - A call tree for runtime order, or a shallow file tree for a move or split.
-- A table when reviewers compare three or more options, versions, or settings, such as a workflow variable and where each value sends the build.
+- A table when reviewers compare three or more options, versions, or settings.
 
-Skip visuals for small diffs, renames, version bumps, and prose edits.
+Delete the section when there is nothing to add. Most small PRs don't need it.
 
 ### Evidence
 
-Give a before and after that a reviewer can check, and claim only what it shows. Leave out fmt, clippy, and test-suite runs that CI already reports, and say what wasn't tested and why. What counts as evidence depends on the change:
+Give a before and after that a reviewer can check, and claim only what it shows. Leave out fmt, clippy, and test-suite runs that CI already reports. Under "Not tested", list only what a reviewer might assume was tested, and say why it wasn't. What counts as evidence depends on the change:
 
 - **A fix:** the test that fails without the change and passes with it, named and described by what it checks.
 - **A performance change:** the benchmark or workload, the network and hardware, and before and after numbers for this PR alone. If other unmerged PRs were applied, say which.
@@ -129,6 +141,7 @@ Name the tool and what it did, for example "Claude Code wrote the implementation
 ### Leave out
 
 - file-by-file narration and drafting history
+- review-round history, such as what a reviewer found and how it was fixed
 - follow-up plans, which belong in an issue
 - sections with nothing to add, rather than "None" or "N/A"
 
@@ -140,4 +153,4 @@ Write the body to a file and pass it with `--body-file`, so the template's shape
 gh pr create --repo ZcashFoundation/zebra --base main --title "fix(network): ..." --body-file pr-body.md
 ```
 
-After pushing changes that alter the scope, update the title and description to match the final diff. When a PR this one depends on merges, retarget or rebase and remove the `Depends on` note.
+After pushing changes that alter the scope, update the title and description to match the final diff. Rewrite the affected section rather than appending to it, and keep the Summary within its limit. A fix for a review comment changes the body only when it changes what the PR does or what its evidence shows. Explain the fix in a reply on the review thread. When a PR this one depends on merges, retarget or rebase and remove the `Depends on` note.
