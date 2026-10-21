@@ -573,26 +573,14 @@ fn context_map(values: &BTreeMap<&'static str, String>) -> Map<String, Value> {
 }
 
 fn release_name() -> String {
-    release_name_from(&env_var, ZebradApp::git_commit())
+    release_name_from(&env_var)
 }
 
-fn release_name_from<F>(lookup: &F, git_commit: Option<&str>) -> String
+fn release_name_from<F>(lookup: &F) -> String
 where
     F: Fn(&str) -> Option<String>,
 {
-    if let Some(release) = lookup_value(lookup, "SENTRY_RELEASE") {
-        return release;
-    }
-
-    let version = build_version();
-
-    if version.build.is_empty() {
-        if let Some(git_sha) = git_commit {
-            return format!("{version}+git.{git_sha}");
-        }
-    }
-
-    version.to_string()
+    lookup_value(lookup, "SENTRY_RELEASE").unwrap_or_else(|| build_version().to_string())
 }
 
 #[cfg(test)]
@@ -772,31 +760,16 @@ mod tests {
     fn release_name_prefers_sentry_release_override() {
         let env = HashMap::from([("SENTRY_RELEASE", "zebrad@4.4.0-rc.1".to_string())]);
 
-        let release = release_name_from(&|key| env.get(key).cloned(), Some("deadbeef"));
+        let release = release_name_from(&|key| env.get(key).cloned());
 
         assert_eq!(release, "zebrad@4.4.0-rc.1");
     }
 
     #[test]
-    fn release_name_appends_git_sha_when_build_metadata_is_empty() {
+    fn release_name_defaults_to_build_version() {
         let env: HashMap<&str, String> = HashMap::new();
 
-        let release = release_name_from(&|key| env.get(key).cloned(), Some("deadbeef"));
-
-        let version = build_version();
-        if version.build.is_empty() {
-            assert_eq!(release, format!("{version}+git.deadbeef"));
-        } else {
-            // Tagged build already carries +build metadata; do not double-append.
-            assert_eq!(release, version.to_string());
-        }
-    }
-
-    #[test]
-    fn release_name_falls_back_to_version_without_git_sha() {
-        let env: HashMap<&str, String> = HashMap::new();
-
-        let release = release_name_from(&|key| env.get(key).cloned(), None);
+        let release = release_name_from(&|key| env.get(key).cloned());
 
         assert_eq!(release, build_version().to_string());
     }

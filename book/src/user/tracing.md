@@ -68,6 +68,10 @@ values are read at runtime, so container images do not need CI-specific build
 arguments, and the `ZEBRA_*` environment namespace remains reserved for Zebra
 configuration.
 
+Zebra names its Sentry release after its build version, which `zebrad --version`
+prints, for example `7.0.0-rc.0+git.6d1e414`. Set `SENTRY_RELEASE` to use a
+different name.
+
 Errors and panics include stack traces, with Zebra's own frames marked in-app.
 In the official Docker images, Zebra's source files appear under `/zebra/`.
 Sentry doesn't create code mappings for Rust, so to show suspect commits, connect
