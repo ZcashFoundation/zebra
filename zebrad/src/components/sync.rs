@@ -41,7 +41,7 @@ mod downloads;
 pub mod end_of_support;
 mod gossip;
 mod hedge;
-mod progress;
+pub(crate) mod progress;
 mod recent_sync_lengths;
 mod status;
 
