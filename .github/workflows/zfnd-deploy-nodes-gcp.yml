@@ -270,6 +270,8 @@ jobs:
       log_file: ${{ needs.set-matrix.outputs.log_file }}
       verify: ${{ fromJSON(needs.set-matrix.outputs.verify) }}
       use_reserved_ip: ${{ fromJSON(needs.set-matrix.outputs.use_reserved_ip) }}
+    secrets:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
   build-failure-issue:
     name: Open or update issues for image build failures
