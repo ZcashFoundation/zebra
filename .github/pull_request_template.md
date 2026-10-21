@@ -1,49 +1,47 @@
-<!--
-- Use this template to quickly write the PR description.
-- Skip or delete items that don't fit.
--->
-
-## Motivation
+## Summary
 
 <!--
-- Describe the goals of the PR.
-- If it closes any issues, enumerate them here.
+The problem, and how Zebra behaves after this change, for a reviewer who hasn't
+opened the code. Explain any design choice or tradeoff the diff doesn't show.
+Add a pseudocode, call-tree, or file-tree sketch only when it shows something
+the diff doesn't. A small change needs only a short paragraph.
+
+Put each link on its own line:
+- "Fixes #123" for an issue this PR resolves
+- "Part of #123" for an issue it only partly resolves, with the part it covers
+- "Closes #456" for another PR this one replaces, with a short reason, such as
+  "Closes #456: supersedes it with a smaller fix"
+- "Depends on #789" for a PR this one is stacked on, with the commits to review
 -->
 
-## Solution
-
-<!-- Describe the changes in the PR. -->
-
-### Tests
+## Evidence
 
 <!--
-- Describe how you tested the solution:
-  - Describe any manual or automated tests.
-  - If you could not test the solution, explain why.
+Before and after: a test that failed and now passes, real output, or a
+screenshot. Skip what CI already reports (fmt, clippy, the existing suite).
+Delete this section when there is no behavior to show, such as a docs change.
 -->
 
-### Specifications & References
-
-<!-- Provide any relevant references. -->
-
-### Follow-up Work
+## Merge Danger
 
 <!--
-- If there's anything missing from the solution, describe it here.
-- List any follow-up issues or PRs.
+Door: "two-way" if reverting this PR fully undoes it, or "one-way" if it acts
+outside the repository in a way a revert doesn't undo: a database format
+upgrade, a publish, a production deployment, or deleted data or infrastructure.
+"two-way until the next release" for consensus, peer protocol, crate API,
+configuration, RPC, or metrics changes.
+
+Blast radius: what a defect would affect, in a few words, such as "sync",
+"RPC clients", "state on disk", "release path", or "CI only".
 -->
 
-### AI Disclosure
+**Door:**
 
-<!-- If you used AI tools, let us know — it helps reviewers. -->
+**Blast radius:**
 
-- [ ] No AI tools were used in this PR
-- [ ] AI tools were used: <!-- tool name and what it was used for, e.g., "Claude for test boilerplate" -->
+## AI Disclosure
 
-### PR Checklist
-
-- [ ] The PR title follows [conventional commits](https://www.conventionalcommits.org/) format: `type(scope): description`
-- [ ] The PR follows the [contribution guidelines](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md).
-- [ ] This change was discussed in an issue or with the team beforehand.
-- [ ] The solution is tested.
-- [ ] The documentation and changelogs are up to date.
+<!--
+The tool and what it did, for example "Claude Code wrote the implementation and
+tests; I reviewed both." If you used no AI tools, say so.
+-->
