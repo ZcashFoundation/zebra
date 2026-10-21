@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: The mempool no longer scores V4 transactions that fail transparent script verification within the branch ID grace period around a network upgrade activation, because they may have been signed for the adjacent upgrade; outside that window script failures keep their misbehavior score.
+time: 2026-10-21T23:57:23.850195911+02:00
