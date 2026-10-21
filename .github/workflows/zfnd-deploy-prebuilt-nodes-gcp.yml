@@ -528,8 +528,11 @@ jobs:
   # Sentry only creates bare releases from events, and its GitHub integration never
   # records deploys or release commits, so record both here. Dev deploys come from
   # arbitrary branches and are not recorded.
-  sentry-release:
-    name: Record Sentry release and deploy
+  #
+  # Reading the release name needs Google Cloud credentials, so it runs apart from the
+  # Sentry action, which runs a container image that Sentry publishes by tag.
+  sentry-release-name:
+    name: Read Sentry release name
     needs: [deploy-nodes]
     if: >-
       ${{
@@ -542,14 +545,12 @@ jobs:
     # The Google Cloud identity provider and service accounts are environment variables.
     environment: ${{ inputs.environment }}
     permissions:
-      contents: read # check out the commit for set_commits
       id-token: write # pull the deployed image from Artifact Registry
-    env:
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    outputs:
+      name: ${{ steps.release-name.outputs.name }}
     steps:
       - name: Authenticate to Google Cloud
         id: auth
-        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
@@ -560,7 +561,6 @@ jobs:
       # Ask the deployed image itself, so the release recorded is the one its nodes report.
       - name: Read Sentry release name from the image
         id: release-name
-        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           IMAGE: ${{ inputs.image }}
@@ -574,13 +574,37 @@ jobs:
           fi
           echo "name=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
-      # `set_commits: auto` sends the checked-out HEAD to Sentry, which resolves the
-      # commit range through its GitHub integration, so history is not needed.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+  sentry-release:
+    name: Record Sentry release and deploy
+    needs: [sentry-release-name]
+    if: ${{ !cancelled() && needs.sentry-release-name.result == 'success' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      deployments: read # find the previous successful deploy to this environment
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    steps:
+      # Without an explicit range, Sentry starts from its newest release in any
+      # environment, which is often a dev or test build without commits.
+      - name: Find the previously deployed commit
+        id: previous
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
-        with:
-          ref: ${{ inputs.source_sha }}
-          persist-credentials: false
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          gh api "repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=50" \
+            --jq ".[] | select(.sha != \"${SOURCE_SHA}\") | \"\(.id) \(.sha)\"" |
+          while read -r ID SHA; do
+            STATE=$(gh api "repos/${REPOSITORY}/deployments/${ID}/statuses?per_page=1" --jq '.[0].state')
+            if [ "${STATE}" = "success" ]; then
+              echo "commit=${SHA}" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
 
       - uses: getsentry/action-release@6fb9aeade7061441cf3864e34fbe11a1457ad7dc #v3.7.1
         if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
@@ -588,9 +612,12 @@ jobs:
           SENTRY_ORG: zfnd
           SENTRY_PROJECT: zebrad
         with:
-          release: ${{ steps.release-name.outputs.name }}
+          release: ${{ needs.sentry-release-name.outputs.name }}
           environment: ${{ inputs.environment }}
-          set_commits: auto
+          set_commits: manual
+          repo: ${{ github.repository }}
+          commit: ${{ inputs.source_sha }}
+          previous_commit: ${{ steps.previous.outputs.commit }}
           disable_telemetry: true
 
   failure-issue:

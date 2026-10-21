@@ -255,6 +255,7 @@ jobs:
       }}
     permissions:
       contents: read
+      deployments: read # the Sentry job reads the previous deploy to the environment
       id-token: write
       issues: write
     uses: ./.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
