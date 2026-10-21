@@ -82,7 +82,7 @@ Zebra's own tests show how to drive these in-process: `zebrad/tests/common/` lau
 
 **Fuzzing**
 
-`zebra-fuzz/fuzz/fuzz_targets/` has libFuzzer targets for the wire codec, block and transaction deserialization, script verification, Equihash, addresses, note commitment trees, and the RPC dispatch layer. If the nightly toolchain and `cargo-fuzz` installed during the build, run one from `/src` with `cargo +nightly fuzz run --fuzz-dir zebra-fuzz/fuzz <target> -- -max_total_time=60`; the `--fuzz-dir` flag is required because the fuzz crate is not at the default `fuzz/` path. The dictionaries in `zebra-fuzz/fuzz/dicts/` help. Targets build in release mode with sanitizers, which takes a while on two CPUs.
+`zebra-fuzz/fuzz/fuzz_targets/` has libFuzzer targets for the wire codec, block and transaction deserialization, script verification, Equihash, addresses, note commitment trees, and the RPC dispatch layer. If the nightly toolchain and `cargo-fuzz` installed during the build, run one from `/src` with `cargo +nightly fuzz run --fuzz-dir zebra-fuzz/fuzz <target> -- -max_total_time=60`; the `--fuzz-dir` flag is required because the fuzz crate is not at the default `fuzz/` path. The dictionaries in `zebra-fuzz/fuzz/dicts/` help. Every target is pre-built in release mode with sanitizers under `zebra-fuzz/fuzz/target/`; rebuilding after a source change takes several minutes on two CPUs.
 
 ## How you rate severity
 

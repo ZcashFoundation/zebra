@@ -79,6 +79,12 @@ RUN (rustup toolchain install nightly --profile minimal \
       && cargo +nightly fetch --manifest-path zebra-fuzz/fuzz/Cargo.toml) \
     || echo "WARNING: fuzzing toolchain not installed; cargo fuzz will not work offline"
 
+# Best effort: pre-build every fuzz target, so the agent's first `cargo fuzz run`
+# does not spend minutes compiling on its two CPUs. Bounded so a slow build
+# cannot use up the build time limit.
+RUN timeout 900 cargo +nightly fuzz build --fuzz-dir zebra-fuzz/fuzz \
+    || echo "WARNING: fuzz targets not pre-built; cargo fuzz run will build them"
+
 # A ready-to-use Regtest configuration. Regtest connects to no peers and skips
 # Proof of Work, so the `generate`, `getblocktemplate`, `submitblock` and
 # `sendrawtransaction` RPCs drive the chain. Setting NU7 to height 1 activates
