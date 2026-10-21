@@ -425,13 +425,24 @@ mode_implies_default_profile() {
   esac
 }
 
-resolve_install_profile() {
+# The zcashd-compat Docker modes were removed. Explain that, rather than a
+# generic profile or "unsupported mode" error, when a saved command or old
+# habit asks for one.
+reject_removed_mode() {
   case "$MODE" in
     docker-split-containers | docker-supervised)
-      add_error "--mode $MODE was removed: Zebra no longer publishes zcashd-compat Docker images. Use --mode split-binary or --mode supervised instead."
-      return
+      add_error "mode $MODE was removed: Zebra no longer publishes zcashd-compat Docker images. Use the split-binary or supervised mode instead."
+      return 0
       ;;
   esac
+
+  return 1
+}
+
+resolve_install_profile() {
+  if reject_removed_mode; then
+    return
+  fi
 
   if [[ -z "$INSTALL_PROFILE" ]]; then
     if mode_implies_compat_profile; then
@@ -1011,7 +1022,7 @@ compat_normalize_inputs() {
   case "$MODE" in
     split-binary | supervised | build-from-source) ;;
     "") add_error "mode is required" ;;
-    *) add_error "unsupported mode: $MODE" ;;
+    *) reject_removed_mode || add_error "unsupported mode: $MODE" ;;
   esac
 
   case "$(compat_network_name_lowercase)" in
@@ -2168,7 +2179,7 @@ default_normalize_inputs() {
   case "$MODE" in
     native | docker | build-from-source) ;;
     "") add_error "mode is required" ;;
-    *) add_error "unsupported mode: $MODE" ;;
+    *) reject_removed_mode || add_error "unsupported mode: $MODE" ;;
   esac
 }
 
@@ -2473,6 +2484,11 @@ while (($#)); do
     --zcashd-path)
       require_value "$1" "${2:-}"
       ZCASHD_PATH="$2"
+      shift 2
+      ;;
+    --zcashd-docker-image)
+      require_value "$1" "${2:-}"
+      add_error "--zcashd-docker-image was removed with the docker-split-containers mode: Zebra no longer publishes zcashd-compat Docker images."
       shift 2
       ;;
     --download-binaries)
