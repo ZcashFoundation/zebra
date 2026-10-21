@@ -540,7 +540,7 @@ where
             tracing::trace!(?tx_id, "got state UTXOs");
 
             // Select version-specific async verification pipeline
-            let mut async_checks = dispatch_version_verification(
+            let async_checks = dispatch_version_verification(
                 tx.as_ref(),
                 nu,
                 script_verifier,
@@ -548,20 +548,21 @@ where
                 tx_id,
             )?;
 
-            let check_anchors_and_revealed_nullifiers_query = state
-                .clone()
-                .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+            // The async checks are lazy: nothing reaches a verifier until they are polled. Check
+            // nullifiers and anchors first, because returning early does not remove items that are
+            // already queued in a batch verifier. Include service readiness in the state deadline.
+            let response = tokio::time::timeout(
+                UTXO_LOOKUP_TIMEOUT,
+                state.clone().oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
                     unmined_tx.clone(),
-                ))
-                .map(|res| {
-                    assert!(
-                        res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
-                        "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
-                    );
-                    Ok(())
-                });
-
-            async_checks.push(check_anchors_and_revealed_nullifiers_query);
+                )),
+            )
+            .await
+            .map_err(BoxError::from)??;
+            assert!(
+                response == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
+            );
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
