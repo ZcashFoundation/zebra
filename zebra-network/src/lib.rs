@@ -170,6 +170,10 @@ mod protocol;
 #[cfg(feature = "fuzzing")]
 pub mod protocol;
 
+// Used by the version 2 handshake and peer set, which later commits add.
+#[allow(dead_code)]
+mod quic;
+
 #[allow(unused)]
 pub(crate) use peer_set::PeerSet;
 
