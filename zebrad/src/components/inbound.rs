@@ -634,7 +634,8 @@ impl Service<zn::Request> for Inbound {
                 block_downloads.download_and_verify(hash, advertiser);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            // The size of this response is limited by the `Connection` state machine in the network layer
+            // The size of this response is limited in the network layer, by the legacy `Connection`
+            // state machine and by the version 2 `get-mempool` responder
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),

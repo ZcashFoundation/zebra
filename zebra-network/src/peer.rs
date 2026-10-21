@@ -8,6 +8,7 @@ mod handshake;
 mod load_tracked_client;
 mod minimum_peer_version;
 mod priority;
+pub(crate) mod v2;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(unused_imports)]
@@ -26,7 +27,7 @@ pub use client::Client;
 pub use connection::Connection;
 pub use connector::{Connector, OutboundConnectorRequest};
 pub use error::{ErrorSlot, HandshakeError, PeerError, SharedPeerError};
-pub use handshake::{ConnectedAddr, ConnectionInfo, Handshake, HandshakeRequest};
+pub use handshake::{ConnectedAddr, ConnectionInfo, Handshake, HandshakeRequest, RemoteHandshake};
 pub use load_tracked_client::LoadTrackedClient;
 pub use minimum_peer_version::MinimumPeerVersion;
 #[allow(unused_imports)]

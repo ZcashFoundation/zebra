@@ -115,10 +115,12 @@ proptest = "1.6"
 proptest-derive = "0.5"
 prost = "0.14"
 quote = "1.0.40"
+quinn = { version = "0.11.9", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rand = "0.10"
 rand_chacha = "0.10"
 rand_core = "0.10"
 rayon = "1.10"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }
 reddsa = "0.6.1"
 redjubjub = "0.9"
 regex = "1.11"
@@ -128,6 +130,7 @@ rlimit = "0.10"
 # `bindgen-runtime` is a rocksdb default we must re-enable, or librocksdb-sys fails to
 # load libclang when a second bindgen version is resolved (#11443).
 rocksdb = { version = "0.24", default-features = false, features = ["bindgen-runtime"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "logging"] }
 secp256k1 = "0.33"
 semver = "1.0.26"
 sentry = { version = "0.49", default-features = false }

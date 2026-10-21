@@ -82,6 +82,24 @@ pub enum PeerError {
     #[error("Internal services over capacity")]
     Overloaded,
 
+    /// The remote peer violated the version 2 protocol: the connection is
+    /// closed with the draft's error code, unless the draft prescribes a
+    /// misbehavior penalty instead, in which case it stays open.
+    #[error("Remote peer violated the protocol: {0}")]
+    ProtocolViolation(String),
+
+    /// This node could not encode a value for the version 2 protocol, and
+    /// closed the connection with `INTERNAL_ERROR`: a local bug, not peer
+    /// misbehaviour.
+    #[error("Internal encoding error, connection closed: {0}")]
+    LocalEncodingError(String),
+
+    /// A request stream failed or was reset, including by the peer's `REFUSED`
+    /// reset (there is no separate refused error, and no retry policy keys on
+    /// one yet); the connection stays open.
+    #[error("Request stream failed: {0}")]
+    RequestStreamFailed(String),
+
     /// There are no ready remote peers.
     #[error("No ready peers available")]
     NoReadyPeers,
@@ -151,6 +169,9 @@ impl PeerError {
             PeerError::Serialization(inner) => format!("Serialization({inner})").into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
+            PeerError::ProtocolViolation(_) => "ProtocolViolation".into(),
+            PeerError::LocalEncodingError(_) => "LocalEncodingError".into(),
+            PeerError::RequestStreamFailed(_) => "RequestStreamFailed".into(),
             PeerError::NoReadyPeers => "NoReadyPeers".into(),
             PeerError::InboundTimeout => "InboundTimeout".into(),
             PeerError::ServiceShutdown => "ServiceShutdown".into(),

@@ -17,7 +17,7 @@ use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc, watch},
-    task::JoinSet,
+    task::{JoinHandle, JoinSet},
     time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
@@ -58,6 +58,11 @@ use crate::{
 mod tests;
 
 mod recent_by_ip;
+
+/// The experimental version 2 protocol's listener and initial peer dialing.
+mod v2;
+
+pub use v2::close_v2_endpoint;
 
 /// A successful outbound peer connection attempt or inbound connection handshake.
 ///
@@ -237,11 +242,11 @@ where
         use crate::protocol::external::types::PeerServices;
         let hs = peer::Handshake::builder()
             .with_config(config.clone())
-            .with_inbound_service(inbound_service)
-            .with_inventory_collector(inv_sender)
+            .with_inbound_service(inbound_service.clone())
+            .with_inventory_collector(inv_sender.clone())
             .with_address_book_updater(address_book_updater.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
-            .with_user_agent(user_agent)
+            .with_user_agent(user_agent.clone())
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)
             .finish()
@@ -282,7 +287,7 @@ where
         inv_receiver,
         bans_receiver.clone(),
         address_metrics,
-        MinimumPeerVersion::new(latest_chain_tip, &config.network),
+        MinimumPeerVersion::new(latest_chain_tip.clone(), &config.network),
         None,
     );
     // Also route queued peer set requests as soon as a peer that might serve them is ready.
@@ -301,7 +306,7 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
-        bans_receiver,
+        bans_receiver.clone(),
         block_gossip_peer_ips,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
@@ -316,6 +321,21 @@ where
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
     peer_set.extend_tasks([initial_peers_join.abort_handle()]);
+
+    // 4. The experimental version 2 protocol's inbound and configured outbound peers, when it is
+    //    enabled. It shares the inbound service, inventory channel, chain tip and bans with the
+    //    legacy protocol; its task runs for the life of the peer set, is aborted on shutdown, and
+    //    is a guard because its exit is fatal.
+    let v2_task = v2::start(
+        config.clone(),
+        inbound_service,
+        inv_sender,
+        latest_chain_tip,
+        user_agent,
+        bans_receiver,
+        peerset_tx.clone(),
+    );
+    peer_set.extend_tasks(v2_task.iter().map(JoinHandle::abort_handle));
 
     // 3. Outgoing peers we connect to in response to load.
     let (next_peer_service, mut crawl_service) =
@@ -371,15 +391,15 @@ where
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
     peer_set.extend_tasks([peer_cache_updater_guard.abort_handle()]);
 
-    handle_tx
-        .send(vec![
-            listen_guard,
-            crawl_guard,
-            address_book_updater_guard,
-            peer_cache_updater_guard,
-            poll_peer_set_guard,
-        ])
-        .unwrap();
+    let mut guards = vec![
+        listen_guard,
+        crawl_guard,
+        address_book_updater_guard,
+        peer_cache_updater_guard,
+        poll_peer_set_guard,
+    ];
+    guards.extend(v2_task);
+    handle_tx.send(guards).unwrap();
 
     (peer_set, address_book, misbehavior_tx)
 }

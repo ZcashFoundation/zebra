@@ -263,6 +263,71 @@ fn peer_set_rejects_connections_past_per_ip_limit() {
     });
 }
 
+/// A peer set with version 2 enabled has room for one more peer than the legacy limits allow:
+/// version 2 connections are on top of the legacy ones.
+#[test]
+fn peer_set_with_v2_admits_peers_past_legacy_limit() {
+    let num_ready = peer_set_with_one_peer_past_legacy_limit(true);
+    let legacy = crate::Config {
+        peerset_initial_target_size: 1,
+        ..crate::Config::default()
+    };
+    assert_eq!(
+        num_ready,
+        legacy.peerset_outbound_connection_limit() + legacy.peerset_inbound_connection_limit() + 1,
+    );
+}
+
+/// Without version 2, going past the legacy limits is still a bug the peer set catches.
+#[test]
+#[should_panic(expected = "unexpectedly exceeded configured peer set connection limit")]
+fn peer_set_without_v2_panics_past_legacy_limit() {
+    peer_set_with_one_peer_past_legacy_limit(false);
+}
+
+/// Builds a peer set with one more peer than the legacy connection limits allow, and returns its
+/// number of ready peers.
+fn peer_set_with_one_peer_past_legacy_limit(v2_enabled: bool) -> usize {
+    let config = crate::Config {
+        peerset_initial_target_size: 1,
+        v2_listen_addr: v2_enabled.then(|| "127.0.0.1:0".parse().unwrap()),
+        ..crate::Config::default()
+    };
+    let num_peers =
+        config.peerset_outbound_connection_limit() + config.peerset_inbound_connection_limit() + 1;
+
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version; num_peers],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        // The mock peers all share 127.0.0.1, so lift the per-IP cap out of the way.
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_config(config)
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(num_peers)
+            .build();
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        peer_ready.ready_services.len()
+    })
+}
+
 /// Check that a peer set with an empty inventory registry routes requests to a random ready peer.
 #[test]
 fn peer_set_route_inv_empty_registry() {

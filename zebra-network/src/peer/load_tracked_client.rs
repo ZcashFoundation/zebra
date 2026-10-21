@@ -19,6 +19,7 @@ use crate::{
         canonical_socket_addr,
         types::{PeerServices, Version},
     },
+    protocol::internal::Request,
 };
 
 /// A client service wrapper that keeps track of its load.
@@ -55,17 +56,27 @@ impl From<Client> for LoadTrackedClient {
 impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
-        self.connection_info.remote.version
+        self.connection_info.remote.version()
     }
 
-    /// Retrieve the services the peer advertised in its `version` message.
+    /// Retrieve the services the peer advertised in its handshake.
     pub fn remote_services(&self) -> PeerServices {
-        self.connection_info.remote.services
+        self.connection_info.remote.services()
     }
 
     /// Returns the shared metadata allocation identifying this connection.
     pub(crate) fn connection_info(&self) -> &Arc<ConnectionInfo> {
         &self.connection_info
+    }
+
+    /// Whether this peer's connection can answer `request`.
+    ///
+    /// Version 2 connections cannot answer a mempool snapshot request yet:
+    /// the draft's `get-mempool` is an open-ended subscription with no
+    /// snapshot delimiter. Every other request is served on both protocols.
+    pub fn supports(&self, request: &Request) -> bool {
+        !(matches!(request, Request::MempoolTransactionIds)
+            && self.connection_info.remote.as_init_record().is_some())
     }
 
     /// Returns true if this peer connected directly to us from `ip`.
