@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: '`MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS`, the fork limit on test networks, also available from `constants` ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).'
+time: 2026-10-21T12:00:00.000000000Z
