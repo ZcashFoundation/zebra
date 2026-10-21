@@ -8,6 +8,9 @@ mod handshake;
 mod load_tracked_client;
 mod minimum_peer_version;
 mod priority;
+// Used by the version 2 peer set, which a later commit adds.
+#[allow(dead_code)]
+pub(crate) mod v2;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(unused_imports)]
