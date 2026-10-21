@@ -31,8 +31,8 @@ ZEBRA_DOCKER_RUNTIME_GID=10001
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
-ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.2.0/zcashd-zebra-compat-v1.2.0-linux-x86_64.tar.gz"
-ZCASHD_RUNTIME_ARCHIVE_SHA256="a2d1d9a7cd4c766ea73990fcd17f370bc94eee738e50f1a3b97262db32f2bab7"
+ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.3.0/zcashd-zebra-compat-v1.3.0-linux-x86_64.tar.gz"
+ZCASHD_RUNTIME_ARCHIVE_SHA256="a419147c49b08a15be2f1f1f5fea2801b5228491f62835bfa8caae8b06350c13"
 ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
 # docker-split-containers runs zcashd from the Zebra image, with the hash-pinned
 # sidecar binary above bind-mounted in. The image's runtime user is zebra, so the
