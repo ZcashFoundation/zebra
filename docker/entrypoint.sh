@@ -14,6 +14,12 @@ set -eo pipefail
 : "${ZEBRA_STATE__CACHE_DIR:=${HOME}/.cache/zebra}"
 : "${ZEBRA_RPC__COOKIE_DIR:=${HOME}/.cache/zebra}"
 
+# ZCASHD_COMPAT_ENABLED was the opt-in for the removed zcashd-compat image. Warn
+# rather than exit: saved commands also pass --zcashd-compat, which still works.
+if [[ -n ${ZCASHD_COMPAT_ENABLED:-} ]]; then
+  echo "WARNING: ZCASHD_COMPAT_ENABLED is no longer supported and is ignored; pass --zcashd-compat or set ZEBRA_ZCASHD_COMPAT__ENABLED=true instead" >&2
+fi
+
 # Use setpriv to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   user=$(id -u)
