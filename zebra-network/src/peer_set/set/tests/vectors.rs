@@ -1854,7 +1854,7 @@ fn peer_set_routes_queued_find_before_earlier_block_behind_buffer() {
 }
 
 /// A request held in the `Buffer` must not wait until every queued block request has been routed,
-/// even when all peers are busy serving peers that could take those blocks.
+/// even when every peer that becomes ready is a serving peer that can take those blocks.
 #[test]
 fn peer_set_gives_buffered_request_a_turn_behind_queued_blocks() {
     let (runtime, _init_guard) = zebra_test::init_async();
@@ -1865,10 +1865,6 @@ fn peer_set_gives_buffered_request_a_turn_behind_queued_blocks() {
         let find = find_requests_and_responses()[0].0.clone();
         let (mut peer_set, mut peer_set_guard, addrs, mut handles, _best_tip) =
             peer_set_with_services(&[PeerServices::NODE_NETWORK; 2]);
-        let block_download = |byte| Request::BlockDownload {
-            hash: block::Hash([byte; 32]),
-            advertiser: None,
-        };
 
         // Only the first serving peer can serve these blocks, but the second one keeps the peer
         // set ready, so the blocks queue behind the first one.
@@ -1890,7 +1886,7 @@ fn peer_set_gives_buffered_request_a_turn_behind_queued_blocks() {
                     .ready()
                     .await
                     .expect("the second serving peer keeps the peer set ready")
-                    .call(block_download(byte)),
+                    .call(block_request(byte)),
             );
         }
         // Make the second serving peer busy too, so the peer set has no ready peers.
@@ -1912,28 +1908,28 @@ fn peer_set_gives_buffered_request_a_turn_behind_queued_blocks() {
             .expect("the buffer has room")
             .call(find.clone());
         tokio::time::sleep(Duration::from_millis(10)).await;
-        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
-        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
 
-        // The first queued block takes the newly ready peer, then the held discovery request gets
-        // a turn, before the rest of the queue.
+        // Free one slot on the first peer: the first queued block takes it from the held request.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
         tokio::time::sleep(Duration::from_millis(10)).await;
-        assert_eq!(received_request(&mut handles[0]), Some(block_download(2)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(2)));
+
+        // The held discovery request gets the next ready peer, before the rest of the queue.
+        tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(
             received_request(&mut handles[0]),
             Some(find),
             "the request held by the buffer must not wait for every queued block",
         );
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(3)));
 
         // The rest of the queue is still routed afterwards.
         tokio::time::sleep(Duration::from_millis(10)).await;
-        assert_eq!(received_request(&mut handles[0]), Some(block_download(3)));
-        assert_eq!(received_request(&mut handles[0]), Some(block_download(4)));
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(4)));
         assert_eq!(received_request(&mut handles[1]), Some(Request::Peers));
         assert_eq!(received_request(&mut handles[1]), Some(Request::Peers));
         assert_eq!(received_request(&mut handles[1]), None);
-
-        drop((queued_futs, other_futs));
     });
 }
 
@@ -1966,10 +1962,7 @@ fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
             .ready()
             .await
             .expect("the second serving peer keeps the peer set ready")
-            .call(Request::BlockDownload {
-                hash: block::Hash([2; 32]),
-                advertiser: None,
-            });
+            .call(block_request(2));
         // Make the second serving peer busy too, so the peer set has no ready peers.
         let mut other_futs = Vec::new();
         for _ in 0..2 {
@@ -1994,7 +1987,7 @@ fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
         // for the queued advert.
         assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
         assert!(
-            futures::poll!(std::future::poll_fn(|cx| peer_set.poll_ready(cx))).is_pending(),
+            futures::poll!(peer_set.ready()).is_pending(),
             "the queued advert takes the only ready peer",
         );
         assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
@@ -2004,7 +1997,26 @@ fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
             "the held request must still get the next ready peer",
         );
 
-        drop(other_futs);
+        // The next ready peer is kept for the held request. If that request doesn't use it, like
+        // a poll from the queued request task, the queued block gets it on the next poll.
+        assert!(
+            futures::poll!(peer_set.ready()).is_ready(),
+            "the peer kept for the held request makes the peer set ready",
+        );
+        assert_eq!(peer_set.queued_inv_requests.len(), 1);
+        let waker = peer_set.queued_request_waker.clone();
+        let _ = futures::poll!(std::pin::pin!(waker.notify.notified()));
+        let _poll_fut = peer_set.call(Request::PollPeerSet);
+        assert!(
+            futures::poll!(std::pin::pin!(waker.notify.notified())).is_ready(),
+            "the queued request task must be woken to route the unused peer",
+        );
+        let _ = futures::poll!(peer_set.ready());
+        assert_eq!(
+            received_request(&mut handles[0]),
+            Some(block_request(2)),
+            "the queued block takes the peer the poll left unused",
+        );
     });
 }
 
