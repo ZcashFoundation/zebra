@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: 'Changed `ConnectionInfo::remote` from a `VersionMessage` to the new `RemoteHandshake` enum, which holds either the legacy `version` message or a version 2 protocol `init` record (`types::InitRecord`). Use its `version()`, `services()`, `user_agent()`, `start_height()` and `relay()` accessors for the shared fields, `as_init_record()` for the version 2 record, or match on the enum for the legacy `VersionMessage`.'
+time: 2026-10-16T17:00:00.000000000+02:00

@@ -990,7 +990,7 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
     let info = std::sync::Arc::make_mut(&mut client.connection_info);
     info.early_block_relay = early_block_relay;
     info.remote
-        .services
+        .services_mut()
         .set(PeerServices::NODE_EARLY_BLOCK_RELAY, early_block_relay);
     let (client_tx, client_rx) = mpsc::channel(1);
     client.server_tx = client_tx;
@@ -1042,7 +1042,7 @@ async fn early_block_advert_restricts_delivery_to_negotiated_peers() {
         // A remote service signal alone must not authorize delivery.
         legacy_info
             .remote
-            .services
+            .services_mut()
             .insert(PeerServices::NODE_EARLY_BLOCK_RELAY);
         let discover = stream::iter([
             Ok::<_, BoxError>(Change::Insert(early_addr, early.into())),

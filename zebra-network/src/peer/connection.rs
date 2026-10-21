@@ -1155,7 +1155,7 @@ where
         let compact = &self.compact;
         let mut serving_authorized = true;
         let address = self.connection_info.connected_addr.get_transient_addr();
-        let version = self.connection_info.remote.version;
+        let version = self.connection_info.remote.version();
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
         let delivery = self
@@ -1930,12 +1930,12 @@ where
 
             tracing::info!(
                 drop_connection_probability = format!("{drop_connection_probability:.3}"),
-                remote_user_agent = ?self.connection_info.remote.user_agent,
+                remote_user_agent = ?self.connection_info.remote.user_agent(),
                 negotiated_version = ?self.connection_info.negotiated_version,
                 peer = ?self.metrics_label,
                 last_peer_state = ?self.last_metrics_state,
                 // TODO: remove this detailed debug info once #6506 is fixed
-                remote_height = ?self.connection_info.remote.start_height,
+                remote_height = ?self.connection_info.remote.start_height(),
                 cached_addrs = ?self.cached_addrs.len(),
                 connection_state = ?self.state,
                 "inbound service {error} error, closing connection",

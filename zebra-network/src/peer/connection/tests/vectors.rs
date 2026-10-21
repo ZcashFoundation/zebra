@@ -428,7 +428,7 @@ async fn early_block_getdata_preserves_negotiated_provenance() {
             info.early_block_relay = negotiated;
             // A remote signal alone is not sufficient.
             info.remote
-                .services
+                .services_mut()
                 .insert(crate::types::PeerServices::NODE_EARLY_BLOCK_RELAY);
             let hashes = HashSet::from([block.hash()]);
             let request = if negotiated {
