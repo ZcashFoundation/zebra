@@ -752,19 +752,33 @@ where
     /// checkpoint verifier from advancing. Waiting for the lookahead pause to
     /// clear would deadlock — the pause cannot clear until this block arrives.
     /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
+    /// Blocks that can't get network capacity before the download deadline stay queued for the
+    /// next sync round.
     async fn reobtain_missing_blocks(&mut self) {
         if self.reobtain_hashes.is_empty() {
             return;
         }
 
-        for hash in std::mem::take(&mut self.reobtain_hashes) {
+        let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
+        for hash in hashes.by_ref() {
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
             if let Err(error) = self.downloads.download_and_verify(hash).await {
                 trace!(?hash, ?error, "re-download of missing block not queued");
+                // Any other error means the network failed or wasn't ready before the download
+                // deadline. Keep this block and the rest for the next sync round, rather than
+                // dropping blocks the verifier is waiting for, or waiting out each deadline.
+                if !matches!(
+                    error,
+                    BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
+                ) {
+                    self.reobtain_hashes.insert(hash);
+                    break;
+                }
             }
         }
+        self.reobtain_hashes.extend(hashes);
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -1208,6 +1222,7 @@ where
                 trace!(?height, ?hash, "verified and committed block to state");
 
                 // The block arrived, so forget any re-request bookkeeping for it.
+                self.reobtain_hashes.shift_remove(&hash);
                 self.block_reobtain_retries.remove(&hash);
                 self.utxo_race_drops = 0;
 
@@ -1275,6 +1290,8 @@ where
         // next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`:
         // - `DownloadFailed`/`NotFound`: no peer delivered the block, which wedges the checkpoint
         //   frontier until the verify timeout (#5709).
+        // - `DownloadTimedOut`: no peer delivered the block within the download round. One hedged
+        //   request can already have failed with `NotFound` while its sibling was still waiting.
         // - `BehindTipHeightLimit`: the body was not a usable block for this hash, so the hash is
         //   still missing (GHSA-g95h-hw6g-pvgv). This re-request runs whether or not the peer could
         //   be attributed, and covers the window before a score reaches the address book, which
@@ -1297,6 +1314,7 @@ where
             {
                 Some(*hash)
             }
+            Err(BlockDownloadVerifyError::DownloadTimedOut { hash }) => Some(*hash),
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
             Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
                 if Self::is_utxo_lookup_timeout(e) =>
@@ -1535,6 +1553,10 @@ where
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+            BlockDownloadVerifyError::DownloadTimedOut { .. } => {
+                debug!(error = ?e, "no peer delivered the block within the download round, re-requesting, continuing");
                 false
             }
 
