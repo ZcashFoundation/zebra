@@ -71,7 +71,7 @@ zcashd-compat modes:
 | `supervised`             | Downloads `zebrad`; Zebra downloads hash-pinned `zcashd` at startup and supervises it |
 | `build-from-source`      | Validates source trees and toolchains; prints build and start commands   |
 
-zcashd-compat mode has no Docker install option: Zebra does not publish
+The installer has no Docker mode for zcashd-compat, and Zebra does not publish
 Docker images with the sidecar `zcashd`.
 
 The installer:
@@ -234,8 +234,7 @@ block_gossip_peer_ips = ["10.0.0.2"]
 > `network.max_connections_per_ip` defaults to **1**, so the sidecar can lose
 > that single slot to a proxied public peer and silently never connect. Set
 > `ZEBRA_NETWORK__MAX_CONNECTIONS_PER_IP=8` (or similar) on a Dockerised
-> front, or attach the
-> sidecar to the container network directly.
+> front, or attach the sidecar to the container network directly.
 
 ### Verify the integration
 
