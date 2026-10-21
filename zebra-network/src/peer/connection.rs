@@ -442,7 +442,7 @@ impl Handler {
     /// `cached_addrs` can be empty if the cache is empty. `new_addrs` can be empty or `None` if
     /// there are no new addresses. `response_size` can be zero or `None` if there is no response
     /// needed.
-    fn update_addr_cache<'new>(
+    pub(in crate::peer) fn update_addr_cache<'new>(
         cached_addrs: &mut Vec<MetaAddr>,
         new_addrs: impl IntoIterator<Item = &'new MetaAddr>,
         response_size: impl Into<Option<usize>>,
