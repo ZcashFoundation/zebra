@@ -775,7 +775,7 @@ where
         // Count rejected handshakes by protocol version, without per-peer labels.
         metrics::counter!(
             "zcash.net.peers.obsolete",
-            "remote_version" => remote.version.to_string(),
+            "remote_version" => remote.version.metric_label(),
             "min_version" => min_version.to_string(),
         )
         .increment(1);
@@ -847,8 +847,8 @@ where
     // Count connected handshakes by protocol version, without per-peer labels.
     metrics::counter!(
         "zcash.net.peers.connected",
-        "remote_version" => connection_info.remote.version.to_string(),
-        "negotiated_version" => negotiated_version.to_string(),
+        "remote_version" => connection_info.remote.version.metric_label(),
+        "negotiated_version" => negotiated_version.metric_label(),
         "min_version" => min_version.to_string(),
     )
     .increment(1);
@@ -1131,7 +1131,7 @@ where
                             Err(err) => {
                                 metrics::counter!(
                                     "zebra.net.in.errors",
-                                    "error" => err.to_string(),
+                                    "error" => serialization_error_metric_label(err),
                                 )
                                 .increment(1);
 
@@ -1251,6 +1251,23 @@ where
                 },
             )
             .boxed()
+    }
+}
+
+/// Returns a bounded serialization error label without error details.
+fn serialization_error_metric_label(error: &SerializationError) -> &'static str {
+    match error {
+        SerializationError::Io(_) => "io",
+        SerializationError::Parse(_) => "parse",
+        SerializationError::Utf8Error(_) => "utf8_error",
+        SerializationError::TryFromSliceError(_) => "try_from_slice_error",
+        SerializationError::TryFromIntError(_) => "try_from_int_error",
+        SerializationError::FromHexError(_) => "from_hex_error",
+        SerializationError::Amount { .. } => "amount",
+        SerializationError::BadTransactionBalance => "bad_transaction_balance",
+        SerializationError::Script(_) => "script",
+        SerializationError::Opcode(_) => "opcode",
+        SerializationError::Num(_) => "num",
     }
 }
 
