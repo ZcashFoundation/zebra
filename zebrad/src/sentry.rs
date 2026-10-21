@@ -5,19 +5,20 @@ use std::{
     env,
     panic::PanicHookInfo,
     sync::{
-        atomic::{AtomicU32, Ordering},
-        Mutex, OnceLock, PoisonError,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        Mutex, MutexGuard, OnceLock, PoisonError,
     },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use sentry::{
     integrations::{backtrace::current_stacktrace, tracing::EventFilter},
     protocol::{
-        Context, Event, Exception, Frame, Log, LogAttribute, Map, Mechanism, SessionStatus,
-        Stacktrace, Value,
+        Context, Envelope, Event, Exception, Frame, Log, LogAttribute, Map, Mechanism,
+        SessionAttributes, SessionStatus, SessionUpdate, Stacktrace, Value,
     },
+    types::random_uuid,
     ClientInitGuard, ClientOptions, Hub, Scope,
 };
 use tracing::Level;
@@ -50,11 +51,20 @@ static TIP_HEIGHT: AtomicU32 = AtomicU32::new(UNKNOWN_TIP_HEIGHT);
 /// Above `Height::MAX`, so it is never a real height.
 const UNKNOWN_TIP_HEIGHT: u32 = u32::MAX;
 
+/// The release health session in progress.
+///
+/// Zebra tracks sessions itself instead of through the SDK. The SDK keeps a session per hub, and
+/// a thread's hub keeps the session it copied when the thread first used Sentry, so a session
+/// the SDK started later, such as a daily one, would miss errors reported on other threads.
+static SESSION: Mutex<Option<SessionUpdate<'static>>> = Mutex::new(None);
+
+/// Errors reported from any thread since the session in progress started.
+static SESSION_ERRORS: AtomicU64 = AtomicU64::new(0);
+
 /// How long one release health session lasts before it is ended and replaced.
 ///
-/// Sentry only receives a session that has no errors when it ends, and drops session updates
-/// for sessions that started more than five days earlier. Daily sessions keep long runs, and
-/// runs that are killed, visible in release health.
+/// Sentry drops session updates for sessions that started more than five days earlier, so a
+/// longer session could never report how it ended.
 const SESSION_ROTATION_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Environment and CI metadata attached to all Sentry events.
@@ -127,8 +137,10 @@ impl Metadata {
         let log_attributes = self.log_attributes();
         let options = ClientOptions::new()
             .release(release)
-            .auto_session_tracking(true)
             .before_send(|mut event| {
+                if event.level >= sentry::Level::Error {
+                    SESSION_ERRORS.fetch_add(1, Ordering::Relaxed);
+                }
                 add_chain_tags(&mut event, chain_position());
                 Some(event)
             })
@@ -186,33 +198,110 @@ pub(crate) fn init(network: &Network) {
     let guard = sentry::init(metadata.client_options());
     sentry::configure_scope(|scope| metadata.apply_to_scope(scope));
 
+    if guard.is_enabled() {
+        start_run_sessions();
+    }
+
     *CLIENT_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(guard);
 
     let rotation = thread::Builder::new()
         .name("sentry session rotation".to_owned())
         .spawn(|| loop {
             thread::sleep(SESSION_ROTATION_INTERVAL);
-            rotate_session(&Hub::main());
+            rotate_session();
         });
     if let Err(error) = rotation {
         warn!(?error, "unable to start Sentry session rotation");
     }
 }
 
-/// Ends the current release health session as exited and starts a new one.
+/// Starts the first release health session of this run.
 ///
-/// Session changes must use the main hub. Other threads copy the main hub's session when they
-/// first use Sentry, so a session started on any other hub would only cover that thread.
-fn rotate_session(hub: &Hub) {
-    hub.end_session();
-    hub.start_session();
+/// Every session of the run reports the same random ID as its distinct ID, so Sentry's crash-free
+/// users rate is the share of runs without a crash.
+fn start_run_sessions() {
+    let Some(client) = Hub::current().client() else {
+        return;
+    };
+    let options = client.options();
+    let Some(release) = options.release.clone() else {
+        return;
+    };
+
+    let attributes = SessionAttributes {
+        release,
+        environment: options.environment.clone(),
+        ip_address: None,
+        user_agent: None,
+    };
+
+    start_session(attributes, random_uuid().to_string());
+}
+
+/// Starts a release health session and reports that it started.
+fn start_session(attributes: SessionAttributes<'static>, run_id: String) {
+    let session = SessionUpdate {
+        session_id: random_uuid(),
+        distinct_id: Some(run_id),
+        sequence: None,
+        timestamp: None,
+        started: SystemTime::now(),
+        init: true,
+        duration: None,
+        status: SessionStatus::Ok,
+        errors: 0,
+        attributes,
+    };
+
+    send_session(session.clone());
+    *lock_session() = Some(session);
+}
+
+/// Ends the session in progress with `status`, reports it, and returns it.
+fn end_session(status: SessionStatus) -> Option<SessionUpdate<'static>> {
+    let mut session = lock_session().take()?;
+
+    session.init = false;
+    session.status = status;
+    session.errors = SESSION_ERRORS.swap(0, Ordering::Relaxed);
+    session.timestamp = Some(SystemTime::now());
+    session.duration = session
+        .started
+        .elapsed()
+        .ok()
+        .map(|duration| duration.as_secs_f64());
+
+    send_session(session.clone());
+    Some(session)
+}
+
+/// Ends the session in progress as exited and starts the next session of the same run.
+fn rotate_session() {
+    if let Some(ended) = end_session(SessionStatus::Exited) {
+        let run_id = ended
+            .distinct_id
+            .expect("every session is started with the run ID");
+        start_session(ended.attributes, run_id);
+    }
+}
+
+fn send_session(session: SessionUpdate<'static>) {
+    if let Some(client) = Hub::current().client() {
+        let mut envelope = Envelope::new();
+        envelope.add_item(session);
+        client.send_envelope(envelope);
+    }
+}
+
+fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
+    SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Ends the release health session with `status`, then closes the client.
 ///
 /// Returns `false` if queued events and logs could not be sent before the shutdown timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
-    Hub::main().end_session_with_status(status);
+    end_session(status);
 
     let guard = CLIENT_GUARD
         .lock()
@@ -468,7 +557,7 @@ mod tests {
     use sentry::{
         protocol::{Context, EnvelopeItem, Event, Log, LogAttribute, LogLevel, SessionStatus},
         test::with_captured_envelopes_options,
-        Client, ClientOptions, Hub, Scope, SessionMode,
+        Client, ClientOptions, Hub, Scope,
     };
     use tracing_subscriber::Registry;
     use zebra_chain::{block::Height, parameters::NetworkUpgrade};
@@ -476,8 +565,8 @@ mod tests {
     use crate::application::build_version;
 
     use super::{
-        add_chain_tags, chain_log_attributes, merge_log_attributes, panic_event_from,
-        release_name_from, rotate_session, tracing_layer, Metadata,
+        add_chain_tags, chain_log_attributes, end_session, merge_log_attributes, panic_event_from,
+        release_name_from, rotate_session, start_run_sessions, tracing_layer, Metadata,
     };
 
     fn tracing_layer_installed_with(client: Option<Client>) -> bool {
@@ -659,14 +748,13 @@ mod tests {
     }
 
     #[test]
-    fn client_options_track_application_sessions_and_roundtrip_environment() {
+    fn client_options_leave_sessions_to_zebra_and_roundtrip_environment() {
         let env = HashMap::from([("SENTRY_ENVIRONMENT", "stage".to_string())]);
         let metadata = Metadata::from_lookup(|key| env.get(key).cloned());
 
         let options = metadata.client_options_with_release("zebrad@test".to_string());
 
-        assert!(options.auto_session_tracking);
-        assert_eq!(options.session_mode, SessionMode::Application);
+        assert!(!options.auto_session_tracking);
         assert_eq!(options.environment.as_deref(), Some("stage"));
         assert_eq!(options.release.as_deref(), Some("zebrad@test"));
     }
@@ -812,15 +900,23 @@ mod tests {
     }
 
     #[test]
-    fn rotation_reports_the_ended_session_and_starts_another() {
+    fn errors_from_any_hub_count_toward_the_session_in_progress() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
         let envelopes = with_captured_envelopes_options(
             || {
-                let hub = Hub::current();
-                hub.start_session();
-                rotate_session(&hub);
-                hub.end_session_with_status(SessionStatus::Crashed);
+                start_run_sessions();
+                // Hubs on other threads are copied once, before any later session starts.
+                let earlier_hub = Hub::new_from_top(Hub::current());
+
+                rotate_session();
+                earlier_hub.capture_event(Event {
+                    level: sentry::Level::Error,
+                    ..Default::default()
+                });
+                end_session(SessionStatus::Crashed);
             },
-            ClientOptions::new().release("zebrad@test"),
+            metadata.client_options_with_release("zebrad@test".to_string()),
         );
 
         let sessions: Vec<_> = envelopes
@@ -832,15 +928,27 @@ mod tests {
             })
             .collect();
 
+        let summary: Vec<_> = sessions
+            .iter()
+            .map(|session| (session.init, session.status, session.errors))
+            .collect();
         assert_eq!(
-            sessions.len(),
-            2,
-            "both sessions are reported: {sessions:?}"
+            summary,
+            [
+                (true, SessionStatus::Ok, 0),
+                (false, SessionStatus::Exited, 0),
+                (true, SessionStatus::Ok, 0),
+                (false, SessionStatus::Crashed, 1),
+            ],
         );
-        assert_eq!(sessions[0].status, SessionStatus::Exited);
-        assert_eq!(sessions[1].status, SessionStatus::Crashed);
-        assert_ne!(sessions[0].session_id, sessions[1].session_id);
-        assert!(sessions.iter().all(|session| session.init));
+        assert_eq!(sessions[0].session_id, sessions[1].session_id);
+        assert_eq!(sessions[2].session_id, sessions[3].session_id);
+        assert_ne!(sessions[0].session_id, sessions[2].session_id);
+        assert!(
+            sessions.iter().all(|session| session.distinct_id.is_some()
+                && session.distinct_id == sessions[0].distinct_id),
+            "every session of a run reports the run ID",
+        );
     }
 
     #[test]

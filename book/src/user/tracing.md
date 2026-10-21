@@ -50,7 +50,8 @@ When Sentry is active, Zebra sends:
   including a log each time the best chain tip enters a different network upgrade;
 - release health sessions: each `zebrad` run is split into daily sessions, and
   the last one ends as exited on a clean shutdown and as crashed on a panic or a
-  fatal error.
+  fatal error. Every session of a run has the same user ID, so Sentry's
+  crash-free users rate is the share of runs without a crash.
 
 Events and logs carry the `chain.network` tag, and once the node has a chain tip,
 `chain.height` and `chain.network_upgrade`.
