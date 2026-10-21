@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed Sentry dropping queued events and logs when `zebrad` shuts down, and titled Sentry panic issues with the panic message and a stack trace instead of a generic message, so that different panics are reported as different issues.
+time: 2026-10-21T08:10:33.512939511Z

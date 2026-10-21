@@ -99,7 +99,7 @@ impl RuntimeRun for Runtime {
                 info!("shutting down Zebra");
             }
             Err(error) => {
-                warn!(?error, "shutting down Zebra due to an error");
+                error!(?error, "shutting down Zebra due to an error");
                 APPLICATION.shutdown(Shutdown::Forced);
             }
         }

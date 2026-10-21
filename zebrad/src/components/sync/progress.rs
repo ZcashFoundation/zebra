@@ -21,6 +21,10 @@ use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
 use crate::components::{health::ChainTipMetrics, sync::SyncStatus};
 
+/// The tracing target of the sync progress logs.
+#[cfg_attr(not(feature = "sentry"), allow(dead_code))]
+pub(crate) const LOG_TARGET: &str = module_path!();
+
 /// The amount of time between progress logs.
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -114,6 +118,8 @@ pub async fn show_block_chain_progress(
     // The last time we logged an update.
     let mut last_log_time = Instant::now();
 
+    let mut last_network_upgrade = None;
+
     #[cfg(feature = "progress-bar")]
     let block_bar = howudoin::new().label("Blocks");
     let mut is_chain_metrics_chan_closed = false;
@@ -133,6 +139,24 @@ pub async fn show_block_chain_progress(
                 .best_tip_height()
                 .expect("unexpected empty state: estimate requires a block height");
             let network_upgrade = NetworkUpgrade::current(&network, current_height);
+
+            #[cfg(feature = "sentry")]
+            crate::sentry::record_tip_height(current_height);
+
+            if let Some(previous_network_upgrade) = last_network_upgrade
+                .replace(network_upgrade)
+                .filter(|previous| *previous != network_upgrade)
+            {
+                info!(
+                    ?current_height,
+                    ?network_upgrade,
+                    ?previous_network_upgrade,
+                    activation_height = network_upgrade
+                        .activation_height(&network)
+                        .map(|height| height.0),
+                    "best chain tip changed network upgrade",
+                );
+            }
 
             // Send progress reports for block height
             //

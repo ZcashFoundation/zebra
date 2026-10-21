@@ -43,6 +43,18 @@ until you configure an OpenTelemetry endpoint using the tracing config or the
 Official Zebra release builds include Sentry support. Sentry is only activated
 when the `SENTRY_DSN` environment variable is set.
 
+When Sentry is active, Zebra sends:
+
+- errors and panics as Sentry issues;
+- warnings, errors, and the once-a-minute sync progress logs as Sentry Logs,
+  including a log each time the best chain tip enters a different network upgrade;
+- release health sessions: each `zebrad` run is split into daily sessions, and
+  the last one ends as exited on a clean shutdown and as crashed on a panic or a
+  fatal error.
+
+Events and logs carry the `chain.network` tag, and once the node has a chain tip,
+`chain.height` and `chain.network_upgrade`.
+
 You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
 attached to Sentry events. Zebra also tags events with the git SHA when
 available, preferring the runtime `GITHUB_SHA` (full commit SHA on GitHub
