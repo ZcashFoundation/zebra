@@ -137,10 +137,14 @@ impl Metadata {
         let log_attributes = self.log_attributes();
         let options = ClientOptions::new()
             .release(release)
+            // Suspect commits need in-app stack frames. Only ERROR events and panics are sent as
+            // events, so capturing the stack stays off the common paths.
+            .attach_stacktrace(true)
             .before_send(|mut event| {
                 if event.level >= sentry::Level::Error {
                     SESSION_ERRORS.fetch_add(1, Ordering::Relaxed);
                 }
+                mark_zebra_frames_in_app(&mut event);
                 add_chain_tags(&mut event, chain_position());
                 Some(event)
             })
@@ -460,6 +464,52 @@ fn without_panic_handling_frames(mut stacktrace: Stacktrace) -> Stacktrace {
     stacktrace
 }
 
+/// Marks the stack frames from Zebra's crates as in-app, and every other frame as not in-app.
+///
+/// The SDK classifies frames by function name, but release builds keep only line tables, so
+/// inlined frames lose their module path. When no frame matches, the SDK marks every frame
+/// in-app. Every frame keeps its source file, so Zebra classifies frames by path instead.
+fn mark_zebra_frames_in_app(event: &mut Event<'static>) {
+    let exception_stacktraces = event
+        .exception
+        .values
+        .iter_mut()
+        .filter_map(|exception| exception.stacktrace.as_mut());
+    let thread_stacktraces = event
+        .threads
+        .values
+        .iter_mut()
+        .filter_map(|thread| thread.stacktrace.as_mut());
+
+    for stacktrace in exception_stacktraces
+        .chain(thread_stacktraces)
+        .chain(event.stacktrace.as_mut())
+    {
+        for frame in &mut stacktrace.frames {
+            frame.in_app = Some(frame.abs_path.as_deref().is_some_and(is_zebra_source));
+        }
+    }
+}
+
+/// Returns whether `path` is a source file in one of Zebra's crates.
+///
+/// A crate's sources are in `<crate directory>/src/`. The directory is the crate name in a
+/// checkout, such as `/zebra/zebrad/src/` in the Docker images, and the crate name and version
+/// in the Cargo registry, such as `zebra-chain-14.0.0/src/`.
+fn is_zebra_source(path: &str) -> bool {
+    let is_zebra_crate = |dir: &str| {
+        dir == "zebrad"
+            || ["zebrad-", "zebra-", "tower-batch-control", "tower-fallback"]
+                .iter()
+                .any(|prefix| dir.starts_with(prefix))
+    };
+
+    path.split(['/', '\\'])
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|dirs| dirs[1] == "src" && is_zebra_crate(dirs[0]))
+}
+
 /// Merge `attrs` into `log.attributes`, letting existing keys win.
 ///
 /// Tracing event fields are already present on the [`Log`] when the
@@ -559,17 +609,17 @@ mod tests {
             Context, EnvelopeItem, Event, Frame, Log, LogAttribute, LogLevel, SessionStatus,
             Stacktrace,
         },
-        test::with_captured_envelopes_options,
+        test::{with_captured_envelopes_options, with_captured_events_options},
         Client, ClientOptions, Hub, Scope,
     };
-    use tracing_subscriber::Registry;
+    use tracing_subscriber::{layer::SubscriberExt, Registry};
     use zebra_chain::{block::Height, parameters::NetworkUpgrade};
 
     use crate::application::build_version;
 
     use super::{
-        add_chain_tags, chain_log_attributes, end_session, merge_log_attributes, panic_event_from,
-        release_name_from, rotate_session, start_run_sessions, tracing_layer,
+        add_chain_tags, chain_log_attributes, end_session, is_zebra_source, merge_log_attributes,
+        panic_event_from, release_name_from, rotate_session, start_run_sessions, tracing_layer,
         without_panic_handling_frames, Metadata,
     };
 
@@ -1057,5 +1107,92 @@ mod tests {
                 "zebra_network::open_listener",
             ],
         );
+    }
+
+    /// Returns the frames Sentry uses for suspect commits: the exception stack traces, or the
+    /// current thread's stack trace when no exception has one.
+    fn suspect_commit_stacktrace<'a>(event: &'a Event<'static>) -> Option<&'a Stacktrace> {
+        event
+            .exception
+            .iter()
+            .find_map(|exception| exception.stacktrace.as_ref())
+            .or_else(|| {
+                event
+                    .threads
+                    .iter()
+                    .find(|thread| thread.current)
+                    .and_then(|thread| thread.stacktrace.as_ref())
+            })
+    }
+
+    #[test]
+    fn error_events_carry_in_app_frames_for_suspect_commits() {
+        let metadata = Metadata::default();
+
+        let events = with_captured_events_options(
+            || {
+                let layer = tracing_layer().expect("the test client is enabled");
+                let subscriber = Registry::default().with(layer);
+
+                tracing::subscriber::with_default(subscriber, || {
+                    tracing::error!("block commit failed");
+
+                    let error = std::io::Error::other("disk full");
+                    tracing::error!(
+                        error = &error as &dyn std::error::Error,
+                        "block commit failed"
+                    );
+                });
+            },
+            // `sentry::init` adds the default integrations, which capture and classify stacks.
+            sentry::apply_defaults(metadata.client_options_with_release("zebrad@test".to_string())),
+        );
+
+        assert_eq!(events.len(), 2, "both ERROR events are sent: {events:?}");
+
+        for event in &events {
+            let frames = &suspect_commit_stacktrace(event)
+                .expect("ERROR events carry a stack trace")
+                .frames;
+            let in_app_frames: Vec<_> = frames
+                .iter()
+                .filter(|frame| frame.in_app == Some(true))
+                .collect();
+
+            assert!(
+                in_app_frames.iter().any(|frame| frame
+                    .abs_path
+                    .as_deref()
+                    .is_some_and(|path| path.ends_with("zebrad/src/sentry.rs"))),
+                "the code that logged the error is an in-app frame with its source path: {frames:?}",
+            );
+            assert!(
+                in_app_frames.iter().all(|frame| frame
+                    .abs_path
+                    .as_deref()
+                    .is_some_and(|path| path.contains("zebrad/src/"))),
+                "dependency frames are not in-app: {in_app_frames:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn zebra_sources_are_recognized_in_checkouts_and_the_registry() {
+        for zebra_path in [
+            "/zebra/zebrad/src/components/sync.rs",
+            "/home/user/zebra/zebra-network/src/peer_set/initialize.rs",
+            "/root/.cargo/registry/src/index.crates.io-0000/zebra-chain-14.0.0/src/block.rs",
+            "/zebra/tower-batch-control/src/service.rs",
+        ] {
+            assert!(is_zebra_source(zebra_path), "{zebra_path} is Zebra's");
+        }
+
+        for other_path in [
+            "/root/.cargo/registry/src/index.crates.io-0000/tokio-1.47.0/src/runtime/task.rs",
+            "/rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs",
+            "/zebra/zebrad/build.rs",
+        ] {
+            assert!(!is_zebra_source(other_path), "{other_path} is not Zebra's");
+        }
     }
 }
