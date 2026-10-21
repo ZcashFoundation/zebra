@@ -2215,7 +2215,7 @@ default_collect_platform_checks() {
   # The plain Zebra image publishes an arm64 manifest, so only the native
   # download path is pinned to amd64 here.
   if [[ "$MODE" == "native" ]]; then
-    collect_host_arch_check ""
+    collect_host_arch_check
   fi
 }
 
