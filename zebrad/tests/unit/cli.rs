@@ -182,12 +182,12 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    // The output should only contain the version
+    // The output should only contain the build version, which deployment tooling parses
     output.output_check(
-        is_zebrad_version,
+        |stdout| stdout.trim() == format!("zebrad {}", zebrad::application::build_version()),
         &output.output.stdout,
         "stdout",
-        "a valid zebrad semantic version",
+        "contain only the zebrad build version",
     )?;
 
     Ok(())

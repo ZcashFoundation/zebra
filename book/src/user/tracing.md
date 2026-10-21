@@ -55,6 +55,10 @@ values are read at runtime, so container images do not need CI-specific build
 arguments, and the `ZEBRA_*` environment namespace remains reserved for Zebra
 configuration.
 
+Zebra names its Sentry release after its build version, which `zebrad --version`
+prints, for example `7.0.0-rc.0+git.6d1e414`. Set `SENTRY_RELEASE` to use a
+different name.
+
 [tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter
 [flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.flamegraph

@@ -48,6 +48,9 @@ lazy_static::lazy_static! {
 /// - the number of commits since the last version tag, and
 /// - the git commit.
 ///
+/// Otherwise, includes the git commit alone if it is known, such as in Docker images, which are
+/// built without `.git`.
+///
 /// For details, see <https://semver.org/>
 pub fn build_version() -> Version {
     // CARGO_PKG_VERSION is always a valid SemVer 2.0 version.
@@ -61,7 +64,23 @@ pub fn build_version() -> Version {
         )
     });
 
-    vergen_build_version().unwrap_or(fallback_version)
+    with_git_commit(
+        vergen_build_version().unwrap_or(fallback_version),
+        ZebradApp::git_commit(),
+    )
+}
+
+/// Adds `git.<git_commit>` build metadata to `version`, if it has no build metadata.
+fn with_git_commit(mut version: Version, git_commit: Option<&str>) -> Version {
+    if version.build.is_empty() {
+        if let Some(build) =
+            git_commit.and_then(|commit| BuildMetadata::new(&format!("git.{commit}")).ok())
+        {
+            version.build = build;
+        }
+    }
+
+    version
 }
 
 /// Returns the `zebrad` version from this build, if available from `vergen`.
@@ -572,4 +591,37 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
 
     ZebradApp::run(app_cell, args);
     process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use semver::Version;
+
+    use super::with_git_commit;
+
+    #[test]
+    fn with_git_commit_adds_commit_without_build_metadata() {
+        let version = with_git_commit(Version::new(7, 0, 0), Some("6d1e414"));
+
+        assert_eq!(version.to_string(), "7.0.0+git.6d1e414");
+    }
+
+    #[test]
+    fn with_git_commit_keeps_git_describe_metadata() {
+        let version =
+            Version::parse("7.0.0-rc.0+12.g6d1e414").expect("hard-coded version is valid");
+
+        assert_eq!(with_git_commit(version.clone(), Some("6d1e414")), version);
+    }
+
+    #[test]
+    fn with_git_commit_skips_missing_or_invalid_commits() {
+        let version = Version::new(7, 0, 0);
+
+        assert_eq!(with_git_commit(version.clone(), None), version);
+        assert_eq!(
+            with_git_commit(version.clone(), Some("not a commit")),
+            version
+        );
+    }
 }
