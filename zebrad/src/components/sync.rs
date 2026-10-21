@@ -760,30 +760,25 @@ where
         }
 
         let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
-        while let Some(hash) = hashes.next() {
+        for hash in hashes.by_ref() {
             // The block was removed from the in-flight set when its download
-            // failed, so this re-queues it.
-            match self.downloads.download_and_verify(hash).await {
-                Ok(()) => {}
-                // The block is already being handled.
-                Err(error @ BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
-                    trace!(?hash, ?error, "re-download of missing block already queued");
-                }
-                // The network didn't have capacity before the download deadline. Keep this block
-                // and the rest for the next sync round, rather than dropping blocks the verifier is
-                // waiting for, or waiting out a deadline for each of them.
-                Err(error) => {
-                    debug!(
-                        ?hash,
-                        ?error,
-                        "re-download of missing block not queued, retrying later"
-                    );
+            // failed, so this re-queues it. A residual duplicate/queue error is
+            // benign — it means the block is already being handled.
+            if let Err(error) = self.downloads.download_and_verify(hash).await {
+                trace!(?hash, ?error, "re-download of missing block not queued");
+                // Any other error means the network failed or wasn't ready before the download
+                // deadline. Keep this block and the rest for the next sync round, rather than
+                // dropping blocks the verifier is waiting for, or waiting out each deadline.
+                if !matches!(
+                    error,
+                    BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
+                ) {
                     self.reobtain_hashes.insert(hash);
-                    self.reobtain_hashes.extend(hashes);
-                    return;
+                    break;
                 }
             }
         }
+        self.reobtain_hashes.extend(hashes);
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
