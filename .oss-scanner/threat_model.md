@@ -101,11 +101,11 @@ Zebra builds with `panic = "abort"` in both the dev and release profiles, so any
   - A remote peer stalling the chain sync indefinitely, eclipsing the node, or filling the address book so the node only talks to attacker peers, beyond what the documented connection and address limits allow.
   - A transaction author evicting arbitrary transactions from every node's mempool, keeping the mempool full for free, or making transaction verification cost far more than its fee and size justify.
   - A bypass of a `TrustedPreallocate` bound, a message size limit, a per-IP connection limit, or a rate limit, with demonstrated resource impact.
-  - A light client crashing the node, or reading data the RPC or gRPC method is not meant to return.
+  - A light client crashing the node through an RPC that lightwalletd or Zaino passes through, or reading data an RPC or gRPC method is not meant to return.
   - An RPC client crashing the node, where a restart recovers it.
 - **Medium**
   - Denial of service bounded to one connection or one peer slot that does not affect other peers or the node's progress, and clears when the peer disconnects or is banned.
-  - A crash that needs a non-default compile-time feature, such as `indexer`.
+  - A crash through the experimental lightwalletd-compatible gRPC server, or one that needs a non-default compile-time feature, such as `indexer`.
   - Incorrect, non-consensus data returned by an RPC (a wrong balance from the address index, or wrong `getblocktemplate` fields a miner would use), where nodes still agree on the chain.
   - Leaking the node's own addresses, peer list, or configuration beyond what the protocol already reveals.
   - Secrets (the RPC cookie) written to logs at info level or above, or readable by other local users.

@@ -72,8 +72,8 @@ RUN timeout 900 cargo nextest run --locked --workspace --no-fail-fast \
 
 # Best effort: the libFuzzer harnesses in zebra-fuzz/fuzz are a separate cargo
 # workspace that needs nightly and cargo-fuzz. Fetch what they need so they can
-# be built offline; nothing here fails the build. The fuzz workspace's own
-# Cargo.lock is not kept in step with the node crates, so it is not --locked.
+# be built offline; nothing here fails the build. The fetch is not --locked, so
+# a fuzz Cargo.lock that drifts from the node crates still resolves.
 RUN (rustup toolchain install nightly --profile minimal \
       && cargo install --locked cargo-fuzz \
       && cargo +nightly fetch --manifest-path zebra-fuzz/fuzz/Cargo.toml) \
