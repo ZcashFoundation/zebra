@@ -689,6 +689,26 @@ pub trait Rpc {
     #[method(name = "z_validateaddress")]
     async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
 
+    /// Converts a transparent P2PKH address to a ZIP 320 TEX address.
+    ///
+    /// zcashd reference: [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)
+    /// method: post
+    /// tags: util
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: (string, required) The transparent P2PKH address to convert.
+    ///
+    /// # Notes
+    ///
+    /// - Addresses that don't decode, or are for another network, return error `-5`; addresses
+    ///   that decode but aren't transparent P2PKH return error `-8`. This follows zcashd for the
+    ///   common cases, but not exactly: zcashd returns `-8` for Sprout addresses and for unified
+    ///   addresses with unknown receivers, where Zebra returns `-5`, because Zebra's
+    ///   `primitives::Address` can't represent them at all. Zallet differs from both.
+    #[method(name = "z_converttex")]
+    async fn z_convert_tex(&self, address: String) -> Result<String>;
+
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
     /// Currently returns the ZIP 317 marginal fee for the next block, with `version` 0:
@@ -3227,6 +3247,39 @@ where
         z_validate_address(network, raw_address)
     }
 
+    async fn z_convert_tex(&self, address: String) -> Result<String> {
+        use zcash_address::{ToAddress, ZcashAddress};
+        use zebra_chain::{parameters::NetworkKind, primitives};
+
+        let address = address
+            .parse::<ZcashAddress>()
+            .ok()
+            .and_then(|address| address.convert::<primitives::Address>().ok())
+            // zcashd decodes against the active chain params, so a wrong-network address is
+            // just "invalid". Testnet and Regtest share an encoding; only Mainnet differs.
+            .filter(|address| {
+                (address.network() == NetworkKind::Mainnet)
+                    == (self.network.kind() == NetworkKind::Mainnet)
+            })
+            .ok_or("Invalid address")
+            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+        let primitives::Address::Transparent(Address::PayToPublicKeyHash { pub_key_hash, .. }) =
+            address
+        else {
+            return Err("Address is not a transparent p2pkh address")
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        };
+
+        // Encode for the configured network, not the parsed address's network: Testnet and
+        // Regtest share transparent address prefixes, so a `tm...` input always decodes as
+        // Testnet, but their TEX HRPs differ (`textest` vs `texregtest`).
+        //
+        // Encode via `zcash_address`: `transparent::Address`'s `Display` impl Base58Check-encodes
+        // the `Tex` variant with the P2PKH version bytes, which would yield a `t1...` string.
+        Ok(ZcashAddress::from_tex(self.network.kind().into(), pub_key_hash).encode())
+    }
+
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse> {
         const VERSION: u32 = 0;
 
@@ -4107,9 +4160,25 @@ pub trait ValidateAddresses {
             .addresses()
             .iter()
             .map(|address| {
-                address
+                let address: Address = address
                     .parse()
-                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+                // Reject TEX addresses, which parse but can never match an index entry.
+                //
+                // Transparent outputs are only ever classified as P2PKH or P2SH by
+                // `Output::address()`, since the output script has no TEX discriminator, and the
+                // index keys on the `Address` variant as well as the hash. So a TEX address would
+                // silently return an empty result rather than the balance of the P2PKH address it
+                // was derived from. zcashd's address index never sees TEX addresses at all, so an
+                // error is also the compatible behaviour here.
+                if matches!(address, Address::Tex { .. }) {
+                    return Err("TEX addresses are not supported by the address index, \
+                         use the transparent P2PKH address they were derived from")
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey);
+                }
+
+                Ok(address)
             })
             .collect::<Result<_>>()?;
 

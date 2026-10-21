@@ -403,7 +403,7 @@ impl Application for ZebradApp {
         // environment variable.
         if env::var_os("SENTRY_DSN").is_some() {
             #[cfg(feature = "sentry")]
-            let guard = crate::sentry::init();
+            crate::sentry::init(&config.network.network);
 
             std::panic::set_hook(Box::new(move |panic_info| {
                 let panic_report = panic_hook.panic_report(panic_info);
@@ -411,10 +411,10 @@ impl Application for ZebradApp {
 
                 #[cfg(feature = "sentry")]
                 {
-                    let event = crate::sentry::panic_event_from(panic_report);
+                    let event = crate::sentry::panic_event_from(panic_info, panic_report);
                     sentry::capture_event(event);
 
-                    if !guard.close(None) {
+                    if !crate::sentry::end(sentry::protocol::SessionStatus::Crashed) {
                         warn!("unable to flush sentry events during panic");
                     }
                 }
@@ -544,6 +544,18 @@ impl Application for ZebradApp {
         let _ = stderr().lock().flush();
 
         let shutdown_result = self.state().components().shutdown(self, shutdown);
+
+        #[cfg(feature = "sentry")]
+        {
+            let status = match shutdown {
+                Shutdown::Graceful => sentry::protocol::SessionStatus::Exited,
+                Shutdown::Forced | Shutdown::Crash => sentry::protocol::SessionStatus::Crashed,
+            };
+
+            if !crate::sentry::end(status) {
+                warn!("unable to flush sentry events during shutdown");
+            }
+        }
 
         self.state()
             .components_mut()

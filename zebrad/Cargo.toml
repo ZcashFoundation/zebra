@@ -298,6 +298,9 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-stream = { workspace = true }
 
+# test feature sentry
+sentry = { workspace = true, features = ["test"] }
+
 zcash_keys = { workspace = true }
 
 # test feature lightwalletd-grpc-tests

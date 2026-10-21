@@ -578,7 +578,16 @@ async fn download_deadline_includes_readiness_and_response() {
         } else {
             queued
         };
-        assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
+        // Readiness timeouts are returned by `download_and_verify` itself, but response timeouts
+        // are re-requestable download failures.
+        if release_capacity {
+            assert!(matches!(
+                result,
+                Err(BlockDownloadVerifyError::DownloadTimedOut { hash: timed_out }) if timed_out == hash
+            ));
+        } else {
+            assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
+        }
         assert_eq!(Instant::now() - started, budget);
     }
 }
