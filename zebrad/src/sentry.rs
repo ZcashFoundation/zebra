@@ -555,7 +555,10 @@ mod tests {
     };
 
     use sentry::{
-        protocol::{Context, EnvelopeItem, Event, Log, LogAttribute, LogLevel, SessionStatus},
+        protocol::{
+            Context, EnvelopeItem, Event, Frame, Log, LogAttribute, LogLevel, SessionStatus,
+            Stacktrace,
+        },
         test::with_captured_envelopes_options,
         Client, ClientOptions, Hub, Scope,
     };
@@ -566,7 +569,8 @@ mod tests {
 
     use super::{
         add_chain_tags, chain_log_attributes, end_session, merge_log_attributes, panic_event_from,
-        release_name_from, rotate_session, start_run_sessions, tracing_layer, Metadata,
+        release_name_from, rotate_session, start_run_sessions, tracing_layer,
+        without_panic_handling_frames, Metadata,
     };
 
     fn tracing_layer_installed_with(client: Option<Client>) -> bool {
@@ -976,6 +980,8 @@ mod tests {
             exception.mechanism.as_ref().and_then(|m| m.handled),
             Some(false)
         );
+        // Optimized builds can inline the panicking closure, so check only that the newest frame
+        // is not part of the panic handling.
         let newest_frame = exception
             .stacktrace
             .as_ref()
@@ -983,8 +989,11 @@ mod tests {
             .and_then(|frame| frame.function.as_deref())
             .expect("panic events carry a stack trace");
         assert!(
-            newest_frame.contains("panic_events_use_the_panic_message_and_stack"),
-            "the newest frame is the code that panicked, not the hook: {newest_frame}",
+            !newest_frame.starts_with("std::")
+                && !newest_frame.starts_with("core::")
+                && !newest_frame.ends_with("rust_begin_unwind")
+                && !newest_frame.contains("panic_event_from"),
+            "the newest frame is the code that panicked, not the panic handling: {newest_frame}",
         );
 
         let Some(Context::Other(panic_context)) = event.contexts.get("panic") else {
@@ -1000,5 +1009,44 @@ mod tests {
             .get("location")
             .and_then(|location| location.as_str())
             .is_some_and(|location| location.contains("sentry.rs")));
+    }
+
+    #[test]
+    fn panic_stacks_end_at_the_code_that_panicked() {
+        let frame = |function: &str| Frame {
+            function: Some(function.to_owned()),
+            ..Default::default()
+        };
+        // Oldest first, as Sentry orders frames.
+        let stacktrace = Stacktrace {
+            frames: vec![
+                frame("std::rt::lang_start"),
+                frame("std::panicking::catch_unwind"),
+                frame("zebrad::components::start"),
+                frame("zebra_network::open_listener"),
+                frame("core::panicking::panic_fmt"),
+                frame("__rustc::rust_begin_unwind"),
+                frame("std::panicking::panic_with_hook"),
+                frame("zebrad::application::panic_hook"),
+                frame("zebrad::sentry::panic_event_from"),
+            ],
+            ..Default::default()
+        };
+
+        let functions: Vec<_> = without_panic_handling_frames(stacktrace)
+            .frames
+            .into_iter()
+            .filter_map(|frame| frame.function)
+            .collect();
+
+        assert_eq!(
+            functions,
+            [
+                "std::rt::lang_start",
+                "std::panicking::catch_unwind",
+                "zebrad::components::start",
+                "zebra_network::open_listener",
+            ],
+        );
     }
 }
