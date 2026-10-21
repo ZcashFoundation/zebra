@@ -176,9 +176,7 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
-    #[error(
-        "timeout during service readiness, download, verification, or internal downloader operation"
-    )]
+    #[error("timeout waiting for the network service to be ready")]
     Timeout,
 }
 
