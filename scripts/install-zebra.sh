@@ -426,6 +426,13 @@ mode_implies_default_profile() {
 }
 
 resolve_install_profile() {
+  case "$MODE" in
+    docker-split-containers | docker-supervised)
+      add_error "--mode $MODE was removed: Zebra no longer publishes zcashd-compat Docker images. Use --mode split-binary or --mode supervised instead."
+      return
+      ;;
+  esac
+
   if [[ -z "$INSTALL_PROFILE" ]]; then
     if mode_implies_compat_profile; then
       INSTALL_PROFILE="zcashd-compat"
