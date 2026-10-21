@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: The crawler started by `init` now adds the initial peers to the address book again when it has no outbound connections and no peers ready to connect to, at most once every `constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL`, waiting at most `constants::INITIAL_PEER_RECOVERY_TIMEOUT` for them to load ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+time: 2026-10-21T14:47:17.996866651Z

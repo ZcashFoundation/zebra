@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: '`AddressBook::update` with a `MetaAddr::new_initial_peer` change for a failed peer now makes the peer eligible for another connection attempt after the usual reconnection delay ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).'
+time: 2026-10-21T14:47:18.002266673Z
