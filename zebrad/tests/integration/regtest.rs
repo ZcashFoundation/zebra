@@ -19,8 +19,8 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{
-        default_test_config, os_assigned_rpc_port_config, random_known_rpc_port_config,
-        read_listen_addr_from_logs, testdir,
+        default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs,
+        rpc_port_config, testdir,
     },
     launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
@@ -108,18 +108,15 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         .into(),
     );
 
-    // All-features builds compile out INFO logs, including the OS-assigned-port announcement.
-    // Use the existing known-unused-port fixture rather than blocking on that diagnostic.
-    let mut config = random_known_rpc_port_config(false, &network)?;
+    // All-features builds compile out the OS-assigned-port announcement.
+    // Keep the reservation through config writing, then release it immediately before spawning.
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let rpc_address = reservation.local_addr()?;
+    let mut config = rpc_port_config(rpc_address.port(), false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
-    let rpc_address = config
-        .rpc
-        .listen_addr
-        .expect("the RPC fixture configures a listener");
-
-    let mut zebrad = testdir()?
-        .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+    let dir = testdir()?.with_config(&mut config)?;
+    drop(reservation);
+    let mut zebrad = dir.spawn_child(args!["start"])?;
 
     let client = RpcRequestClient::new(rpc_address);
     wait_for_mempool_activation(&client).await?;
