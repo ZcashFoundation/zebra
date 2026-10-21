@@ -388,12 +388,12 @@ shutdown_grace_period = "5m"
 ```
 
 All values can also be set through environment variables with the `ZEBRA_`
-prefix, e.g. `ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH=/usr/local/bin/zcashd`.
+prefix, e.g. `ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE=embedded`.
 Because environment values cannot express TOML arrays, `zcashd_extra_args`
 also accepts a JSON array string:
 
 ```console
-ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]'
+ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=127.0.0.1","-rpcallowip=127.0.0.1"]'
 ```
 
 ## Hardware preflight (Linux)
