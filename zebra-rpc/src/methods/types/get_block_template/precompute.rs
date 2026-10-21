@@ -77,9 +77,11 @@ pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Bounds state/mempool snapshot reads, without cancelling a started coinbase proof.
 pub(crate) const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Minimum pause after event-driven builds, so idle arrivals start immediately and bursts
-/// coalesce without extending the window. Slow builds wait at least their own duration.
-pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_millis(100);
+/// Minimum pause after event-driven builds. An arrival after a quiet interval still starts a build
+/// immediately, while a steady flow of transactions coalesces into at most one build per pause,
+/// which bounds the work each build and its later validation cost. Slow builds wait at least
+/// their own duration.
+pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_secs(1);
 
 /// Reading inputs owns no proof or mutex permit.
 const BUILD_FETCHING: u8 = 0;
