@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
 
+# GitHub Pages accepts one deployment at a time. Runs queue in push order, so an
+# older build never publishes over a newer one, and a newer push replaces any
+# run still waiting. In-progress runs are not cancelled midway through a deploy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   pull-requests: read
@@ -118,12 +125,6 @@ jobs:
     if: needs.changes.outputs.book == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
-
-    # GitHub Pages accepts one deployment at a time. Deployments queue rather
-    # than cancel, because cancelling one midway leaves Pages half-updated.
-    concurrency:
-      group: pages
-      cancel-in-progress: false
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment.
     # `contents: read` is intentionally omitted: this job publishes rendered
