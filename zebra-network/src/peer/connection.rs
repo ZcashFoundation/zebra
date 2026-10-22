@@ -1019,18 +1019,10 @@ where
         self.shutdown_async(error).await;
     }
 
+    /// Write dequeued adverts even if their callers have stopped waiting for the result.
+    ///
     /// Acknowledge only completed local writes, after rechecking live authorization.
     async fn send_block_advert(&mut self, advert: BlockAdvert) {
-        if advert.result.is_closed() {
-            metrics::counter!("peer.canceled").increment(1);
-            metrics::counter!(
-                "zebra.net.out.requests.canceled",
-                "command" => "AdvertiseBlock",
-            )
-            .increment(1);
-            return;
-        }
-
         metrics::counter!(
             "zebra.net.out.requests",
             "command" => "AdvertiseBlock",

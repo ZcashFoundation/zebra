@@ -1053,6 +1053,47 @@ async fn block_advert_success_waits_for_peer_write() {
     );
 }
 
+/// A caller timeout must not cancel an advert queued on an unpolled connection.
+#[tokio::test(start_paused = true)]
+async fn block_advert_is_written_after_caller_timeout() {
+    let _init_guard = zebra_test::init();
+    let (client, harness, connection, mut messages) =
+        real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+        .chain(stream::pending());
+    let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discover)
+        .with_minimum_peer_version(minimum)
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let hash = block::Hash([22; 32]);
+    let advert = timeout(Duration::from_secs(1), advertiser.ready())
+        .await
+        .unwrap()
+        .unwrap()
+        .call(Request::AdvertiseBlockToAll(hash));
+
+    // Leave the connection unpolled until the caller's timeout drops the result receiver.
+    assert!(timeout(Duration::from_secs(6), advert).await.is_err());
+    let mut connection = Box::pin(connection);
+    assert!(connection.as_mut().now_or_never().is_none());
+    assert_eq!(
+        messages
+            .try_recv()
+            .expect("the queued advert must be written despite the caller's timeout"),
+        Message::Inv(vec![InventoryHash::Block(hash)])
+    );
+    assert!(connection.as_mut().now_or_never().is_none());
+    assert!(harness.current_error().is_none());
+}
+
 async fn failed_block_advert_write(all_peers: bool) {
     let (client, harness, connection, messages) =
         real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
@@ -1149,9 +1190,9 @@ async fn block_advert_reports_full_and_closed_connection_queues() {
     }
 }
 
-/// Clones share the existing network concurrency bound, and cancellation returns its permit.
+/// Clones bound concurrent calls; cancellation returns a permit but leaves queued adverts intact.
 #[tokio::test(start_paused = true)]
-async fn block_advertiser_bounds_in_flight_writes_across_clones() {
+async fn block_advertiser_bounds_in_flight_calls_across_clones() {
     let _init_guard = zebra_test::init();
     let (client, _harness, _connection, _messages) =
         real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);

@@ -605,9 +605,9 @@ async fn empty_find_blocks_result_sends_no_inventory() {
     assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
-/// Dedicated block adverts preserve the ordinary request counter and cancellation labels.
+/// Dedicated block adverts count as requests even after their callers stop waiting.
 #[test]
-fn block_advert_request_metrics_include_cancellation() {
+fn block_advert_request_metrics_ignore_caller_cancellation() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let recorder = ConnectionMetricsRecorder::default();
 
@@ -634,29 +634,33 @@ fn block_advert_request_metrics_include_cancellation() {
 
                 let (result, delivery) = tokio::sync::oneshot::channel();
                 drop(delivery);
-                connection
-                    .send_block_advert(crate::peer_set::BlockAdvert { hash, result })
-                    .await;
-                assert!(outbound_messages.try_recv().is_err());
+                let (_, message) = tokio::join!(
+                    connection.send_block_advert(crate::peer_set::BlockAdvert { hash, result }),
+                    outbound_messages.next(),
+                );
+                assert_eq!(
+                    message,
+                    Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+                );
 
                 assert_eq!(
                     recorder.counter(Key::from_parts(
                         "zebra.net.out.requests",
                         &[("command", Request::AdvertiseBlock(hash, None).command())],
                     )),
-                    1,
+                    2,
                 );
                 assert_eq!(
                     recorder.counter(Key::from_parts(
                         "zebra.net.out.requests.canceled",
                         &[("command", Request::AdvertiseBlockToAll(hash).command())],
                     )),
-                    1,
+                    0,
                 );
-                assert_eq!(recorder.counter(Key::from_name("peer.canceled")), 1);
+                assert_eq!(recorder.counter(Key::from_name("peer.canceled")), 0);
             })
             .await
-            .expect("the local transport and canceled advert complete without remote responses");
+            .expect("both local writes complete without remote responses");
         });
     });
 }
