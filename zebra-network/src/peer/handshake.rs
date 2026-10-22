@@ -77,6 +77,7 @@ where
     address_book_updater: AddressBookChangeSender,
     inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
+    bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
 
     parent_span: Span,
@@ -117,6 +118,7 @@ where
             address_book_updater: self.address_book_updater.clone(),
             inv_collector: self.inv_collector.clone(),
             minimum_peer_version: self.minimum_peer_version.clone(),
+            bans_receiver: self.bans_receiver.clone(),
             nonces: self.nonces.clone(),
             parent_span: self.parent_span.clone(),
         }
@@ -409,6 +411,7 @@ where
     address_book_updater: Option<AddressBookChangeSender>,
     inv_collector: Option<broadcast::Sender<InventoryChange>>,
     latest_chain_tip: C,
+    bans_receiver: Option<tokio::sync::watch::Receiver<crate::BanList>>,
 }
 
 impl<S, C> Builder<S, C>
@@ -453,6 +456,12 @@ where
         self
     }
 
+    /// Share the live ban list with connection advert delivery.
+    pub fn with_bans(mut self, bans: tokio::sync::watch::Receiver<crate::BanList>) -> Self {
+        self.bans_receiver = Some(bans);
+        self
+    }
+
     /// Provide the services this node advertises to other peers.  Optional.
     ///
     /// If this is unset, the node will advertise itself as a client.
@@ -490,6 +499,7 @@ where
             user_agent: self.user_agent,
             relay: self.relay,
             inv_collector: self.inv_collector,
+            bans_receiver: self.bans_receiver,
         }
     }
 
@@ -535,6 +545,9 @@ where
             address_book_updater,
             inv_collector,
             minimum_peer_version,
+            bans_receiver: self
+                .bans_receiver
+                .unwrap_or_else(|| tokio::sync::watch::channel(crate::BanList::default()).1),
             nonces,
             parent_span: Span::current(),
         })
@@ -560,6 +573,7 @@ where
             address_book_updater: None,
             inv_collector: None,
             latest_chain_tip: NoChainTip,
+            bans_receiver: None,
         }
     }
 }
@@ -961,6 +975,7 @@ where
         let our_services = self.our_services;
         let relay = self.relay;
         let minimum_peer_version = self.minimum_peer_version.clone();
+        let bans_receiver = self.bans_receiver.clone();
 
         // # Security
         //
@@ -988,7 +1003,7 @@ where
                 user_agent,
                 our_services,
                 relay,
-                minimum_peer_version,
+                minimum_peer_version.clone(),
             )
             .await
             {
@@ -1070,6 +1085,8 @@ where
             // and between the different connection tasks. We create separate tasks and channels
             // for each new connection.
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
+            // Bound pending adverts; slow peers can catch up through later tip gossip.
+            let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
@@ -1189,7 +1206,12 @@ where
 
             let server = Connection::new(
                 inbound_service,
-                server_rx,
+                (
+                    server_rx,
+                    block_advert_rx,
+                    minimum_peer_version,
+                    bans_receiver,
+                ),
                 error_slot.clone(),
                 peer_tx,
                 connection_tracker,
@@ -1219,6 +1241,7 @@ where
                 connection_info,
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
+                block_advert_tx,
                 inv_collector,
                 error_slot,
                 connection_task,

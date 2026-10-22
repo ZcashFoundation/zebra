@@ -2,13 +2,12 @@
 
 use std::{
     cmp::max,
-    collections::HashSet,
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
 
-use futures::{stream, FutureExt as _, Stream, StreamExt};
+use futures::{channel::mpsc, stream, Future, FutureExt as _, SinkExt, Stream, StreamExt};
 use tokio::time::timeout;
 use tower::{
     discover::{Change, Discover},
@@ -22,25 +21,27 @@ use zebra_chain::{
         ChainTip,
     },
     parameters::{Network, NetworkUpgrade},
-    serialization::ZcashDeserializeInto,
+    serialization::{SerializationError, ZcashDeserializeInto},
     transaction::{self, UnminedTxId},
 };
 
 use crate::{
     constants::{
         CURRENT_NETWORK_PROTOCOL_VERSION, DEFAULT_MAX_CONNS_PER_IP,
-        FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT,
+        FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT, INVENTORY_BUSY_PEER_WAIT_TIMEOUT, PEERSET_BUFFER_SIZE,
+        REQUEST_TIMEOUT,
     },
     peer::{
-        ClientRequest, ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion,
+        Client, ClientRequest, ClientTestHarness, ConnectedAddr, Connection, LoadTrackedClient,
+        MinimumPeerVersion,
     },
     peer_set::{
         inventory_registry::InventoryStatus, stall_tracker::FIND_RESPONSE_STALL_THRESHOLD,
-        InventoryChange, PeerSet,
+        ActiveConnectionCounter, InventoryChange, PeerSet,
     },
     protocol::external::{
         types::{PeerServices, Version},
-        InventoryHash,
+        InventoryHash, Message,
     },
     BoxError, PeerError, PeerSocketAddr, Request, Response, SharedPeerError,
 };
@@ -328,156 +329,1078 @@ fn peer_set_route_inv_empty_registry() {
     });
 }
 
-#[test]
-fn broadcast_all_queued_removes_banned_peers() {
-    let peer_versions = PeerVersions {
-        peer_versions: vec![Version::min_specified_for_upgrade(
-            &Network::Mainnet,
-            NetworkUpgrade::Nu6_2,
-        )],
-    };
-
-    let (runtime, _init_guard) = zebra_test::init_async();
-    let _guard = runtime.enter();
-
-    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
-    let (minimum_peer_version, _best_tip_height) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
-    runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version.clone())
-            .build();
-
-        peer_set.ready().await.expect("mock peer is ready");
-
-        let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let mut bans = crate::BanList::default();
-        bans.ban(banned_ip);
-
-        let (bans_tx, bans_rx) = watch::channel(bans);
-        let _ = bans_tx;
-        peer_set.bans_receiver = bans_rx;
-
-        let banned_addr: PeerSocketAddr = SocketAddr::new(banned_ip, 1).into();
-        let mut remaining_peers = HashSet::new();
-        remaining_peers.insert(banned_addr);
-
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        peer_set.queued_broadcast_all = Some((Request::Peers, sender, remaining_peers));
-
-        peer_set.broadcast_all_queued();
-
-        assert!(peer_set.queued_broadcast_all.is_none());
-        assert!(matches!(
-            receiver.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
-        ));
-    });
-}
-
-/// Disconnecting the last queued peer must finish the broadcast even with no ready peers.
-#[test]
-fn broadcast_all_queued_removes_disconnected_peers() {
-    let peer_versions = PeerVersions {
-        peer_versions: vec![Version::min_specified_for_upgrade(
-            &Network::Mainnet,
-            NetworkUpgrade::Nu6_2,
-        )],
-    };
-
-    let (runtime, _init_guard) = zebra_test::init_async();
-    let _guard = runtime.enter();
-
-    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
-    let (minimum_peer_version, _best_tip_height) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-
-    runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .build();
-
-        let peer_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
-        let peer_set = peer_set.ready().await.expect("mock peer is ready");
-        let service = peer_set
-            .take_ready_service(&peer_addr)
-            .expect("mock peer is ready");
-        peer_set.push_unready(peer_addr, service);
-
-        let broadcast_fut =
-            peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([9; 32])));
-        assert!(peer_set.queued_broadcast_all.is_some());
-
-        peer_set.remove(&peer_addr);
-
-        // Readiness processes the canceled service but remains pending with no peers.
-        assert!(peer_set.ready().now_or_never().is_none());
-
-        timeout(Duration::from_secs(1), broadcast_fut)
-            .await
-            .expect("broadcast should not wait for a disconnected peer")
-            .expect("broadcast_all should succeed");
-        assert!(peer_set.queued_broadcast_all.is_none());
-    });
-}
-
-/// Delivery must progress across readiness waves without polling the response receiver.
-#[test]
-fn broadcast_all_queued_does_not_wait_for_receiver_capacity() {
+/// A busy peer receives the advert before its request channel has any capacity.
+#[tokio::test]
+async fn block_advert_to_all_reaches_unready_peer() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
     let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
     let peer_versions = PeerVersions {
-        peer_versions: vec![peer_version; 4],
+        peer_versions: vec![peer_version; 2],
     };
-
-    let (runtime, _init_guard) = zebra_test::init_async();
-    let _guard = runtime.enter();
-
-    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
     let (minimum_peer_version, _best_tip_height) =
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
 
-    runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .max_conns_per_ip(max(4, DEFAULT_MAX_CONNS_PER_IP))
+    timeout(Duration::from_secs(1), async {
+        peer_set.ready().await.unwrap();
+        let busy_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let mut busy_service = peer_set.take_ready_service(&busy_addr).unwrap();
+
+        // The mock has one buffered slot plus its sender's reserved slot.
+        let _first_request = busy_service.call(Request::Peers);
+        busy_service.ready().await.unwrap();
+        let _second_request = busy_service.call(Request::Peers);
+        assert!(busy_service.ready().now_or_never().is_none());
+        peer_set.push_unready(busy_addr, busy_service);
+
+        let hash = block::Hash([9; 32]);
+        assert!(peer_set.cancel_handles.contains_key(&busy_addr));
+        assert!(!peer_set.ready_services.contains_key(&busy_addr));
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        for handle in &mut handles {
+            assert_eq!(handle.receive_block_advert(), hash);
+        }
+        assert_eq!(advert.await.unwrap(), Response::Nil);
+    })
+    .await
+    .expect("the ready peer permits dispatch while the busy peer remains unready");
+}
+
+/// The production Buffer must not strand adverts when every ordinary request channel is full.
+#[tokio::test(start_paused = true)]
+async fn block_advert_bypasses_buffer_with_all_peers_busy() {
+    let _init_guard = zebra_test::init();
+    let peer_versions = PeerVersions {
+        peer_versions: vec![CURRENT_NETWORK_PROTOCOL_VERSION; 2],
+    };
+    let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut pending_requests = Vec::new();
+    for port in 1..=2 {
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port).into();
+        let mut service = peer_set.take_ready_service(&addr).unwrap();
+        pending_requests.push(service.call(Request::Peers));
+        service.ready().await.unwrap();
+        pending_requests.push(service.call(Request::Peers));
+        assert!(service.ready().now_or_never().is_none());
+        peer_set.push_unready(addr, service);
+    }
+    assert!(
+        peer_set.ready().now_or_never().is_none(),
+        "ordinary requests must remain backpressured when every peer is busy"
+    );
+
+    let mut advertiser = peer_set.block_advertiser();
+    let (mut network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let mut ordinary = Box::pin(network.ready().await.unwrap().call(Request::Peers));
+    assert!(ordinary.as_mut().now_or_never().is_none());
+    tokio::task::yield_now().await;
+    let hash = block::Hash([13; 32]);
+    let advert = advertiser
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::AdvertiseBlockToAll(hash));
+    for handle in &mut handles {
+        let queued = timeout(Duration::from_secs(1), handle.block_advert_receiver.recv())
+            .await
+            .expect("adverts bypass the blocked ordinary buffer")
+            .unwrap();
+        assert_eq!(queued.hash, hash);
+        queued.result.send(Ok(())).unwrap();
+    }
+    assert_eq!(advert.await.unwrap(), Response::Nil);
+    assert!(ordinary.as_mut().now_or_never().is_none());
+    drop(pending_requests);
+}
+
+/// Discovery must reach block fanout without another ordinary buffered request.
+#[tokio::test(start_paused = true)]
+async fn block_advert_to_all_discovers_peer_while_buffer_idle() {
+    let _init_guard = zebra_test::init();
+    advert_discovers_peer_while_buffer_idle(true).await;
+}
+
+/// Newly discovered sidecars must join sampled fanout even when ordinary requests are idle.
+#[tokio::test(start_paused = true)]
+async fn sampled_block_advert_discovers_sidecar_while_buffer_idle() {
+    let _init_guard = zebra_test::init();
+    advert_discovers_peer_while_buffer_idle(false).await;
+}
+
+async fn advert_discovers_peer_while_buffer_idle(all_peers: bool) {
+    timeout(Duration::from_secs(2), async {
+        let (old_client, _old_harness, old_connection, mut old_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (new_client, _new_harness, new_connection, mut new_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (mut discovery, discovered) = mpsc::channel::<
+            Result<Change<PeerSocketAddr, crate::peer::LoadTrackedClient>, BoxError>,
+        >(1);
+        let old_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let new_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+        discovery
+            .try_send(Ok(Change::Insert(old_addr, old_client.into())))
+            .unwrap();
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .with_block_gossip_peer_ips(if all_peers {
+                Vec::new()
+            } else {
+                vec![Ipv4Addr::LOCALHOST.into()]
+            })
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
             .build();
+        let mut advertiser = peer_set.block_advertiser();
+        let (mut network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let old_task = tokio::spawn(old_connection);
+        let new_task = tokio::spawn(new_connection);
 
-        let peer_set = peer_set.ready().await.expect("mock peers are ready");
-        assert_eq!(peer_set.ready_services.len(), 4);
+        // Dispatch one ordinary request through the real Buffer. Its worker becomes idle after
+        // forwarding the response future; retaining that future keeps the connection request alive.
+        let _ordinary = network.ready().await.unwrap().call(Request::Peers);
+        assert_eq!(old_messages.next().await, Some(Message::GetAddr));
+        tokio::task::yield_now().await;
 
-        // Cancel handles model the unready snapshot. Restore one service at a time
-        // to create more readiness waves than the old channel's capacity of three.
-        let services = std::mem::take(&mut peer_set.ready_services);
-        let mut cancel_receivers = Vec::new();
-        for peer_addr in services.keys() {
-            let (cancel_tx, cancel_rx) =
-                crate::peer_set::set::oneshot::channel::<crate::peer_set::set::CancelClientWork>();
-            peer_set.cancel_handles.insert(*peer_addr, cancel_tx);
-            cancel_receivers.push(cancel_rx);
+        // No ordinary request or direct PeerSet readiness poll occurs after this discovery.
+        discovery
+            .try_send(Ok(Change::Insert(new_addr, new_client.into())))
+            .unwrap();
+        tokio::task::yield_now().await;
+        let hash = block::Hash([19; 32]);
+        let request = if all_peers {
+            Request::AdvertiseBlockToAll(hash)
+        } else {
+            Request::AdvertiseBlock(hash, None)
+        };
+        let advert = advertiser.ready().await.unwrap().call(request);
+        let (delivery, old_write, new_write) = tokio::join!(
+            advert,
+            old_messages.next(),
+            timeout(Duration::from_secs(1), new_messages.next()),
+        );
+        old_task.abort();
+        new_task.abort();
+        assert_eq!(
+            old_write,
+            Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+        );
+        assert_eq!(delivery.unwrap(), Response::Nil);
+        assert_eq!(
+            new_write.expect("idle ordinary traffic must not strand a newly discovered peer"),
+            Some(Message::Inv(vec![InventoryHash::Block(hash)])),
+        );
+    })
+    .await
+    .expect("idle-buffer discovery and advert delivery must remain bounded");
+}
+
+/// A barrier submitted after discovery returned Pending must wait for a fresh reconciliation pass.
+#[tokio::test(start_paused = true)]
+async fn block_advert_does_not_ack_a_barrier_arriving_during_discovery() {
+    use std::{cell::RefCell, rc::Rc, task::Poll};
+    use zebra_chain::chain_tip::mock::MockChainTip;
+
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        let (old_client, _old_harness, old_connection, mut old_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (new_client, _new_harness, new_connection, mut new_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (mut discovery, mut discovered) = mpsc::channel::<
+            Result<Change<PeerSocketAddr, crate::peer::LoadTrackedClient>, BoxError>,
+        >(1);
+        let old_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let new_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+        discovery
+            .try_send(Ok(Change::Insert(old_addr, old_client.into())))
+            .unwrap();
+        let advertiser = Rc::new(RefCell::new(None::<crate::BlockAdvertiser<MockChainTip>>));
+        let during_discovery = advertiser.clone();
+        let mut late_peer = Some(new_client);
+        let discovered = stream::poll_fn(move |cx| {
+            let polled = discovered.poll_next_unpin(cx);
+            if polled.is_pending() {
+                if let Some(client) = late_peer.take() {
+                    // The current pass has already sampled an empty discovery stream. Queue a
+                    // peer, then submit a real advertiser readiness barrier before returning that
+                    // Pending result. Neither is part of the snapshot this pass reconciled.
+                    discovery
+                        .try_send(Ok(Change::Insert(new_addr, client.into())))
+                        .unwrap();
+                    assert!(during_discovery
+                        .borrow_mut()
+                        .as_mut()
+                        .unwrap()
+                        .poll_ready(cx)
+                        .is_pending());
+                }
+            }
+            polled
+        });
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+        *advertiser.borrow_mut() = Some(peer_set.block_advertiser());
+        let old_task = tokio::spawn(old_connection);
+        let new_task = tokio::spawn(new_connection);
+
+        // Drive the production readiness methods until the advertiser is acknowledged. The
+        // buggy implementation acknowledges in the first pass; the fix must request another pass
+        // and admit the intervening discovery before this future completes.
+        futures::future::poll_fn(|cx| {
+            if let Poll::Ready(Err(error)) = peer_set.poll_ready(cx) {
+                return Poll::Ready(Err(error));
+            }
+            advertiser.borrow_mut().as_mut().unwrap().poll_ready(cx)
+        })
+        .await
+        .unwrap();
+        let hash = block::Hash([22; 32]);
+        let advert = advertiser
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        let (delivery, old_write, new_write) = tokio::join!(
+            advert,
+            old_messages.next(),
+            timeout(Duration::from_secs(1), new_messages.next()),
+        );
+        old_task.abort();
+        new_task.abort();
+        assert_eq!(
+            old_write,
+            Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+        );
+        assert_eq!(delivery.unwrap(), Response::Nil);
+        assert_eq!(
+            new_write
+                .expect("a maintenance barrier must include discovery queued before that barrier"),
+            Some(Message::Inv(vec![InventoryHash::Block(hash)])),
+        );
+    })
+    .await
+    .expect("interleaved discovery and maintenance acknowledgment must remain bounded");
+}
+
+/// Captured waiters survive a discovery burst spanning multiple bounded maintenance passes.
+#[tokio::test(start_paused = true)]
+async fn block_advert_barriers_survive_partial_discovery_drains() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        let config = crate::Config::default();
+        let batch = config.peerset_total_connection_limit();
+        let (old_client, _old_harness, old_connection, mut old_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (new_client, _new_harness, new_connection, mut new_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let old_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let new_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+        let absent_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 3).into();
+        let discovered = stream::iter([Ok::<_, BoxError>(Change::Insert(
+            old_addr,
+            old_client.into(),
+        ))])
+        .chain(stream::iter(
+            (0..batch).map(move |_| Ok(Change::Remove(absent_addr))),
+        ))
+        .chain(stream::iter([Ok(Change::Insert(
+            new_addr,
+            new_client.into(),
+        ))]))
+        .chain(stream::pending());
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (peer_set, _guard) = PeerSetBuilder::new()
+            .with_config(config)
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+        let advertiser = peer_set.block_advertiser();
+        let mut waiting: Vec<_> = (0..PEERSET_BUFFER_SIZE)
+            .map(|_| advertiser.clone())
+            .collect();
+        for advertiser in &mut waiting {
+            assert!(advertiser.ready().now_or_never().is_none());
         }
-
-        let mut receiver = peer_set
-            .queue_broadcast_all_unready(&Request::AdvertiseBlockToAll(block::Hash([13; 32])))
-            .expect("cancel handles create a queued broadcast");
-
-        for (peer_addr, service) in services {
-            assert!(peer_set.cancel_handles.remove(&peer_addr).is_some());
-            assert!(peer_set.ready_services.insert(peer_addr, service).is_none());
-            peer_set.broadcast_all_queued();
+        // Every barrier precedes reconciliation; the final peer lies beyond the first batch.
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let old_task = tokio::spawn(old_connection);
+        let new_task = tokio::spawn(new_connection);
+        let hash = block::Hash([23; 32]);
+        for advertiser in &mut waiting {
+            let advert = advertiser
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::AdvertiseBlockToAll(hash));
+            let (delivery, old_write, new_write) =
+                tokio::join!(advert, old_messages.next(), new_messages.next());
+            assert_eq!(delivery.unwrap(), Response::Nil);
+            assert_eq!(
+                old_write,
+                Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+            );
+            assert_eq!(
+                new_write,
+                Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+            );
         }
+        old_task.abort();
+        new_task.abort();
+    })
+    .await
+    .expect("captured maintenance waiters must complete after discovery drains");
+}
 
-        assert!(peer_set.queued_broadcast_all.is_none());
-
-        let mut queued_deliveries = 0;
-        while receiver.try_recv().is_ok() {
-            queued_deliveries += 1;
+/// Finishing a retained full batch must schedule waiters whose earlier wake was already consumed.
+#[tokio::test(start_paused = true)]
+async fn block_advert_late_barrier_is_rescheduled_after_retained_batch() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        let config = crate::Config::default();
+        let batch = config.peerset_total_connection_limit();
+        let (client, _harness, connection, mut messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let absent = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+        let discovered = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+            .chain(stream::iter(
+                (0..batch).map(move |_| Ok(Change::Remove(absent))),
+            ))
+            .chain(stream::pending());
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_config(config)
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .build();
+        let advertiser = peer_set.block_advertiser();
+        let mut waiting: Vec<_> = (0..PEERSET_BUFFER_SIZE)
+            .map(|_| advertiser.clone())
+            .collect();
+        for advertiser in &mut waiting {
+            assert!(advertiser.ready().now_or_never().is_none());
         }
-        assert_eq!(queued_deliveries, 4);
-    });
+        peer_set
+            .ready()
+            .now_or_never()
+            .expect("the first peer is ordinarily ready")
+            .unwrap();
+        for advertiser in &mut waiting {
+            assert!(
+                advertiser.ready().now_or_never().is_none(),
+                "partial discovery cannot acknowledge the captured batch"
+            );
+        }
+        // Cancel one captured caller, then enqueue its replacement. The old batch remains full,
+        // so the next pass cannot capture the replacement before finishing the discovery burst.
+        drop(waiting.pop());
+        let mut late = advertiser.clone();
+        assert!(late.ready().now_or_never().is_none());
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let connection = tokio::spawn(connection);
+        let hash = block::Hash([24; 32]);
+        let advert = late
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        let (delivery, message) = tokio::join!(advert, messages.next());
+        connection.abort();
+        assert_eq!(delivery.unwrap(), Response::Nil);
+        assert_eq!(
+            message,
+            Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+        );
+    })
+    .await
+    .expect("a waiter behind the retained batch must trigger another idle maintenance pass");
+}
+
+/// Bootstrap maintenance admits the first peer without an ordinary request; background handles
+/// and advertiser clones must not keep its worker alive after the owning service is dropped.
+#[tokio::test(start_paused = true)]
+async fn advertiser_bootstraps_discovery_and_does_not_own_network_shutdown() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        let (client, _harness, connection, mut messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (mut discovery, discovered) = mpsc::channel::<
+            Result<Change<PeerSocketAddr, crate::peer::LoadTrackedClient>, BoxError>,
+        >(1);
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .build();
+        let mut advertiser = peer_set.block_advertiser();
+        let (network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let background = network.background_service();
+        let connection = tokio::spawn(connection);
+        tokio::task::yield_now().await;
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        discovery
+            .try_send(Ok(Change::Insert(addr, client.into())))
+            .unwrap();
+
+        let hash = block::Hash([20; 32]);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        let (delivery, message) = tokio::join!(advert, messages.next());
+        assert_eq!(delivery.unwrap(), Response::Nil);
+        assert_eq!(
+            message,
+            Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+        );
+
+        drop(network);
+        let (request, ready, closed) = tokio::join!(
+            background.oneshot(Request::Peers),
+            advertiser.ready(),
+            messages.next(),
+        );
+        assert!(
+            request.is_err(),
+            "non-owning background handles must fail after shutdown"
+        );
+        assert!(
+            ready.is_err(),
+            "a maintenance barrier must observe worker shutdown"
+        );
+        assert_eq!(
+            closed, None,
+            "the worker releases its clients while the runtime is alive"
+        );
+        connection.await.unwrap();
+    })
+    .await
+    .expect("bootstrap discovery and owner-driven shutdown must remain bounded");
+}
+
+/// Zero-peer readiness sleeps until discovery or owner-driven shutdown wakes its retained barrier.
+#[tokio::test(start_paused = true)]
+async fn block_advertiser_waits_for_eligible_peer_or_shutdown() {
+    let _init_guard = zebra_test::init();
+    for shutdown in [false, true] {
+        let (mut discovery, discovered) =
+            mpsc::channel::<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>(1);
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .build();
+        let mut advertiser = peer_set.block_advertiser();
+        let (network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let ready = tokio::spawn(async move { advertiser.ready().await.map(|_| ()) });
+
+        // The readiness task has no timer and is never polled manually by this test.
+        tokio::time::sleep(REQUEST_TIMEOUT * 2).await;
+        assert!(
+            !ready.is_finished(),
+            "zero eligible peers must keep readiness pending"
+        );
+        let _harness = if shutdown {
+            drop(network);
+            None
+        } else {
+            let (client, harness) = ClientTestHarness::build()
+                .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+                .finish();
+            let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+            discovery
+                .try_send(Ok(Change::Insert(addr, client.into())))
+                .unwrap();
+            Some(harness)
+        };
+        let result = timeout(Duration::from_secs(1), ready)
+            .await
+            .expect("discovery and shutdown must wake advertiser readiness")
+            .expect("readiness must not panic");
+        assert_eq!(result.is_err(), shutdown);
+    }
+}
+
+/// A dropped maintenance acknowledgment fails once, without leaving a completed receiver to poll.
+#[tokio::test]
+async fn block_advertiser_can_retry_after_maintenance_failure() {
+    let _init_guard = zebra_test::init();
+    let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(stream::pending::<
+            Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>,
+        >())
+        .with_minimum_peer_version(minimum)
+        .build();
+    let mut advertiser = peer_set.block_advertiser();
+
+    assert!(advertiser.ready().now_or_never().is_none());
+    drop(peer_set.maintenance_rx.try_recv().unwrap());
+    assert!(advertiser.ready().now_or_never().unwrap().is_err());
+
+    assert!(
+        advertiser.ready().now_or_never().is_none(),
+        "polling after a failed acknowledgment must submit a fresh maintenance request"
+    );
+    peer_set
+        .maintenance_rx
+        .try_recv()
+        .unwrap()
+        .send(())
+        .unwrap();
+    assert!(advertiser.ready().now_or_never().unwrap().is_ok());
+}
+
+/// Independent maintenance still applies duplicate-address and per-IP admission limits.
+#[tokio::test(start_paused = true)]
+async fn advert_maintenance_does_not_register_rejected_discoveries() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        for duplicate in [false, true] {
+            let (old_client, _old_harness, old_connection, mut old_messages) =
+                real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+            let (new_client, _new_harness, new_connection, mut new_messages) =
+                real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+            let (mut discovery, discovered) = mpsc::channel::<
+                Result<Change<PeerSocketAddr, crate::peer::LoadTrackedClient>, BoxError>,
+            >(1);
+            let old_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+            let new_addr =
+                SocketAddr::new(Ipv4Addr::LOCALHOST.into(), if duplicate { 1 } else { 2 }).into();
+            discovery
+                .try_send(Ok(Change::Insert(old_addr, old_client.into())))
+                .unwrap();
+            let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+            let (peer_set, _guard) = PeerSetBuilder::new()
+                .with_discover(discovered)
+                .with_minimum_peer_version(minimum)
+                .max_conns_per_ip(1)
+                .build();
+            let mut advertiser = peer_set.block_advertiser();
+            let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+            let old_task = tokio::spawn(old_connection);
+            let new_task = tokio::spawn(new_connection);
+            let hash = block::Hash([21; 32]);
+            let first = advertiser
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::AdvertiseBlockToAll(hash));
+            let (delivery, message) = tokio::join!(first, old_messages.next());
+            assert_eq!(delivery.unwrap(), Response::Nil);
+            assert_eq!(
+                message,
+                Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+            );
+
+            discovery
+                .try_send(Ok(Change::Insert(new_addr, new_client.into())))
+                .unwrap();
+            let advert = advertiser
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::AdvertiseBlockToAll(hash));
+            let (delivery, existing, rejected) =
+                tokio::join!(advert, old_messages.next(), new_messages.next());
+            assert_eq!(delivery.unwrap(), Response::Nil);
+            assert_eq!(
+                existing,
+                Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+            );
+            assert_eq!(
+                rejected, None,
+                "unadmitted clients must be dropped without any advert"
+            );
+            old_task.abort();
+            new_task.await.unwrap();
+        }
+    })
+    .await
+    .expect("admission checks must run independently of ordinary requests");
+}
+
+/// Connect a real Client and Connection, replacing only the remote wire with a bounded channel.
+fn real_advert_peer(
+    version: Version,
+) -> (
+    Client,
+    ClientTestHarness,
+    impl Future<Output = ()> + Send,
+    mpsc::Receiver<Message>,
+) {
+    real_advert_peer_with_authorization(
+        version,
+        MinimumPeerVersion::new(zebra_chain::chain_tip::NoChainTip, &Network::Mainnet),
+        watch::channel(crate::BanList::default()).1,
+    )
+}
+
+fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Send + 'static>(
+    version: Version,
+    minimum: MinimumPeerVersion<C>,
+    bans: watch::Receiver<crate::BanList>,
+) -> (
+    Client,
+    ClientTestHarness,
+    impl Future<Output = ()> + Send,
+    mpsc::Receiver<Message>,
+) {
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let (mut client, harness) = ClientTestHarness::build()
+        .with_version(version)
+        .with_connected_addr(ConnectedAddr::InboundDirect { addr })
+        .finish();
+    let (client_tx, client_rx) = mpsc::channel(1);
+    client.server_tx = client_tx;
+    let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(4);
+    client.block_advert_tx = advert_tx;
+    let (wire_tx, wire_rx) = mpsc::channel(0);
+    let connection = Connection::new(
+        tower::service_fn(|_: Request| async { Ok::<_, BoxError>(Response::Nil) }),
+        (client_rx, advert_rx, minimum, bans),
+        client.error_slot.clone(),
+        wire_tx.sink_map_err(|_| {
+            SerializationError::from(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "test remote closed its wire receiver",
+            ))
+        }),
+        ActiveConnectionCounter::new_counter().track_connection(),
+        client.connection_info.clone(),
+        Vec::new(),
+    );
+    (client, harness, connection.run(stream::pending()), wire_rx)
+}
+
+/// Channel admission is not evidence that the connection has written an inventory message.
+#[tokio::test(start_paused = true)]
+async fn block_advert_success_waits_for_peer_write() {
+    let _init_guard = zebra_test::init();
+    let (client, _harness, connection, mut messages) =
+        real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+        .chain(stream::pending());
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discover)
+        .with_minimum_peer_version(minimum_peer_version)
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let hash = block::Hash([14; 32]);
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let mut advert = Box::pin(
+        advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash)),
+    );
+    assert!(
+        advert.as_mut().now_or_never().is_none(),
+        "an unpolled connection cannot have acknowledged a peer write"
+    );
+    let mut connection = Box::pin(connection);
+    assert!(connection.as_mut().now_or_never().is_none());
+    assert_eq!(
+        messages.try_recv().unwrap(),
+        Message::Inv(vec![InventoryHash::Block(hash)])
+    );
+    assert!(connection.as_mut().now_or_never().is_none());
+    assert_eq!(
+        timeout(Duration::from_secs(1), advert)
+            .await
+            .unwrap()
+            .unwrap(),
+        Response::Nil
+    );
+}
+
+async fn failed_block_advert_write(all_peers: bool) {
+    let (client, harness, connection, messages) =
+        real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+        .chain(stream::pending());
+    let (minimum_peer_version, _best_tip) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discover)
+        .with_minimum_peer_version(minimum_peer_version)
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let hash = block::Hash([15; 32]);
+    let request = if all_peers {
+        Request::AdvertiseBlockToAll(hash)
+    } else {
+        Request::AdvertiseBlock(hash, None)
+    };
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let advert = advertiser.ready().await.unwrap().call(request);
+    drop(messages);
+    let (result, ()) = timeout(Duration::from_secs(1), async {
+        tokio::join!(advert, connection)
+    })
+    .await
+    .expect("the closed wire must fail the actual connection write");
+    assert!(
+        harness.current_error().is_some(),
+        "the connection detected the write failure"
+    );
+    assert!(
+        result.is_err(),
+        "zero successful peer writes must not be reported as success"
+    );
+}
+
+/// Committed adverts must propagate actual connection write failures.
+#[tokio::test(start_paused = true)]
+async fn committed_block_advert_reports_peer_write_failure() {
+    let _init_guard = zebra_test::init();
+    failed_block_advert_write(true).await;
+}
+
+/// Sampled tip/early adverts must not discard every selected peer's write error.
+#[tokio::test(start_paused = true)]
+async fn ordinary_block_advert_reports_peer_write_failure() {
+    let _init_guard = zebra_test::init();
+    failed_block_advert_write(false).await;
+}
+
+/// Admission to a full or closed real connection queue is not a successful local write.
+#[tokio::test(start_paused = true)]
+async fn block_advert_reports_full_and_closed_connection_queues() {
+    let _init_guard = zebra_test::init();
+    for close in [false, true] {
+        let (client, _harness, connection, _messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let capacity = client.block_advert_tx.max_capacity();
+        let mut connection = Some(connection);
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+            .chain(stream::pending());
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discover)
+            .with_minimum_peer_version(minimum)
+            .build();
+        timeout(Duration::from_secs(1), peer_set.ready())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let request = Request::AdvertiseBlockToAll(block::Hash([17; 32]));
+        if close {
+            advertiser.ready().await.unwrap();
+            drop(connection.take());
+        } else {
+            // Cancel callers without polling the connection: their bounded envelopes remain queued.
+            for _ in 0..capacity {
+                drop(advertiser.ready().await.unwrap().call(request.clone()));
+            }
+            advertiser.ready().await.unwrap();
+        }
+        assert!(timeout(Duration::from_secs(1), advertiser.call(request))
+            .await
+            .unwrap()
+            .is_err());
+    }
+}
+
+/// Clones share the existing network concurrency bound, and cancellation returns its permit.
+#[tokio::test(start_paused = true)]
+async fn block_advertiser_bounds_in_flight_writes_across_clones() {
+    let _init_guard = zebra_test::init();
+    let (client, _harness, _connection, _messages) =
+        real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+        .chain(stream::pending());
+    let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discover)
+        .with_minimum_peer_version(minimum)
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let mut pending = Vec::new();
+    for _ in 0..PEERSET_BUFFER_SIZE {
+        let mut clone = advertiser.clone();
+        pending.push(
+            clone
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::AdvertiseBlockToAll(block::Hash([18; 32]))),
+        );
+    }
+    assert!(advertiser.ready().now_or_never().is_none());
+    drop(pending.pop());
+    timeout(Duration::from_secs(1), advertiser.ready())
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+async fn queued_block_advert_revocation(upgrade: bool, busy: bool) {
+    let network = Network::Mainnet;
+    let version = Version::min_specified_for_upgrade(&network, NetworkUpgrade::Nu6_2);
+    let (minimum_peer_version, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    let (bans_tx, bans_rx) = watch::channel(crate::BanList::default());
+    let (client, _harness, connection, mut messages) =
+        real_advert_peer_with_authorization(version, minimum_peer_version.clone(), bans_rx.clone());
+    let mut connection = Box::pin(connection);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
+        .chain(stream::pending());
+    best_tip.send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&network));
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discover)
+        .with_minimum_peer_version(minimum_peer_version)
+        .build();
+    peer_set.bans_receiver = bans_rx;
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let _pending_request = if busy {
+        let request = peer_set.call(Request::Peers);
+        assert!(connection.as_mut().now_or_never().is_none());
+        assert_eq!(messages.try_recv().unwrap(), Message::GetAddr);
+        assert!(connection.as_mut().now_or_never().is_none());
+        Some(request)
+    } else {
+        None
+    };
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let advert = advertiser
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::AdvertiseBlockToAll(block::Hash([16; 32])));
+
+    // The connection is deliberately not polled between admission and revocation.
+    if upgrade {
+        best_tip.send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&network));
+    } else {
+        bans_tx.send_modify(|bans| {
+            bans.ban(Ipv4Addr::LOCALHOST.into());
+        });
+    }
+    let _completion = connection.as_mut().now_or_never();
+    assert!(
+        messages.try_recv().is_err(),
+        "queued adverts must recheck authorization before writing to the peer"
+    );
+    assert!(timeout(Duration::from_secs(1), advert)
+        .await
+        .unwrap()
+        .is_err());
+}
+
+/// Idle connections must revoke adverts queued before a ban.
+#[tokio::test(start_paused = true)]
+async fn queued_block_advert_is_revoked_by_ban() {
+    let _init_guard = zebra_test::init();
+    queued_block_advert_revocation(false, false).await;
+}
+
+/// The enqueue-time minimum-version check alone cannot authorize a later write.
+#[tokio::test(start_paused = true)]
+async fn queued_block_advert_is_revoked_by_upgrade() {
+    let _init_guard = zebra_test::init();
+    queued_block_advert_revocation(true, false).await;
+}
+
+/// Waiting for an ordinary response must not defer a queued advert's ban check.
+#[tokio::test(start_paused = true)]
+async fn queued_block_advert_is_revoked_by_ban_while_awaiting_response() {
+    let _init_guard = zebra_test::init();
+    queued_block_advert_revocation(false, true).await;
+}
+
+/// An upgrade revokes queued adverts even while an ordinary response remains outstanding.
+#[tokio::test(start_paused = true)]
+async fn queued_block_advert_is_revoked_by_upgrade_while_awaiting_response() {
+    let _init_guard = zebra_test::init();
+    queued_block_advert_revocation(true, true).await;
+}
+
+/// Upgrades must exclude obsolete peers from adverts even while their services remain busy.
+#[tokio::test(start_paused = true)]
+async fn block_adverts_skip_busy_outdated_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let peer_versions = PeerVersions {
+        peer_versions: vec![
+            Version::min_specified_for_upgrade(&network, NetworkUpgrade::Nu6_2),
+            Version::min_specified_for_upgrade(&network, NetworkUpgrade::Nu6_3),
+        ],
+    };
+    let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    best_tip.send_best_tip_height(NetworkUpgrade::Nu6_2.activation_height(&network));
+    let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+        .with_discover(discovered_peers)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+
+    timeout(Duration::from_secs(1), async {
+        peer_set.ready().await.unwrap();
+        let busy_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let mut busy_service = peer_set.take_ready_service(&busy_addr).unwrap();
+        let _first_request = busy_service.call(Request::Peers);
+        busy_service.ready().await.unwrap();
+        let _second_request = busy_service.call(Request::Peers);
+        assert!(busy_service.ready().now_or_never().is_none());
+        peer_set.push_unready(busy_addr, busy_service);
+
+        let before_upgrade = block::Hash([11; 32]);
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(before_upgrade));
+        for handle in &mut handles {
+            assert_eq!(handle.receive_block_advert(), before_upgrade);
+        }
+        advert.await.unwrap();
+
+        best_tip.send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&network));
+        let after_upgrade = block::Hash([12; 32]);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(after_upgrade));
+        assert!(
+            !handles[0].wants_connection_heartbeats(),
+            "the obsolete peer is disconnected"
+        );
+        assert!(handles[0].block_advert_receiver.try_recv().is_err());
+        assert_eq!(handles[1].receive_block_advert(), after_upgrade);
+        advert.await.unwrap();
+    })
+    .await
+    .expect("the supported peer permits dispatch while the obsolete peer remains busy");
+}
+
+/// Out-of-band adverts must respect bans and discovery removals while ordinary traffic is idle.
+#[tokio::test(start_paused = true)]
+async fn block_adverts_skip_banned_and_removed_peers() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(1), async {
+        let peer_versions = PeerVersions {
+            peer_versions: vec![CURRENT_NETWORK_PROTOCOL_VERSION; 2],
+        };
+        let (clients, mut handles) = peer_versions.mock_peers();
+        let addresses: [PeerSocketAddr; 2] = [
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into(),
+            SocketAddr::new(Ipv4Addr::new(127, 0, 0, 2).into(), 2).into(),
+        ];
+        let (mut changes, changes_rx) = mpsc::channel(1);
+        let discovered = stream::iter(
+            addresses
+                .into_iter()
+                .zip(clients)
+                .map(|(address, client)| Ok::<_, BoxError>(Change::Insert(address, client))),
+        )
+        .chain(changes_rx);
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discovered)
+            .with_minimum_peer_version(minimum)
+            .build();
+        peer_set.ready().await.unwrap();
+        let (bans, bans_rx) = watch::channel(crate::BanList::default());
+        peer_set.bans_receiver = bans_rx;
+        let mut advertiser = peer_set.block_advertiser();
+        let mut advert_peers = peer_set.block_advert_senders.subscribe();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+
+        bans.send_modify(|bans| {
+            bans.ban(addresses[0].ip());
+        });
+        let hash = block::Hash([10; 32]);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        assert!(handles[0].block_advert_receiver.try_recv().is_err());
+        assert!(!handles[0].wants_connection_heartbeats());
+        assert_eq!(handles[1].receive_block_advert(), hash);
+        advert.await.unwrap();
+
+        advertiser.ready().await.unwrap();
+        changes.try_send(Ok(Change::Remove(addresses[1]))).unwrap();
+        advert_peers
+            .wait_for(|peers| peers.is_empty())
+            .await
+            .unwrap();
+        assert!(advertiser
+            .call(Request::AdvertiseBlockToAll(hash))
+            .await
+            .is_err());
+        assert!(handles[1].block_advert_receiver.try_recv().is_err());
+        assert!(!handles[1].wants_connection_heartbeats());
+    })
+    .await
+    .expect("revocation and removal must not require ordinary ready peers");
 }
 
 #[test]
@@ -1477,8 +2400,7 @@ fn find_failures_do_not_disconnect_zcashd_compat() {
     });
 }
 
-/// Check that a configured sidecar that is busy with another request when a block
-/// is advertised still receives the advert once it becomes ready again.
+/// Configured sidecars receive sampled block adverts without waiting for ordinary responses.
 #[test]
 fn busy_sidecar_receives_queued_block_gossip() {
     let (runtime, _init_guard) = zebra_test::init_async();
@@ -1521,40 +2443,21 @@ fn busy_sidecar_receives_queued_block_gossip() {
             .request()
             .expect("sidecar received the find blocks request");
 
-        // Advertise a block while the sidecar is busy: nothing can be sent yet,
-        // so the advert must be queued for the sidecar.
-        let advert_response = peer_set
-            .route_sidecar_broadcast(Request::AdvertiseBlock(block_hash, None))
-            .await;
-        advert_response.expect("broadcast to zero ready peers succeeds");
-        assert!(
-            sidecar_handle
-                .try_to_receive_outbound_client_request()
-                .request()
-                .is_none(),
-            "busy sidecar must not receive the advert while unready"
-        );
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let advert_response = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlock(block_hash, None));
+        assert_eq!(sidecar_handle.receive_block_advert(), block_hash);
+        advert_response.await.unwrap();
 
         // Complete the in-flight request, making the sidecar ready again.
         let _ = find_blocks_request
             .tx
             .send(Ok(Response::BlockHashes(vec![])));
         find_blocks_fut.await.expect("response received");
-
-        // Polling the peer set delivers the queued advert to the now-ready sidecar.
-        let _ = peer_set.ready().await.expect("peer set is ready");
-        // Let the detached advert delivery task run.
-        tokio::task::yield_now().await;
-
-        let delivered = sidecar_handle
-            .try_to_receive_outbound_client_request()
-            .request()
-            .expect("sidecar received the queued block advert");
-        assert_eq!(
-            delivered.request,
-            Request::AdvertiseBlock(block_hash, None),
-            "the queued request must be the block advert"
-        );
     });
 }
 
@@ -2038,10 +2941,10 @@ fn peer_set_gives_buffered_request_a_turn_behind_queued_blocks() {
     });
 }
 
-/// A queued broadcast that takes the ready peer kept for the request held in the `Buffer` must
-/// not cancel that request's turn.
+/// A ready peer kept for the request held in the `Buffer` goes to queued block requests if that
+/// request doesn't use it. Block adverts no longer queue in the peer set, so they can't take it.
 #[test]
-fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
+fn peer_set_routes_unused_kept_peer_to_queued_blocks() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
     tokio::time::pause();
@@ -2080,36 +2983,19 @@ fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
             );
         }
 
-        // Queued block requests already took the last ready peer from the held request, and a
-        // block advert is queued for the first peer.
+        // Queued block requests already took the last ready peer from the held request.
         peer_set.queued_inv_requests_took_last_peer = true;
-        let advert = Request::AdvertiseBlockToAll(block::Hash([7; 32]));
-        let (advert_tx, _advert_rx) = tokio::sync::mpsc::unbounded_channel();
-        peer_set.queued_broadcast_all =
-            Some((advert.clone(), advert_tx, HashSet::from([addrs[0]])));
 
-        // Free one slot on the first peer: the peer kept for the held request then only has room
-        // for the queued advert.
+        // Free one slot on the first peer. It is kept for the held request. If that request
+        // doesn't use it, like a poll from the queued request task, the queued block gets it on
+        // the next poll.
         assert_eq!(received_request(&mut handles[0]), Some(block_request(1)));
-        assert!(
-            futures::poll!(peer_set.ready()).is_pending(),
-            "the queued advert takes the only ready peer",
-        );
-        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
-        assert_eq!(received_request(&mut handles[0]), Some(advert));
-        assert!(
-            peer_set.queued_inv_requests_took_last_peer,
-            "the held request must still get the next ready peer",
-        );
-
-        // The next ready peer is kept for the held request. If that request doesn't use it, like
-        // a poll from the queued request task, the queued block gets it on the next poll.
         assert!(
             futures::poll!(peer_set.ready()).is_ready(),
             "the peer kept for the held request makes the peer set ready",
         );
         assert_eq!(peer_set.queued_inv_requests.len(), 1);
-        let waker = peer_set.queued_request_waker.clone();
+        let waker = peer_set.maintenance_waker.clone();
         let _ = futures::poll!(std::pin::pin!(waker.notify.notified()));
         let _poll_fut = peer_set.call(Request::PollPeerSet);
         assert!(
@@ -2117,6 +3003,8 @@ fn peer_set_keeps_buffered_request_turn_after_queued_broadcast() {
             "the queued request task must be woken to route the unused peer",
         );
         let _ = futures::poll!(peer_set.ready());
+        // The first peer still has the request it was busy with before the queued block.
+        assert_eq!(received_request(&mut handles[0]), Some(block_request(9)));
         assert_eq!(
             received_request(&mut handles[0]),
             Some(block_request(2)),
@@ -2493,6 +3381,49 @@ fn peer_set_routes_queued_block_request_behind_buffer_without_other_requests() {
             );
         }
     });
+}
+
+/// Readiness expiry must revoke the separate advert path before maintenance is acknowledged.
+#[tokio::test(start_paused = true)]
+async fn readiness_expiry_removes_busy_peer_from_advertisers() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, _peer_set_guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&SERVING_AND_NON_SERVING);
+    let _busy_futs = make_serving_peer_busy(&mut peer_set, addrs[0]).await;
+    assert!(peer_set
+        .block_advert_senders
+        .borrow()
+        .contains_key(&addrs[0]));
+
+    tokio::time::advance(REQUEST_TIMEOUT).await;
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .expect("the non-serving peer remains ready")
+        .expect("readiness expiry is not a peer-set error");
+
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    timeout(Duration::from_secs(1), async {
+        let hash = block::Hash([14; 32]);
+        let advert = advertiser
+            .ready()
+            .await
+            .expect("the surviving peer remains eligible for adverts")
+            .call(Request::AdvertiseBlockToAll(hash));
+        assert_eq!(handles[1].receive_block_advert(), hash);
+        assert_eq!(
+            advert
+                .await
+                .expect("the surviving peer acknowledged the advert"),
+            Response::Nil
+        );
+        assert!(
+            handles[0].block_advert_receiver.try_recv().is_err(),
+            "the expired peer must not receive the advert"
+        );
+    })
+    .await
+    .expect("advertising to the surviving peer does not wait for the expired peer");
 }
 
 /// Check that a waiting block request is refused after [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`] if the
@@ -3021,73 +3952,5 @@ fn peer_set_waits_for_busy_failed_peer_as_last_resort() {
             Some(block_request(2)),
             "the waiting retry should be routed to the peer once it is ready",
         );
-    });
-}
-
-/// Deferred delivery futures must run, drain siblings, and report supersession as failure.
-#[test]
-fn broadcast_all_drains_deferred_deliveries_and_reports_supersession() {
-    let peer_versions = PeerVersions {
-        peer_versions: vec![Version::min_specified_for_upgrade(
-            &Network::Mainnet,
-            NetworkUpgrade::Nu6_2,
-        )],
-    };
-    let (runtime, _init_guard) = zebra_test::init_async();
-    let _guard = runtime.enter();
-    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
-    let (minimum_peer_version, _best_tip_height) =
-        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
-    runtime.block_on(async move {
-        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
-            .with_discover(discovered_peers)
-            .with_minimum_peer_version(minimum_peer_version)
-            .build();
-        let peer_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
-        peer_set.ready().await.expect("mock peer is ready");
-        let service = peer_set
-            .take_ready_service(&peer_addr)
-            .expect("mock peer is ready");
-        peer_set.push_unready(peer_addr, service);
-        let mut broadcast =
-            peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([41; 32])));
-        let (_, sender, _) = peer_set.queued_broadcast_all.take().unwrap();
-        let (entered, mut started) = tokio::sync::oneshot::channel();
-        let (release, released) = tokio::sync::oneshot::channel();
-        assert!(sender
-            .send(async { Err("controlled delivery failure".into()) }.boxed())
-            .is_ok());
-        assert!(sender
-            .send(
-                async move {
-                    let _ = entered.send(());
-                    released
-                        .await
-                        .expect("the test releases the deferred delivery");
-                    Ok(Response::Nil)
-                }
-                .boxed()
-            )
-            .is_ok());
-        drop(sender);
-        assert!(futures::poll!(&mut broadcast).is_pending());
-        started
-            .try_recv()
-            .expect("the deferred delivery future was polled");
-        release.send(()).unwrap();
-        let error = timeout(Duration::from_secs(1), broadcast)
-            .await
-            .unwrap()
-            .unwrap_err();
-        assert_eq!(error.to_string(), "controlled delivery failure");
-
-        let displaced = peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([42; 32])));
-        let replacement =
-            peer_set.broadcast_all(Request::AdvertiseBlockToAll(block::Hash([43; 32])));
-        assert!(timeout(Duration::from_secs(1), displaced)
-            .await
-            .unwrap()
-            .is_err());
-        drop(replacement);
     });
 }

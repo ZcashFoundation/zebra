@@ -557,12 +557,13 @@ impl GenesisPeer {
             .enable_all()
             .build()?;
 
-        let (peer_set, address_book, misbehavior_tx) = runtime.block_on(zebra_network::init(
-            config,
-            inbound_service,
-            NoChainTip,
-            "Genesis test peer".to_string(),
-        ));
+        let (peer_set, address_book, misbehavior_tx, _advertiser) =
+            runtime.block_on(zebra_network::init(
+                config,
+                inbound_service,
+                NoChainTip,
+                "Genesis test peer".to_string(),
+            ));
 
         let listen_addr = address_book
             .lock()
