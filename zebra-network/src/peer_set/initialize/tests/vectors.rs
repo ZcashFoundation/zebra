@@ -35,7 +35,7 @@ use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::Dat
 use zebra_test::net::random_known_port;
 
 use crate::{
-    address_book_updater::AddressBookUpdater,
+    address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
@@ -43,8 +43,8 @@ use crate::{
     peer_set::{
         crawler_services,
         initialize::{
-            accept_inbound_connections, add_initial_peers, crawl_and_dial, limit_initial_peers,
-            open_listener, DiscoveredPeer,
+            accept_inbound_connections, add_initial_peers, batch_misbehavior_updates,
+            crawl_and_dial, limit_initial_peers, open_listener, DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker,
@@ -2596,4 +2596,62 @@ where
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx, address_book_updater_guard)
+}
+
+/// Check that misbehaviour reports sent while a flush is waiting on the address book
+/// updater are received, rather than filling up the channel and being dropped.
+#[tokio::test]
+async fn misbehavior_reports_are_received_during_flush() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    const CHANNEL_SIZE: usize = 4;
+    const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
+
+    // A full address book channel, which nothing reads until the end of the test,
+    // makes the flush wait.
+    let (address_book_updater, mut address_book_rx) = change_channel(1);
+
+    let batch_task = tokio::spawn(batch_misbehavior_updates(
+        misbehavior_rx,
+        address_book_updater,
+        FLUSH_INTERVAL,
+    ));
+
+    let report = |port| {
+        MisbehaviorReport::new(
+            PeerSocketAddr::from(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)),
+            1,
+            "test",
+        )
+    };
+
+    // The first flush sends one of these updates, then waits to send the other one.
+    misbehavior_tx.send(report(1)).await.unwrap();
+    misbehavior_tx.send(report(2)).await.unwrap();
+    tokio::time::sleep(FLUSH_INTERVAL * 2).await;
+
+    // Verification code uses `try_send()`, which fails if the channel is full.
+    for _ in 0..CHANNEL_SIZE * 3 {
+        misbehavior_tx
+            .try_send(report(3))
+            .expect("the batch task should keep receiving while it waits to flush");
+        tokio::task::yield_now().await;
+    }
+
+    // Unblock the flush, then wait for the next one, which has all the reports for peer 3.
+    let mut updates = 0;
+    while tokio::time::timeout(FLUSH_INTERVAL * 3, address_book_rx.recv())
+        .await
+        .is_ok_and(|update| update.is_some())
+    {
+        updates += 1;
+    }
+
+    assert_eq!(updates, 3, "expected one address book update for each peer");
+
+    drop(misbehavior_tx);
+    batch_task.await.expect("batch task should not panic");
 }

@@ -173,7 +173,7 @@ where
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, listen_addr);
 
-    let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
+    let (misbehavior_tx, misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
         // Leave enough room for a misbehaviour update on every peer connection
         // before the channel is drained.
         config
@@ -181,47 +181,12 @@ where
             .max(MIN_CHANNEL_SIZE),
     );
 
-    let misbehaviour_updater = address_book_updater.clone();
     let misbehavior_guard = tokio::spawn(
-        async move {
-            let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
-            // Batch misbehaviour updates so peers can't keep the address book mutex locked
-            // by repeatedly sending invalid blocks or transactions.
-            let mut flush_timer =
-                IntervalStream::new(tokio::time::interval(constants::MISBEHAVIOR_FLUSH_INTERVAL));
-
-            loop {
-                tokio::select! {
-                    msg = misbehavior_rx.recv() => match msg {
-                        Some(report) => {
-                            // Keep the first reason: any report can cross the ban threshold.
-                            let score = report.score;
-                            misbehaviors
-                                .entry(report.addr)
-                                .and_modify(|batched| {
-                                    batched.score = batched.score.saturating_add(score)
-                                })
-                                .or_insert(report);
-                        }
-                        None => break,
-                    },
-
-                    _ = flush_timer.next() => {
-                        for (_, report) in misbehaviors.drain() {
-                            let _ = misbehaviour_updater
-                                .send(MetaAddr::new_misbehavior(
-                                    report.addr,
-                                    report.score,
-                                    report.reason,
-                                ))
-                                .await;
-                        }
-                    },
-                };
-            }
-
-            tracing::warn!("exiting misbehavior update batch task");
-        }
+        batch_misbehavior_updates(
+            misbehavior_rx,
+            address_book_updater.clone(),
+            constants::MISBEHAVIOR_FLUSH_INTERVAL,
+        )
         .in_current_span(),
     );
 
@@ -618,6 +583,70 @@ async fn limit_initial_peers(
     }
 
     initial_peers
+}
+
+/// Batches peer misbehaviour reports from `misbehavior_rx`, and sends them to the address
+/// book every `flush_interval`.
+///
+/// Batching stops peers from keeping the address book mutex locked by repeatedly sending
+/// invalid blocks or transactions.
+///
+/// Senders use `try_send()`, so this task keeps receiving while a flush is waiting for the
+/// address book updater. Otherwise the channel could fill up during the flush, and new
+/// reports would be dropped.
+async fn batch_misbehavior_updates(
+    mut misbehavior_rx: mpsc::Receiver<MisbehaviorReport>,
+    address_book_updater: AddressBookChangeSender,
+    flush_interval: Duration,
+) {
+    let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
+    let mut flush_timer = IntervalStream::new(tokio::time::interval(flush_interval));
+
+    loop {
+        tokio::select! {
+            msg = misbehavior_rx.recv() => match msg {
+                Some(report) => batch_misbehavior_report(&mut misbehaviors, report),
+                None => break,
+            },
+
+            _ = flush_timer.next() => {
+                for (_, report) in std::mem::take(&mut misbehaviors) {
+                    let update = address_book_updater.send(MetaAddr::new_misbehavior(
+                        report.addr,
+                        report.score,
+                        report.reason,
+                    ));
+                    tokio::pin!(update);
+
+                    // Keep receiving while the address book updater is busy.
+                    // Reports received here are sent in the next flush.
+                    loop {
+                        tokio::select! {
+                            _ = &mut update => break,
+                            Some(report) = misbehavior_rx.recv() => {
+                                batch_misbehavior_report(&mut misbehaviors, report);
+                            }
+                        }
+                    }
+                }
+            },
+        };
+    }
+
+    tracing::warn!("exiting misbehavior update batch task");
+}
+
+/// Adds `report` to the batched `misbehaviors`, summing the scores for the same peer.
+fn batch_misbehavior_report(
+    misbehaviors: &mut HashMap<PeerSocketAddr, MisbehaviorReport>,
+    report: MisbehaviorReport,
+) {
+    // Keep the first reason: any report can cross the ban threshold.
+    let score = report.score;
+    misbehaviors
+        .entry(report.addr)
+        .and_modify(|batched| batched.score = batched.score.saturating_add(score))
+        .or_insert(report);
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
