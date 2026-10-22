@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Reduced block-template transaction selection time for large mempools while preserving ZIP 317 fee-weighted selection.
+time: 2026-10-22T03:54:35.493595016+02:00

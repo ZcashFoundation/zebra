@@ -8,7 +8,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rand::distr::{weighted::WeightedIndex, Distribution};
+use rand::{
+    distr::{Distribution, Open01},
+    Rng,
+};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -71,7 +74,7 @@ pub fn select_mempool_transactions(
             .partition(|(tx_id, _tx)| !tx_dependencies.contains_key(tx_id));
 
     // Setup the transaction lists.
-    let (mut conventional_fee_txs, mut low_fee_txs): (Vec<_>, Vec<_>) = independent_mempool_txs
+    let (conventional_fee_txs, low_fee_txs): (Vec<_>, Vec<_>) = independent_mempool_txs
         .into_values()
         .partition(VerifiedUnminedTx::pays_conventional_fee);
 
@@ -103,41 +106,21 @@ pub fn select_mempool_transactions(
     remaining_block_bytes = block_bytes;
     remaining_block_sigops = block_sigops;
 
-    // > Repeat while there is any candidate transaction
-    // > that pays at least the conventional fee:
-    let mut conventional_fee_tx_weights = setup_fee_weighted_index(&conventional_fee_txs);
-
-    while let Some(tx_weights) = conventional_fee_tx_weights {
-        conventional_fee_tx_weights = checked_add_transaction_weighted_random(
-            &mut conventional_fee_txs,
-            &mut dependent_mempool_txs,
-            tx_weights,
-            &mut selected_txs,
-            &mempool_tx_deps,
-            &mut remaining_block_bytes,
-            &mut remaining_block_sigops,
-            // The number of unpaid actions is always zero for transactions that pay the
-            // conventional fee, so this check and limit is effectively ignored.
-            &mut remaining_block_unpaid_actions,
-            &mut remaining_shielded,
-        );
-    }
-
-    // > Repeat while there is any candidate transaction:
-    let mut low_fee_tx_weights = setup_fee_weighted_index(&low_fee_txs);
-
-    while let Some(tx_weights) = low_fee_tx_weights {
-        low_fee_tx_weights = checked_add_transaction_weighted_random(
-            &mut low_fee_txs,
-            &mut dependent_mempool_txs,
-            tx_weights,
-            &mut selected_txs,
-            &mempool_tx_deps,
-            &mut remaining_block_bytes,
-            &mut remaining_block_sigops,
-            &mut remaining_block_unpaid_actions,
-            &mut remaining_shielded,
-        );
+    // Draw all conventional-fee candidates before considering the low-fee tier.
+    for candidate_txs in [conventional_fee_txs, low_fee_txs] {
+        for candidate_tx in fee_weighted_order(candidate_txs, &mut rand::rng()) {
+            checked_add_transaction(
+                candidate_tx,
+                &mut dependent_mempool_txs,
+                &mut selected_txs,
+                &mempool_tx_deps,
+                &mut remaining_block_bytes,
+                &mut remaining_block_sigops,
+                // Conventional-fee transactions always have zero unpaid actions.
+                &mut remaining_block_unpaid_actions,
+                &mut remaining_shielded,
+            );
+        }
     }
 
     selected_txs
@@ -162,18 +145,37 @@ fn max_transaction_count_size() -> usize {
         .len()
 }
 
-/// Returns a fee-weighted index and the total weight of `transactions`.
+/// Orders candidates by repeated fee-proportional draws without replacement in O(N log N).
 ///
-/// Returns `None` if there are no transactions, or if the weights are invalid.
-fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<WeightedIndex<f32>> {
-    if transactions.is_empty() {
-        return None;
+/// Efraimidis-Spirakis keys `ln(U) / weight`, sorted descending, are an exponential race:
+/// each next candidate wins with probability proportional to its remaining weight. Computing
+/// the order once therefore preserves ZIP 317's draws, including skipping candidates that don't fit.
+///
+/// Zero-weight candidates are never chosen; invalid weights discard the candidate list.
+fn fee_weighted_order(
+    mut transactions: Vec<VerifiedUnminedTx>,
+    rng: &mut impl Rng,
+) -> impl Iterator<Item = VerifiedUnminedTx> {
+    if transactions
+        .iter()
+        .any(|tx| !tx.fee_weight_ratio.is_finite() || tx.fee_weight_ratio < 0.0)
+    {
+        transactions.clear();
     }
 
-    let tx_weights: Vec<f32> = transactions.iter().map(|tx| tx.fee_weight_ratio).collect();
-
-    // Setup the transaction weights.
-    WeightedIndex::new(tx_weights).ok()
+    let mut weighted_txs = Vec::with_capacity(transactions.len());
+    weighted_txs.extend(
+        transactions
+            .into_iter()
+            .filter(|tx| tx.fee_weight_ratio > 0.0)
+            .map(|tx| {
+                // Open01 excludes both endpoints, keeping the logarithm finite and nonzero.
+                let uniform: f64 = Open01.sample(rng);
+                (uniform.ln() / f64::from(tx.fee_weight_ratio), tx)
+            }),
+    );
+    weighted_txs.sort_unstable_by(|(left, _), (right, _)| right.total_cmp(left));
+    weighted_txs.into_iter().map(|(_, tx)| tx)
 }
 
 /// Checks if every item in `candidate_tx_deps` is present in `selected_txs`.
@@ -229,41 +231,28 @@ fn dependencies_depth(
     current_level
 }
 
-/// Chooses a random transaction from `txs` using the weighted index `tx_weights`,
-/// and tries to add it to `selected_txs`.
+/// Tries to add `candidate_tx` and its dependents to `selected_txs`.
 ///
 /// If it fits in the supplied limits, adds it to `selected_txs`, and updates the limits.
-///
-/// Updates the weights of chosen transactions to zero, even if they weren't added,
-/// so they can't be chosen again.
-///
-/// Returns the updated transaction weights.
-/// If all transactions have been chosen, returns `None`.
 // TODO: Refactor these arguments into a struct and this function into a method.
 #[allow(clippy::too_many_arguments)]
-fn checked_add_transaction_weighted_random(
-    candidate_txs: &mut Vec<VerifiedUnminedTx>,
+fn checked_add_transaction(
+    candidate_tx: VerifiedUnminedTx,
     dependent_txs: &mut HashMap<transaction::Hash, VerifiedUnminedTx>,
-    tx_weights: WeightedIndex<f32>,
     selected_txs: &mut Vec<SelectedMempoolTx>,
     mempool_tx_deps: &TransactionDependencies,
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u32,
     remaining_block_unpaid_actions: &mut u32,
     remaining_shielded: &mut ShieldedBudget,
-) -> Option<WeightedIndex<f32>> {
-    // > Pick one of those transactions at random with probability in direct proportion
-    // > to its weight_ratio, and remove it from the set of candidate transactions
-    let (new_tx_weights, candidate_tx) =
-        choose_transaction_weighted_random(candidate_txs, tx_weights);
-
+) {
     if !candidate_tx.try_update_block_template_limits(
         remaining_block_bytes,
         remaining_block_sigops,
         remaining_block_unpaid_actions,
         remaining_shielded,
     ) {
-        return new_tx_weights;
+        return;
     }
 
     let tx_dependencies = mempool_tx_deps.dependencies();
@@ -327,8 +316,6 @@ fn checked_add_transaction_weighted_random(
 
         current_level_dependents = next_level_dependents;
     }
-
-    new_tx_weights
 }
 
 /// Tracks a block template's [ZIP 218] shielded action budget.
@@ -429,21 +416,4 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
             false
         }
     }
-}
-
-/// Choose a transaction from `transactions`, using the previously set up `weighted_index`.
-///
-/// If some transactions have not yet been chosen, returns the weighted index and the transaction.
-/// Otherwise, just returns the transaction.
-fn choose_transaction_weighted_random(
-    candidate_txs: &mut Vec<VerifiedUnminedTx>,
-    weighted_index: WeightedIndex<f32>,
-) -> (Option<WeightedIndex<f32>>, VerifiedUnminedTx) {
-    let candidate_position = weighted_index.sample(&mut rand::rng());
-    let candidate_tx = candidate_txs.swap_remove(candidate_position);
-
-    // We have to regenerate this index each time we choose a transaction, due to floating-point sum inaccuracies.
-    // If we don't, some chosen transactions can end up with a tiny non-zero weight, leading to duplicates.
-    // <https://github.com/rust-random/rand/blob/4bde8a0adb517ec956fcec91665922f6360f974b/src/distributions/weighted_index.rs#L173-L183>
-    (setup_fee_weighted_index(candidate_txs), candidate_tx)
 }
