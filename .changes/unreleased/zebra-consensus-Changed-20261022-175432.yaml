@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Verify Sapling bundles in parallel on blocking workers, keeping proof preparation off asynchronous workers and flushing every used batch when block checks are queued.
+time: 2026-10-22T17:54:32.37229991+02:00
