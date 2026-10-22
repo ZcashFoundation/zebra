@@ -227,18 +227,19 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Outbound success acknowledges local writes to every selected peer, not remote receipt.
+    /// Outbound success acknowledges the first completed local write, not remote receipt.
     /// Inbound handlers return [`Response::Nil`](super::Response::Nil) after accepting inventory.
     AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
 
     /// Advertise a block to every connected, non-banned peer.
     ///
     /// Use [`crate::BlockAdvertiser`], not the ordinary peer service. Each peer has a bounded
-    /// advert channel; full or closed queues, revoked authorization, and write errors are failures.
+    /// advert channel; per-peer failures do not fail a fanout with a completed local write.
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
+    /// Returns [`Response::Nil`](super::Response::Nil) on the first completed local write.
+    /// Other queued writes continue; timeouts leave delivery unknown.
     AdvertiseBlockToAll(block::Hash),
 
     /// Request the contents of this node's mempool.
