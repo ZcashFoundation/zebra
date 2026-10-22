@@ -3582,7 +3582,8 @@ fn v4_with_small_order_rk_sapling_spend() {
         let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase()
+                transaction.version() == 4
+                    && !transaction.is_coinbase()
                     && transaction.inputs().is_empty()
                     && transaction.joinsplit_count() == 0
             })
@@ -3625,7 +3626,8 @@ fn v4_with_small_order_epk_sapling_output() {
         let (height, mut transaction) = test_transactions(&network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.is_coinbase()
+                transaction.version() == 4
+                    && !transaction.is_coinbase()
                     && transaction.inputs().is_empty()
                     && transaction.joinsplit_count() == 0
             })
@@ -3744,9 +3746,12 @@ async fn v5_with_duplicate_sapling_spends() {
 async fn v5_with_small_order_rk_sapling_spend() {
     let _init_guard = zebra_test::init();
 
-    for net in Network::iter() {
+    // Only Mainnet: the Testnet vectors have no V5 Sapling-only spend without transparent inputs.
+    for net in [Network::Mainnet] {
         let mut tx = v5_transactions(net.block_iter())
-            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_orchard_shielded_data()
+            })
             .find(|tx| tx.sapling_spends_count() > 0)
             .expect("V5 tx with Sapling spends");
 
@@ -3785,7 +3790,9 @@ async fn v5_with_small_order_epk_sapling_output() {
     // Only Mainnet: the Testnet vectors have no V5 tx with Sapling outputs and no transparent inputs.
     for net in [Network::Mainnet] {
         let mut tx = v5_transactions(net.block_iter())
-            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_orchard_shielded_data()
+            })
             .find(|tx| tx.sapling_outputs().next().is_some())
             .expect("V5 tx with Sapling outputs");
 
