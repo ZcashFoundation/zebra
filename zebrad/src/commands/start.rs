@@ -655,9 +655,8 @@ impl StartCmd {
 
         // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it exits.
         info!("spawning tip block delay metrics task");
-        let tip_delay_task_handle = tokio::spawn(
-            record_tip_block_delay(chain_tip_change.clone(), sync_status.clone()).in_current_span(),
-        );
+        let tip_delay_task_handle =
+            tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());
 
         // Start health server if configured
         info!("initializing health endpoints");
