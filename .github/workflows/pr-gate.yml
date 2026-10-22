@@ -7,7 +7,7 @@ on:
   # re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
-    branches: [main]
+    branches: [main, next]
   push:
     branches: [main]
   merge_group:

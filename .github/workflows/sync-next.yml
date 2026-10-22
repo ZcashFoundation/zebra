@@ -1,0 +1,92 @@
+# Keep `next` current with `main` through a reviewable pull request.
+#
+# After each push to `main`, opens a `main` -> `next` pull request, or leaves the open
+# one to pick up the new commits. A maintainer merges it with a merge commit, resolving
+# any conflicts on a separate branch first. See book/src/dev/next-branch.md.
+name: Sync main to next
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  sync:
+    name: Open or update the sync pull request
+    if: github.repository_owner == 'ZcashFoundation'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # A pull request opened with GITHUB_TOKEN never starts the required checks, so it
+      # could never merge.
+      - name: Generate release app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Open or update the sync pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+        run: |
+          # `gh pr list --head` matches the branch name in any fork, so a fork's `main`
+          # could stand in for this repository's. The REST filter takes the owner.
+          find_sync_pr() {
+            gh api "repos/${REPO}/pulls?state=open&base=next&head=${OWNER}:main" \
+              --jq '.[0].number // empty'
+          }
+
+          if ! BRANCH=$(gh api "repos/${REPO}/branches/next" --jq '.name' 2>&1); then
+            if [[ "${BRANCH}" == *"HTTP 404"* ]]; then
+              echo "::notice::The next branch does not exist, so there is nothing to sync."
+              exit 0
+            fi
+            echo "${BRANCH}"
+            exit 1
+          fi
+
+          AHEAD=$(gh api "repos/${REPO}/compare/next...main" --jq '.ahead_by')
+          if [ "${AHEAD}" -eq 0 ]; then
+            echo "next already contains every commit on main."
+            exit 0
+          fi
+
+          PR=$(find_sync_pr)
+          if [ -z "${PR}" ]; then
+            BODY_FILE=$(mktemp)
+            cat > "${BODY_FILE}" <<'BODY'
+          Brings the commits merged to `main` into `next`.
+
+          Merge this pull request with a merge commit, so `next` keeps each commit from `main`.
+
+          If it has conflicts, resolve them on a separate branch, because this pull request's head is `main`. The steps are in [The `next` branch](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/next-branch.md#resolve-sync-conflicts).
+          BODY
+            gh pr create --repo "${REPO}" --base next --head main \
+              --title "chore: sync main to next" --body-file "${BODY_FILE}"
+            PR=$(find_sync_pr)
+          fi
+          echo "Sync pull request #${PR} has ${AHEAD} commit(s) from main."
+
+          # GitHub computes mergeability asynchronously after the head moves.
+          MERGEABLE=UNKNOWN
+          for _ in $(seq 1 6); do
+            MERGEABLE=$(gh pr view "${PR}" --repo "${REPO}" --json mergeable --jq '.mergeable')
+            [ "${MERGEABLE}" != "UNKNOWN" ] && break
+            sleep 10
+          done
+          if [ "${MERGEABLE}" = "CONFLICTING" ]; then
+            echo "::warning::Sync pull request #${PR} conflicts with next. Resolve it on a separate branch, as described in its body."
+            echo "Sync pull request #${PR} conflicts with \`next\` and needs a maintainer to resolve it." >> "$GITHUB_STEP_SUMMARY"
+          fi

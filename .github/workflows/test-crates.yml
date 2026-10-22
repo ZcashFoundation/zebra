@@ -2,7 +2,7 @@ name: Test Crate Build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
   push:
     branches: [main]
   merge_group:

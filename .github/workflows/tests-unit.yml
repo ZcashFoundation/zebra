@@ -2,7 +2,7 @@ name: Unit Tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
     types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
@@ -57,10 +57,12 @@ jobs:
     # Adding a label that is not `release` cannot change the result of a test run on a
     # head commit that did not move, and this is the longest job in CI, so it must not
     # re-run for one. `allowed-skips` tolerates the skip; the tests still have to pass on
-    # the merge group before anything reaches main.
+    # the merge group before anything reaches main. `next` has no merge queue, so its
+    # pull requests always run the tests: a skip would replace a failed run's result.
     if: >-
       needs.changes.outputs.unit_tests == 'true' &&
-      (github.event.action != 'labeled' ||
+      (github.base_ref == 'next' ||
+      github.event.action != 'labeled' ||
       github.event.label.name == 'release')
     permissions:
       contents: read
