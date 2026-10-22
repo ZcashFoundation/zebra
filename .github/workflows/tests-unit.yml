@@ -3,22 +3,25 @@ name: Unit Tests
 on:
   pull_request:
     branches: [main, next]
-    types: [opened, synchronize, reopened, labeled]
+    # `edited` covers a pull request retargeted to `next`, which must not keep a result
+    # that a skipped run reported against `main`.
+    types: [opened, synchronize, reopened, labeled, edited]
   push:
     branches: [main]
   merge_group:
     types: [checks_requested]
 
-# Cancel obsolete test runs after new commits. Unrelated label events get a group of
-# their own, keyed by run id, so they can cancel neither the required unit test run
-# nor each other: cancelling one would report the required check as failed, because
-# `alls-green` reads a cancelled need as a failure.
+# Cancel obsolete test runs after new commits. Unrelated label events and edits get a
+# group of their own, keyed by run id, so they can cancel neither the required unit
+# test run nor each other: cancelling one would report the required check as failed,
+# because `alls-green` reads a cancelled need as a failure.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
-      github.event.action == 'labeled' &&
-      github.event.label.name != 'release' &&
-      format('ignored-label-{0}', github.run_id) ||
+      (github.event.action == 'labeled' &&
+      github.event.label.name != 'release' ||
+      github.event.action == 'edited') &&
+      format('ignored-event-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
@@ -54,15 +57,16 @@ jobs:
   run-unit-tests:
     name: stable 1.97.0
     needs: changes
-    # Adding a label that is not `release` cannot change the result of a test run on a
-    # head commit that did not move, and this is the longest job in CI, so it must not
-    # re-run for one. `allowed-skips` tolerates the skip; the tests still have to pass on
-    # the merge group before anything reaches main. `next` has no merge queue, so its
-    # pull requests always run the tests: a skip would replace a failed run's result.
+    # Adding a label that is not `release`, or editing the pull request, cannot change the
+    # result of a test run on a head commit that did not move, and this is the longest
+    # job in CI, so it must not re-run for one. `allowed-skips` tolerates the skip; the
+    # tests still have to pass on the merge group before anything reaches main. `next`
+    # has no merge queue, so its pull requests always run the tests: a skip would
+    # replace a failed run's result.
     if: >-
       needs.changes.outputs.unit_tests == 'true' &&
       (github.base_ref == 'next' ||
-      github.event.action != 'labeled' ||
+      (github.event.action != 'labeled' && github.event.action != 'edited') ||
       github.event.label.name == 'release')
     permissions:
       contents: read
@@ -100,7 +104,10 @@ jobs:
   run-zebra-test-windows:
     name: zebra-test Windows 1.97.0
     needs: changes
-    if: needs.changes.outputs.unit_tests == 'true'
+    # Edits only rerun it for `next`, as for the Linux tests above.
+    if: >-
+      needs.changes.outputs.unit_tests == 'true' &&
+      (github.base_ref == 'next' || github.event.action != 'edited')
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
