@@ -2,7 +2,10 @@ name: Lint
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
+    # `edited` covers a pull request retargeted to `next`, whose required checks must
+    # be evaluated against `next` rather than kept from a run against `main`.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
   merge_group:
@@ -10,9 +13,14 @@ on:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
-# to run, cancelling any workflows in between
+# to run, cancelling any workflows in between. Edits to pull requests into `main`
+# get a group of their own, so they cannot cancel the run for the latest commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}${{
+      github.event.action == 'edited' && github.base_ref != 'next' &&
+      format('-ignored-edit-{0}', github.run_id) || ''
+    }}
   cancel-in-progress: true
 
 permissions:
@@ -27,9 +35,11 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
-      lint: ${{ steps.filter.outputs.lint || 'true' }}
-      hadolint: ${{ steps.filter.outputs.hadolint || 'true' }}
-      shellcheck: ${{ steps.filter.outputs.shellcheck || 'true' }}
+      # Edits report the checks as skipped for `main`, whose merge queue reruns them.
+      # `next` has no queue, so edits there, such as a retarget, rerun the filter.
+      lint: ${{ github.event.action == 'edited' && github.base_ref != 'next' && 'false' || steps.filter.outputs.lint || 'true' }}
+      hadolint: ${{ github.event.action == 'edited' && github.base_ref != 'next' && 'false' || steps.filter.outputs.hadolint || 'true' }}
+      shellcheck: ${{ github.event.action == 'edited' && github.base_ref != 'next' && 'false' || steps.filter.outputs.shellcheck || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'

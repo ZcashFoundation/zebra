@@ -52,6 +52,8 @@ Some PRs don't use the queue:
 
 - Admin merges, which happen when there are multiple failures on the `main` branch
   (see `Admin: Manually Merging PRs` below)
+- PRs into the [`next` branch](next-branch.md), which run the same required checks
+  except `mergefreeze`, need no approval, and merge directly
 
 ### Holding a Pull Request Back
 
