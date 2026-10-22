@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Network upgrade and consensus branch ID lookups no longer copy the activation list or build a map on each call.
+time: 2026-10-23T00:18:30.96798958+02:00
