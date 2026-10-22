@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Parse Regtest TEX addresses, which use the `texregtest` HRP. `transparent::Address::from_str` previously accepted only the Mainnet and Testnet HRPs, so Regtest TEX addresses were rejected as unparseable.
+- Parse Regtest TEX addresses, which use the `texregtest` HRP. `transparent::Address::from_str` previously accepted only the Mainnet and Testnet HRPs, so Regtest TEX addresses were rejected as unparsable.
 - Added the NU7 Mainnet activation height, `parameters::constants::activation_heights::mainnet::NU7` (3,543,405).
 
 ### Changed
