@@ -4,13 +4,6 @@ on:
   push:
     branches: [main]
 
-# Ensures that only one workflow task will run at a time. Previous builds, if
-# already in process, will get cancelled. Only the latest commit will be allowed
-# to run, cancelling any workflows in between
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   pull-requests: read
@@ -125,6 +118,12 @@ jobs:
     if: needs.changes.outputs.book == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+
+    # GitHub Pages accepts one deployment at a time. Deployments queue rather
+    # than cancel, because cancelling one midway leaves Pages half-updated.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment.
     # `contents: read` is intentionally omitted: this job publishes rendered
