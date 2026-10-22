@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Security
-body: "Compute transaction signature hashes from digests cached once per transaction, so verifying a transaction's transparent inputs is linear in their number instead of quadratic. Previously, a single 2 MB transaction with tens of thousands of stub-signed inputs could keep a node's CPU busy for minutes ([GHSA-j4cw-58mj-7w6v](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-j4cw-58mj-7w6v))."
-time: 2026-09-21T12:00:00.000000000-03:00

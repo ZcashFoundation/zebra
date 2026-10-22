@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: "Fix an initial sync stall where a peer serving a forged checkpoint block body followed by an invalid block left the checkpoint verifier ahead of the state, so the honest block was rejected until restart ([GHSA-2w9f-9wx8-f5c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2w9f-9wx8-f5c8)). Reported by @SphereDonout."
-time: 2026-10-19T18:04:05.000000000Z

@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Fixed
-body: "`check::utxo::transparent_spend()` computes each transaction's coinbase spend restriction once instead of once per spent outpoint, removing an O(inputs × outputs) cost at block commit."
-time: 2026-10-15T12:00:00.000000000-03:00

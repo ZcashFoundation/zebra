@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Fixed
-body: Removing one of two queued or sent blocks with the same transaction no longer drops their shared outputs from the UTXO caches. Thanks to @ouicate for the report ([#11619](https://github.com/ZcashFoundation/zebra/issues/11619)).
-time: 2026-10-09T12:00:00.000000+00:00

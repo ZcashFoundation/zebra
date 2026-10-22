@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Fixed
-body: "`Transaction::has_transparent_inputs()` and `has_transparent_outputs()` now read the transparent bundle's lengths instead of rebuilding and converting the whole input or output vector, and `coinbase_spend_restriction()` uses the non-allocating check."
-time: 2026-10-15T12:00:00.000000000-03:00

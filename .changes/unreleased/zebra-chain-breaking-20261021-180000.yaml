@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: 'Updated `zcash_primitives` to 0.31.0, `zcash_address` to 0.14.0, `zcash_transparent` to 0.11.0 and `zcash_protocol` to 0.11.0, the final releases of these versions. Their types appear in the public API.'
-time: 2026-10-21T18:00:00.000000000-03:00

@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Updated the pinned zcashd-compat sidecar to [`zebra-compat-v1.3.0`](https://github.com/ZcashFoundation/zcashd/releases/tag/zebra-compat-v1.3.0), which follows the NU7 network upgrade. Earlier sidecar builds cannot follow Testnet past NU7 at height 4,465,026, or Mainnet past NU7 at height 3,543,405. `zcashd_source = "embedded"` and the installer''s `split-binary` mode now download this build.'
-time: 2026-10-21T21:00:00.000000000Z

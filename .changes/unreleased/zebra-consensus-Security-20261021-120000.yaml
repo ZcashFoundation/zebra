@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Security
-body: "Converted failed transparent script checks into `TransactionError::Script`, so they get its misbehaviour score of 100. Previously, every transparent script failure became an unscored `InternalDowncastError` ([GHSA-jq45-ghw5-v37x](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x))."
-time: 2026-10-21T12:00:00.000000000-03:00

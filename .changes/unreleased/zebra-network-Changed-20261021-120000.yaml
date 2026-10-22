@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: 'Changed `CURRENT_NETWORK_PROTOCOL_VERSION` to 170190 for the NU7 Mainnet activation.'
-time: 2026-10-21T12:00:00.000000000Z
