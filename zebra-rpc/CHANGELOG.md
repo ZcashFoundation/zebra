@@ -9,10 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Breaking Changes
 
-- Updated `zcash_primitives` to 0.31.0-pre.2, `zcash_address` to 0.14.0-pre.2, `zcash_transparent` to 0.11.0-pre.2, `zcash_protocol` to 0.11.0-pre.1 and `zcash_keys` to 0.17.0-pre.2, whose `address::Address` is returned by `MinerParams::addr` ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784)).
+- Updated `zcash_primitives` to 0.31.0, `zcash_address` to 0.14.0, `zcash_transparent` to 0.11.0, `zcash_protocol` to 0.11.0 and `zcash_keys` to 0.17.0, whose `address::Address` is returned by `MinerParams::addr` ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784), [#11877](https://github.com/ZcashFoundation/zebra/pull/11877)).
 - `RpcMetricsMiddleware::new` and `RpcTracingMiddleware::new` now require an `Arc<HashSet<&'static str>>` of registered RPC method names, collected from `RpcModule::method_names()`. Unregistered names use the `unknown` method label in request, duration and error metrics, and the `unknown` value in the `rpc.method` span field ([#11837](https://github.com/ZcashFoundation/zebra/pull/11837)).
 - Added the `z_converttex` RPC method, which converts a transparent P2PKH address to a ZIP 320 TEX address. Adding a method to the `Rpc` trait is a breaking change for downstream implementers.
-- Updated `zcash_primitives` to 0.31.0, `zcash_address` to 0.14.0, `zcash_transparent` to 0.11.0, `zcash_protocol` to 0.11.0 and `zcash_keys` to 0.17.0, whose `address::Address` is returned by `MinerParams::addr`. These are the final releases of these versions.
 
 ### Changed
 

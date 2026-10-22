@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Breaking Changes
 
-- Updated `zcash_primitives` to 0.31.0-pre.2, `zcash_address` to 0.14.0-pre.2, `zcash_transparent` to 0.11.0-pre.2, `zcash_protocol` to 0.11.0-pre.1 and `zcash_history` to 0.6.0, whose `V1`, `V2` and `V3` are re-exported from `primitives::zcash_history`. Their types appear in the public API ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784)).
-- Updated `zcash_primitives` to 0.31.0, `zcash_address` to 0.14.0, `zcash_transparent` to 0.11.0 and `zcash_protocol` to 0.11.0, the final releases of these versions. Their types appear in the public API.
+- Updated `zcash_primitives` to 0.31.0, `zcash_address` to 0.14.0, `zcash_transparent` to 0.11.0, `zcash_protocol` to 0.11.0 and `zcash_history` to 0.6.0, whose `V1`, `V2` and `V3` are re-exported from `primitives::zcash_history`. Their types appear in the public API ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784), [#11877](https://github.com/ZcashFoundation/zebra/pull/11877)).
 
 ### Added
 

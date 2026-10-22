@@ -5,13 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [13.0.1] - 2026-10-22
+## [14.0.0] - 2026-10-22
 
 ### Breaking Changes
 
-- Updated `zcash_primitives` to 0.31.0-pre.2 and `zcash_transparent` to 0.11.0-pre.2. `Sigops` is implemented for `zcash_primitives::transaction::Transaction`, so its users must upgrade `zcash_primitives` in lockstep ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784)).
+- Updated `zcash_primitives` to 0.31.0 and `zcash_transparent` to 0.11.0. `Sigops` is implemented for `zcash_primitives::transaction::Transaction`, so its users must upgrade `zcash_primitives` in lockstep ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784), [#11877](https://github.com/ZcashFoundation/zebra/pull/11877)).
 - Updated to the new major version of `zebra-chain`, whose types appear in the public API.
-- Updated `zcash_primitives` to 0.31.0 and `zcash_transparent` to 0.11.0, the final releases of these versions.
 
 ### Changed
 

@@ -5,7 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 7.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.1) - 2026-10-22
+## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-10-22
+
+This release supports the NU7 network upgrade on Mainnet, which activates at
+height 3,543,405. The notes below list the changes since [Zebra
+7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0).
+If you are upgrading from Zebra 6.x, also read the 7.0.0-rc.0 notes, which
+include breaking configuration and RPC changes.
+
+Zebra 7 bumps the major database format version from v28 to v29 (if you upgraded
+to 7.0.0-rc.0, that has already happened). Zebra moves the existing v28 state to
+v29 on first start without resyncing, but Zebra 6.x cannot use the v29 database,
+so downgrading after the upgrade requires a full resync. We advise backing up
+the `state/v28` directory in `state.cache_dir` before upgrading from Zebra 6.x.
 
 ### Breaking Changes
 
@@ -61,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Update `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.10 to distrust the compromised eMudhra intermediate CA keys. Zebra peer and RPC connections do not use TLS, so only outbound HTTPS clients such as the managed `zcashd` download (which is also SHA256-pinned), `sentry`, OpenTelemetry and Elasticsearch are affected.
 - Fix a panic that could abort `zebrad` when Zebra disconnected a peer while it was still waiting for that peer to accept a request ([GHSA-6v36-c42v-v98p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p)). Thanks to @SphereDonout for reporting the issue.
 - Ban peers that send transactions or blocks whose transparent scripts fail. Previously, a peer could keep transaction and block verification busy with invalid transparent transactions without being banned ([GHSA-jq45-ghw5-v37x](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x)). Thanks to @x15-eth for reporting the issue.
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@DrVelvetFog, @alchemydc, @andres-pcg, @arcayne, @arya2, @conradoplg, @gustavovalverde, @idky137, @jiehuo100net, @mpguerra, @natalieesk, @nuttycom, @oxarbitrage, @robustfengbin, @upbqdn, @vbar and @zmanian
 
 ## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
 
