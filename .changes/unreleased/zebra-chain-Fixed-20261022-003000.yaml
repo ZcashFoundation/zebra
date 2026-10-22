@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: '`transparent::Address` now displays TEX addresses as Bech32m strings with the `tex`, `textest` or `texregtest` HRP, as ZIP 320 defines them, so a parsed TEX address round-trips through `Display` and `FromStr` on every network. Previously `Display`, and with it the serde `SerializeDisplay` form, Base58Check-encoded the `Tex` variant, which printed a TEX address as the P2PKH address with the same key hash (`t1…` on Mainnet, `tm…` on Testnet and Regtest).'
+time: 2026-10-22T00:30:00.000000+05:30
