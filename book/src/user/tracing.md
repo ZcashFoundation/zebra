@@ -51,10 +51,11 @@ When Sentry is active, Zebra sends:
 - release health sessions: each `zebrad` run is split into daily sessions, and
   the last one ends as exited on a clean shutdown and as crashed on a panic or a
   fatal error. Every session of a run has the same user ID, so Sentry's
-  crash-free users rate is the share of runs without a crash.
+  crash-free users rate is the share of runs without a crash;
+- the [block timing histograms](metrics.md#block-timing) as Sentry metrics.
 
-Events and logs carry the `chain.network` tag, and once the node has a chain tip,
-`chain.height` and `chain.network_upgrade`.
+Events, logs, and metrics carry the `chain.network` tag. Once the node has a
+chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`.
 
 You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
 attached to Sentry events. Zebra also tags events with the git SHA when

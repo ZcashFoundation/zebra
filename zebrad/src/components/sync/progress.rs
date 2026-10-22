@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use num_integer::div_ceil;
 
 use tokio::sync::watch;
@@ -17,7 +17,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade},
 };
-use zebra_state::MAX_BLOCK_REORG_HEIGHT;
+use zebra_state::{ChainTipChange, TipAction, MAX_BLOCK_REORG_HEIGHT};
 
 use crate::components::{health::ChainTipMetrics, sync::SyncStatus};
 
@@ -403,5 +403,80 @@ pub async fn show_block_chain_progress(
         }
 
         tokio::time::sleep(min(LOG_INTERVAL, PROGRESS_BAR_INTERVAL)).await;
+    }
+}
+
+/// Records how long after its header time each new best chain tip block was committed, while the
+/// node is close to the network chain tip.
+///
+/// Only single-block tip changes are recorded, so catching up after a restart or a chain reset
+/// doesn't count as following the tip.
+pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange, sync_status: SyncStatus) {
+    while let Ok(tip_action) = chain_tip_change.wait_for_tip_change().await {
+        if let Some(delay) = tip_block_delay(&tip_action, sync_status.is_close_to_tip(), Utc::now())
+        {
+            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(delay);
+        }
+    }
+}
+
+/// Returns the seconds from the header time of the block that `tip_action` added to `now`, if it
+/// added a single block while the node is close to the tip.
+///
+/// The result is negative when the block's miner set its clock ahead of this node's.
+fn tip_block_delay(
+    tip_action: &TipAction,
+    is_close_to_tip: bool,
+    now: DateTime<Utc>,
+) -> Option<f64> {
+    match tip_action {
+        TipAction::Grow { block } if is_close_to_tip => Some((now - block.time).as_seconds_f64()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeDelta;
+    use zebra_chain::block;
+    use zebra_state::ChainTipBlock;
+
+    use super::*;
+
+    fn grow_with_block_time(time: DateTime<Utc>) -> TipAction {
+        TipAction::Grow {
+            block: ChainTipBlock {
+                hash: block::Hash([1; 32]),
+                height: block::Height(1),
+                time,
+                transactions: Vec::new(),
+                transaction_hashes: Vec::new().into(),
+                previous_block_hash: block::Hash([0; 32]),
+            },
+        }
+    }
+
+    #[test]
+    fn tip_block_delay_is_measured_from_the_header_time() {
+        let now = Utc::now();
+
+        let late = grow_with_block_time(now - TimeDelta::milliseconds(1_500));
+        let early = grow_with_block_time(now + TimeDelta::seconds(2));
+
+        assert_eq!(tip_block_delay(&late, true, now), Some(1.5));
+        assert_eq!(tip_block_delay(&early, true, now), Some(-2.0));
+    }
+
+    #[test]
+    fn tip_block_delay_skips_sync_and_resets() {
+        let now = Utc::now();
+        let grow = grow_with_block_time(now);
+        let reset = TipAction::Reset {
+            height: block::Height(1),
+            hash: block::Hash([1; 32]),
+        };
+
+        assert_eq!(tip_block_delay(&grow, false, now), None);
+        assert_eq!(tip_block_delay(&reset, true, now), None);
     }
 }

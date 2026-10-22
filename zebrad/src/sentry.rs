@@ -32,6 +32,10 @@ use crate::{
     components::sync::progress,
 };
 
+mod distributions;
+
+pub(crate) use distributions::SentryRecorder;
+
 /// Keeps the Sentry client open until [`end`] drops it.
 ///
 /// `zebrad` exits with `process::exit`, which skips destructors, so the guard must be dropped
@@ -135,6 +139,7 @@ impl Metadata {
 
     fn client_options_with_release(&self, release: String) -> ClientOptions {
         let log_attributes = self.log_attributes();
+        let network = self.tags.get("chain.network").cloned();
         let options = ClientOptions::new()
             .release(release)
             .before_send(|mut event| {
@@ -148,6 +153,15 @@ impl Metadata {
                 merge_log_attributes(&mut log, &log_attributes);
                 merge_log_attributes(&mut log, &chain_log_attributes(chain_position()));
                 Some(log)
+            })
+            .before_send_metric(move |mut metric| {
+                if let Some(network) = &network {
+                    metric
+                        .attributes
+                        .entry("chain.network".into())
+                        .or_insert_with(|| network.clone().into());
+                }
+                Some(metric)
             });
 
         match &self.environment {
@@ -367,11 +381,7 @@ pub(crate) fn tracing_layer<S>() -> Option<impl tracing_subscriber::Layer<S>>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
-    let client_enabled = Hub::current()
-        .client()
-        .is_some_and(|client| client.is_enabled());
-
-    client_enabled.then(|| {
+    is_client_enabled().then(|| {
         sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
             Level::ERROR => EventFilter::Event | EventFilter::Log,
             Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
@@ -384,6 +394,18 @@ where
             _ => EventFilter::Ignore,
         })
     })
+}
+
+/// Returns the recorder that sends selected histograms to Sentry, or `None` if [`init`] has not
+/// bound an enabled client.
+pub(crate) fn metrics_recorder() -> Option<SentryRecorder> {
+    is_client_enabled().then_some(SentryRecorder)
+}
+
+fn is_client_enabled() -> bool {
+    Hub::current()
+        .client()
+        .is_some_and(|client| client.is_enabled())
 }
 
 /// Builds the Sentry event for a panic.
@@ -544,8 +566,8 @@ mod tests {
 
     use sentry::{
         protocol::{
-            Context, EnvelopeItem, Event, Frame, Log, LogAttribute, LogLevel, SessionStatus,
-            Stacktrace,
+            Context, EnvelopeItem, Event, Frame, ItemContainer, Log, LogAttribute, LogLevel,
+            MetricType, SessionStatus, Stacktrace, Unit,
         },
         test::with_captured_envelopes_options,
         Client, ClientOptions, Hub, Scope,
@@ -558,7 +580,7 @@ mod tests {
     use super::{
         add_chain_tags, chain_log_attributes, end_session, merge_log_attributes, panic_event_from,
         release_name_from, rotate_session, start_run_sessions, tracing_layer,
-        without_panic_handling_frames, Metadata,
+        without_panic_handling_frames, Metadata, SentryRecorder,
     };
 
     fn tracing_layer_installed_with(client: Option<Client>) -> bool {
@@ -874,6 +896,49 @@ mod tests {
                 .and_then(|attr| attr.0.as_str()),
             Some("Nu7"),
         );
+    }
+
+    #[test]
+    fn listed_histograms_become_distributions_with_labels_and_network() {
+        let mut metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+        metadata.tags.insert("chain.network", "Mainnet".to_owned());
+
+        let envelopes = with_captured_envelopes_options(
+            || {
+                metrics::with_local_recorder(&SentryRecorder, || {
+                    metrics::histogram!(
+                        "state.block_writer.phase.duration_seconds",
+                        "phase" => "queue"
+                    )
+                    .record(0.25);
+                    metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
+                    metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
+                });
+            },
+            metadata.client_options_with_release("zebrad@test".to_string()),
+        );
+
+        let metrics: Vec<_> = envelopes
+            .iter()
+            .flat_map(|envelope| envelope.items())
+            .filter_map(|item| match item {
+                EnvelopeItem::ItemContainer(ItemContainer::Metrics(metrics)) => Some(metrics),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected only the listed histogram, got {metrics:?}");
+        };
+        let attribute = |key: &str| metric.attributes.get(key).and_then(|attr| attr.0.as_str());
+
+        assert_eq!(metric.name, "state.block_writer.phase.duration_seconds");
+        assert_eq!(metric.r#type, MetricType::Distribution);
+        assert_eq!(metric.value, 0.25);
+        assert_eq!(metric.unit, Some(Unit::Second));
+        assert_eq!(attribute("phase"), Some("queue"));
+        assert_eq!(attribute("chain.network"), Some("Mainnet"));
     }
 
     #[test]

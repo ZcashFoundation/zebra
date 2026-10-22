@@ -53,7 +53,7 @@ use hedge::SuccessHedge;
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
-pub use progress::show_block_chain_progress;
+pub use progress::{record_tip_block_delay, show_block_chain_progress};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
