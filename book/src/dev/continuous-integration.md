@@ -35,10 +35,11 @@ Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebr
 ## Automated Merges
 
 We use [GitHub's merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
-to merge pull requests. To merge, a PR has to pass all required `main` checks and be approved
-by a Zebra developer, as stated by the `PR Requirements` ruleset.
+to merge pull requests. To merge, a PR has to pass all required `main` checks and have one
+approving review, as stated by the `PR Requirements` ruleset. A maintainer's PR can be approved
+by another maintainer or by Copilot code review. Every other PR needs a maintainer's approval.
 
-After approving a green PR, a Zebra maintainer presses **Merge when ready**. This
+Once a PR is approved and green, a Zebra maintainer presses **Merge when ready**. This
 manual enrollment applies to Zebra-owned and fork PRs; authors do not need write access
 to the queue. The queue builds the PR on top of `main` plus every PR ahead of it,
 re-runs the required checks against that merged result, and merges it if they pass. A
@@ -92,7 +93,7 @@ enrollment and high/low priority rules.
 
 | Queue behavior | GitHub merge queue policy |
 | --- | --- |
-| Enrollment | An approving Zebra maintainer selects **Merge when ready** |
+| Enrollment | A Zebra maintainer selects **Merge when ready** on an approved PR |
 | Ordering | FIFO; a maintainer can manually jump an urgent PR to the top |
 | CI concurrency | Up to five cumulative merge-group builds |
 | Final merges | One merge commit per PR |
