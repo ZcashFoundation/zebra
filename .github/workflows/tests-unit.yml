@@ -11,13 +11,15 @@ on:
   merge_group:
     types: [checks_requested]
 
-# Cancel obsolete test runs after new commits. Unrelated label events and edits get a
-# group of their own, keyed by run id, so they can cancel neither the required unit
-# test run nor each other: cancelling one would report the required check as failed,
-# because `alls-green` reads a cancelled need as a failure.
+# Cancel obsolete test runs after new commits. For `main`, unrelated label events and
+# edits skip the tests, so they get a group of their own, keyed by run id: they can
+# cancel neither the required unit test run nor each other, and cancelling one would
+# report the required check as failed, because `alls-green` reads a cancelled need as
+# a failure. For `next`, those events run the tests, so they share the normal group.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
+      github.base_ref != 'next' &&
       (github.event.action == 'labeled' &&
       github.event.label.name != 'release' ||
       github.event.action == 'edited') &&

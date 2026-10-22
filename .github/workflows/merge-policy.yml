@@ -3,7 +3,9 @@ name: Merge Policy
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # `edited` covers a pull request retargeted from another branch, which has no
+    # earlier result for this required check.
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
     branches: [main, next]
   merge_group:
     types: [checks_requested]
