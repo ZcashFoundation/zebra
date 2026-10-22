@@ -166,7 +166,7 @@ For production: set `P=zfnd-prod-zebra`, `MIG=zebrad-${NET}-${ZONE_LETTER}`, `DI
 
 ## Bootstrap a disk without a cache image
 
-A deploy seeds a new zone's disk from a cache image that matches the commit's state format. When none exists, for example after a major format change on `next`, zones that have a disk still roll out, and a zone without one fails. Create that disk from the newest `zebrad-cache-main-*` image, named and sized like the other disks, then rerun the deploy. Zebra syncs the new format from genesis.
+A deploy seeds a new zone's disk from a cache image that matches the commit's state format. When none exists, for example after a major format change on `next`, zones that have a disk still roll out, and a zone without one fails. Create that disk from the newest `zebrad-cache-main-*` image, named and sized like the other disks, then rerun the deploy. Zebra keeps each major state format in its own directory, so it never opens the older state on that disk: it syncs the new format from genesis and deletes the older one.
 
 ## DB-format-version-break release
 
