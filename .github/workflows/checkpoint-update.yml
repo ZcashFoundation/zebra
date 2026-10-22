@@ -1,6 +1,6 @@
 # Automated checkpoint updates.
 #
-# Triggered whenever the integration tests complete; requires both checkpoint artifacts.
+# Triggered whenever the integration tests succeed; requires both checkpoint artifacts.
 # Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
 # appends new entries to the checkpoint files, validates them, and opens a PR.
 #
@@ -15,7 +15,7 @@ on:
     types: [completed]
     branches: [main]
 
-  # Manual trigger for testing; resolves the latest completed integration test run automatically
+  # Manual trigger for testing; resolves the latest successful integration test run automatically
   workflow_dispatch:
 
 permissions: {}
@@ -23,6 +23,8 @@ permissions: {}
 jobs:
   update-checkpoints:
     name: Update checkpoint files
+    # Cancelled or failed integration runs may not have uploaded both checkpoint artifacts.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-26.04
     permissions:
       actions: read
@@ -48,7 +50,7 @@ jobs:
 
       # Resolve the integration test run ID.
       # For workflow_run: use the triggering run directly.
-      # For workflow_dispatch: find the latest completed run via the API.
+      # For workflow_dispatch: find the latest successful run via the API.
       - name: Resolve integration test run ID
         id: resolve-run
         env:
@@ -65,7 +67,7 @@ jobs:
             RUN_ID=$(gh run list \
               --workflow "Integration Tests on GCP" \
               --branch main \
-              --status completed \
+              --status success \
               --limit 1 \
               --json databaseId \
               --jq '.[0].databaseId')
@@ -73,7 +75,7 @@ jobs:
           fi
 
           if [ -z "$RUN_ID" ]; then
-            echo "No completed integration test run found"
+            echo "No successful integration test run found"
             exit 1
           fi
 
