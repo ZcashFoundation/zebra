@@ -43,30 +43,29 @@ jobs:
           WF_RUN_ID: ${{ github.event.workflow_run.id }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_run" ]; then
-            CANDIDATES="$WF_RUN_ID"
-          else
-            CANDIDATES=$(gh run list \
-              --repo "$REPO" \
-              --workflow "Integration Tests on GCP" \
-              --branch main \
-              --status success \
-              --limit 20 \
-              --json databaseId \
-              --jq '.[].databaseId')
-          fi
+          # Run IDs on main that still have this artifact, newest first.
+          artifact_runs() {
+            gh api "repos/${REPO}/actions/artifacts?name=$1&per_page=100" --paginate \
+              --jq '.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main") | .workflow_run.id'
+          }
 
-          for RUN_ID in $CANDIDATES; do
-            ARTIFACTS=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --paginate \
-              --jq '.artifacts[] | select(.expired | not) | .name')
-            if grep -qx generate-checkpoints-mainnet-checkpoints <<< "$ARTIFACTS" \
-              && grep -qx generate-checkpoints-testnet-checkpoints <<< "$ARTIFACTS"; then
-              RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
-              echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-              echo "run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
-              echo "Using integration test run: ${RUN_URL}"
-              exit 0
+          MAINNET_RUNS=$(artifact_runs generate-checkpoints-mainnet-checkpoints)
+          TESTNET_RUNS=$(artifact_runs generate-checkpoints-testnet-checkpoints)
+          RUN_IDS=$(grep -Fx -f <(printf '%s\n' "$TESTNET_RUNS") <<< "$MAINNET_RUNS" || true)
+
+          for RUN_ID in $RUN_IDS; do
+            if [ "$EVENT_NAME" = "workflow_run" ]; then
+              [ "$RUN_ID" = "$WF_RUN_ID" ] || continue
+            else
+              RUN=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}" --jq '.name + "/" + .conclusion')
+              [ "$RUN" = "Integration Tests on GCP/success" ] || continue
             fi
+
+            RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+            echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+            echo "run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+            echo "Using integration test run: ${RUN_URL}"
+            exit 0
           done
 
           echo "::notice::No integration test run with both checkpoint artifacts found, skipping the update"
