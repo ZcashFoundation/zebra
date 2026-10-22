@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: '`BlockAdvertiser` fanout now succeeds on the first completed local transport write instead of requiring a write to every selected peer; writes queued for other selected peers continue. If no write succeeds, an acknowledgement timeout takes precedence over other errors and leaves delivery unknown ([#11876](https://github.com/ZcashFoundation/zebra/pull/11876)).'
+time: 2026-10-22T12:00:00+02:00
