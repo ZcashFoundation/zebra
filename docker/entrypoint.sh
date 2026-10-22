@@ -102,6 +102,9 @@ case "$1" in
   ;;
 test)
   shift
+  # Match the image build, which leaves SHORT_SHA unset when it's empty, so cargo doesn't
+  # rebuild zebrad. See the `tests` stage in the Dockerfile.
+  [[ -n "${SHORT_SHA:-}" ]] || unset SHORT_SHA
   if [[ "$1" == "zebrad" ]]; then
     shift
     exec_as_user zebrad "${CONFIG_ARGS[@]}" "$@"

@@ -61,7 +61,13 @@ ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 FROM deps AS tests
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
+# The tests run `cargo` again when the container starts, and zebrad reads SHORT_SHA at
+# compile time, so cargo rebuilds zebrad if the value differs from the image build. Keeping
+# it in the environment avoids that rebuild, which would drop the commit from zebrad's
+# version and its Sentry release name. Cargo treats an empty value as changed on every
+# build, so the build here and entrypoint.sh unset it when it's empty.
 ARG SHORT_SHA
+ENV SHORT_SHA=${SHORT_SHA}
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
@@ -112,7 +118,7 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
-RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+RUN [ -n "${SHORT_SHA}" ] || unset SHORT_SHA; \
     cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
