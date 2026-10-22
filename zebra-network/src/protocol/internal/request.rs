@@ -21,15 +21,19 @@ use proptest_derive::Arbitrary;
 ///
 /// # Cancellations
 ///
-/// The peer set handles cancelled requests (i.e., requests where the future
-/// returned by `Service::call` is dropped before it resolves) on a best-effort
-/// basis. Requests are routed to a particular peer connection, and then
+/// For requests other than block adverts, the peer set handles cancellation (i.e., dropping the
+/// future returned by `Service::call` before it resolves) on a best-effort basis. Requests are
+/// routed to a particular peer connection, and then
 /// translated into Zcash protocol messages and sent over the network. If a
 /// request is cancelled after it is submitted but before it is processed by a
 /// peer connection, no messages will be sent. Otherwise, if it is cancelled
 /// while waiting for a response, the peer connection resets its state and makes
 /// a best-effort attempt to ignore any messages responsive to the cancelled
 /// request, subject to limitations in the underlying Zcash protocol.
+///
+/// Block adverts sent through [`crate::BlockAdvertiser`] are an exception. Dropping their response
+/// future does not cancel queued writes of [`Request::AdvertiseBlock`] or
+/// [`Request::AdvertiseBlockToAll`]; it only stops waiting for acknowledgement.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Request {

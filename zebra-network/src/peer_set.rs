@@ -73,6 +73,7 @@ impl Wake for PeerSetWaker {
 /// Readiness reconciles pending discovery and waits for an eligible connected peer, even if busy.
 /// Success requires every selected connection to complete its local write. Full queues, revoked
 /// connections, write failures, and losing all eligible peers after readiness are errors.
+/// Dropping a call's future does not cancel queued adverts.
 /// Keep an owning [`NetworkService`] alive; advertiser handles do not own background tasks.
 #[derive(Clone, Debug)]
 pub struct BlockAdvertiser<C> {

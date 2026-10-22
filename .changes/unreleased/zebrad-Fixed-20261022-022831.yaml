@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Deliver queued block adverts even after gossip callers time out.
+time: 2026-10-22T02:28:31.064461843+02:00
