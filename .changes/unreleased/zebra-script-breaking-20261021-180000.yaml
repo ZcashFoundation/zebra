@@ -1,4 +1,0 @@
-project: zebra-script
-kind: breaking
-body: 'Updated `zcash_primitives` to 0.31.0 and `zcash_transparent` to 0.11.0, the final releases of these versions.'
-time: 2026-10-21T18:00:00.000000000-03:00

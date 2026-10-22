@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: "Fix an initial sync stall where a peer serving a forged checkpoint block body stopped the honest block from being downloaded again until restart ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h)). Originally reported by @saxenism; independently re-discovered by @x15-eth, @manus-pi, @ouicate and Nathan Byarugaba."
-time: 2026-09-28T12:00:00.000000000-03:00

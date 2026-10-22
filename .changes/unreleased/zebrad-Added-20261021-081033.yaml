@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: Added Sentry release health, with daily sessions per `zebrad` run that end as exited or crashed, and tagged Sentry events and logs with the network, the best chain tip height, and its network upgrade. Sync progress logs and a new log when the best chain tip changes network upgrade are now sent to Sentry Logs.
-time: 2026-10-21T08:10:33.510394553Z

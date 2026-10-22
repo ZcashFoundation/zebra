@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Block downloads keep a useful hedged request alive after its sibling fails, preserve missing-block recovery when both copies fail or no peer delivers the block before the download deadline, and bound pending hedged downloads by the configured download concurrency limit.
-time: 2026-10-16T02:28:46.775672486+02:00

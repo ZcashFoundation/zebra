@@ -1,4 +1,0 @@
-project: zebra-script
-kind: Fixed
-body: "The per-signature-check sighash callback in `CachedFfiTransaction::is_valid()` reads the transparent output count from the underlying `zcash_primitives` bundle instead of rebuilding the whole output vector on every `SIGHASH_SINGLE` check."
-time: 2026-10-15T12:00:00.000000000-03:00

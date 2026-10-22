@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: 'Block-advertisement broadcasts retain started delivery futures until completion and report delivery errors.'
-time: 2026-10-13T02:46:09.049996889+02:00

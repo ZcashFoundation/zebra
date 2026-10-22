@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: 'The indexer''s non-finalized state subscription accepts up to 100 known chain tips, up from 10, following the new test-network fork limit ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).'
-time: 2026-10-17T21:00:00.000000+00:00

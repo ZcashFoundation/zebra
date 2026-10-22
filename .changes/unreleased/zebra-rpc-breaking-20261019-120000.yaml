@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: Added the `z_converttex` RPC method, which converts a transparent P2PKH address to a ZIP 320 TEX address. Adding a method to the `Rpc` trait is a breaking change for downstream implementers.
-time: 2026-10-19T12:00:00.000000+00:00

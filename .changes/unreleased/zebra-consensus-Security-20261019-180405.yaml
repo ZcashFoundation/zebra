@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Security
-body: "`CheckpointVerifier` now resets its progress to the state tip after a failed checkpoint block commit even if the caller dropped the verify future ([GHSA-2w9f-9wx8-f5c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2w9f-9wx8-f5c8))."
-time: 2026-10-19T18:04:05.000000000Z

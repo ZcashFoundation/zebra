@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Changed
-body: 'Raised the MSRV to 1.89.'
-time: 2026-10-21T20:00:00.000000000-03:00

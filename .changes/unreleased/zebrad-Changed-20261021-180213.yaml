@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Changed zebrad log output for all nodes: a fatal error that stops zebrad is now logged at error level instead of warning, the message while waiting for the genesis block appears once a minute instead of every five seconds, and a new info log reports each time the best chain tip enters a different network upgrade. Update log-based alerts that match on these lines.'
-time: 2026-10-21T18:02:13.493166718Z

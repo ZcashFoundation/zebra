@@ -1,4 +1,0 @@
-project: zebra-script
-kind: breaking
-body: 'Updated `zcash_primitives` to 0.31.0-pre.2 and `zcash_transparent` to 0.11.0-pre.2. `Sigops` is implemented for `zcash_primitives::transaction::Transaction`, so its users must upgrade `zcash_primitives` in lockstep ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784)).'
-time: 2026-10-16T12:00:00.000000000-03:00

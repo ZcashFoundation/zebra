@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Fixed
-body: 'Reject invalidating the root of the only non-finalized chain without changing state, and handle empty non-finalized state when updating chain-tip notifications ([#11536](https://github.com/ZcashFoundation/zebra/issues/11536)).'
-time: 2026-10-15T15:32:00.000000000Z

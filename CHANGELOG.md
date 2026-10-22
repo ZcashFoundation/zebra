@@ -5,6 +5,63 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.1) - 2026-10-22
+
+### Breaking Changes
+
+- Peer connection, request, response, message, byte and handshake metrics no longer carry their per-peer `addr`, `remote_ip` or `user_agent` labels, and neither do `zcash.net.peers.initial` or `zcash.net.peers.cache`. `zebra.net.connection.state` now counts connections in each state, and `zcash.net.peers.version.connected` and `zcash.net.peers.version.obsolete` report only the most recent handshake. RPC metrics label unregistered method names as `unknown`, as does the `rpc.method` field of RPC tracing spans. Update dashboards and alerts that select or group by these labels; the bundled dashboards are updated.
+
+### Added
+
+- New [zcashd API Migration Guide](https://zebra.zfnd.org/user/zcashd-api-migration-guide.html) book page, recording which component owns each of the 135 RPC methods `zcashd` 6.20.0 registers, plus its ZMQ topics, REST interface, and notification hooks: whether Zebra or Zallet provides it, what replaces it, or why it was retired, with notes on how Zebra's responses differ from `zcashd`'s ([#11021](https://github.com/ZcashFoundation/zebra/issues/11021)). New [Running Zallet with Zebra](https://zebra.zfnd.org/user/zallet.html) page describing the `zebrad` build and configuration Zallet needs.
+- Added Sentry release health, with daily sessions per `zebrad` run that end as exited or crashed, and tagged Sentry events and logs with the network, the best chain tip height, and its network upgrade. Sync progress logs and a new log when the best chain tip changes network upgrade are now sent to Sentry Logs.
+- Activate NU7 on Mainnet at height 3,543,405, and advertise network protocol version 170190. Mainnet nodes must upgrade before the activation height to stay on the consensus chain. This release is supported for 8 weeks instead of 12, so it halts about 56 days after its estimated release height.
+
+### Changed
+
+- Empty discovery replies no longer trigger stalled-peer disconnections. Chain discovery rotates across peers that serve blocks instead of favoring fast empty responders. When those peers are busy, discovery waits up to 1.5 seconds and takes priority over queued downloads before falling back to other peers, avoiding sync pauses caused by idle peers that do not serve blocks ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).
+- Shorten near-tip sync stalls by waiting for a busy peer that can serve a block instead of failing fast when every ready peer is missing it. Stuck peer connections that remain unready past the request timeout are dropped when the peer set is next polled, freeing their slots for other connections ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748), [#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+- Cap queued block-discovery requests at 16 and fall back to any ready peer when the queue is full. Report queued discovery requests in `zcash.net.peer_set.find_queued` and non-serving fallbacks in `zcash.net.peer_set.find_fallback` with `reason` labels `queue_full`, `no_serving_peer`, and `expired` ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).
+- The `banned ip and removed banned peer addresses from address book` warning now logs the misbehavior `score` and the `reason` the peer was banned, such as the block or transaction verification error.
+- The `Opened metrics endpoint` log line is now written after the `zebrad.build.info` metric is registered, so a scrape that waits for that line always sees the version metric.
+- Updated `pasta_curves` to 0.6.1, which speeds up Orchard field arithmetic; CPU instruction requirements are unchanged.
+- Mined-block broadcasts no longer stall when peers disconnect or become ready in successive groups ([#11703](https://github.com/ZcashFoundation/zebra/issues/11703)).
+- Block adverts reach eligible busy peers without waiting for ordinary requests to become ready. Readiness waits for an eligible peer, retaining only the latest mined block while disconnected. Broadcasts acknowledge completed local writes; full queues, revoked connections, and write failures are not treated as successful delivery ([#11839](https://github.com/ZcashFoundation/zebra/pull/11839)).
+- A late reply to a cancelled request no longer makes Zebra treat a block or transaction as missing from that peer, which could stall syncing from a single peer.
+- Retry block requests using another source when one is available after a peer fails to return the block ([#11525](https://github.com/ZcashFoundation/zebra/pull/11525)).
+- Block downloads keep a useful hedged request alive after its sibling fails, preserve missing-block recovery when both copies fail or no peer delivers the block before the download deadline, and bound pending hedged downloads by the configured download concurrency limit.
+- Peers now receive an empty inventory reply when the mempool is empty instead of waiting for their request to time out, avoiding block relay delays of up to 6 seconds on single-peer Zebra links.
+- Stopped installing the Sentry tracing layer when Sentry is not configured, which removes per-span overhead from block verification and commit on nodes without a valid `SENTRY_DSN`.
+- `zebrad --version` now prints the full build version, including the git commit, for example `7.0.0-rc.0+git.6d1e414`. Builds without `git describe` metadata, such as the Docker images, now include the commit in their build version, which also appears in the `getinfo` RPC `build` field, the startup message, and the Sentry release name.
+- Changed zebrad log output for all nodes: a fatal error that stops zebrad is now logged at error level instead of warning, the message while waiting for the genesis block appears once a minute instead of every five seconds, and a new info log reports each time the best chain tip enters a different network upgrade. Update log-based alerts that match on these lines.
+- Updated the pinned zcashd-compat sidecar to [`zebra-compat-v1.3.0`](https://github.com/ZcashFoundation/zcashd/releases/tag/zebra-compat-v1.3.0), which follows the NU7 network upgrade. Earlier sidecar builds cannot follow Testnet past NU7 at height 4,465,026, or Mainnet past NU7 at height 3,543,405. `zcashd_source = "embedded"` and the installer's `split-binary` mode now download this build.
+
+### Removed
+
+- Removed the Docker options for zcashd-compat mode, since Zebra no longer publishes zcashd-compat Docker images: the `docker-split-containers` and `docker-supervised` modes and the `--zcashd-docker-image` flag of `scripts/install-zebra.sh`, the `runtime-zcashd-compat` Dockerfile stage, the `compat-docker-build` and `compat-docker-start` make targets, and the `ZCASHD_COMPAT_ENABLED` variable of the Docker entrypoint. Use the installer's `split-binary`, `supervised`, or `build-from-source` modes instead.
+
+### Fixed
+
+- The block gossip task no longer stalls when there are no ready peers, which could fill the mined block channel and make `submitblock` return errors for blocks that were committed ([#11475](https://github.com/ZcashFoundation/zebra/issues/11475)).
+- Zebra no longer gets stuck on a losing branch when many competing blocks arrive at once, as in Testnet minimum-difficulty bursts. Thanks to @tuan-phan and @SphereDonout ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+- The mempool no longer bans peers that relay a transaction rejected for its lock time. Lock times are checked against the local tip, so a better-synced peer could relay a transaction that becomes valid one block later and be banned for 24 hours. Thanks to @sangsoo-osec for the report ([#11623](https://github.com/ZcashFoundation/zebra/issues/11623)).
+- `getinfo`, `getnetworkinfo` and `getpeerinfo` no longer stop responding, or block other RPC requests, while the node processes a large batch of gossiped peer addresses ([#11702](https://github.com/ZcashFoundation/zebra/pull/11702)).
+- Return an error instead of exiting when invalidateblock targets the root of the only non-finalized chain ([#11536](https://github.com/ZcashFoundation/zebra/issues/11536)).
+- Fixed Sentry dropping queued events and logs when `zebrad` shuts down, and titled Sentry panic issues with the panic message and a stack trace instead of a generic message, so that different panics are reported as different issues.
+
+### Security
+
+- The mempool per-peer inbound-download cap is now keyed on the peer's IP address instead of its full socket address, so a single host can no longer exceed the cap by opening connections from multiple source ports. This matches the inbound-block download cap ([#10685](https://github.com/ZcashFoundation/zebra/issues/10685)).
+- Fix an initial sync stall where a peer serving a forged checkpoint block body stopped the honest block from being downloaded again until restart ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h)). Originally reported by @saxenism; independently re-discovered by @x15-eth, @manus-pi, @ouicate and Nathan Byarugaba.
+- Capped the number of transaction IDs the inbound service looks up per transaction request at `GETDATA_MAX_TRANSACTION_COUNT`, before the mempool lookup — matching the block request path, which was already capped at `GETDATA_MAX_BLOCK_COUNT` ([#10566](https://github.com/ZcashFoundation/zebra/issues/10566)).
+- `getaddresstxids` and `getaddressutxos` return an error instead of doing unbounded work when a query matches more than 100,000 results, and the address RPCs accept at most 10,000 addresses. Narrow the height range, or page with `startHeight` and `maxEntries` ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).
+- Update `rustls` to 0.23.46 to fix RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349. Zebra peer and RPC connections do not use TLS, so only outbound HTTPS clients such as `sentry`, OpenTelemetry and Elasticsearch are affected.
+- Fixed a quadratic CPU cost in transaction verification: the coinbase maturity check rebuilt a transaction's transparent output list once per input, so one unsigned ~2 MB transaction with many inputs and outputs could pin a node's worker threads for tens of seconds before being rejected without a misbehaviour score. The check now computes the coinbase spend restriction once per transaction, in both the mempool and block commit paths. Regression from the `zcash_primitives` transaction newtype in Zebra 6.4.0; Zebra 6.3.x is not affected.
+- Fix an initial sync stall where a peer serving a forged checkpoint block body followed by an invalid block left the checkpoint verifier ahead of the state, so the honest block was rejected until restart ([GHSA-2w9f-9wx8-f5c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2w9f-9wx8-f5c8)). Reported by @SphereDonout.
+- Update `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.10 to distrust the compromised eMudhra intermediate CA keys. Zebra peer and RPC connections do not use TLS, so only outbound HTTPS clients such as the managed `zcashd` download (which is also SHA256-pinned), `sentry`, OpenTelemetry and Elasticsearch are affected.
+- Fix a panic that could abort `zebrad` when Zebra disconnected a peer while it was still waiting for that peer to accept a request ([GHSA-6v36-c42v-v98p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p)). Thanks to @SphereDonout for reporting the issue.
+- Ban peers that send transactions or blocks whose transparent scripts fail. Previously, a peer could keep transaction and block verification busy with invalid transparent transactions without being banned ([GHSA-jq45-ghw5-v37x](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x)). Thanks to @x15-eth for reporting the issue.
+
 ## [Zebra 7.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0-rc.0) - 2026-10-01
 
 This release candidate supports the NU7 network upgrade on Testnet, which
