@@ -294,7 +294,9 @@ impl Address {
 
     /// Turns the address into the `scriptPubKey` script that can be used in a coinbase output.
     ///
-    /// TEX addresses are not supported and return an empty script.
+    /// TEX addresses return the P2PKH script for their validating key hash: per
+    /// [ZIP-320](https://zips.z.cash/zip-0320), a TEX address is a P2PKH destination
+    /// with a restriction on the sender, not on the output script.
     pub fn script(&self) -> Script {
         let mut script_bytes = Vec::new();
 
@@ -307,7 +309,8 @@ impl Address {
                 script_bytes.push(OpCode::Equal as u8);
             }
             // https://developer.bitcoin.org/devguide/transactions.html#pay-to-public-key-hash-p2pkh
-            Address::PayToPublicKeyHash { .. } => {
+            // https://zips.z.cash/zip-0320#specification
+            Address::PayToPublicKeyHash { .. } | Address::Tex { .. } => {
                 script_bytes.push(OpCode::Dup as u8);
                 script_bytes.push(OpCode::Hash160 as u8);
                 script_bytes.push(OpCode::Push20Bytes as u8);
@@ -315,7 +318,6 @@ impl Address {
                 script_bytes.push(OpCode::EqualVerify as u8);
                 script_bytes.push(OpCode::CheckSig as u8);
             }
-            Address::Tex { .. } => {}
         };
 
         Script::new(&script_bytes)
@@ -429,6 +431,28 @@ mod tests {
         let t_addr = script.to_address(NetworkKind::Testnet);
 
         assert_eq!(format!("{t_addr}"), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
+    }
+
+    #[test]
+    fn tex_script_is_p2pkh_script() {
+        let _init_guard = zebra_test::init();
+
+        let key_hash = [7; 20];
+
+        for network_kind in [
+            NetworkKind::Mainnet,
+            NetworkKind::Testnet,
+            NetworkKind::Regtest,
+        ] {
+            let tex = Address::from_tex(network_kind, key_hash);
+            let p2pkh = Address::from_pub_key_hash(network_kind, key_hash);
+
+            assert!(
+                !tex.script().as_raw_bytes().is_empty(),
+                "a TEX address must not produce an empty, anyone-can-spend script"
+            );
+            assert_eq!(tex.script(), p2pkh.script());
+        }
     }
 
     #[test]

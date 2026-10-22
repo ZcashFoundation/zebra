@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: '`transparent::Address::script()` now returns the P2PKH script for TEX addresses, as ZIP 320 specifies, instead of an empty script ([#11892](https://github.com/ZcashFoundation/zebra/issues/11892)).'
+time: 2026-10-22T19:30:00.000000000Z
