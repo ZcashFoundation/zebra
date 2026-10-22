@@ -112,6 +112,9 @@ Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/
     - Do not include entries for e.g. bugs introduced and fixed _after_ the
       last release. The changelog needs to reflect changes from the last
       release.
+    - Changelog entries for crates that impact the user-facing interface (e.g.
+      new RPCs) need a `zebrad` entry too. Any Security entry should also have
+      a `zebrad` entry.
 - [ ] Approve and merge the release PR.
 - [ ] Approve the Release workflow (https://github.com/ZcashFoundation/zebra/actions/workflows/release.yml in the `release-...` branch)
 - [ ] Confirm that the Release workflow completed successfully
