@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: "Ban peers that send transactions or blocks whose transparent scripts fail. Previously, a peer could keep transaction and block verification busy with invalid transparent transactions without being banned ([GHSA-jq45-ghw5-v37x](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x)). Thanks to @x15-eth for reporting the issue."
+time: 2026-10-21T12:00:00.000000000-03:00

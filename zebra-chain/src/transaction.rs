@@ -213,13 +213,23 @@ impl Transaction {
     }
 
     /// Returns `true` if this transaction has transparent inputs.
+    ///
+    /// Reads the bundle's input count directly: `inputs()` rebuilds and converts the whole
+    /// input vector, which is wasteful when only the count is needed.
     pub fn has_transparent_inputs(&self) -> bool {
-        !self.inputs().is_empty()
+        self.0
+            .transparent_bundle()
+            .is_some_and(|bundle| !bundle.vin.is_empty())
     }
 
     /// Returns `true` if this transaction has transparent outputs.
+    ///
+    /// Reads the bundle's output count directly: `outputs()` rebuilds and converts the whole
+    /// output vector, which is wasteful when only the count is needed.
     pub fn has_transparent_outputs(&self) -> bool {
-        !self.outputs().is_empty()
+        self.0
+            .transparent_bundle()
+            .is_some_and(|bundle| !bundle.vout.is_empty())
     }
 
     /// Returns `true` if this transaction has transparent inputs or outputs.
@@ -754,7 +764,7 @@ impl Transaction {
         network: &crate::parameters::Network,
         spend_height: block::Height,
     ) -> transparent::CoinbaseSpendRestriction {
-        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
+        if !self.has_transparent_outputs() || network.should_allow_unshielded_coinbase_spends() {
             transparent::CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height }
         } else {
             transparent::CoinbaseSpendRestriction::DisallowCoinbaseSpend

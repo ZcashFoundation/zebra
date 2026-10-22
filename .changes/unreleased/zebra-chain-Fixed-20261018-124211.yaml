@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: "Blocks generated with valid commitments by the `proptest-impl` strategies now have a merkle root that matches their transactions."
+time: 2026-10-18T12:42:11.000000000Z

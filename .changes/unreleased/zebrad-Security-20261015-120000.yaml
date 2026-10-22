@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: "Fixed a quadratic CPU cost in transaction verification: the coinbase maturity check rebuilt a transaction's transparent output list once per input, so one unsigned ~2 MB transaction with many inputs and outputs could pin a node's worker threads for tens of seconds before being rejected without a misbehaviour score. The check now computes the coinbase spend restriction once per transaction, in both the mempool and block commit paths. Regression from the `zcash_primitives` transaction newtype in Zebra 6.4.0; Zebra 6.3.x is not affected."
+time: 2026-10-15T12:00:00.000000000-03:00
