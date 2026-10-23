@@ -51,8 +51,7 @@ pub fn transparent_spend(
     {
         // Coinbase inputs represent new coins,
         // so there are no UTXOs to mark as spent.
-        let inputs = transaction.inputs();
-        let spends = inputs.iter().filter_map(transparent::Input::outpoint);
+        let spends = transaction.spent_outpoints();
 
         // The restriction depends only on the transaction, network and height, so compute it
         // once per transaction rather than once per spend: it inspects the transaction's
