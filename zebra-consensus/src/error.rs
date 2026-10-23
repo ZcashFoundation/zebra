@@ -401,6 +401,68 @@ impl From<BoxError> for TransactionError {
 }
 
 impl TransactionError {
+    /// Whether this failure is fixed by the authenticated block's contents and network upgrade.
+    ///
+    /// This allowlist deliberately excludes time rules, contextual/maturity checks, mempool policy,
+    /// UTXO availability, and generic infrastructure/conversion failures. Successfully fetched UTXO
+    /// scripts and amounts are committed by their outpoints, so signature failures cannot change
+    /// with the best chain. Unknown future variants must not poison early-relay rejection retention.
+    pub(crate) fn is_deterministic_for_block(&self) -> bool {
+        use TransactionError::*;
+
+        matches!(
+            self,
+            CoinbasePosition
+                | CoinbaseAfterFirst
+                | CoinbaseHasJoinSplit
+                | CoinbaseHasSpend
+                | CoinbaseHasOutputPreHeartwood
+                | CoinbaseHasEnableSpendsOrchard
+                | CoinbaseHasEnableSpendsIronwood
+                | CoinbaseHasOrchardActions
+                | OrchardHasEnableCrossAddress
+                | CoinbaseOutputsNotDecryptable
+                | NonCoinbaseHasCoinbaseInput
+                | NotCoinbase
+                | CoinbaseExpiryBlockHeight { .. }
+                | MaximumExpiryHeight { .. }
+                | WrongVersion
+                | UnsupportedByNetworkUpgrade(..)
+                | NoInputs
+                | NoOutputs
+                | BadBalance
+                | Subsidy(
+                    SubsidyError::InvalidMinerFees
+                        | SubsidyError::Overflow
+                        | SubsidyError::Underflow
+                        | SubsidyError::InvalidAmount(_)
+                )
+                | Script(zebra_script::Error::ScriptInvalid)
+                | SmallOrder
+                | Groth16(_)
+                | MalformedGroth16(_)
+                | Ed25519(_)
+                | RedJubjub(_)
+                | RedPallas(_)
+                | SaplingVerificationFailed
+                | Halo2VerificationFailed
+                | BothVPubsNonZero
+                | DisabledAddToSproutPool
+                | NegativeOrchardValueBalance
+                | DuplicateTransparentSpend(_)
+                | DuplicateSproutNullifier(_)
+                | DuplicateSaplingNullifier(_)
+                | DuplicateOrchardNullifier(_)
+                | DuplicateIronwoodNullifier(_)
+                | NotEnoughOrchardFlags
+                | NotEnoughIronwoodFlags
+                | WrongConsensusBranchId
+                | MissingConsensusBranchId
+                | OrchardProofSize
+                | IronwoodProofSize
+        )
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error when
     /// verifying a mempool transaction.
     pub fn mempool_misbehavior_score(&self) -> u32 {

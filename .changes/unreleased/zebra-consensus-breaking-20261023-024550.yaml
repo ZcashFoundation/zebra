@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Added `Request::CommitEarlyRelay` and early-relay verification error variants. Negotiated downloads authenticate block commitments before exempting later transaction validation failures from peer punishment and suppress repeated expensive verification of deterministic rejections; handle the new variants in exhaustive matches.
+time: 2026-10-23T02:45:50.916190558+02:00

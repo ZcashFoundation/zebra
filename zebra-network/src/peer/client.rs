@@ -371,11 +371,13 @@ impl MissingInventoryCollector {
     pub fn send(self, response: &Result<Response, SharedPeerError>) {
         let missing_inv: HashSet<InventoryHash> = match (self.request, response) {
             // Missing block hashes from partial responses.
-            (_, Ok(Response::Blocks(block_statuses))) => block_statuses
-                .iter()
-                .filter_map(|b| b.missing())
-                .map(InventoryHash::Block)
-                .collect(),
+            (_, Ok(Response::Blocks(block_statuses) | Response::EarlyBlocks(block_statuses))) => {
+                block_statuses
+                    .iter()
+                    .filter_map(|b| b.missing())
+                    .map(InventoryHash::Block)
+                    .collect()
+            }
 
             // Missing transaction IDs from partial responses.
             (_, Ok(Response::Transactions(tx_statuses))) => tx_statuses

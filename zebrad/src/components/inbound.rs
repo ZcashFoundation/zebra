@@ -230,6 +230,9 @@ pub struct Inbound {
 
     /// Submitted bodies published by trusted state validation, available before commit completes.
     submitted_blocks: zebra_rpc::SubmittedBlockCache,
+
+    /// Authenticated uncommitted bodies, available only on negotiated early-relay connections.
+    early_blocks: Option<zs::EarlyRelayCache>,
 }
 
 impl Inbound {
@@ -246,6 +249,7 @@ impl Inbound {
                 setup,
             },
             submitted_blocks: Default::default(),
+            early_blocks: None,
         }
     }
 
@@ -255,6 +259,12 @@ impl Inbound {
     /// continue through the ordinary state lookup.
     pub fn with_submitted_blocks(mut self, cache: zebra_rpc::SubmittedBlockCache) -> Self {
         self.submitted_blocks = cache;
+        self
+    }
+
+    /// Shares authenticated bodies with explicitly opted-in peer connections.
+    pub fn with_early_blocks(mut self, cache: Option<zs::EarlyRelayCache>) -> Self {
+        self.early_blocks = cache;
         self
     }
 
@@ -457,6 +467,7 @@ impl Service<zn::Request> for Inbound {
             }
         };
 
+        let early_relay = matches!(req, zn::Request::EarlyBlocksByHash(_));
         match req {
             zn::Request::Peers => {
                 // # Security
@@ -476,7 +487,7 @@ impl Service<zn::Request> for Inbound {
                     Ok(response)
                 }.boxed()
             }
-            zn::Request::BlocksByHash(hashes) => {
+            zn::Request::BlocksByHash(hashes) | zn::Request::EarlyBlocksByHash(hashes) => {
                 // We return an available or missing response to each inventory request,
                 // unless the request is empty, or it reaches a response limit.
                 if hashes.is_empty() {
@@ -485,6 +496,7 @@ impl Service<zn::Request> for Inbound {
 
                 let state = state.clone();
                 let submitted_blocks = self.submitted_blocks.clone();
+                let early_blocks = if early_relay { self.early_blocks.clone() } else { None };
 
                 async move {
                     let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
@@ -499,7 +511,9 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = if let Some(block) = submitted_blocks.get(&hash) {
+                        let cached = submitted_blocks.get(&hash)
+                            .or_else(|| early_blocks.as_ref().and_then(|cache| cache.get(&hash)));
+                        let response = if let Some(block) = cached {
                             zs::Response::Block(Some(block))
                         } else {
                             state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?
@@ -664,7 +678,8 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+            zn::Request::AdvertiseBlockToAll(_) | zn::Request::AdvertiseEarlyBlock(_) =>
+                unreachable!("should always be decoded as `AdvertiseBlock` request"),
 
             zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
 
