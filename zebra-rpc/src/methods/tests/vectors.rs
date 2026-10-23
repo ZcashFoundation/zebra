@@ -5939,6 +5939,249 @@ async fn rpc_submitblock_resource_pressure_is_operational() {
     }
 }
 
+/// Bodies without an exact successful proposal verdict wait for normal validation before relay.
+#[tokio::test]
+async fn rpc_submitblock_requires_validated_early_relay() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Parameters::build()
+            .with_disable_pow(true)
+            .to_network()
+            .unwrap();
+        let mut block: Block = zebra_test::vectors::BLOCK_TESTNET_1842421_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let height = block.coinbase_height().unwrap();
+        let config = mining::Config {
+            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                NetworkType::Test,
+                [1; 20],
+            )),
+            ..Default::default()
+        };
+        let chain_info = GetBlockTemplateChainInfo {
+            tip_hash: block.header.previous_block_hash,
+            tip_height: height.previous().unwrap(),
+            chain_history_root: fake_history_tree(&network).hash(),
+            expected_difficulty: block.header.difficulty_threshold,
+            cur_time: DateTime32::now(),
+            min_time: DateTime32::now(),
+            max_time: DateTime32::now(),
+            chain_value_pools: Default::default(),
+        };
+        let template = BlockTemplateResponse::new_internal(
+            &network,
+            &CoinbaseCache::default(),
+            &MinerParams::new(&network, config).unwrap(),
+            &chain_info,
+            LongPollInput::new(
+                chain_info.tip_height,
+                chain_info.tip_hash,
+                chain_info.max_time,
+                std::iter::empty(),
+            )
+            .generate_id(),
+            vec![],
+            None,
+        );
+        Arc::make_mut(&mut block.header).commitment_bytes = <[u8; 32]>::from(
+            block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &template.default_roots.chain_history_root,
+                &block.auth_data_root(),
+            ),
+        )
+        .into();
+        let (index, tx) = block
+            .transactions
+            .iter()
+            .enumerate()
+            .find(|(_, tx)| tx.version() == 5 && tx.sapling_spends_count() > 0)
+            .unwrap();
+        let mut bytes = tx.zcash_serialize_to_vec().unwrap();
+        let proof = tx.sapling_spends().next().unwrap().zkproof();
+        let offset = bytes
+            .windows(proof.len())
+            .position(|part| part == proof)
+            .unwrap();
+        bytes[offset] ^= 1;
+        let altered_tx: Arc<Transaction> = bytes.as_slice().zcash_deserialize_into().unwrap();
+        assert_eq!(altered_tx.hash(), tx.hash());
+        let mut altered = block.clone();
+        altered.transactions[index] = altered_tx;
+        let mut recommitted = altered.clone();
+        Arc::make_mut(&mut recommitted.header).commitment_bytes = <[u8; 32]>::from(
+            block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &template.default_roots.chain_history_root,
+                &recommitted.auth_data_root(),
+            ),
+        )
+        .into();
+        let mut other_parent = block.clone();
+        Arc::make_mut(&mut other_parent.header).previous_block_hash = Hash([7; 32]);
+        let mut bad_merkle = block.clone();
+        bad_merkle.transactions.push(block.transactions[0].clone());
+
+        let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (sender, mut committed) = mpsc::channel(8);
+        let (_logs, logs) = watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            network,
+            Default::default(),
+            false,
+            "0.0.1",
+            "RPC test",
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            verifier.clone(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            logs,
+            Some(sender),
+        );
+        queue.abort();
+        let cache = crate::SubmittedBlockCache::default();
+        let mut rpc = rpc.with_submitted_blocks(cache.clone());
+        let normal_network = rpc.network.clone();
+        let delayed_nu5 = Parameters::build()
+            .with_disable_pow(true)
+            .with_activation_heights(testnet::ConfiguredActivationHeights {
+                nu5: Some(height.0 + 1),
+                ..normal_network.activation_list().into()
+            })
+            .unwrap()
+            .to_network()
+            .unwrap();
+        let mut pre_nu5 = altered.clone();
+        for tx in &mut pre_nu5.transactions {
+            if tx.version() == 5 {
+                // Canopy cannot deserialize Orchard; retain the altered Sapling authorizing data.
+                let mut candidate = (**tx).clone().with_orchard_bundle(None);
+                candidate.set_network_upgrade(NetworkUpgrade::Canopy);
+                *tx = Arc::new(candidate);
+            }
+        }
+        let hashes: Vec<_> = pre_nu5.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut pre_nu5.header).merkle_root = hashes.iter().copied().collect();
+        zebra_consensus::merkle_root_validity(&delayed_nu5, &pre_nu5, &hashes).unwrap();
+        rpc.gbt.template_cache().unwrap().publish(template);
+        let mut pending = cache.subscribe();
+        pending.borrow_and_update();
+        for (candidate, delay_nu5) in [
+            (pre_nu5, true),
+            (altered, false),
+            (recommitted, false),
+            (other_parent, false),
+            (bad_merkle, false),
+            (block, false),
+        ] {
+            rpc.network = if delay_nu5 {
+                delayed_nu5.clone()
+            } else {
+                normal_network.clone()
+            };
+            let candidate = Arc::new(candidate);
+            let hash = candidate.hash();
+            let call = tokio::spawn({
+                let rpc = rpc.clone();
+                let bytes = candidate.zcash_serialize_to_vec().unwrap();
+                async move { rpc.submit_block(HexData(bytes), None).await }
+            });
+            let verification = verifier
+                .expect_request_that(|request| {
+                    matches!(request, zebra_consensus::Request::CommitMined(block, _) if block == &candidate)
+                })
+                .await;
+            assert!(
+                cache.get(&hash).is_none(),
+                "no body is served before a verdict"
+            );
+            assert!(
+                !pending.has_changed().unwrap(),
+                "no inventory precedes a verdict"
+            );
+            assert!(!call.is_finished());
+            assert!(committed.try_recv().is_err());
+            verification.respond(hash);
+            assert_eq!(call.await.unwrap().unwrap(), SubmitBlockResponse::Accepted);
+            // A mock verifier has no state writer: the RPC must not invent a committed event.
+            assert!(committed.try_recv().is_err());
+            pending.borrow_and_update();
+        }
+    })
+    .await
+    .expect("submission eligibility test must finish");
+}
+
+#[tokio::test(start_paused = true)]
+async fn rpc_submitblock_cache_is_bounded_and_expires() {
+    let cache = crate::SubmittedBlockCache::default();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(5)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    cache.insert(blocks[0].hash(), Height(0), blocks[0].clone());
+    cache.insert(blocks[0].hash(), Height(0), Arc::new((*blocks[0]).clone()));
+    assert!(Arc::ptr_eq(
+        &cache.get(&blocks[0].hash()).unwrap(),
+        &blocks[0]
+    ));
+    for block in &blocks[1..] {
+        cache.insert(
+            block.hash(),
+            block.coinbase_height().unwrap(),
+            block.clone(),
+        );
+    }
+    assert!(cache.get(&blocks[0].hash()).is_none());
+    let replacement = Arc::new((*blocks[0]).clone());
+    cache.insert(replacement.hash(), Height(0), replacement.clone());
+    assert_eq!(cache.get(&replacement.hash()), Some(replacement.clone()));
+    tokio::time::advance(Duration::from_secs(90)).await;
+    assert!(blocks
+        .iter()
+        .all(|block| cache.get(&block.hash()).is_none()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn rpc_submitblock_withdrawal_restores_pending_advertisement() {
+    let cache = crate::SubmittedBlockCache::default();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(3)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let mut pending = cache.subscribe();
+    pending.borrow_and_update();
+    for block in &blocks[..2] {
+        cache.insert(
+            block.hash(),
+            block.coinbase_height().unwrap(),
+            block.clone(),
+        );
+    }
+    cache.remove(blocks[1].hash());
+    assert!(pending.has_changed().unwrap());
+    assert_eq!(
+        *pending.borrow_and_update(),
+        Some((blocks[0].hash(), blocks[0].coinbase_height().unwrap()))
+    );
+    assert!(cache.get(&blocks[0].hash()).is_some());
+    assert!(cache.get(&blocks[1].hash()).is_none());
+
+    tokio::time::advance(Duration::from_secs(90)).await;
+    cache.insert(
+        blocks[2].hash(),
+        blocks[2].coinbase_height().unwrap(),
+        blocks[2].clone(),
+    );
+    cache.remove(blocks[2].hash());
+    assert_eq!(*pending.borrow_and_update(), None);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_validateaddress() {
     let _init_guard = zebra_test::init();

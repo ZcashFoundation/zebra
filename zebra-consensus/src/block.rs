@@ -190,8 +190,7 @@ impl VerifyBlockError {
     }
 }
 
-/// Converts an error from a `CommitSemanticallyVerifiedBlock` state request
-/// into a [`VerifyBlockError`].
+/// Converts a semantic, contextual, or mined state commit error into a [`VerifyBlockError`].
 ///
 /// The state boxes commit errors as [`zs::CommitSemanticallyVerifiedError`], a
 /// newtype around [`zs::CommitBlockError`], so the wrapper must be unwrapped
@@ -485,18 +484,22 @@ where
             if let Some(cached) = cached {
                 let mut contextual = (*cached).clone();
                 contextual.rebind(block, received_time);
-                return match state_service
-                    .oneshot(zs::Request::CommitContextuallyVerifiedBlock(Box::new(
-                        contextual,
-                    )))
-                    .await
-                {
+                let commit = match request {
+                    Request::CommitMined(_, notifications) => {
+                        contextual.into_mined_request(notifications)
+                    }
+                    Request::Commit(_) => {
+                        zs::Request::CommitContextuallyVerifiedBlock(Box::new(contextual))
+                    }
+                    Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
+                };
+                return match state_service.oneshot(commit).await {
                     Ok(zs::Response::Committed(committed_hash)) => {
                         assert_eq!(committed_hash, hash, "state must commit correct hash");
                         Ok(hash)
                     }
                     Err(source) => Err(map_commit_error(source, hash)),
-                    _ => unreachable!("wrong response for CommitContextuallyVerifiedBlock"),
+                    _ => unreachable!("wrong response for contextual block commit"),
                 };
             }
 
@@ -665,12 +668,21 @@ where
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
                 };
             }
+            let commit = match request {
+                Request::CommitMined(_, notifications) => zs::Request::CommitMinedBlock {
+                    block: prepared_block,
+                    contextual: None,
+                    notifications,
+                },
+                Request::Commit(_) => zs::Request::CommitSemanticallyVerifiedBlock(prepared_block),
+                Request::CheckProposal(_) => unreachable!("proposals return after validation"),
+            };
 
             match state_service
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::StateService { source, hash })?
-                .call(zs::Request::CommitSemanticallyVerifiedBlock(prepared_block))
+                .call(commit)
                 .await
             {
                 Ok(zs::Response::Committed(committed_hash)) => {
@@ -680,7 +692,7 @@ where
 
                 Err(source) => Err(map_commit_error(source, hash)),
 
-                _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
+                _ => unreachable!("wrong response for semantic block commit"),
             }
         }
         .instrument(span)
