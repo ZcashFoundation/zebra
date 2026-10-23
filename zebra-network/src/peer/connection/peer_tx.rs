@@ -36,14 +36,12 @@ where
     pub async fn send_authorized(
         &mut self,
         msg: Message,
-        mut authorized: impl FnMut() -> bool,
+        mut authorized: impl FnMut() -> Result<(), PeerError>,
     ) -> Result<(), PeerError> {
         tokio::time::timeout(REQUEST_TIMEOUT, async {
             futures::future::poll_fn(|cx| std::pin::Pin::new(&mut self.inner).poll_ready(cx))
                 .await?;
-            if !authorized() {
-                return Err(PeerError::AdvertAuthorizationRevoked);
-            }
+            authorized()?;
             std::pin::Pin::new(&mut self.inner).start_send(msg)?;
             self.inner.flush().await?;
             Ok(())
