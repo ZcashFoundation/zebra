@@ -39,6 +39,9 @@ if grep -rqF "Version::new(${LOCAL_STATE_VERSION}, 0, 0)" "${UPGRADES_DIR}/upgra
 else
     echo "No previous state version fallback: no ${LOCAL_STATE_VERSION}.0.0 format upgrade."
 fi
+LOCAL_STATE_VERSION=30 # temporary: simulate a v30 bump that falls back to v29, see #11940
+STATE_VERSIONS=(30 29)
+echo "Simulated STATE_VERSION: ${LOCAL_STATE_VERSION}, PREVIOUS_STATE_VERSION: ${STATE_VERSIONS[1]}"
 
 # Function to print the newest ready image named `<image_prefix>-<name_pattern>`.
 # GCE filters use RE2, which has no negative lookahead, so images from copies of
