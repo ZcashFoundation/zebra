@@ -19,7 +19,7 @@ use zebra_chain::{
         testnet::{ConfiguredActivationHeights, ParametersBuilder},
         Network, NetworkUpgrade,
     },
-    serialization::ZcashDeserializeInto,
+    serialization::{TrustedPreallocate, ZcashDeserializeInto},
     transaction::{Transaction, VerifiedUnminedTx},
     transparent::{self, OutPoint},
 };
@@ -344,6 +344,190 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     assert_eq!(actual_usage, expected_usage, "QueueStats usage mismatch");
 
     Ok(())
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_returns_requested_subset() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        let transactions: Vec<_> = network.unmined_transactions_in_blocks(1..=4).collect();
+        for (index, transaction) in transactions[..3].iter().enumerate() {
+            service
+                .storage()
+                .insert(
+                    transaction.clone(),
+                    Vec::new(),
+                    (index == 0).then_some(Height(0)),
+                )
+                .unwrap();
+        }
+
+        let hashes: Vec<_> = transactions
+            .iter()
+            .map(|transaction| transaction.transaction.id.mined_id())
+            .collect();
+        let expected = [hashes[2], hashes[0]]
+            .into_iter()
+            .map(|hash| (hash, service.storage().transactions()[&hash].clone()))
+            .collect();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let response = service
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![hashes[2], hashes[3], hashes[0]].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert_eq!(candidates, expected);
+        assert_eq!(candidates[&hashes[2]].height, None);
+        assert_eq!(candidates[&hashes[0]].height, Some(Height(0)));
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_requires_last_seen_tip() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let hash = transaction.transaction.id.mined_id();
+        service
+            .storage()
+            .insert(transaction, Vec::new(), Some(Height(0)))
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let ActiveState::Enabled {
+            last_seen_tip_hash, ..
+        } = &mut service.active_state
+        else {
+            panic!("mempool was enabled");
+        };
+        *last_seen_tip_hash = block::Hash([0; 32]);
+        assert_ne!(*last_seen_tip_hash, parent_hash);
+
+        let response = service
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![hash].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_disabled_returns_empty() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            _recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        assert!(!service.is_enabled());
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+
+        let response = (&mut service)
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![transaction.transaction.id.mined_id()].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+        assert!(!service.is_enabled());
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_rejects_oversized_batch() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let hash = transaction.transaction.id.mined_id();
+        service
+            .storage()
+            .insert(transaction, Vec::new(), Some(Height(0)))
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let max_transactions = usize::try_from(Transaction::max_allocation()).unwrap();
+        let response = service
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![hash; max_transactions + 1].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+    })
+    .await
+    .expect("mempool candidate query must finish");
 }
 
 #[tokio::test]

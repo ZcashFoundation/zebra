@@ -417,6 +417,7 @@ impl StartCmd {
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
+        let (block_verifier_setup_tx, block_verifier_setup_rx) = oneshot::channel();
         let (
             block_verifier_router,
             tx_verifier,
@@ -429,6 +430,7 @@ impl StartCmd {
             state.clone(),
             read_only_state_service.clone(),
             tx_verifier_setup_rx,
+            Some(block_verifier_setup_rx),
         )
         .await;
 
@@ -469,6 +471,12 @@ impl StartCmd {
         if tx_verifier_setup_tx.send(mempool.clone()).is_err() {
             warn!("error setting up the transaction verifier with a handle to the mempool service");
         };
+        if block_verifier_setup_tx
+            .send(tower::util::BoxCloneService::new(mempool.clone()))
+            .is_err()
+        {
+            warn!("error setting up the block verifier with a handle to the mempool service");
+        }
 
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
