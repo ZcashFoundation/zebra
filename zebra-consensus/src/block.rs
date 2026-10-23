@@ -135,15 +135,21 @@ struct PreparedProposal {
 /// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
 const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;
 
-/// Charge once on a blocking worker, before taking the shared cache lock.
-fn cache_proposal(
+/// Charge once on a cancellable CPU worker, then publish only while the caller is still waiting.
+async fn cache_proposal(
     proposals: &watch::Sender<ProposalCache>,
     key: [u8; 32],
     block: Arc<block::Block>,
     transaction_bytes: usize,
     contextual: Box<zs::ContextuallyVerifiedBlock>,
 ) {
-    let retained_bytes = contextual.retained_bytes();
+    let (contextual, retained_bytes) =
+        AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+            let retained_bytes = contextual.retained_bytes();
+            (contextual, retained_bytes)
+        }))
+        .await
+        .expect("proposal retention accounting uses saturating content-size arithmetic");
     proposals.send_modify(|proposals| {
         proposals.retain(|proposal| proposal.key != key);
         proposals.push_front(PreparedProposal {
@@ -782,11 +788,11 @@ where
             {
                 let block = block.clone();
                 Some(
-                    tokio::task::spawn_blocking(move || {
+                    AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
                         #[cfg(test)]
                         proposal_key_computations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         proposal_key_and_size(&block)
-                    })
+                    }))
                     .await
                     .expect("proposal hashing serializes an already-decoded block into an infallible writer"),
                 )
@@ -1174,11 +1180,7 @@ where
                     zs::Response::ValidBlockProposal(contextual) => {
                         let (key, size) = proposal_key.expect("proposals always have a cache key");
                         let transaction_bytes = size - block.header.zcash_serialized_size();
-                        tokio::task::spawn_blocking(move || {
-                            cache_proposal(&proposals, key, block, transaction_bytes, contextual);
-                        })
-                        .await
-                        .expect("proposal retention accounting uses saturating content-size arithmetic");
+                        cache_proposal(&proposals, key, block, transaction_bytes, contextual).await;
                         Ok(hash)
                     }
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
