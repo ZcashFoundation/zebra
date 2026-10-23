@@ -18,19 +18,38 @@ and where the archive has to land.
 
 There is no `latest` alias URL, so don't hardcode an archive name. Each network
 publishes `https://snapshots.zfnd.org/<network>/snapshots.json`: an array of
-every archive available for that network, newest first, where the newest entry
-carries `"latest"` in its `roles`. Resolve it at download time:
+every archive available for that network, newest first. The newest archive of
+each database major carries `"latest-v<major>"` in its `roles`. Resolve the one
+for your build at download time:
 
 ```sh
-url=$(curl -s https://snapshots.zfnd.org/mainnet/snapshots.json \
-  | jq -r 'map(select(.roles | index("latest")))[0].url')
+major=29   # your zebrad build's database format major
+url=$(curl -fsS https://snapshots.zfnd.org/mainnet/snapshots.json \
+  | jq -r --arg role "latest-v$major" 'map(select(.roles | index($role)))[0].url')
+echo "$url"
+```
 
-curl -sS -O "$url" -O "$url.sha256"
+Use `testnet` in place of `mainnet` for the Testnet archive. To find your
+`major`, see [Check the database format version](#check-the-database-format-version).
+If `url` is `null`, no archive for that major is published yet, and that
+section says when the previous major works instead.
+
+Then download the checksum and the archive, and check the archive:
+
+```sh
+curl --fail -O "$url.sha256"
+for attempt in $(seq 10); do
+  curl --fail -C - -O "$url" && break
+  sleep 10
+done
 sha256sum -c "$(basename "$url").sha256"
 ```
 
-Use `testnet` in place of `mainnet` for the Testnet archive. Don't use an
-archive that fails `sha256sum -c`; re-download it.
+A Mainnet download can take hours, and the connection can drop partway. The
+loop resumes from the bytes already on disk, and so does running it again after
+it gives up. It avoids `curl --retry` because `curl` releases before 8.17
+restart a retried download from the beginning. Don't use an archive that fails
+`sha256sum -c`: delete it and download it again.
 
 Each entry also carries `height`, `db_major`, `sha256`, `zebrad_version`, and
 `manifest_url`, so a script can check compatibility before it commits to a
@@ -68,11 +87,14 @@ instead.
 
 ## Check the database format version
 
-A snapshot only loads into a `zebrad` whose state database format _major_
-version matches the archive. If they differ, the snapshot won't load; don't use
-it. Get a snapshot cut for your version, or run a `zebrad` that matches.
+Use the archive tagged `latest-v<your major>`, where `<your major>` is the
+state database format _major_ version of your `zebrad` build. An archive from
+the previous major also works if your release can upgrade it in place, which
+Zebra 7.0.0 (major 29) does for v28 archives on its first start. `zebrad`
+ignores an archive from any other major: it starts an empty state and syncs from
+genesis, without an error.
 
-Both sides of that comparison are easy to read:
+To find both majors:
 
 - The archive: `db_major` in `snapshots.json`, the `v<major>` in its filename,
   and `database_format_major_version` in its manifest.
@@ -81,11 +103,44 @@ Both sides of that comparison are easy to read:
   of the cached state path:
 
   ```text
-  zebra_state::...::disk_db: Opened Zebra state cache at /home/user/.cache/zebra/state/v28/mainnet
+  zebra_state::...::disk_db: Opened Zebra state cache at /home/user/.cache/zebra/state/v29/mainnet
   ```
 
 The manifest is also where you'll find the snapshot's chain height and the
 `zebrad` version that produced it.
+
+### Starting from the previous major
+
+On its first start, a `zebrad` on major 29 looks for a major 28 state. If
+`<cache_dir>/state/v28/<network>` holds a database and
+`<cache_dir>/state/v29/<network>` does not, `zebrad` moves the directory to the
+v29 path and then upgrades the database format in place. The move is a rename,
+so it is fast: in a restore test it took well under a second, and the node
+committed new blocks within 21 seconds on Mainnet and 10 seconds on Testnet.
+
+Nothing is moved if `<cache_dir>/state/v29/<network>` already holds a database,
+for example because `zebrad` started before you extracted the archive. Stop
+`zebrad`, delete that directory, and start it again.
+
+The log shows the move and the upgrade:
+
+```text
+zebra_state::...::disk_db: moved state cache from "<cache_dir>/state/v28/mainnet" to "<cache_dir>/state/v29/mainnet"
+zebra_state::...::upgrade: trying to open older database format: launching upgrade task running_version=29.0.0 disk_version=28.0.0
+zebra_state::...::upgrade: marked database format as upgraded running_version=29.0.0 disk_version=28.0.0 format_upgrade_version=29.0.0
+```
+
+The move is one-way: afterwards, a `zebrad` on major 28 (such as 6.x) can't use
+the directory, and `state.delete_old_database = false` doesn't prevent the
+move. To keep a way to roll back, keep the archive or a copy of `state/v28`. For
+how upgrades work, see
+[Upgrading the State Database](../dev/state-db-upgrades.md#upgrading-the-state-database).
+
+### How long older majors stay published
+
+The newest archive of an older major stays published, as `latest-v<major>`, at
+least until the last `zebrad` release that uses that major reaches end of
+support. See [Supported Releases](../dev/release-process.md#supported-releases).
 
 ## Extract into your `cache_dir`
 
@@ -109,7 +164,11 @@ before you extract, and stop `zebrad` first if it is already running against
 that directory.
 
 Once it starts, confirm from the logs that it picked the snapshot up. The tip
-should be close to the manifest's `chain_tip.height`, not genesis:
+is not genesis. If the manifest's `chain_tip.block_hash` is set, the logged
+height equals `chain_tip.height`. If it is `null`, as in older manifests, the
+logged height is about 1,000 blocks lower: those manifests record the source
+node's tip, and up to 1,000 of its newest blocks aren't finalized, so they
+aren't in the archive. `zebrad` downloads them again within minutes.
 
 ```text
 zebra_state::service: loaded Zebra state cache chain_tip=Some((block::Hash("0000..."), Height(3459525)))
@@ -118,8 +177,11 @@ zebra_state::service: loaded Zebra state cache chain_tip=Some((block::Hash("0000
 ### Streaming, to avoid needing the space twice
 
 Downloading and then extracting needs the archive and the extracted state on
-disk at once, and the extracted state is larger than the archive. To avoid
-holding both, pipe the download straight into `tar`:
+disk at once, about twice the archive size. To avoid holding both, pipe the
+download straight into `tar`. A stream can't resume: if the connection drops,
+`tar` stops partway and leaves an incomplete state directory in `cache_dir`,
+which you must delete before you retry. On Mainnet, downloading to disk first
+is more reliable. To stream anyway:
 
 ```sh
 curl -sS "$url" | tar --zstd -x -C /path/to/your/cache_dir
@@ -168,8 +230,10 @@ curl -sS "$url" | docker run --rm -i \
 - **Sync starts from genesis anyway.** Your `cache_dir` doesn't match where you
   extracted the archive. Check both paths, and that the extracted tree is
   `<cache_dir>/state/v<major>/<network>/`.
-- **`zebrad` won't start, or errors about the state format.** Compare
-  `database_format_major_version` in the manifest with your build's
-  `DATABASE_FORMAT_VERSION`. A mismatch won't fix itself on retry.
+- **Sync starts from genesis even though the paths match.** The archive is from
+  a major your build doesn't use, so `zebrad` ignored it and logged `creating
+  new database with the current format`. Compare `database_format_major_version`
+  in the manifest with your build's `DATABASE_FORMAT_VERSION`, and see
+  [Check the database format version](#check-the-database-format-version).
 - **Checksum mismatch.** Re-download. Don't use a file that fails
   `sha256sum -c`.
