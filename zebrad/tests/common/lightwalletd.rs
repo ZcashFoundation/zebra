@@ -7,7 +7,7 @@
 
 use std::{
     env,
-    net::SocketAddr,
+    net::{SocketAddr, TcpListener},
     path::{Path, PathBuf},
 };
 
@@ -15,13 +15,12 @@ use tempfile::TempDir;
 
 use zebra_chain::parameters::Network::{self, *};
 use zebra_test::{
-    args,
     command::{Arguments, TestDirExt},
-    net::random_known_port,
     prelude::*,
 };
 
 use color_eyre::eyre::WrapErr;
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::state_database_format_version_in_code;
 
 use super::{
@@ -29,7 +28,7 @@ use super::{
         wait_for_state_version_message, wait_for_state_version_upgrade,
         DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
-    config::testdir,
+    config::{parse_listen_addr, read_listen_addr_from_logs, testdir},
     launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, LIGHTWALLETD_STARTUP_DELAY},
     sync::SYNC_FINISHED_REGEX,
     test_type::TestType,
@@ -114,11 +113,6 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     let lightwalletd_state_path = test_type.lightwalletd_state_path(test_name);
     let lightwalletd_dir = testdir()?.with_lightwalletd_config(zebrad_rpc_address)?;
 
-    let lightwalletd_rpc_port = random_known_port();
-    let lightwalletd_rpc_address = format!("127.0.0.1:{lightwalletd_rpc_port}");
-
-    let arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
-
     let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
         test_type.lightwalletd_failure_messages();
 
@@ -126,8 +120,9 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     // of blocking for the full test timeout. Never extend a test's own timeout to do it.
     let startup_timeout = LIGHTWALLETD_STARTUP_DELAY.min(test_type.lightwalletd_timeout());
 
-    let mut lightwalletd = lightwalletd_dir
-        .spawn_lightwalletd_child(lightwalletd_state_path, test_type, arguments)?
+    let (lightwalletd, lightwalletd_rpc_port) =
+        lightwalletd_dir.spawn_lightwalletd_child(lightwalletd_state_path, test_type)?;
+    let mut lightwalletd = lightwalletd
         .with_timeout(startup_timeout)?
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
@@ -175,13 +170,13 @@ pub trait LightWalletdTestDirExt: ZebradTestDirExt
 where
     Self: AsRef<Path> + Sized,
 {
-    /// Spawn `lightwalletd` with `lightwalletd_state_path`, and `extra_args`,
+    /// Spawn `lightwalletd` with `lightwalletd_state_path`,
     /// as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the child process.
     ///
     /// Uses `test_type` to determine logging behavior for the state directory.
     ///
-    /// By default, launch a working test instance with logging, and avoid port conflicts.
+    /// Returns the child and its configured gRPC port.
     ///
     /// # Panics
     ///
@@ -190,8 +185,7 @@ where
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
         test_type: TestType,
-        extra_args: Arguments,
-    ) -> Result<TestChild<Self>>;
+    ) -> Result<(TestChild<Self>, u16)>;
 
     /// Create a config file and use it for all subsequently spawned `lightwalletd` processes.
     /// Returns an error if the config already exists.
@@ -210,8 +204,7 @@ where
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
         test_type: TestType,
-        extra_args: Arguments,
-    ) -> Result<TestChild<Self>> {
+    ) -> Result<(TestChild<Self>, u16)> {
         let test_dir = self.as_ref().to_owned();
         let default_config_path = test_dir.join("lightwalletd-zcash.conf");
 
@@ -303,17 +296,23 @@ where
         //       work out how to log to the terminal on all platforms
         args.set_parameter("--log-file", "/dev/stdout");
 
-        // let the OS choose a random available wallet client port
-        args.set_parameter("--grpc-bind-addr", "127.0.0.1:0");
+        // The HTTP endpoint is not used by these tests.
         args.set_parameter("--http-bind-addr", "127.0.0.1:0");
 
         // don't require a TLS certificate for the HTTP server
         args.set_argument("--no-tls-very-insecure");
 
-        // apply user provided arguments
-        args.merge_with(extra_args);
-
-        self.spawn_child_with_command("lightwalletd", args)
+        // The external server logs its configured address, not its bound address, so clients cannot
+        // discover a port-0 listener. Reserve the port until immediately before spawning it.
+        // ponytail: release-before-spawn still races; use port 0 when upstream reports its address.
+        let port_reservation = TcpListener::bind("127.0.0.1:0")?;
+        let address = port_reservation.local_addr()?;
+        args.set_parameter("--grpc-bind-addr", address.to_string());
+        drop(port_reservation);
+        Ok((
+            self.spawn_child_with_command("lightwalletd", args)?,
+            address.port(),
+        ))
     }
 
     fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {
@@ -374,7 +373,7 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
     }
 
     // Launch zebra with peers and using a predefined zebrad state path.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+    let mut zebrad = if let Some(zebrad) = spawn_zebrad_for_rpc(
         network.clone(),
         test_name,
         test_type,
@@ -385,7 +384,7 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
             "running lightwalletd & zebrad integration test, launching zebrad...",
         );
 
-        zebrad_and_address
+        zebrad
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());
@@ -406,23 +405,25 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
     //
     // If incompletely upgraded states get written to the CI cache,
     // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
-    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
-        if test_type.launches_lightwalletd() {
-            tracing::info!(
-                ?test_type,
-                ?zebra_rpc_address,
-                "waiting for zebrad to open its RPC port..."
-            );
-            wait_for_state_version_upgrade(
+    let zebra_rpc_address = if test_type.launches_lightwalletd() {
+        let address = if DATABASE_FORMAT_UPGRADE_IS_LONG {
+            read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?
+        } else {
+            let startup_logs = wait_for_state_version_upgrade(
                 &mut zebrad,
                 &state_version_message,
                 state_database_format_version_in_code(),
-                [format!(
-                    "Opened RPC endpoint at {}",
-                    zebra_rpc_address.expect("lightwalletd test must have RPC port")
-                )],
+                [OPENED_RPC_ENDPOINT_MSG.to_string()],
             )?;
-        } else {
+            let rpc_log = startup_logs
+                .iter()
+                .find(|line| line.contains(OPENED_RPC_ENDPOINT_MSG))
+                .expect("the RPC endpoint log was matched");
+            parse_listen_addr(rpc_log, OPENED_RPC_ENDPOINT_MSG)?
+        };
+        Some(address)
+    } else {
+        if !DATABASE_FORMAT_UPGRADE_IS_LONG {
             wait_for_state_version_upgrade(
                 &mut zebrad,
                 &state_version_message,
@@ -430,7 +431,8 @@ pub fn lwd_integration_test(test_type: TestType) -> Result<()> {
                 None,
             )?;
         }
-    }
+        None
+    };
 
     // Wait for zebrad to sync the genesis block before launching lightwalletd,
     // if lightwalletd is launched and zebrad starts with an empty state.

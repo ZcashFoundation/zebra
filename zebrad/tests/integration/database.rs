@@ -4,12 +4,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use color_eyre::{
-    eyre::{eyre, Result, WrapErr},
-    Help,
-};
+use color_eyre::eyre::{eyre, Result, WrapErr};
 use semver::Version;
-use zebra_test::command::ContextFrom;
+use zebra_test::command::{ContextFrom, TestChild};
 
 use zebra_chain::{
     block::Height,
@@ -124,6 +121,20 @@ where
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
 
+    check_config_conflict_with_running_node(node1, second_dir, second_stderr_regex)
+}
+
+/// Launch a second node while `node1` holds the conflicting resource and check both exits.
+#[tracing::instrument]
+pub fn check_config_conflict_with_running_node<T, U>(
+    node1: TestChild<T>,
+    second_dir: U,
+    second_stderr_regex: &str,
+) -> Result<()>
+where
+    T: std::fmt::Debug,
+    U: ZebradTestDirExt + std::fmt::Debug,
+{
     // Spawn the second node
     let node2 = second_dir.spawn_child(args!["start"]);
     let (node2, mut node1) = node1.kill_on_error(node2)?;
@@ -138,10 +149,7 @@ where
     let output1 = node1.wait_with_output().context_from(&output2)?;
 
     // Make sure the first node was killed, rather than exiting with an error.
-    output1
-        .assert_was_killed()
-        .warning("Possible port conflict. Are there other zebrad tests running?")
-        .context_from(&output2)?;
+    output1.assert_was_killed().context_from(&output2)?;
 
     // Make sure node2 has the expected resource conflict.
     output2
@@ -150,7 +158,6 @@ where
     output2
         .assert_failure()?
         .assert_was_not_killed()
-        .warning("Possible port conflict. Are there other zebrad tests running?")
         .context_from(&output1)?;
 
     Ok(())

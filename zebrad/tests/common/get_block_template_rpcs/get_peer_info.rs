@@ -6,9 +6,10 @@ use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::client::PeerInfo;
+use zebra_rpc::{client::PeerInfo, server::OPENED_RPC_ENDPOINT_MSG};
 
 use crate::common::{
+    config::read_listen_addr_from_logs,
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     test_type::TestType,
 };
@@ -29,14 +30,11 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!(?network, "running getpeerinfo test using zebrad",);
 
-    let (mut zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, true)?
-            .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
-
-    let rpc_address = zebra_rpc_address.expect("getpeerinfo test must have RPC port");
+    let mut zebrad = spawn_zebrad_for_rpc(network, test_name, test_type, true)?
+        .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
 
     // Wait until port is open.
-    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {rpc_address}"))?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
