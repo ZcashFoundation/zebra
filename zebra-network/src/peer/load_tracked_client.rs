@@ -34,6 +34,9 @@ pub struct LoadTrackedClient {
 
     /// Sends block adverts even when the load-tracked service is busy.
     pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<crate::peer_set::BlockAdvert>,
+
+    /// Updates receive-source selection independently of request readiness.
+    pub(crate) compact_receive_tx: tokio::sync::watch::Sender<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
@@ -41,6 +44,7 @@ impl From<Client> for LoadTrackedClient {
     fn from(client: Client) -> Self {
         let connection_info = client.connection_info.clone();
         let block_advert_tx = client.block_advert_tx.clone();
+        let compact_receive_tx = client.compact_receive_tx.clone();
 
         let service = PeakEwma::new(
             client,
@@ -53,6 +57,7 @@ impl From<Client> for LoadTrackedClient {
             service,
             connection_info,
             block_advert_tx,
+            compact_receive_tx,
         }
     }
 }
