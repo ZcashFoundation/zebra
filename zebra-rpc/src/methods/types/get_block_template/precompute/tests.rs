@@ -750,7 +750,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 }
             }
         });
-        let (router, _, _handles, _) = zebra_consensus::router::init_test(
+        let (router, _, _handles, _, _) = zebra_consensus::router::init_test(
             zebra_consensus::Config {
                 checkpoint_sync: false,
             },
