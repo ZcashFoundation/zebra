@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, convert::Infallible, fmt, sync::Arc};
 
-use crate::methods::arrayhex;
+use crate::methods::{arrayhex, hex_data};
 use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
@@ -56,7 +56,7 @@ where
     FeeConstraint: amount::Constraint + Clone + Copy,
 {
     /// The hex-encoded serialized data for this transaction.
-    #[serde(with = "hex")]
+    #[serde(with = "hex_data")]
     pub(crate) data: SerializedTransaction,
 
     /// The transaction ID of this transaction.
@@ -571,7 +571,7 @@ pub struct TransactionObject {
     #[getter(copy)]
     pub(crate) in_active_chain: Option<bool>,
     /// The raw transaction, encoded as hex bytes.
-    #[serde(with = "hex")]
+    #[serde(with = "hex_data")]
     pub(crate) hex: SerializedTransaction,
     /// The height of the block in the best chain that contains the tx, -1 if
     /// it's in a side chain block, or `None` if the tx is in the mempool.
