@@ -149,7 +149,12 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// the network efficiently.
 ///
 /// If this timeout is set too low, the peer set and remote peers can get overloaded.
+#[cfg(not(test))]
 pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
+
+/// Keep gossip throttled in unit tests without waiting for real peer-network delays.
+#[cfg(test)]
+pub const PEER_GOSSIP_DELAY: Duration = Duration::from_millis(10);
 
 /// The per-peer wire-response budget used to derive complete download deadlines.
 ///
