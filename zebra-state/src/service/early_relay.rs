@@ -91,6 +91,13 @@ impl EarlyRelayState {
         ContextUpdate(&self.context_version)
     }
 
+    pub(super) fn is_rejected(&self, hash: block::Hash) -> bool {
+        self.rejections
+            .lock()
+            .expect("early relay rejection lock is not poisoned")
+            .contains(hash, tokio::time::Instant::now())
+    }
+
     fn publish(self: &Arc<Self>, block: Arc<Block>, guard: &EarlyRelayGuard, retained: usize) {
         if self.changes.receiver_count() == 0
             || retained > MAX_RETAINED_BYTES

@@ -1481,6 +1481,25 @@ pub enum ReadRequest {
     /// or one of its subscribers is held. Independent of mining and never enabled by default.
     EarlyRelayCache,
 
+    /// Checks height and contextual difficulty/time for a direct child of the committed best tip.
+    /// Rejects locally invalidated or recently deterministically rejected block hashes.
+    ///
+    /// Returns [`ReadResponse::ValidBestTipHeader`] or an error, without caching a verdict.
+    /// Callers must independently check proof of work and bound compact-body resources.
+    CheckBestTipHeader {
+        /// The candidate header.
+        header: Arc<block::Header>,
+        /// The height from its prefilled coinbase.
+        height: block::Height,
+    },
+
+    /// Authenticates a NU5-or-later body's history and authorization commitments at the best tip.
+    ///
+    /// Callers must first bound the body and check transaction Merkle roots and duplicates.
+    /// Returns [`ReadResponse::ValidBestTipBlockCommitments`] or an error. Neither result updates
+    /// rejection, mining, or early-relay caches; success does not imply transaction validity.
+    CheckBestTipBlockCommitments(Arc<Block>),
+
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
     /// with the latest disk space usage estimate in bytes. Primary services normally refresh
     /// it every 30 seconds; read-only services measure it on demand.
@@ -1993,6 +2012,8 @@ impl ReadRequest {
             ReadRequest::MiningCandidate => "mining_candidate",
             ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
             ReadRequest::EarlyRelayCache => "early_relay_cache",
+            ReadRequest::CheckBestTipHeader { .. } => "check_best_tip_header",
+            ReadRequest::CheckBestTipBlockCommitments(_) => "check_best_tip_block_commitments",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
