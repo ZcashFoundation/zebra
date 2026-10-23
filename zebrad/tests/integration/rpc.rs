@@ -1,4 +1,4 @@
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::Result;
 
 use zebra_chain::parameters::Network::*;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
@@ -12,31 +12,29 @@ use crate::common::{
 // Used by metrics_endpoint and tracing_endpoint (feature gated).
 #[cfg(any(feature = "prometheus", feature = "filter-reload"))]
 use crate::common::config::default_test_config;
-#[cfg(any(feature = "prometheus", feature = "filter-reload"))]
-use zebra_test::net::random_known_port;
 
 #[tokio::test]
 #[cfg(feature = "prometheus")]
 async fn metrics_endpoint() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let endpoint = format!("127.0.0.1:{port}");
-    let url = format!("http://{endpoint}");
+    // ponytail: exporter hides its bound address; this handoff can race until it accepts a listener.
+    // Keep the reservation through config writing, then release it immediately before spawning.
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let endpoint = reservation.local_addr()?;
 
     // Write a configuration that has metrics endpoint_addr set
     let mut config = default_test_config(&Mainnet);
     config.network.cache_dir = false.into();
-    config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
+    config.metrics.endpoint_addr = Some(endpoint);
 
     let dir = testdir()?.with_config(&mut config)?;
+    drop(reservation);
     let mut child = dir
         .spawn_child(args!["start"])?
         .with_timeout(LAUNCH_DELAY)?;
-    child.expect_stdout_line_matches(regex::escape(&format!(
-        "Opened metrics endpoint at {endpoint}"
-    )))?;
+    let endpoint = read_listen_addr_from_logs(&mut child, "Opened metrics endpoint at ")?;
+    let url = format!("http://{endpoint}");
 
     // Create an http client
     let client = reqwest::Client::builder().timeout(LAUNCH_DELAY).build()?;
@@ -63,10 +61,7 @@ async fn metrics_endpoint() -> Result<()> {
     )?;
     std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
+    output.assert_was_killed()?;
 
     Ok(())
 }
@@ -76,24 +71,18 @@ async fn metrics_endpoint() -> Result<()> {
 async fn tracing_endpoint() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let endpoint = format!("127.0.0.1:{port}");
-    let url_default = format!("http://{endpoint}");
-    let url_filter = format!("{url_default}/filter");
-
     // Write a configuration that has tracing endpoint_addr option set
     let mut config = default_test_config(&Mainnet);
     config.network.cache_dir = false.into();
-    config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
+    config.tracing.endpoint_addr = Some("127.0.0.1:0".parse()?);
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir
         .spawn_child(args!["start"])?
         .with_timeout(LAUNCH_DELAY)?;
-    child.expect_stdout_line_matches(regex::escape(&format!(
-        "Opened tracing endpoint at {endpoint}"
-    )))?;
+    let endpoint = read_listen_addr_from_logs(&mut child, "Opened tracing endpoint at ")?;
+    let url_default = format!("http://{endpoint}");
+    let url_filter = format!("{url_default}/filter");
 
     // Create an http client
     let client = reqwest::Client::builder().timeout(LAUNCH_DELAY).build()?;
@@ -154,10 +143,7 @@ async fn tracing_endpoint() -> Result<()> {
     std::str::from_utf8(&tracing_body)
         .expect("unexpected invalid UTF-8 in modified tracing filter response");
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
+    output.assert_was_killed()?;
 
     Ok(())
 }
@@ -186,7 +172,6 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     let _init_guard = zebra_test::init();
     // Write a configuration that has RPC listen_addr set
-    // [Note on port conflict](#Note on port conflict)
     let mut config = os_assigned_rpc_port_config(parallel_cpu_threads, &Mainnet)?;
     config.network.cache_dir = false.into();
 
@@ -224,10 +209,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other zebrad tests running?")?;
+    output.assert_was_killed()?;
 
     Ok(())
 }
@@ -243,7 +225,6 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     let _init_guard = zebra_test::init();
     // Write a configuration that has RPC listen_addr set
-    // [Note on port conflict](#Note on port conflict)
     let mut config = os_assigned_rpc_port_config(true, &Mainnet)?;
     config.network.cache_dir = false.into();
 

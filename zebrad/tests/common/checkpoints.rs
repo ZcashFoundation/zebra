@@ -19,6 +19,7 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::{
     args,
@@ -34,7 +35,7 @@ use crate::common::{
 };
 
 use super::{
-    config::testdir,
+    config::{read_listen_addr_from_logs, testdir},
     failure_messages::{
         PROCESS_FAILURE_MESSAGES, ZEBRA_CHECKPOINTS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
     },
@@ -69,14 +70,13 @@ pub async fn run(network: Network) -> Result<()> {
     );
 
     // Sync zebrad to the network chain tip
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, true)?
-    {
-        zebrad_and_address
-    } else {
-        // Skip the test, we don't have the required cached state
-        return Ok(());
-    };
+    let mut zebrad =
+        if let Some(zebrad) = spawn_zebrad_for_rpc(network.clone(), test_name, test_type, true)? {
+            zebrad
+        } else {
+            // Skip the test, we don't have the required cached state
+            return Ok(());
+        };
 
     // Wait for the upgrade if needed.
     // Currently we only write an image for testnet, which is quick.
@@ -102,11 +102,8 @@ pub async fn run(network: Network) -> Result<()> {
         )?;
     }
 
-    let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");
-
     tracing::info!(
         ?network,
-        ?zebra_rpc_address,
         "spawned zebrad, waiting for it to load compiled-in checkpoints...",
     );
 
@@ -125,17 +122,12 @@ pub async fn run(network: Network) -> Result<()> {
 
     tracing::info!(
         ?network,
-        ?zebra_rpc_address,
         ?last_checkpoint,
         "found zebrad's current last checkpoint",
     );
 
-    tracing::info!(
-        ?network,
-        ?zebra_rpc_address,
-        "waiting for zebrad to open its RPC port...",
-    );
-    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+    tracing::info!(?network, "waiting for zebrad to open its RPC port...",);
+    let zebra_rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
     tracing::info!(
         ?network,

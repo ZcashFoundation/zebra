@@ -8,7 +8,6 @@
 use std::{
     env,
     fmt::Debug,
-    net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -239,7 +238,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
     test_name: S,
     test_type: TestType,
     use_internet_connection: bool,
-) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+) -> Result<Option<TestChild<TempDir>>> {
     spawn_zebrad_for_rpc_with_opts(network, test_name, test_type, use_internet_connection, true)
 }
 
@@ -253,11 +252,11 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 /// not to cache a backup of its non-finalized state on disk.
 ///
 /// Returns:
-/// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
+/// - `Ok(Some(zebrad))` on success,
 /// - `Ok(None)` if the test doesn't have the required network or cached state, and
 /// - `Err(_)` if spawning zebrad fails.
 ///
-/// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
+/// Callers read the bound RPC address from the startup logs after checking earlier startup messages.
 #[tracing::instrument]
 pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
     network: Network,
@@ -265,7 +264,7 @@ pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
     test_type: TestType,
     use_internet_connection: bool,
     use_non_finalized_backup: bool,
-) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+) -> Result<Option<TestChild<TempDir>>> {
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
@@ -290,7 +289,7 @@ pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
         .with_timeout(test_type.zebrad_timeout())?
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    Ok(Some((zebrad, config.rpc.listen_addr)))
+    Ok(Some(zebrad))
 }
 
 /// Spawns a zebrad instance on `network` without RPCs or `lightwalletd`.
