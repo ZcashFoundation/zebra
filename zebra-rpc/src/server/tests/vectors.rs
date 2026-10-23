@@ -153,15 +153,13 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
     }
 }
 
-/// Test if the RPC server will panic correctly when there is a port conflict.
+/// Test that the RPC server rejects an address held by another RPC server.
 #[tokio::test]
 async fn rpc_server_spawn_port_conflict() {
-    use std::time::Duration;
     let _init_guard = zebra_test::init();
 
-    let port = zebra_test::net::random_known_port();
-    let conf = Config {
-        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
+    let mut conf = Config {
+        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
         indexer_listen_addr: None,
         lightwalletd_listen_addr: None,
         debug_force_finished_sync: false,
@@ -195,11 +193,16 @@ async fn rpc_server_spawn_port_conflict() {
         None,
     );
 
-    RpcServer::start(rpc_impl.clone(), conf.clone())
+    let server = Server::builder()
+        .build(conf.listen_addr.expect("the test config enables RPC"))
         .await
-        .expect("RPC server should start");
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
+        .expect("RPC server should bind");
+    conf.listen_addr = Some(
+        server
+            .local_addr()
+            .expect("the RPC server has bound its listener"),
+    );
+    let _server_handle = server.start(rpc_impl.clone().into_rpc());
 
     RpcServer::start(rpc_impl, conf)
         .await

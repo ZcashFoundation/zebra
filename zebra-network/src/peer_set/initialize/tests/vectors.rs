@@ -32,8 +32,6 @@ use tower::{service_fn, Layer, Service, ServiceExt};
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
 
-use zebra_test::net::random_known_port;
-
 use crate::{
     address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
@@ -181,28 +179,24 @@ async fn local_listener_unspecified_port_localhost_addr_v6() {
     }
 }
 
-/// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
+/// Test that zebra-network propagates a bound localhost listener port to the `AddressBook`.
 #[tokio::test]
-async fn local_listener_fixed_port_localhost_addr_v4() {
+async fn local_listener_bound_port_localhost_addr_v4() {
     let _init_guard = zebra_test::init();
-
-    let localhost_v4 = "127.0.0.1".parse().unwrap();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
     }
 
     for network in Network::iter() {
-        local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), network).await;
+        local_listener_bound_port_with("127.0.0.1:0".parse().unwrap(), network).await;
     }
 }
 
-/// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
+/// Test that zebra-network propagates a bound localhost listener port to the `AddressBook`.
 #[tokio::test]
-async fn local_listener_fixed_port_localhost_addr_v6() {
+async fn local_listener_bound_port_localhost_addr_v6() {
     let _init_guard = zebra_test::init();
-
-    let localhost_v6 = "::1".parse().unwrap();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -213,7 +207,7 @@ async fn local_listener_fixed_port_localhost_addr_v6() {
     }
 
     for network in Network::iter() {
-        local_listener_port_with(SocketAddr::new(localhost_v6, random_known_port()), network).await;
+        local_listener_bound_port_with("[::1]:0".parse().unwrap(), network).await;
     }
 }
 
@@ -2179,25 +2173,47 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         .unwrap()
         .local_listener_meta_addr(Utc::now());
 
-    if listen_addr.port() == 0 {
-        assert_ne!(
-            local_listener.addr.port(),
-            0,
-            "dynamic ports are replaced with OS-assigned ports"
-        );
-    } else {
-        assert_eq!(
-            local_listener.addr.port(),
-            listen_addr.port(),
-            "fixed ports are correctly propagated"
-        );
-    }
+    assert_ne!(
+        local_listener.addr.port(),
+        0,
+        "dynamic ports are replaced with OS-assigned ports"
+    );
 
     assert_eq!(
         local_listener.addr.ip(),
         listen_addr.ip(),
         "IP addresses are correctly propagated"
     );
+}
+
+/// Checks that the address book advertises the actual port while its listener is held open.
+async fn local_listener_bound_port_with(listen_addr: SocketAddr, network: Network) {
+    let config = Config {
+        listen_addr,
+        network,
+        ..Config::default()
+    };
+    let (listener, bound_addr) = open_listener(&config).await;
+    let (address_book, _, _, _, _, updater_task) = AddressBookUpdater::spawn(&config, bound_addr);
+    let local_listener = address_book
+        .lock()
+        .unwrap()
+        .local_listener_meta_addr(Utc::now());
+
+    assert_eq!(
+        local_listener.addr.port(),
+        listener
+            .local_addr()
+            .expect("the listener has bound its address")
+            .port(),
+        "bound ports are correctly propagated"
+    );
+    assert_eq!(
+        local_listener.addr.ip(),
+        listen_addr.ip(),
+        "IP addresses are correctly propagated"
+    );
+    updater_task.abort();
 }
 
 /// Initialize a peer set with `peerset_initial_target_size`, `inbound_service`, and `network`.
