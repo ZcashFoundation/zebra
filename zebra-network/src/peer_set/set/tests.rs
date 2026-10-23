@@ -39,6 +39,9 @@ use crate::{peer::ClientTestHarness, protocol::external::types::Version};
 pub mod consumer;
 
 #[cfg(test)]
+mod bans;
+
+#[cfg(test)]
 mod prop;
 
 #[cfg(test)]
