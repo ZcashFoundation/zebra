@@ -53,8 +53,10 @@ pub struct Codec {
     builder: Builder,
     state: DecodeState,
     early_block_relay: bool,
-    compact_send: bool,
+    compact_sent: bool,
     compact_receive: bool,
+    compact_recovery:
+        Option<tokio::sync::watch::Receiver<Option<(block::Hash, tokio::time::Instant)>>>,
 }
 
 /// A builder for specifying [`Codec`] options.
@@ -94,6 +96,14 @@ impl Codec {
     pub(crate) fn reconfigure_early_block_relay(&mut self, enabled: bool) {
         self.early_block_relay = enabled;
     }
+
+    /// Track the connection's live recovery request independently of announcement preferences.
+    pub(crate) fn reconfigure_compact_recovery(
+        &mut self,
+        recovery: tokio::sync::watch::Receiver<Option<(block::Hash, tokio::time::Instant)>>,
+    ) {
+        self.compact_recovery = Some(recovery);
+    }
 }
 
 impl Builder {
@@ -103,8 +113,9 @@ impl Builder {
             builder: self,
             state: DecodeState::Head,
             early_block_relay: false,
-            compact_send: false,
+            compact_sent: false,
             compact_receive: false,
+            compact_recovery: None,
         }
     }
 
@@ -142,12 +153,15 @@ impl Encoder<Message> for Codec {
         if body_length > self.builder.max_len {
             return Err(Parse("body length exceeded maximum size"));
         }
-        if let Message::SendCompact {
-            high_bandwidth,
-            version,
-        } = &item
-        {
-            self.compact_receive = self.early_block_relay && *high_bandwidth && *version == 1;
+        match &item {
+            Message::SendCompact {
+                high_bandwidth,
+                version,
+            } => {
+                self.compact_receive = self.early_block_relay && *high_bandwidth && *version == 1;
+            }
+            Message::CompactBlock(_) => self.compact_sent = true,
+            _ => {}
         }
 
         // The bounded message length plus its header fits in u64.
@@ -468,12 +482,24 @@ impl Decoder for Codec {
                 self.state = DecodeState::Head;
 
                 // Ignore unnegotiated extensions before hashing or deserializing their bodies.
-                if (command == *b"sendcmpct\0\0\0" && !self.early_block_relay)
-                    || (matches!(
-                        &command,
-                        b"cmpctblock\0\0" | b"getblocktxn\0" | b"blocktxn\0\0\0\0"
-                    ) && !(self.early_block_relay && self.compact_send && self.compact_receive))
-                {
+                let negotiated = match &command {
+                    b"sendcmpct\0\0\0" => self.early_block_relay,
+                    b"cmpctblock\0\0" => self.early_block_relay && self.compact_receive,
+                    // The connection checks the retained block and its serving deadline.
+                    b"getblocktxn\0" => self.early_block_relay && self.compact_sent,
+                    b"blocktxn\0\0\0\0" => {
+                        self.early_block_relay
+                            && self.compact_recovery.as_ref().is_some_and(|recovery| {
+                                recovery.has_changed().is_ok()
+                                    && recovery.borrow().is_some_and(|(hash, deadline)| {
+                                        tokio::time::Instant::now() < deadline
+                                            && body.get(..32) == Some(hash.0.as_slice())
+                                    })
+                            })
+                    }
+                    _ => true,
+                };
+                if !negotiated {
                     return Ok(None);
                 }
 
@@ -501,8 +527,6 @@ impl Decoder for Codec {
                             _ => return Err(Parse("invalid sendcmpct boolean")),
                         };
                         let version = body_reader.read_u64::<LittleEndian>()?;
-                        self.compact_send =
-                            self.early_block_relay && high_bandwidth && version == 1;
                         Ok(Message::SendCompact {
                             high_bandwidth,
                             version,

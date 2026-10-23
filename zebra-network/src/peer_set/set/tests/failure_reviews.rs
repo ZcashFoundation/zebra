@@ -352,6 +352,7 @@ async fn connection_block_error_attribution(not_found: bool) {
         (
             client_rx,
             advert_rx,
+            tokio::sync::watch::channel(None).1,
             peer_set.minimum_peer_version.clone(),
             peer_set.bans_receiver.clone(),
         ),
