@@ -5,7 +5,13 @@
 
 use std::ops::Deref;
 
-use crate::service::finalized_state::disk_db::{DiskDb, DB};
+use zebra_chain::parameters::Network;
+
+use crate::{
+    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    service::finalized_state::disk_db::{DiskDb, DB},
+    Config,
+};
 
 // Enable older test code to automatically access the inner database via Deref coercion.
 impl Deref for DiskDb {
@@ -162,4 +168,57 @@ fn open_errors_distinguish_lock_holders_from_io_errors() {
         .expect_err("open fails because the lock file path is a directory");
     assert_eq!(io_error.kind(), rocksdb::ErrorKind::IOError, "{io_error}");
     assert_eq!(DiskDb::lock_holder(io_error.as_ref()), None, "{io_error}");
+}
+
+/// Check that a read-only secondary removes its temporary directory once its last clone is
+/// dropped, and leaves the primary database in place.
+#[test]
+fn read_only_secondary_removes_its_directory_on_drop() {
+    let _init_guard = zebra_test::init();
+
+    let cache_dir = tempfile::tempdir().expect("temporary directory is writable");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let version = state_database_format_version_in_code();
+    let open = |read_only| {
+        DiskDb::new(
+            &config,
+            STATE_DATABASE_KIND,
+            &version,
+            &network,
+            [],
+            read_only,
+        )
+        .expect("database opens in a fresh cache directory")
+    };
+
+    let primary = open(false);
+    let secondary = open(true);
+    let secondary_path = secondary
+        .secondary_dir
+        .as_ref()
+        .expect("read-only instances have a secondary directory")
+        .path()
+        .to_path_buf();
+    assert!(secondary_path.exists());
+
+    drop(secondary.clone());
+    assert!(
+        secondary_path.exists(),
+        "dropping a clone must keep the secondary directory"
+    );
+
+    drop(secondary);
+    assert!(
+        !secondary_path.exists(),
+        "secondary directory {secondary_path:?} was not removed"
+    );
+    assert!(
+        primary.path().exists(),
+        "dropping a secondary must keep the primary database"
+    );
 }
