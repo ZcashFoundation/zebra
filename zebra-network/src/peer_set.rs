@@ -44,6 +44,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct BlockAdvert {
     pub(crate) hash: block::Hash,
+    pub(crate) allow_compact: bool,
     pub(crate) result: oneshot::Sender<Result<(), BoxError>>,
 }
 
@@ -177,16 +178,23 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
         let sample = broadcast_peer_count(&self.network, selected.len());
         let mut writes = FuturesUnordered::new();
         let mut sampled = 0;
-        for (_, sidecar, _, sender) in selected {
+        let mut compact_peers = 0;
+        for (_, sidecar, early_relay, sender) in selected {
             if !all && !*sidecar {
                 if sampled >= sample {
                     continue;
                 }
                 sampled += 1;
             }
+            let allow_compact = *early_relay && compact_peers < 3;
+            compact_peers += usize::from(allow_compact);
             let (result, receiver) = oneshot::channel();
             let admission = sender
-                .try_send(BlockAdvert { hash, result })
+                .try_send(BlockAdvert {
+                    hash,
+                    allow_compact,
+                    result,
+                })
                 .map_err(|error| -> BoxError { error.to_string().into() });
             writes.push(async move {
                 admission?;

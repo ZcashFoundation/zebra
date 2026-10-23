@@ -82,6 +82,11 @@ pub enum Response {
     /// Inbound serving handlers return [`Response::Blocks`], not this outbound-only classification.
     EarlyBlocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
+    /// Verified mempool candidates matching unique compact short IDs by exact witnessed identity.
+    ///
+    /// Local-only response to [`super::Request::CompactBlockTransactions`], never sent on the wire.
+    CompactBlockTransactions(Vec<UnminedTx>),
+
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
@@ -105,6 +110,9 @@ impl fmt::Display for Response {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())
             }
             Response::TransactionIds(ids) => format!("TransactionIds {{ ids: {} }}", ids.len()),
+            Response::CompactBlockTransactions(transactions) => {
+                format!("CompactBlockTransactions({})", transactions.len())
+            }
 
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks) | Response::EarlyBlocks(blocks) if blocks.len() == 1 => {
@@ -152,6 +160,7 @@ impl Response {
 
             Response::Blocks(_) => "Blocks",
             Response::EarlyBlocks(_) => "EarlyBlocks",
+            Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Response::Transactions(_) => "Transactions",
         }
     }

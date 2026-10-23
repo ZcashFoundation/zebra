@@ -48,7 +48,7 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 For private relay experiments, set `experimental_early_block_relay = true` in
 `[network]` on each participating Zebra node. It defaults to `false` and requires
 both ends of a connection to advertise the experimental capability during the
-handshake. Older Zebra nodes and zcashd retain committed-block relay behavior.
+handshake. Zakura and non-opted-in Zebra peers retain ordinary full-block relay.
 
 After NU5, opted-in nodes can advertise and serve an authenticated child of the
 committed best tip before transaction verification finishes. Full validation is
@@ -63,6 +63,21 @@ timeouts, and infrastructure failures do not populate this set. Ordinary
 committed announcements are unchanged. Compatible peers do not punish one another
 for later transaction validation failures, but still reject malformed or
 unauthenticated bodies.
+
+These connections also negotiate provisional compact encoding version 1 with
+`sendcmpct`. At most three recipients per announcement receive `cmpctblock`;
+other connections receive ordinary inventory and full blocks. The compact
+encoding includes the complete Zcash header, a nonce, six-byte SipHash-2-4 short
+IDs, and a prefilled coinbase. Short IDs use the complete witnessed identity for
+v5/v6 transactions and the transaction ID for earlier versions.
+
+Reconstruction uses the verified mempool, then one `getblocktxn`/`blocktxn`
+exchange for missing transactions. Collisions, commitment mismatches, unknown
+parents, and a two-second recovery timeout fall back to a full block without
+punishing the announcing peer. Retained bodies expire after 15 seconds and are
+globally bounded; rejected early bodies are no longer served. The normal
+consensus verifier still checks every reconstructed block. Coinbase-only blocks
+use full relay because compact encoding would not save bytes.
 
 This uses experimental service bit 25 from the
 [temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).

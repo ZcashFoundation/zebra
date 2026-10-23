@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt};
+use std::{collections::HashSet, fmt, sync::Arc};
 
 use zebra_chain::{
     block,
@@ -6,7 +6,7 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
-use crate::PeerSocketAddr;
+use crate::{compact::CompactBlock, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -84,6 +84,21 @@ pub enum Request {
     ///
     /// The inbound service returns [`Response::Blocks`](super::Response::Blocks).
     EarlyBlocksByHash(HashSet<block::Hash>),
+
+    /// Finds verified mempool candidates for a negotiated compact block.
+    ///
+    /// The inbound service screens the compact shape, proof of work, and current committed-tip
+    /// header context before consulting the mempool. Returns [`super::Response::CompactBlockTransactions`].
+    /// Errors mean full-block fallback, not peer punishment or block rejection.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CompactBlockTransactions(Arc<CompactBlock>),
+
+    /// Authenticates a reconstructed body against the current committed tip without caching it.
+    ///
+    /// Returns [`super::Response::Nil`] on success. Errors require full-block fallback and must
+    /// not enter the block rejection cache. Success does not replace normal block verification.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CheckCompactBlock(Arc<block::Block>),
 
     /// Download one block from a connected peer, waiting for eligible peer capacity.
     ///
@@ -298,6 +313,8 @@ impl fmt::Display for Request {
                 format!("EarlyBlocksByHash({})", hashes.len())
             }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
+            Request::CompactBlockTransactions(_) => "CompactBlockTransactions".to_string(),
+            Request::CheckCompactBlock(_) => "CheckCompactBlock".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -335,6 +352,8 @@ impl Request {
             Request::BlocksByHash(_) => "BlocksByHash",
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
+            Request::CompactBlockTransactions(_) => "CompactBlockTransactions",
+            Request::CheckCompactBlock(_) => "CheckCompactBlock",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",
