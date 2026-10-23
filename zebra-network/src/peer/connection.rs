@@ -563,7 +563,7 @@ where
 {
     /// The metadata for the connected peer `service`.
     ///
-    /// This field is used for debugging.
+    /// Includes negotiated permissions for serving and classifying early block responses.
     pub connection_info: Arc<ConnectionInfo>,
 
     /// The state of this connection's current request or response.
@@ -856,6 +856,14 @@ where
                         ..
                     } = tmp_state
                     {
+                        let response = match response {
+                            Ok(Response::Blocks(blocks))
+                                if self.connection_info.early_block_relay =>
+                            {
+                                Ok(Response::EarlyBlocks(blocks))
+                            }
+                            response => response,
+                        };
                         if let Ok(response) = response.as_ref() {
                             debug!(%response, "finished receiving peer response to Zebra request");
                             // Add a metric for inbound responses to outbound requests.
@@ -1261,8 +1269,11 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _)) => {
+            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
+            }
+            (AwaitingRequest, EarlyBlocksByHash(_)) => {
+                Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
             }
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
@@ -1443,7 +1454,13 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Request::BlocksByHash(block_hashes(items).collect()).into()
+                    let hashes = block_hashes(items).collect();
+                    if self.connection_info.early_block_relay {
+                        Request::EarlyBlocksByHash(hashes)
+                    } else {
+                        Request::BlocksByHash(hashes)
+                    }
+                    .into()
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::TransactionsById(transaction_ids(items).collect()).into()
@@ -1578,9 +1595,17 @@ where
         .increment(1);
         self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
 
+        let authorization = match &rsp {
+            Response::AuthorizedBlocks { authorization, .. } => Some(authorization.clone()),
+            _ => None,
+        };
         // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
+            Response::EarlyBlocks(_) => {
+                error!("inbound service returned an outbound-only early block response");
+                return;
+            }
             Response::Peers(addrs) => {
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
@@ -1613,7 +1638,7 @@ where
                     }
                 }
             }
-            Response::Blocks(blocks) => {
+            Response::Blocks(blocks) | Response::AuthorizedBlocks { blocks, .. } => {
                 // Generate one tx message per block,
                 // then a notfound message with all the missing block hashes.
                 let mut missing_hashes = Vec::new();
@@ -1621,7 +1646,51 @@ where
                 for block in blocks.into_iter() {
                     match block {
                         Available((block, _)) => {
-                            if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
+                            let result = if let Some(authorization) = &authorization {
+                                let snapshot = block.clone();
+                                let result = self
+                                    .peer_tx
+                                    .send_authorized(Message::Block(block), || {
+                                        authorization.is_authorized(&snapshot)
+                                    })
+                                    .await;
+                                if matches!(result, Err(PeerError::AdvertAuthorizationRevoked)) {
+                                    // A committed body can outlive its early-cache authorization.
+                                    // Requery the ordinary serving path, never the early cache.
+                                    let hash = snapshot.hash();
+                                    if self.svc.ready().await.is_err() {
+                                        self.fail_with(PeerError::ServiceShutdown).await;
+                                        return;
+                                    }
+                                    match self.svc.call(Request::BlocksByHash([hash].into())).await
+                                    {
+                                        Ok(Response::Blocks(blocks)) => {
+                                            match blocks.into_iter().next() {
+                                                Some(Available((committed, _))) => {
+                                                    self.peer_tx
+                                                        .send(Message::Block(committed))
+                                                        .await
+                                                }
+                                                Some(Missing(_)) => {
+                                                    missing_hashes.push(hash.into());
+                                                    continue;
+                                                }
+                                                _ => unreachable!("single-block serving responds"),
+                                            }
+                                        }
+                                        Ok(_) => unreachable!("ordinary serving returns blocks"),
+                                        Err(error) => {
+                                            debug!(?hash, %error, "committed block fallback failed");
+                                            return;
+                                        }
+                                    }
+                                } else {
+                                    result
+                                }
+                            } else {
+                                self.peer_tx.send(Message::Block(block)).await
+                            };
+                            if let Err(e) = result {
                                 self.fail_with(e).await;
                                 return;
                             }

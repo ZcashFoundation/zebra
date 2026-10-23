@@ -293,6 +293,11 @@ fn mining_candidate_rejects_invalid_parent_auth_data_and_work() {
     let db = &finalized.db;
 
     assert!(
+        authenticated_candidate_header(&non_finalized, db, &network, candidate.clone(), true,)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
         mining_candidate_chain_info(&non_finalized, db, &network, candidate.clone()).is_some(),
         "the unmodified transaction bodies must pass before testing rejection",
     );
@@ -332,6 +337,11 @@ fn mining_candidate_rejects_invalid_parent_auth_data_and_work() {
         "only authorizing data changed, not transaction IDs",
     );
     assert_ne!(forged.auth_data_root(), candidate.auth_data_root());
+    let admission =
+        authenticated_candidate_header(&non_finalized, db, &network, forged.clone(), true)
+            .unwrap_err();
+    assert!(admission.is_auth_commitment_mismatch());
+    assert_eq!(admission.misbehavior_score(), 100);
     assert!(mining_candidate_chain_info(&non_finalized, db, &network, forged).is_none());
 
     // At Sapling activation the full Sapling frontier really is empty, so this pair

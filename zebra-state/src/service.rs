@@ -75,6 +75,8 @@ pub mod watch_receiver;
 
 pub mod check;
 
+pub(crate) mod early_relay;
+
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
@@ -240,6 +242,9 @@ pub struct ReadStateService {
 
     /// At most one early mining parent, separate from committed state.
     mining_candidate: watch::Sender<Option<MiningCandidate>>,
+
+    /// Independently enabled, authenticated early block retention.
+    early_relay: Arc<early_relay::EarlyRelayState>,
 
     /// The shared inner on-disk database for the finalized state.
     ///
@@ -415,6 +420,7 @@ impl StateService {
 
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
+        let early_relay = early_relay::EarlyRelayState::new(Some(latest_chain_tip.clone()));
 
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
@@ -431,13 +437,15 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
+            early_relay.clone(),
         );
 
-        let read_service = ReadStateService::new(
+        let mut read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
         );
+        read_service.early_relay = early_relay;
 
         let full_verifier_utxo_lookahead = max_checkpoint_height
             - HeightDiff::try_from(checkpoint_verify_concurrency_limit)
@@ -1083,6 +1091,7 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
+            early_relay: early_relay::EarlyRelayState::new(None),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1201,6 +1210,29 @@ impl Service<Request> for StateService {
         };
 
         match req {
+            Request::EarlyRelay {
+                block,
+                require_authentication,
+            } => {
+                let state = self.read_service.clone();
+                async move {
+                    state
+                        .early_relay(block, require_authentication, true)
+                        .await
+                        .map(Response::EarlyRelay)
+                }
+                .boxed()
+            }
+            Request::AuthenticateEarlyRelay(block) => {
+                let state = self.read_service.clone();
+                async move {
+                    state
+                        .early_relay(block, true, false)
+                        .await
+                        .map(Response::EarlyRelay)
+                }
+                .boxed()
+            }
             Request::MiningCandidate(block) => {
                 if self.read_service.mining_candidate.receiver_count() == 0 {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
@@ -1627,6 +1659,11 @@ impl Service<ReadRequest> for ReadStateService {
         let span = Span::current();
         let timed_span = TimedSpan::new(timer, span);
         let state = self.clone();
+
+        if let ReadRequest::EarlyRelayCache = req {
+            let cache = self.early_relay.cache();
+            return async move { Ok(ReadResponse::EarlyRelayCache(cache)) }.boxed();
+        }
 
         if let ReadRequest::MiningCandidateChanges = req {
             let changes =
@@ -2140,6 +2177,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::NonFinalizedBlocksListener { .. }
+            | ReadRequest::EarlyRelayCache
             | ReadRequest::MiningCandidateChanges => {
                 unreachable!("should return early");
             }

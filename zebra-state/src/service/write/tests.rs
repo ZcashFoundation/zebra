@@ -102,8 +102,15 @@ async fn write_worker_survives_rejected_root_invalidation() {
     let before = state.clone();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) =
-        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+        finalized,
+        state,
+        tip_sender,
+        state_sender,
+        false,
+        None,
+        super::super::early_relay::EarlyRelayState::new(None),
+    );
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -169,8 +176,15 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     let (finalized, state, genesis) = new_state_with_mainnet_genesis();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) =
-        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+        finalized,
+        state,
+        tip_sender,
+        state_sender,
+        false,
+        None,
+        super::super::early_relay::EarlyRelayState::new(None),
+    );
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
