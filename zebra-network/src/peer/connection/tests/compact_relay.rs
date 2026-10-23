@@ -25,9 +25,11 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
             .unwrap();
         assert!(block.transactions.len() > 1);
         let source = "127.0.0.1:8233".parse().unwrap();
-        for failure in ["none", "missing", "timeout", "commitments"] {
+        for failure in ["none", "missing", "timeout", "commitments", "canceled"] {
             let (mut connection, mut client, mut inbound, mut outbound, errors) =
                 new_test_connection::<PanicAssertion>();
+            let (recovery, mut active_recovery) = tokio::sync::watch::channel(None);
+            connection.compact_recovery = Some(recovery);
             let info = Arc::make_mut(&mut connection.connection_info);
             info.early_block_relay = true;
             info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
@@ -78,6 +80,16 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 request.indexes,
                 (1..block.transactions.len()).collect::<Vec<_>>()
             );
+            active_recovery.changed().await.unwrap();
+            assert_eq!(active_recovery.borrow_and_update().unwrap().0, block.hash());
+            if failure == "canceled" {
+                drop(rx);
+                active_recovery.changed().await.unwrap();
+                assert!(active_recovery.borrow().is_none());
+                task.abort();
+                assert!(task.await.unwrap_err().is_cancelled());
+                continue;
+            }
             if failure != "timeout" {
                 let transactions = if failure == "missing" {
                     Vec::new()
@@ -106,6 +118,7 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                     outbound.next().await,
                     Some(Message::GetData(vec![block.hash().into()]))
                 );
+                assert!(active_recovery.borrow().is_none());
                 peer.send(Ok(Message::Block(block.clone()))).await.unwrap();
             }
             assert_eq!(
@@ -115,6 +128,7 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                     Some(source)
                 ))])
             );
+            assert!(active_recovery.borrow().is_none());
             if failure == "none" {
                 let (tx, rx) = oneshot::channel();
                 client
@@ -292,7 +306,7 @@ async fn only_constructed_compact_adverts_consume_fanout_quota() {
 }
 
 #[tokio::test]
-async fn withdrawn_compact_snapshots_are_not_sent() {
+async fn withdrawn_unsent_compact_snapshots_are_not_sent() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let _init_guard = zebra_test::init();
@@ -301,63 +315,221 @@ async fn withdrawn_compact_snapshots_are_not_sent() {
             .as_slice()
             .zcash_deserialize_into()
             .unwrap();
-        for transactions in [false, true] {
-            let (mut connection, _client, mut inbound, mut outbound, errors) =
-                new_test_connection::<PanicAssertion>();
-            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
-            connection.compact.send = true;
-            let live = Arc::new(AtomicBool::new(true));
-            let authorized = live.clone();
-            let response = Response::AuthorizedBlocks {
-                blocks: vec![InventoryResponse::Available((block.clone(), None))],
-                authorization: crate::BlockAuthorization::new(move |_| {
-                    authorized.load(Ordering::SeqCst)
-                }),
-            };
-            let request = Request::EarlyBlocksByHash([block.hash()].into());
-            if transactions {
-                let (advert, ()) = tokio::join!(connection.compact_advert(block.hash()), async {
-                    inbound
-                        .expect_request(request.clone())
-                        .await
-                        .respond(response.clone());
-                },);
-                assert!(matches!(advert, Some(Message::CompactBlock(_))));
-                let send = connection.serve_compact_transactions(BlockTransactionsRequest {
-                    block_hash: block.hash(),
-                    indexes: vec![0],
-                });
-                tokio::pin!(send);
-                assert!(futures::poll!(&mut send).is_pending());
-                inbound.expect_request(request).await.respond(response);
-                live.store(false, Ordering::SeqCst);
-                send.await;
-            } else {
-                let (result, delivered) = tokio::sync::oneshot::channel();
-                let quota = Arc::new(tokio::sync::Semaphore::new(1));
-                let send = connection.send_block_advert(crate::peer_set::BlockAdvert {
-                    hash: block.hash(),
-                    compact_slots: quota.clone(),
-                    result,
-                });
-                tokio::pin!(send);
-                assert!(futures::poll!(&mut send).is_pending());
-                inbound.expect_request(request).await.respond(response);
-                live.store(false, Ordering::SeqCst);
-                send.await;
-                assert!(delivered.await.unwrap().is_err());
-                assert_eq!(quota.available_permits(), 1);
-            }
-            assert!(
-                outbound.try_recv().is_err(),
-                "withdrawn snapshots must not reach the wire"
-            );
-            assert!(
-                errors.try_get_error().is_none(),
-                "withdrawal is not a peer failure"
-            );
+        let (mut connection, _client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+        connection.compact.send = true;
+        let live = Arc::new(AtomicBool::new(true));
+        let authorized = live.clone();
+        let response = Response::AuthorizedBlocks {
+            blocks: vec![InventoryResponse::Available((block.clone(), None))],
+            authorization: crate::BlockAuthorization::new(move |_| {
+                authorized.load(Ordering::SeqCst)
+            }),
+        };
+        let (result, delivered) = tokio::sync::oneshot::channel();
+        let quota = Arc::new(tokio::sync::Semaphore::new(1));
+        {
+            let send = connection.send_block_advert(crate::peer_set::BlockAdvert {
+                hash: block.hash(),
+                compact_slots: quota.clone(),
+                result,
+            });
+            tokio::pin!(send);
+            assert!(futures::poll!(&mut send).is_pending());
+            inbound
+                .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                .await
+                .respond(response);
+            live.store(false, Ordering::SeqCst);
+            send.await;
         }
+        assert!(delivered.await.unwrap().is_err());
+        assert_eq!(quota.available_permits(), 1);
+        assert!(!connection.compact.has_cached());
+        assert!(
+            outbound.try_recv().is_err(),
+            "withdrawn unsent snapshots must not reach the wire"
+        );
+        assert!(
+            errors.try_get_error().is_none(),
+            "withdrawal is not a peer failure"
+        );
     })
     .await
-    .expect("compact serving rechecks authorization after detached work");
+    .expect("compact adverts recheck authorization after detached work");
+}
+
+#[tokio::test]
+async fn sent_compact_snapshot_survives_withdrawal_and_repeated_requests() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        assert!(block.transactions.len() > 1);
+        let (mut connection, _client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+        connection.compact.send = true;
+        let live = Arc::new(AtomicBool::new(true));
+        let authorized = live.clone();
+        let (result, delivered) = tokio::sync::oneshot::channel();
+        let (_, message) = tokio::join!(
+            connection.send_block_advert(crate::peer_set::BlockAdvert {
+                hash: block.hash(),
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+                result,
+            }),
+            async {
+                inbound
+                    .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                    .await
+                    .respond(Response::AuthorizedBlocks {
+                        blocks: vec![InventoryResponse::Available((block.clone(), None))],
+                        authorization: crate::BlockAuthorization::new(move |_| {
+                            authorized.load(Ordering::SeqCst)
+                        }),
+                    });
+                outbound.next().await.unwrap()
+            }
+        );
+        assert!(matches!(message, Message::CompactBlock(_)));
+        delivered.await.unwrap().unwrap();
+        live.store(false, Ordering::SeqCst);
+        let until = connection.compact.expiry();
+        let unknown = zebra_chain::block::Hash([1; 32]);
+        assert!(connection.compact_advert(unknown).await.is_none());
+        connection
+            .handle_message_as_request(Message::SendCompact {
+                high_bandwidth: false,
+                version: 1,
+            })
+            .await;
+        assert!(!connection.compact.send);
+
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = false;
+        connection
+            .handle_message_as_request(Message::GetBlockTransactions(BlockTransactionsRequest {
+                block_hash: block.hash(),
+                indexes: vec![0],
+            }))
+            .await;
+        assert!(outbound.try_recv().is_err());
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+
+        for (hash, indexes) in [
+            (unknown, vec![0]),
+            (block.hash(), vec![block.transactions.len()]),
+            (block.hash(), vec![0, block.transactions.len()]),
+            (block.hash(), vec![1, 0]),
+            (block.hash(), vec![0, 0]),
+            (block.hash(), vec![0, usize::MAX]),
+        ] {
+            connection
+                .handle_message_as_request(Message::GetBlockTransactions(
+                    BlockTransactionsRequest {
+                        block_hash: hash,
+                        indexes,
+                    },
+                ))
+                .await;
+            assert!(outbound.try_recv().is_err());
+            for index in [0, 1] {
+                let (_, response) = tokio::join!(
+                    connection.handle_message_as_request(Message::GetBlockTransactions(
+                        BlockTransactionsRequest {
+                            block_hash: block.hash(),
+                            indexes: vec![index],
+                        }
+                    )),
+                    outbound.next()
+                );
+                assert_eq!(
+                    response,
+                    Some(Message::BlockTransactions(BlockTransactions {
+                        block_hash: block.hash(),
+                        transactions: vec![block.transactions[index].clone()],
+                    }))
+                );
+                assert!(connection.compact.has_cached());
+                assert_eq!(connection.compact.expiry(), until);
+            }
+        }
+        assert!(errors.try_get_error().is_none());
+    })
+    .await
+    .expect("sent snapshots answer repeated recovery without fresh authorization");
+}
+
+#[tokio::test]
+async fn compact_serving_deadline_starts_after_successful_delivery() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(40), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let (mut connection, _client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+        connection.compact.send = true;
+        let (result, delivered) = tokio::sync::oneshot::channel();
+        {
+            let send = connection.send_block_advert(crate::peer_set::BlockAdvert {
+                hash: block.hash(),
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+                result,
+            });
+            tokio::pin!(send);
+            let message = tokio::select! {
+                _ = &mut send => panic!("the unbuffered sink must wait for its receiver"),
+                message = async {
+                    inbound
+                        .expect_request(Request::EarlyBlocksByHash([block.hash()].into()))
+                        .await
+                        .respond(Response::Blocks(vec![InventoryResponse::Available((
+                            block.clone(),
+                            None,
+                        ))]));
+                    outbound.next().await.unwrap()
+                } => message,
+            };
+            assert!(matches!(message, Message::CompactBlock(_)));
+            // Delay completion of the local flush past the construction-time retention window.
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(16)).await;
+            send.await;
+        }
+        delivered.await.unwrap().unwrap();
+        let until = tokio::time::Instant::now() + Duration::from_secs(15);
+        assert_eq!(connection.compact.expiry(), until);
+        tokio::time::advance(Duration::from_secs(14)).await;
+        let request = BlockTransactionsRequest {
+            block_hash: block.hash(),
+            indexes: vec![0],
+        };
+        let (_, response) = tokio::join!(
+            connection.serve_compact_transactions(request.clone()),
+            outbound.next()
+        );
+        assert_eq!(
+            response,
+            Some(Message::BlockTransactions(BlockTransactions {
+                block_hash: block.hash(),
+                transactions: vec![block.transactions[0].clone()],
+            }))
+        );
+        assert_eq!(connection.compact.expiry(), until);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        connection.serve_compact_transactions(request).await;
+        assert!(outbound.try_recv().is_err());
+        assert!(!connection.compact.has_cached());
+        assert!(errors.try_get_error().is_none());
+    })
+    .await
+    .expect("serving lasts fifteen seconds from successful delivery without refresh");
 }

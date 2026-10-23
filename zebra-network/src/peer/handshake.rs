@@ -1093,6 +1093,11 @@ where
             bare_codec.reconfigure_version(connection_info.negotiated_version);
             bare_codec.reconfigure_full_body_len();
             bare_codec.reconfigure_early_block_relay(connection_info.early_block_relay);
+            let compact_recovery = connection_info.early_block_relay.then(|| {
+                let (sender, receiver) = tokio::sync::watch::channel(None);
+                bare_codec.reconfigure_compact_recovery(receiver);
+                sender
+            });
 
             debug!("constructing client, spawning server");
 
@@ -1102,6 +1107,7 @@ where
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
             // Bound pending adverts; slow peers can catch up through later tip gossip.
             let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+            let (compact_receive_tx, compact_receive_rx) = tokio::sync::watch::channel(None);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
@@ -1225,11 +1231,12 @@ where
                     )
                 });
 
-            let server = Connection::new(
+            let mut server = Connection::new(
                 inbound_service,
                 (
                     server_rx,
                     block_advert_rx,
+                    compact_receive_rx,
                     minimum_peer_version,
                     bans_receiver,
                 ),
@@ -1239,6 +1246,7 @@ where
                 connection_info.clone(),
                 alternate_addrs.collect(),
             );
+            server.compact_recovery = compact_recovery;
 
             let connection_task = tokio::spawn(
                 server
@@ -1263,6 +1271,7 @@ where
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 block_advert_tx,
+                compact_receive_tx,
                 inv_collector,
                 error_slot,
                 connection_task,

@@ -35,6 +35,8 @@ const RECOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct ServingBlock {
     block: Arc<Block>,
+    /// Keep the sent short-ID keys reproducible without retaining the compact transaction vectors.
+    nonce: u64,
     authorization: Option<BlockAuthorization>,
 }
 
@@ -50,7 +52,7 @@ impl ServingBlock {
 pub(super) struct CompactRelay {
     pub(super) send: bool,
     received: Option<(Arc<CompactBlock>, Instant, OwnedSemaphorePermit)>,
-    sent: Option<(ServingBlock, Instant, OwnedSemaphorePermit)>,
+    sent: Option<(ServingBlock, Option<Instant>, OwnedSemaphorePermit)>,
     /// Gossip and sync can request the same body before either verifier commits it.
     reconstructed: Option<(Arc<Block>, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
@@ -61,10 +63,19 @@ impl CompactRelay {
         self.sent = None;
     }
 
-    pub(super) fn sent_is_authorized(&self) -> bool {
+    pub(super) fn advert_is_authorized(&self) -> bool {
         self.sent
             .as_ref()
-            .is_some_and(|(serving, until, _)| Instant::now() < *until && serving.is_authorized())
+            .is_some_and(|(serving, until, _)| until.is_none() && serving.is_authorized())
+    }
+
+    pub(super) fn mark_sent(&mut self) {
+        let (serving, until, _) = self
+            .sent
+            .as_mut()
+            .expect("a delivered compact announcement retains its serving snapshot");
+        serving.authorization = None;
+        *until = Some(Instant::now() + RETENTION);
     }
 
     pub(super) fn expire(&mut self) {
@@ -79,7 +90,7 @@ impl CompactRelay {
         if self
             .sent
             .as_ref()
-            .is_some_and(|(_, until, _)| *until <= now)
+            .is_some_and(|(_, until, _)| until.is_some_and(|until| until <= now))
         {
             self.sent = None;
         }
@@ -101,7 +112,7 @@ impl CompactRelay {
             .as_ref()
             .map(|(_, until, _)| *until)
             .into_iter()
-            .chain(self.sent.as_ref().map(|(_, until, _)| *until))
+            .chain(self.sent.as_ref().and_then(|(_, until, _)| *until))
             .chain(self.reconstructed.as_ref().map(|(_, until, _)| *until))
             .min()
             .unwrap_or_else(|| Instant::now() + RETENTION)
@@ -124,7 +135,7 @@ where
         .flatten()
     }
 
-    /// Resolve serving permission anew, so rejected early bodies cannot outlive their admission.
+    /// Resolve live permission before constructing an announcement.
     async fn compact_serving_block(&mut self, hash: block::Hash) -> Option<ServingBlock> {
         let (blocks, authorization) = match self
             .compact_query(Request::EarlyBlocksByHash(HashSet::from([hash])))
@@ -143,6 +154,7 @@ where
         })?;
         Some(ServingBlock {
             block,
+            nonce: rand::random(),
             authorization,
         })
     }
@@ -159,7 +171,7 @@ where
         let permit = SLOTS.clone().try_acquire_owned().ok()?;
         let serving = self.compact_serving_block(hash).await?;
         let (serving, compact, permit) = tokio::task::spawn_blocking(move || {
-            let compact = CompactBlock::from_block(&serving.block, rand::random());
+            let compact = CompactBlock::from_block(&serving.block, serving.nonce);
             let compact = compact.ok().filter(|compact| {
                 compact.zcash_serialized_size() < serving.block.zcash_serialized_size()
             });
@@ -168,7 +180,7 @@ where
         .await
         .ok()?;
         let compact = compact?;
-        self.compact.sent = Some((serving, Instant::now() + RETENTION, permit));
+        self.compact.sent = Some((serving, None, permit));
         Some(Message::CompactBlock(Arc::new(compact)))
     }
 
@@ -312,6 +324,9 @@ where
         {
             return;
         }
+        if let Some(recovery) = &self.compact_recovery {
+            recovery.send_replace(None);
+        }
         let Handler::CompactBlock {
             reconstruction,
             permit,
@@ -330,6 +345,7 @@ where
     }
 
     pub(super) async fn fallback_compact(&mut self, hash: block::Hash) {
+        self.clear_compact_recovery();
         if let Err(error) = self.peer_tx.send(Message::GetData(vec![hash.into()])).await {
             self.fail_with(error).await;
             return;
@@ -344,52 +360,39 @@ where
     }
 
     pub(super) async fn serve_compact_transactions(&mut self, request: BlockTransactionsRequest) {
-        if !self.connection_info.early_block_relay || !self.compact.send {
+        if !self.connection_info.early_block_relay {
             return;
         }
         self.compact.expire();
-        let Some((serving, _, _)) = &self.compact.sent else {
+        let Some((serving, Some(_), _)) = &self.compact.sent else {
             return;
         };
         if serving.block.hash() != request.block_hash {
             return;
         }
-        // Only our most recently advertised body can be queried; no arbitrary-block mempool probes.
-        let Some(serving) = self.compact_serving_block(request.block_hash).await else {
-            self.compact.sent = None;
+        if request
+            .indexes
+            .last()
+            .is_some_and(|index| *index >= serving.block.transactions.len())
+            || request.indexes.windows(2).any(|pair| pair[0] >= pair[1])
+        {
             return;
-        };
-        self.compact.expire();
-        let Some((_, _, _permit)) = self.compact.sent.take() else {
-            return;
-        };
-        let mut transactions = Vec::with_capacity(request.indexes.len());
-        let mut previous = None;
-        for index in request.indexes {
-            if previous.is_some_and(|previous| index <= previous) {
-                return;
-            }
-            let Some(transaction) = serving.block.transactions.get(index) else {
-                return;
-            };
-            transactions.push(transaction.clone());
-            previous = Some(index);
         }
-        // Each announcement permits one recovery response, bounded by the original block size.
+        let transactions = request
+            .indexes
+            .into_iter()
+            .map(|index| serving.block.transactions[index].clone())
+            .collect();
+        // Repeated recovery uses the sent snapshot, with each response bounded by the original body.
         if let Err(error) = self
             .peer_tx
-            .send_authorized(
-                Message::BlockTransactions(BlockTransactions {
-                    block_hash: request.block_hash,
-                    transactions,
-                }),
-                || serving.is_authorized(),
-            )
+            .send(Message::BlockTransactions(BlockTransactions {
+                block_hash: request.block_hash,
+                transactions,
+            }))
             .await
         {
-            if !matches!(error, PeerError::AdvertAuthorizationRevoked) {
-                self.fail_with(error).await;
-            }
+            self.fail_with(error).await;
         }
     }
 }

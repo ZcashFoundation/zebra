@@ -615,6 +615,14 @@ where
     /// Receives block adverts independently of the current request's response.
     pub(super) block_advert_rx: tokio::sync::mpsc::Receiver<BlockAdvert>,
 
+    /// Selected receive sources share three permits, held until low-bandwidth delivery or disconnect.
+    pub(super) compact_receive_rx:
+        tokio::sync::watch::Receiver<Option<Arc<tokio::sync::Semaphore>>>,
+    compact_receive_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    /// Permit decoding recovery responses only for the live request and its deadline.
+    pub(super) compact_recovery:
+        Option<tokio::sync::watch::Sender<Option<(block::Hash, tokio::time::Instant)>>>,
+
     /// Live authorization, rechecked immediately before advert writes.
     minimum_peer_version: MinimumPeerVersion<C>,
     bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
@@ -685,9 +693,10 @@ where
     /// Return a new connection from its channels, services, shared state, and metadata.
     pub(crate) fn new(
         inbound_service: S,
-        (client_rx, block_advert_rx, minimum_peer_version, bans_receiver): (
+        (client_rx, block_advert_rx, compact_receive_rx, minimum_peer_version, bans_receiver): (
             futures::channel::mpsc::Receiver<ClientRequest>,
             tokio::sync::mpsc::Receiver<BlockAdvert>,
+            tokio::sync::watch::Receiver<Option<Arc<tokio::sync::Semaphore>>>,
             MinimumPeerVersion<C>,
             tokio::sync::watch::Receiver<crate::BanList>,
         ),
@@ -708,6 +717,9 @@ where
             svc: inbound_service,
             client_rx: client_rx.into(),
             block_advert_rx,
+            compact_receive_rx,
+            compact_receive_permit: None,
+            compact_recovery: None,
             minimum_peer_version,
             bans_receiver,
             error_slot,
@@ -737,16 +749,12 @@ where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
     {
         if self.connection_info.early_block_relay {
-            if let Err(error) = self
-                .peer_tx
-                .send(Message::SendCompact {
-                    high_bandwidth: true,
-                    version: 1,
-                })
-                .await
-            {
-                self.fail_with(error).await;
-            }
+            let permit = self
+                .compact_receive_rx
+                .borrow_and_update()
+                .as_ref()
+                .and_then(|slots| slots.clone().try_acquire_owned().ok());
+            self.set_compact_receive(permit).await;
         }
         // At a high level, the event loop we want is as follows: we check for any
         // incoming messages from the remote peer, check if they should be interpreted
@@ -772,6 +780,20 @@ where
         loop {
             self.compact.expire();
             let compact_expiry = self.compact.expiry();
+            let receive_slots = self.compact_receive_rx.borrow_and_update().clone();
+            if receive_slots.is_none() && self.compact_receive_permit.is_some() {
+                self.set_compact_receive(None).await;
+            }
+            let receive_slot = async {
+                match receive_slots {
+                    Some(slots) => slots
+                        .acquire_owned()
+                        .await
+                        .expect("receive slots stay open"),
+                    None => futures::future::pending().await,
+                }
+            };
+            tokio::pin!(receive_slot);
             self.update_state_metrics(None);
 
             match self.state {
@@ -819,6 +841,12 @@ where
                     let incoming = tokio::select! {
                         biased;
                         _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
+                        Ok(()) = self.compact_receive_rx.changed() => continue,
+                        permit = &mut receive_slot, if self.connection_info.early_block_relay
+                            && self.compact_receive_permit.is_none() => {
+                            self.set_compact_receive(Some(permit)).await;
+                            continue;
+                        }
                         msg = peer_rx.next() => Either::Left(msg),
                         // A closed advert channel disables only this branch.
                         Some(hash) = self.block_advert_rx.recv() => {
@@ -947,6 +975,7 @@ where
                         _ = tx.cancellation() => {
                             // The canceled response receiver no longer needs a result.
                             trace!(parent: &span, "client request was cancelled");
+                            self.clear_compact_recovery();
                             self.state = State::AwaitingRequest;
                             continue;
                         }
@@ -983,6 +1012,12 @@ where
                             continue;
                         }
                         _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
+                        Ok(()) = self.compact_receive_rx.changed() => continue,
+                        permit = &mut receive_slot, if self.connection_info.early_block_relay
+                            && self.compact_receive_permit.is_none() => {
+                            self.set_compact_receive(Some(permit)).await;
+                            continue;
+                        }
                         msg = peer_rx.next() => msg,
                         Some(hash) = self.block_advert_rx.recv() => {
                             self.send_block_advert(hash).await;
@@ -1067,6 +1102,21 @@ where
         self.shutdown_async(error).await;
     }
 
+    /// Release a source slot only after the peer has been asked to stop compact pushes.
+    async fn set_compact_receive(&mut self, permit: Option<tokio::sync::OwnedSemaphorePermit>) {
+        let result = self
+            .peer_tx
+            .send(Message::SendCompact {
+                high_bandwidth: permit.is_some(),
+                version: 1,
+            })
+            .await;
+        if let Err(error) = result {
+            self.fail_with(error).await;
+        }
+        self.compact_receive_permit = permit;
+    }
+
     /// Acknowledge only completed local writes, after rechecking live authorization.
     async fn send_block_advert(&mut self, advert: BlockAdvert) {
         if advert.result.is_closed() {
@@ -1113,25 +1163,29 @@ where
                 version >= minimum.current()
                     && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
                     && {
-                        serving_authorized = !is_compact || compact.sent_is_authorized();
+                        serving_authorized = !is_compact || compact.advert_is_authorized();
                         serving_authorized
                     }
             })
             .await;
         match delivery {
             Ok(()) => {
+                if is_compact {
+                    self.compact.mark_sent();
+                }
                 if let Some(slot) = compact_slot {
                     slot.forget();
                 }
                 let _ = advert.result.send(Ok(()));
             }
             Err(error) => {
+                if is_compact {
+                    self.compact.clear_sent();
+                }
                 let error = SharedPeerError::from(error);
                 let _ = advert.result.send(Err(error.clone().into()));
                 if serving_authorized {
                     self.fail_with(error).await;
-                } else {
-                    self.compact.clear_sent();
                 }
             }
         }
@@ -1342,9 +1396,14 @@ where
         // Update the connection state with a new handler, or fail with an error.
         match new_handler {
             Ok(handler) => {
-                let response_timeout = compact_relay::response_timeout(&handler);
+                let timer = sleep(compact_relay::response_timeout(&handler));
+                if let (Handler::CompactBlock { reconstruction, .. }, Some(recovery)) =
+                    (&handler, &self.compact_recovery)
+                {
+                    recovery.send_replace(Some((reconstruction.block_hash(), timer.deadline())));
+                }
                 self.state = AwaitingResponse { handler, span, tx };
-                self.request_timer = Some(Box::pin(sleep(response_timeout)));
+                self.request_timer = Some(Box::pin(timer));
             }
             Err(error) => {
                 let error = SharedPeerError::from(error);
@@ -1973,6 +2032,13 @@ where
         }
     }
 
+    /// Stop admitting compact recovery responses before dropping or replacing their handler.
+    fn clear_compact_recovery(&self) {
+        if let Some(recovery) = &self.compact_recovery {
+            recovery.send_replace(None);
+        }
+    }
+
     /// Marks the peer as having failed with `error`, and performs connection cleanup,
     /// including async channel closes.
     ///
@@ -1996,6 +2062,7 @@ where
     ///
     /// Call [`Self::shutdown_async()`] in async code, because it can shut down more channels.
     fn shutdown(&mut self, error: impl Into<SharedPeerError>) {
+        self.clear_compact_recovery();
         let mut error = error.into();
 
         // Close channels first, so other tasks can start shutting down.

@@ -23,6 +23,16 @@ fn negotiate_compact(codec: &mut Codec) {
     assert_eq!(codec.decode(&mut bytes).unwrap(), Some(mode));
 }
 
+fn track_compact_recovery(
+    codec: &mut Codec,
+    hash: block::Hash,
+) -> tokio::sync::watch::Sender<Option<(block::Hash, tokio::time::Instant)>> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    let (sender, receiver) = tokio::sync::watch::channel(Some((hash, deadline)));
+    codec.reconfigure_compact_recovery(receiver);
+    sender
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compact_messages_round_trip() {
     let _guard = zebra_test::init();
@@ -56,6 +66,7 @@ async fn compact_messages_round_trip() {
         .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
         .finish();
     negotiate_compact(&mut codec);
+    let _recovery = track_compact_recovery(&mut codec, block.hash());
     for message in messages {
         let mut bytes = BytesMut::new();
         codec.encode(message.clone(), &mut bytes).unwrap();
@@ -75,6 +86,15 @@ async fn compact_codec_rejects_malformed_messages() {
         .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
         .finish();
     negotiate_compact(&mut codec);
+    let _recovery = track_compact_recovery(&mut codec, block::Hash([0; 32]));
+    let block =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+    codec
+        .encode(
+            Message::CompactBlock(Arc::new(CompactBlock::from_block(&block, 23).unwrap())),
+            &mut BytesMut::new(),
+        )
+        .unwrap();
     let mut mode = vec![2];
     mode.extend_from_slice(&1u64.to_le_bytes());
     assert!(codec.decode(&mut frame(b"sendcmpct\0\0\0", &mode)).is_err());
@@ -115,45 +135,141 @@ fn compact_codec_enforces_message_size_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn compact_codec_ignores_bodies_without_bilateral_negotiation() {
+async fn compact_codec_negotiates_each_direction_independently() {
     let _guard = zebra_test::init();
-    for mode in [
+    let block =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+    let compact = Message::CompactBlock(Arc::new(CompactBlock::from_block(&block, 23).unwrap()));
+    for bilateral in [false, true] {
+        for receive in [false, true] {
+            for sent in [false, true] {
+                let mut codec = Codec::builder()
+                    .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                    .finish();
+                codec.reconfigure_early_block_relay(bilateral);
+                codec
+                    .encode(
+                        Message::SendCompact {
+                            high_bandwidth: receive,
+                            version: 1,
+                        },
+                        &mut BytesMut::new(),
+                    )
+                    .unwrap();
+                if sent {
+                    codec.encode(compact.clone(), &mut BytesMut::new()).unwrap();
+                }
+                // The peer's receive preference cannot change our receive or serving permission.
+                for (high_bandwidth, version) in [(false, 1u64), (true, 1), (true, 2)] {
+                    let mut mode = vec![u8::from(high_bandwidth)];
+                    mode.extend_from_slice(&version.to_le_bytes());
+                    codec.decode(&mut frame(b"sendcmpct\0\0\0", &mode)).unwrap();
+                    for (command, allowed) in [
+                        (b"cmpctblock\0\0", bilateral && receive),
+                        (b"blocktxn\0\0\0\0", false),
+                        (b"getblocktxn\0", bilateral && sent),
+                    ] {
+                        let decoded = codec.decode(&mut frame(command, &[]));
+                        if allowed {
+                            assert!(decoded.is_err(), "negotiated bodies must be parsed");
+                        } else {
+                            assert_eq!(decoded.unwrap(), None, "unnegotiated bodies are ignored");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compact_recovery_survives_receive_source_demotion() {
+    let _guard = zebra_test::init();
+    let block =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    negotiate_compact(&mut codec);
+    codec
+        .encode(
+            Message::GetBlockTransactions(BlockTransactionsRequest {
+                block_hash: block.hash(),
+                indexes: vec![0],
+            }),
+            &mut BytesMut::new(),
+        )
+        .unwrap();
+    let recovery = track_compact_recovery(&mut codec, block.hash());
+    codec
+        .encode(
+            Message::SendCompact {
+                high_bandwidth: false,
+                version: 1,
+            },
+            &mut BytesMut::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        codec.decode(&mut frame(b"cmpctblock\0\0", &[])).unwrap(),
+        None
+    );
+    let response = Message::BlockTransactions(BlockTransactions {
+        block_hash: block.hash(),
+        transactions: vec![block.transactions[0].clone()],
+    });
+    let mut bytes = BytesMut::new();
+    codec.encode(response.clone(), &mut bytes).unwrap();
+    assert_eq!(codec.decode(&mut bytes).unwrap(), Some(response));
+    recovery.send_replace(None);
+    assert_eq!(
+        codec.decode(&mut frame(b"blocktxn\0\0\0\0", &[])).unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn compact_recovery_ignores_unrelated_expired_and_canceled_bodies_before_hashing() {
+    let hash = block::Hash([1; 32]);
+    for case in [
+        "unrelated",
+        "expired",
+        "canceled",
+        "disconnected",
         "disabled",
-        "missing",
-        "low_bandwidth",
-        "unsupported",
-        "no_local_request",
     ] {
         let mut codec = Codec::builder()
             .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
             .finish();
-        if mode != "disabled" {
-            codec.reconfigure_early_block_relay(true);
-        }
-        if mode != "no_local_request" {
-            codec
-                .encode(
-                    Message::SendCompact {
-                        high_bandwidth: true,
-                        version: 1,
-                    },
-                    &mut BytesMut::new(),
-                )
-                .unwrap();
-        }
-        if mode != "missing" {
-            let mut body = vec![u8::from(mode != "low_bandwidth")];
-            body.extend_from_slice(&if mode == "unsupported" { 2u64 } else { 1 }.to_le_bytes());
-            codec.decode(&mut frame(b"sendcmpct\0\0\0", &body)).unwrap();
-        }
-        for command in [b"cmpctblock\0\0", b"getblocktxn\0", b"blocktxn\0\0\0\0"] {
-            assert_eq!(
-                codec.decode(&mut frame(command, &[])).unwrap(),
-                None,
-                "{mode}"
-            );
-        }
         negotiate_compact(&mut codec);
-        assert!(codec.decode(&mut frame(b"cmpctblock\0\0", &[])).is_err());
+        let recovery = track_compact_recovery(&mut codec, hash);
+        codec
+            .encode(
+                Message::SendCompact {
+                    high_bandwidth: false,
+                    version: 1,
+                },
+                &mut BytesMut::new(),
+            )
+            .unwrap();
+        let mut body = hash.0.to_vec();
+        match case {
+            "unrelated" => body[0] ^= 1,
+            "expired" => {
+                recovery.send_replace(Some((hash, tokio::time::Instant::now())));
+            }
+            "canceled" => {
+                recovery.send_replace(None);
+            }
+            "disconnected" => drop(recovery),
+            "disabled" => codec.reconfigure_early_block_relay(false),
+            _ => unreachable!(),
+        }
+        // Invalid checksums and malformed transaction counts must never reach either decoder stage.
+        body.push(0xff);
+        let mut bytes = frame(b"blocktxn\0\0\0\0", &body);
+        bytes[20] ^= 1;
+        assert_eq!(codec.decode(&mut bytes).unwrap(), None, "{case}");
+        assert!(bytes.is_empty());
     }
 }

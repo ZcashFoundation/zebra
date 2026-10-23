@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: After delivering an experimental compact block, retain its transactions for repeated recovery requests for fifteen seconds, even if early-publication permission is later withdrawn.
+time: 2026-10-23T16:50:19.516046357+02:00
