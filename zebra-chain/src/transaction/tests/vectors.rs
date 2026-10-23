@@ -140,6 +140,26 @@ fn librustzcash_tx_hash() {
 }
 
 #[test]
+fn recording_reader_preserves_short_reads_at_capacity_boundary() -> Result<()> {
+    use std::io::Read;
+
+    let _init_guard = zebra_test::init();
+
+    for len in [255, 256, 257] {
+        let data: Vec<u8> = (0..=u8::MAX).cycle().take(len).collect();
+        let mut reader = RecordingReader::new(Read::chain(&data[..128], &data[128..]));
+        let mut buf = [0; 257];
+
+        assert_eq!(reader.read(&mut buf)?, 128);
+        assert_eq!(reader.read(&mut buf)?, len - 128);
+        assert_eq!(reader.read(&mut buf)?, 0);
+        assert_eq!(reader.into_recorded(), data);
+    }
+
+    Ok(())
+}
+
+#[test]
 fn doesnt_deserialize_transaction_with_invalid_value_balance() {
     let _init_guard = zebra_test::init();
 
@@ -1699,6 +1719,118 @@ fn expiry_height_preserves_out_of_range_values() {
             .zcash_deserialize_into::<Transaction>()
             .expect("parsing does not enforce the expiry maximum, the verifier does");
         assert_eq!(parsed.expiry_height(), expected);
+    }
+}
+
+/// Borrowed accounting preserves monetary bounds, zero-value coinbase inputs, and missing UTXOs.
+#[test]
+fn borrowed_transparent_balance_matches_allocating_edge_cases() {
+    use std::{
+        collections::HashMap,
+        panic::{catch_unwind, AssertUnwindSafe},
+    };
+
+    let _init_guard = zebra_test::init();
+    let cases: &[(&[Option<i64>], &[i64], Option<usize>)] = &[
+        (&[], &[], None),
+        (&[None], &[MAX_MONEY], None),
+        (&[Some(MAX_MONEY)], &[], None),
+        (&[], &[MAX_MONEY], None),
+        (&[Some(4), Some(0), Some(9)], &[3, 1, 9], None),
+        (&[Some(MAX_MONEY - 1), Some(1)], &[MAX_MONEY], None),
+        (&[Some(MAX_MONEY), Some(1), Some(0)], &[], None),
+        (&[Some(0), Some(MAX_MONEY), Some(1)], &[], None),
+        (&[], &[MAX_MONEY, 1, 0], None),
+        (&[], &[0, MAX_MONEY, 1], None),
+        (&[Some(MAX_MONEY), Some(1)], &[MAX_MONEY, 1], None),
+        // Null prevouts still count in overflow diagnostics, even in invalid mixed-input txs.
+        (&[Some(MAX_MONEY), Some(1), None, Some(0)], &[], None),
+        (&[Some(1), Some(2)], &[0], Some(0)),
+        (&[Some(1), Some(2)], &[0], Some(1)),
+        (&[Some(MAX_MONEY), Some(1), Some(0)], &[], Some(1)),
+        (&[Some(MAX_MONEY), Some(1), Some(0)], &[], Some(2)),
+    ];
+
+    for &(input_values, output_values, missing) in cases {
+        let output = |value: i64| {
+            transparent::Output::new(
+                value
+                    .try_into()
+                    .expect("test amounts are within monetary bounds"),
+                Script::new(&[0; 1024]),
+            )
+        };
+        let mut outputs = HashMap::new();
+        let inputs = input_values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                if let Some(value) = value {
+                    let outpoint = transparent::OutPoint {
+                        hash: Hash([1; 32]),
+                        index: index.try_into().expect("test input indices fit in u32"),
+                    };
+                    if missing != Some(index) {
+                        outputs.insert(outpoint, output(*value));
+                    }
+                    transparent::Input::PrevOut {
+                        outpoint,
+                        unlock_script: Script::new(&[0; 1024]),
+                        sequence: 0,
+                    }
+                } else {
+                    transparent::Input::Coinbase {
+                        height: Height(1),
+                        data: vec![0],
+                        sequence: 0,
+                    }
+                }
+            })
+            .collect();
+        let tx = Transaction::test_v4(
+            inputs,
+            output_values.iter().copied().map(output).collect(),
+            LockTime::Height(Height(0)),
+            Height(1),
+        );
+        let plain: HashMap<_, _> = outputs
+            .iter()
+            .map(|(outpoint, output)| {
+                (
+                    *outpoint,
+                    transparent::Utxo::new(output.clone(), Height(1), false),
+                )
+            })
+            .collect();
+        let ordered: HashMap<_, _> = plain
+            .iter()
+            .map(|(outpoint, utxo)| {
+                (
+                    *outpoint,
+                    transparent::OrderedUtxo::from_utxo(utxo.clone(), 0),
+                )
+            })
+            .collect();
+        let expected = catch_unwind(AssertUnwindSafe(|| {
+            super::allocating_transparent_value_balance(&tx, &outputs)
+        }))
+        .map_err(|_| ());
+        assert_eq!(
+            catch_unwind(AssertUnwindSafe(|| {
+                tx.transparent_value_balance_from_outputs(&outputs)
+            }))
+            .map_err(|_| ()),
+            expected,
+            "input values: {input_values:?}, output values: {output_values:?}, missing: {missing:?}",
+        );
+        assert_eq!(
+            catch_unwind(AssertUnwindSafe(|| tx.value_balance(&plain))).map_err(|_| ()),
+            expected,
+        );
+        assert_eq!(
+            catch_unwind(AssertUnwindSafe(|| tx.value_balance(&ordered))).map_err(|_| ()),
+            expected,
+        );
     }
 }
 
