@@ -420,32 +420,13 @@ impl BlockTemplateResponse {
             .expect("mempool tx fees must be non-negative");
 
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(net, chain_info);
-        coinbase_cache.select(height, parent_nsm_value_balance);
-
-        // Reuse the cached coinbase for this height and fee, and only build (and re-prove, for a
-        // shielded address) as a last resort — caching the result so subsequent requests for the
-        // same height and fees reuse it.
-        let coinbase_txn = coinbase_cache
-            .get(height, txs_fee, parent_nsm_value_balance)
-            .unwrap_or_else(|| {
-                let coinbase_txn = TransactionTemplate::new_coinbase_with_parent_pools(
-                    net,
-                    height,
-                    miner_params,
-                    txs_fee,
-                    parent_nsm_value_balance,
-                )
-                .expect("valid coinbase tx");
-
-                coinbase_cache.store(
-                    height,
-                    txs_fee,
-                    parent_nsm_value_balance,
-                    coinbase_txn.clone(),
-                );
-
-                coinbase_txn
-            });
+        let coinbase_txn = coinbase_cache.get_or_build(
+            net,
+            height,
+            miner_params,
+            txs_fee,
+            parent_nsm_value_balance,
+        );
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
@@ -701,6 +682,34 @@ struct CachedCoinbases {
 }
 
 impl CoinbaseCache {
+    /// Reuses an exact fee variant, or builds it under the caller's shared build permit.
+    ///
+    /// Each cache belongs to one immutable network and miner configuration. Overriding the miner
+    /// parameters creates a new cache rather than sharing proofs with the old configuration.
+    fn get_or_build(
+        &self,
+        network: &Network,
+        height: block::Height,
+        miner_params: &MinerParams,
+        fee: Amount<NonNegative>,
+        parent_nsm_value_balance: Option<Amount<NonNegative>>,
+    ) -> TransactionTemplate<amount::NegativeOrZero> {
+        self.select(height, parent_nsm_value_balance);
+        self.get(height, fee, parent_nsm_value_balance)
+            .unwrap_or_else(|| {
+                let coinbase = TransactionTemplate::new_coinbase_with_parent_pools(
+                    network,
+                    height,
+                    miner_params,
+                    fee,
+                    parent_nsm_value_balance,
+                )
+                .expect("validated miner parameters and parent context determine a valid coinbase");
+                self.store(height, fee, parent_nsm_value_balance, coinbase.clone());
+                coinbase
+            })
+    }
+
     /// Selects the context before a template starts constructing its coinbase.
     fn select(&self, height: block::Height, parent_nsm_value_balance: Option<Amount<NonNegative>>) {
         let mut cache = self

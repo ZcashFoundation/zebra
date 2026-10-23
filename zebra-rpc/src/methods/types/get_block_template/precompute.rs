@@ -8,7 +8,8 @@
 //!
 //! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
 //! only serves the current tip or a proof-of-work checked parent under verification. Early work
-//! is coinbase-only and withdrawn when verification ends or times out.
+//! is coinbase-only and withdrawn on rejection or timeout. Commitment preserves that work while a
+//! fee-bearing proof finishes.
 
 use std::{
     collections::HashSet,
@@ -32,16 +33,18 @@ use tower::ServiceExt;
 
 use zebra_chain::{
     amount::{Amount, NegativeOrZero},
-    block::{self, Height},
+    block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
     serialization::{DateTime32, Duration32},
-    transaction::UnminedTxId,
+    transaction::{UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{router::service_trait::BlockVerifierService, Request as VerifyRequest};
-use zebra_node_services::mempool::{self, MempoolChange, MempoolService};
-use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, ReadState};
+use zebra_node_services::mempool::{self, MempoolChange, MempoolService, TransactionDependencies};
+use zebra_state::{
+    GetBlockTemplateChainInfo, MiningCandidateChanges, ReadRequest, ReadResponse, ReadState,
+};
 
 use crate::{
     methods::types::{long_poll::LongPollInput, transaction::TransactionTemplate},
@@ -50,8 +53,9 @@ use crate::{
 
 use super::{
     check_synced_to_tip, constants::MEMPOOL_LONG_POLL_INTERVAL, fetch_chain_info,
-    fetch_mempool_transactions, proposal::proposal_block_from_template, BlockTemplateResponse,
-    BlockTemplateTimeSource, CoinbaseCache, MinerParams,
+    fetch_mempool_transactions, nsm_value_balance_for_next_block,
+    proposal::proposal_block_from_template, zip317, BlockTemplateResponse, BlockTemplateTimeSource,
+    CoinbaseCache, MinerParams,
 };
 
 #[cfg(test)]
@@ -357,6 +361,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
     // The coinbase transaction for a coinbase-only block at this height, built while we're idle. A
     // shielded coinbase takes seconds to prove, which is too slow to do after the tip changes.
     let mut next_coinbase: Option<(Height, JoinHandle<TransactionTemplate<NegativeOrZero>>)> = None;
+    // At most one speculative fee proof, sharing the normal builder's permit. Dropping the
+    // updater cancels its reads and permit wait, but a started blocking proof retains the permit.
+    let mut fee_coinbase = tokio::task::JoinSet::new();
 
     // Whether the last build failed, so a failing spell is logged once rather than every second.
     let mut was_failing = false;
@@ -364,6 +371,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
     // tip snapshots and mutex waiters before asking a replacement build to acquire the same mutex.
     let full_build_phase = AtomicU8::new(BUILD_FETCHING);
     let mut full_build = None;
+    let mut full_build_tip = latest_chain_tip.best_tip_hash();
 
     loop {
         // `getblocktemplate` returns an error until Zebra is synced to the tip, so there's nothing
@@ -377,6 +385,14 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             );
             sleep(RETRY_DELAY).await;
             continue;
+        }
+
+        // Candidate withdrawal can win the wait at commit. Drop its retained old-tip snapshot before
+        // marking the new tip seen, or that snapshot could evict the predicted next-height coinbase.
+        if full_build_tip != latest_chain_tip.best_tip_hash()
+            && full_build_phase.load(Ordering::Acquire) != BUILD_STARTED
+        {
+            full_build = None;
         }
 
         // Mark tip changes up to this point as seen, so a change while we build a template wakes up
@@ -398,7 +414,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                 &coinbase_cache,
                 read_state.clone(),
                 None::<Mempool>,
-                Some(info),
+                Some(info.clone()),
                 None,
             )
             .await
@@ -413,14 +429,58 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     );
                     let until_boundary = template.max_time.saturating_duration_since(now).to_std()
                         + Duration::from_secs(1);
+                    let boundary = Instant::now() + until_boundary;
                     cache.publish(template);
-                    let mut tip_change = latest_chain_tip.clone();
-                    tokio::select! {
-                        _ = candidate_changes.changed() => {}
-                        result = tip_change.best_tip_changed() => if result.is_err() { return; },
-                        _ = sleep(until_boundary), if refresh_at_boundary => {}
+                    let mut started_fee_proof = false;
+                    loop {
+                        while fee_coinbase.try_join_next().is_some() {}
+                        if miner_params.has_shielded_component()
+                            && !started_fee_proof
+                            && fee_coinbase.is_empty()
+                        {
+                            if let Some(block) = candidate_changes.block(info.tip_hash) {
+                                fee_coinbase.spawn(precompute_fee_coinbase(
+                                    network.clone(),
+                                    miner_params.clone(),
+                                    coinbase_cache.clone(),
+                                    mempool.clone(),
+                                    candidate_changes.clone(),
+                                    info.clone(),
+                                    block,
+                                ));
+                                started_fee_proof = true;
+                            }
+                        }
+                        let mut tip_change = latest_chain_tip.clone();
+                        tokio::select! {
+                            _ = candidate_changes.changed() => {
+                                // The read can observe a publication that was not yet marked seen.
+                                // Only withdrawal or replacement invalidates this candidate.
+                                if !candidate_changes.is_current(info.tip_hash) { break; }
+                            },
+                            result = tip_change.best_tip_changed() => {
+                                if result.is_err() { return; }
+                                break;
+                            },
+                            _ = sleep_until(boundary), if refresh_at_boundary => break,
+                            _ = fee_coinbase.join_next(), if !fee_coinbase.is_empty() => {}
+                        }
                     }
-                    cache.clear();
+                    let committed_tip = state_tip_hash(read_state.clone()).await.ok().flatten();
+                    // Withdrawal can precede the tip watch. An old snapshot must not evict the
+                    // predicted proof while that notification is still catching up.
+                    if committed_tip != full_build_tip
+                        && full_build_phase.load(Ordering::Acquire) != BUILD_STARTED
+                    {
+                        full_build = None;
+                    }
+                    // Live candidates and committed parents both retain their coinbase-only work
+                    // while a fee proof finishes.
+                    if !candidate_changes.is_current(info.tip_hash)
+                        && committed_tip != Some(info.tip_hash)
+                    {
+                        cache.clear();
+                    }
                     continue;
                 }
             }
@@ -464,6 +524,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         let resumed = Instant::now();
         let (awaited, building) = full_build.get_or_insert_with(|| {
             full_build_phase.store(BUILD_FETCHING, Ordering::Release);
+            full_build_tip = latest_chain_tip.best_tip_hash();
             (
                 Duration::ZERO,
                 Box::pin(build(
@@ -566,7 +627,13 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             .and_then(|tip_height| tip_height.next().ok())
             .and_then(|next_height| next_height.next().ok())
         {
-            start_precomputing_coinbase(&mut next_coinbase, &network, &miner_params, height);
+            start_precomputing_coinbase(
+                &mut next_coinbase,
+                &network,
+                &miner_params,
+                height,
+                &coinbase_cache,
+            );
         }
 
         // Keep the tip and backstop live even while the mempool query is pending.
@@ -821,6 +888,143 @@ where
     .map_err(|error| (error_tip, error))
 }
 
+/// Predicts the post-commit selection without publishing work based on unverified transactions.
+async fn precompute_fee_coinbase(
+    network: Network,
+    miner_params: MinerParams,
+    coinbase_cache: CoinbaseCache,
+    mempool: impl MempoolService,
+    mut candidates: MiningCandidateChanges,
+    info: Arc<GetBlockTemplateChainInfo>,
+    block: Arc<Block>,
+) {
+    let prepare = async {
+        let Ok(Ok(Some((transactions, dependencies)))) = tokio::time::timeout(
+            SNAPSHOT_TIMEOUT,
+            fetch_mempool_transactions(mempool, block.header.previous_block_hash),
+        )
+        .await
+        else {
+            return None;
+        };
+        let build_guard = coinbase_cache.build.clone().lock_owned().await;
+        Some((transactions, dependencies, build_guard))
+    };
+    let cancelled = async {
+        while candidates.is_current(info.tip_hash) {
+            candidates.changed().await;
+        }
+    };
+    let Some((transactions, dependencies, build_guard)) = (tokio::select! {
+        biased;
+        _ = cancelled => return,
+        ready = prepare => ready,
+    }) else {
+        return;
+    };
+    if !candidates.is_current(info.tip_hash) {
+        return;
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        let _build_guard = build_guard;
+        let Ok(height) = info.tip_height.next() else {
+            return;
+        };
+        let (transactions, dependencies) =
+            candidate_mempool(&block, info.tip_height, transactions, dependencies);
+        let parent_balance = nsm_value_balance_for_next_block(&network, &info);
+        let selected = zip317::select_mempool_transactions(
+            &network,
+            height,
+            &miner_params,
+            transactions,
+            dependencies,
+            parent_balance,
+        );
+        let fees = selected
+            .iter()
+            .map(|tx| {
+                #[cfg(test)]
+                let (_, tx) = tx;
+                tx.miner_fee
+            })
+            .sum::<zebra_chain::amount::Result<_>>()
+            .expect("selected mempool fees are non-negative and bounded by the monetary supply");
+        coinbase_cache.get_or_build(&network, height, &miner_params, fees, parent_balance);
+    })
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(?error, "precomputed fee-bearing coinbase task failed");
+    }
+}
+
+/// Removes mined, conflicting and expired transactions from a private pre-tip snapshot.
+///
+/// Only fee prediction uses this snapshot. The full template always selects again from the committed
+/// mempool, so arrivals, reorgs or different ZIP-317 draws cannot reuse a proof for the wrong fees.
+fn candidate_mempool(
+    block: &Block,
+    tip_height: Height,
+    mut transactions: Vec<VerifiedUnminedTx>,
+    mut dependencies: TransactionDependencies,
+) -> (Vec<VerifiedUnminedTx>, TransactionDependencies) {
+    let mined: HashSet<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    dependencies.clear_mined_dependencies(&mined);
+    let spent: HashSet<_> = block
+        .transactions
+        .iter()
+        .filter_map(|tx| tx.transparent_bundle())
+        .flat_map(|bundle| &bundle.vin)
+        .map(|input| input.prevout())
+        .collect();
+    let sprout: HashSet<_> = block
+        .transactions
+        .iter()
+        .flat_map(|tx| tx.sprout_nullifiers())
+        .collect();
+    let sapling: HashSet<_> = block
+        .transactions
+        .iter()
+        .flat_map(|tx| tx.sapling_nullifiers())
+        .collect();
+    let orchard: HashSet<_> = block
+        .transactions
+        .iter()
+        .flat_map(|tx| tx.orchard_nullifiers())
+        .collect();
+    let ironwood: HashSet<_> = block
+        .transactions
+        .iter()
+        .flat_map(|tx| tx.ironwood_nullifiers())
+        .collect();
+    // Leave dependencies of removed conflicts in place: selection excludes their descendants.
+    transactions.retain(|tx| {
+        let transaction = &tx.transaction.transaction;
+        !mined.contains(&tx.transaction.id.mined_id())
+            && transaction
+                .expiry_height()
+                .is_none_or(|expiry| tip_height < expiry)
+            && !transaction
+                .transparent_bundle()
+                .into_iter()
+                .flat_map(|bundle| &bundle.vin)
+                .any(|input| spent.contains(input.prevout()))
+            && !transaction
+                .sprout_nullifiers()
+                .any(|nf| sprout.contains(&nf))
+            && !transaction
+                .sapling_nullifiers()
+                .any(|nf| sapling.contains(&nf))
+            && !transaction
+                .orchard_nullifiers()
+                .any(|nf| orchard.contains(&nf))
+            && !transaction
+                .ironwood_nullifiers()
+                .any(|nf| ironwood.contains(&nf))
+    });
+    (transactions, dependencies)
+}
+
 /// Starts building the coinbase transaction for a coinbase-only block at `height`, unless it is
 /// already built or another coinbase is still being built.
 fn start_precomputing_coinbase(
@@ -828,6 +1032,7 @@ fn start_precomputing_coinbase(
     network: &Network,
     miner_params: &MinerParams,
     height: Height,
+    coinbase_cache: &CoinbaseCache,
 ) {
     // The future parent does not exist yet, so its NSM balance is unknown.
     if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network) {
@@ -841,12 +1046,16 @@ fn start_precomputing_coinbase(
     {
         return;
     }
+    let Ok(build_guard) = coinbase_cache.build.clone().try_lock_owned() else {
+        return;
+    };
 
     let (network, miner_params) = (network.clone(), miner_params.clone());
 
     *next_coinbase = Some((
         height,
         tokio::task::spawn_blocking(move || {
+            let _build_guard = build_guard;
             TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
                 .expect("valid coinbase tx")
         }),

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Precompute fee-bearing shielded coinbases while a mining candidate is being verified, reusing the proof only when the committed template has matching fees and subsidy context.
+time: 2026-10-23T02:43:02.124306602+02:00
