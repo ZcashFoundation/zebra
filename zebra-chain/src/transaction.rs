@@ -1133,7 +1133,7 @@ impl<R: std::io::Read> RecordingReader<R> {
     fn new(inner: R) -> Self {
         Self {
             inner,
-            recorded: Vec::new(),
+            recorded: Vec::with_capacity(256),
         }
     }
 
