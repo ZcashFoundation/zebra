@@ -83,6 +83,22 @@ impl MiningCandidateChanges {
             })
     }
 
+    /// Returns the body of a still-current candidate for speculative transaction selection.
+    ///
+    /// The block has not passed full verification. Never publish transactions selected against it
+    /// until it is committed and the mempool has processed that tip.
+    pub fn block(&self, hash: block::Hash) -> Option<Arc<Block>> {
+        self.0
+            .borrow()
+            .as_ref()
+            .filter(|(_, info, cancelled, deadline)| {
+                info.tip_hash == hash
+                    && cancelled.has_changed().is_ok()
+                    && tokio::time::Instant::now() < *deadline
+            })
+            .map(|(block, _, _, _)| block.clone())
+    }
+
     /// Marks earlier notifications as observed before reading the current candidate.
     pub fn mark_seen(&mut self) {
         self.0.borrow_and_update();
