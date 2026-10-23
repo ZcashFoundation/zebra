@@ -51,6 +51,8 @@ use InventoryResponse::*;
 ///
 /// These tests run the download task in parallel with the test, so machines under heavy load need a
 /// longer delay.
+///
+/// Mock-only tests pause Tokio time to retain this window without idle wall time.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// Upper bound on a real state commit finishing, for tests that use a real state and verifier.
@@ -562,7 +564,7 @@ async fn logical_download_limit_holds_until_completion_or_cancellation() {
 /// A peer can answer with a canonical header and rewritten coinbase height because the initial hash
 /// check does not recompute the header's commitment to the body's authorizing data. The parent is
 /// the proof: a block's height is one more than its parent's.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -651,7 +653,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
 /// The syncer tolerates an out-of-order first hash in `FindBlocks` responses, so a requested hash
 /// can resolve to an old block that an honest peer still holds. Its height agrees with its parent's,
 /// so there is no proof of misbehaviour and the drop must stay anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_old_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -719,7 +721,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
 
 /// A peer whose old block has a parent we do not hold is not attributed either: without the parent
 /// there is no proof the height was rewritten.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     let _init_guard = zebra_test::init();
 
@@ -831,7 +833,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `min_accepted_height` is the boundary, and the behind-tip comparison is strict, so a block
 /// exactly on it is a normal download and the state is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 

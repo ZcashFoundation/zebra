@@ -914,22 +914,22 @@ async fn setup(
 mod submitblock_test {
     use std::io;
     use std::sync::{Arc, Mutex};
+    use tokio::sync::Notify;
     use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
     use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 
-    use crate::components::sync::PEER_GOSSIP_DELAY;
-
     // Custom in-memory writer to capture logs
-    struct TestWriter(Arc<Mutex<Vec<u8>>>);
+    struct TestWriter(Arc<Mutex<Vec<u8>>>, Arc<Notify>);
 
     impl io::Write for TestWriter {
         #[allow(clippy::unwrap_in_result)]
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut logs = self.0.lock().unwrap();
             logs.extend_from_slice(buf);
+            self.1.notify_one();
             Ok(buf.len())
         }
 
@@ -941,12 +941,14 @@ mod submitblock_test {
     #[tokio::test]
     async fn submitblock_channel() -> Result<(), crate::BoxError> {
         let logs = Arc::new(Mutex::new(Vec::new()));
+        let log_written = Arc::new(Notify::new());
+        let writer_notify = log_written.clone();
         let log_sink = logs.clone();
 
         // Set up a tracing subscriber with a custom writer
         let subscriber = fmt()
             .with_max_level(Level::INFO)
-            .with_writer(move || TestWriter(log_sink.clone())) // Write logs to an in-memory buffer
+            .with_writer(move || TestWriter(log_sink.clone(), writer_notify.clone()))
             .finish();
 
         let _guard = tracing::subscriber::set_default(subscriber);
@@ -1007,10 +1009,22 @@ mod submitblock_test {
             .in_current_span(),
         );
 
-        // Wait for the block gossip task to process the block
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Wait for the gossip task's log instead of the unrelated periodic gossip delay.
+        tokio::time::timeout(Duration::from_secs(7), async {
+            loop {
+                let notified = log_written.notified();
+                if String::from_utf8_lossy(&logs.lock().unwrap())
+                    .contains("sending mined block broadcast")
+                {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("the gossip task must process the submitted block");
 
-        // Check that the block was processed as a mnined block by the gossip task
+        // Check that the block was processed as a mined block by the gossip task.
         let captured_logs = logs.lock().unwrap();
         let log_output = String::from_utf8(captured_logs.clone()).unwrap();
 
