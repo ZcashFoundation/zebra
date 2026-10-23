@@ -39,7 +39,7 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::{check, QueuedCheckpointVerified},
+    service::check,
     CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
 };
 
@@ -292,15 +292,12 @@ impl FinalizedState {
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order.
-    /// Runs on the blocking state writer; mined commit notifications precede the response.
-    /// The caller must reserve `committed_permit` for mined blocks before calling this method.
+    /// Runs on the blocking state writer; the caller publishes the tip before notifying completion.
     pub fn commit_finalized(
         &mut self,
-        ordered_block: QueuedCheckpointVerified,
+        checkpoint_verified: CheckpointVerifiedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-        committed_permit: Option<tokio::sync::mpsc::OwnedPermit<(block::Hash, block::Height)>>,
     ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (checkpoint_verified, rsp_tx, _) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
             prev_note_commitment_trees,
@@ -318,16 +315,11 @@ impl FinalizedState {
             metrics::gauge!("zcash.chain.verified.block.height")
                 .set(checkpoint_verified.height.0 as f64);
             metrics::counter!("zcash.chain.verified.block.total").increment(1);
-            if let Some(permit) = committed_permit {
-                permit.send((checkpoint_verified.hash, checkpoint_verified.height));
-            }
         } else {
             metrics::counter!("state.checkpoint.error.block.count").increment(1);
             metrics::gauge!("state.checkpoint.error.block.height")
                 .set(checkpoint_verified.height.0 as f64);
         };
-
-        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash));
 
         result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
     }

@@ -136,8 +136,8 @@ impl From<VerifyBlockError> for RouterError {
 }
 
 impl RouterError {
-    /// Returns `true` when local retention pressure permits retrying the same body
-    /// without downloading it again.
+    /// Returns `true` when local retention pressure permits retrying the same body without
+    /// downloading it again.
     ///
     /// These operational failures do not establish that the block or its serving peer is invalid.
     pub fn is_resource_pressure(&self) -> bool {
@@ -255,7 +255,9 @@ where
                     .verify(block, Some(notifications))
                     .map_err(Into::into)
                     .boxed(),
-                Request::Commit(_) | Request::CommitDecoded(_, None) => {
+                Request::Commit(_)
+                | Request::CommitEarlyRelay(_)
+                | Request::CommitDecoded(_, None) => {
                     self.checkpoint.call(block).map_err(Into::into).boxed()
                 }
                 Request::CheckProposal(_) => {
