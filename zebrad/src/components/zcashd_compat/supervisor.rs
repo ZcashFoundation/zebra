@@ -294,8 +294,10 @@ pub async fn run(
             }
             ChildOutcome::Exited(status) => {
                 SUPERVISED_ZCASHD_PID.store(0, Ordering::SeqCst);
-                drain_child_stderr(stderr_task).await;
+                // Measure uptime before draining, so a slow drain is not
+                // counted as healthy uptime that resets the failure count.
                 let child_uptime = child_started_at.elapsed();
+                drain_child_stderr(stderr_task).await;
                 if should_reset_restart_count(child_uptime, config.restart_reset_after) {
                     info!(
                         ?status,
@@ -903,7 +905,7 @@ mod tests {
     use super::{
         reject_peer_selection_extra_args, restart_backoff_delay, should_reset_restart_count,
         wait_for_delay_or_shutdown, ChildStream, StderrTail, SupervisorConfig,
-        CRASH_LOOP_THRESHOLD, STDERR_TAIL_LINES,
+        CRASH_LOOP_THRESHOLD, STDERR_DRAIN_TIMEOUT, STDERR_TAIL_LINES,
     };
 
     fn test_supervisor_config(extra_args: Vec<String>) -> SupervisorConfig {
@@ -1240,6 +1242,76 @@ mod tests {
         assert!(
             stderr_tail.contains("-d"),
             "the stderr tail includes the shell's option error: {stderr_tail}",
+        );
+    }
+
+    /// Waiting for a child's stderr does not count as child uptime, so it
+    /// cannot reset the failure count of a child that exits immediately.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn slow_stderr_drain_does_not_reset_crash_loop_count() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let recorder = EventRecorder::default();
+        let _guard = recorder.set_default();
+        let datadir = tempfile::tempdir().expect("temporary directories can be created in tests");
+
+        // The script exits at once, but its background `sleep` inherits stderr
+        // and holds the pipe open, so every drain waits for its full timeout.
+        let script = datadir.path().join("zcashd");
+        std::fs::write(&script, "#!/bin/sh\nsleep 3 &\necho exiting >&2\nexit 1\n")
+            .expect("temporary directories are writable in tests");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("the test owns the script it just wrote");
+
+        let config = SupervisorConfig {
+            zcashd_path: script,
+            zcashd_datadir: datadir.path().join("datadir"),
+            startup_delay: Duration::ZERO,
+            restart_backoff: Duration::from_millis(1),
+            restart_backoff_max: Duration::from_millis(1),
+            // Shorter than the drain timeout, longer than the child's uptime.
+            restart_reset_after: STDERR_DRAIN_TIMEOUT / 2,
+            ..test_supervisor_config(Vec::new())
+        };
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let supervisor = tokio::spawn(super::run(config, shutdown_rx));
+
+        let reported = || {
+            recorder
+                .events()
+                .into_iter()
+                .find(|event| event.level == Level::ERROR)
+        };
+        let error = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if let Some(error) = reported() {
+                    return error;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("an immediately exiting child is reported as a crash loop");
+
+        shutdown_tx
+            .send(true)
+            .expect("shutdown receiver exists because the supervisor task owns it");
+        supervisor
+            .await
+            .expect("supervisor task should not panic")
+            .expect("supervisor should shut down cleanly");
+
+        assert_eq!(
+            error.fields.get("restart_count"),
+            Some(&CRASH_LOOP_THRESHOLD.to_string()),
+        );
+        assert!(
+            error
+                .fields
+                .get("last_failure")
+                .is_some_and(|failure| failure.contains("exit status")),
+            "the crash loop is made of child exits, not spawn failures: {error:?}",
         );
     }
 
