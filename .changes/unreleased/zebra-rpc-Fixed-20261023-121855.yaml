@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Reduced hex conversion time for serialized RPC blocks and transactions without changing accepted inputs, errors, or output encoding ([#11935](https://github.com/ZcashFoundation/zebra/issues/11935)).
+time: 2026-10-23T12:18:55.046251512+02:00
