@@ -48,6 +48,20 @@ fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 }
 
 proptest! {
+    /// Borrowed prevouts preserve input order and omit coinbase inputs in every transaction version.
+    #[test]
+    fn spent_outpoints_match_converted_inputs(
+        tx in (1..=6u32)
+            .prop_flat_map(|version|
+                LedgerState::network_upgrade_strategy(NetworkUpgrade::Nu6_3, version, true))
+            .prop_flat_map(Transaction::arbitrary_with)
+    ) {
+        let expected: Vec<_> = tx.inputs().iter().filter_map(transparent::Input::outpoint).collect();
+        prop_assert_eq!(tx.spent_outpoints().collect::<Vec<_>>(), expected);
+        let empty = tx.with_transparent_inputs(Vec::new()).with_transparent_outputs(Vec::new());
+        prop_assert_eq!(empty.spent_outpoints().next(), None);
+    }
+
     /// Borrowed plain and ordered lookups preserve the old output-map accounting and errors.
     #[test]
     fn borrowed_value_balances_match_owned_outputs(
