@@ -82,7 +82,7 @@ impl MiningCandidateChanges {
                 (info.tip_hash == hash
                     && cancelled.has_changed().is_ok()
                     && tokio::time::Instant::now() < *deadline)
-                    .then_some(*parent)
+                    .then_some(parent.header.previous_block_hash)
             });
         parent.is_some_and(|parent| {
             self.1.as_ref().is_some_and(|state| {
@@ -90,6 +90,21 @@ impl MiningCandidateChanges {
                     && state.best_tip().map(|(_, hash)| hash) == Some(parent)
             })
         })
+    }
+
+    /// Returns the body of a still-current candidate for speculative transaction selection.
+    ///
+    /// The block has not passed full verification. Never publish transactions selected against it
+    /// until it is committed and the mempool has processed that tip.
+    pub fn block(&self, hash: block::Hash) -> Option<Arc<Block>> {
+        if !self.is_current(hash) {
+            return None;
+        }
+        self.0
+            .borrow()
+            .as_ref()
+            .filter(|(_, info, _, _)| info.tip_hash == hash)
+            .map(|(block, _, _, _)| block.clone())
     }
 
     /// Marks earlier notifications as observed before reading the current candidate.
