@@ -1,6 +1,6 @@
 //! Transaction-related types.
 
-use std::{collections::HashMap, convert::Infallible, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, fmt, sync::Arc};
 
 use crate::methods::arrayhex;
 use chrono::{DateTime, Utc};
@@ -38,7 +38,7 @@ use zebra_chain::{
     },
     primitives::ed25519,
     sapling::ValueCommitment,
-    serialization::{CompactSizeMessage, ZcashSerialize},
+    serialization::{CompactSizeMessage, SerializationError, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::{OutPoint, Script, Utxo},
 };
@@ -49,7 +49,7 @@ use super::zec::Zec;
 use super::{super::opthex, get_block_template::MinerParams};
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(Clone, Eq, serde::Serialize, Getters, new)]
 #[serde(bound = "FeeConstraint: amount::Constraint + Clone")]
 pub struct TransactionTemplate<FeeConstraint>
 where
@@ -93,6 +93,99 @@ where
     ///
     /// Coinbase transactions are required, all other transactions are not.
     pub(crate) required: bool,
+
+    /// Shares the mempool allocation that was serialized into `data`.
+    /// This is local-only metadata, excluded from equality and debug output as well as JSON.
+    #[serde(skip)]
+    #[getter(skip)]
+    #[new(default)]
+    decoded: Option<Arc<Transaction>>,
+}
+
+// Keep Serde's default in-place replacement: field-wise updates would retain the skipped cache.
+impl<'de, FeeConstraint> serde::Deserialize<'de> for TransactionTemplate<FeeConstraint>
+where
+    FeeConstraint: amount::Constraint + Clone + Copy,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(
+            rename = "TransactionTemplate",
+            expecting = "struct TransactionTemplate",
+            bound = "FeeConstraint: amount::Constraint + Clone"
+        )]
+        struct Fields<FeeConstraint> {
+            #[serde(with = "hex")]
+            data: SerializedTransaction,
+            #[serde(with = "hex")]
+            hash: transaction::Hash,
+            #[serde(rename = "authdigest", with = "hex")]
+            auth_digest: transaction::AuthDigest,
+            depends: Vec<u16>,
+            fee: Amount<FeeConstraint>,
+            sigops: u32,
+            required: bool,
+        }
+
+        let fields: Fields<FeeConstraint> = serde::Deserialize::deserialize(deserializer)?;
+        Ok(Self::new(
+            fields.data,
+            fields.hash,
+            fields.auth_digest,
+            fields.depends,
+            fields.fee,
+            fields.sigops,
+            fields.required,
+        ))
+    }
+}
+
+impl<FeeConstraint> PartialEq for TransactionTemplate<FeeConstraint>
+where
+    FeeConstraint: amount::Constraint + Clone + Copy + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+            && self.hash == other.hash
+            && self.auth_digest == other.auth_digest
+            && self.depends == other.depends
+            && self.fee == other.fee
+            && self.sigops == other.sigops
+            && self.required == other.required
+    }
+}
+
+impl<FeeConstraint> fmt::Debug for TransactionTemplate<FeeConstraint>
+where
+    FeeConstraint: amount::Constraint + Clone + Copy + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TransactionTemplate")
+            .field("data", &self.data)
+            .field("hash", &self.hash)
+            .field("auth_digest", &self.auth_digest)
+            .field("depends", &self.depends)
+            .field("fee", &self.fee)
+            .field("sigops", &self.sigops)
+            .field("required", &self.required)
+            .finish()
+    }
+}
+
+impl<FeeConstraint> TransactionTemplate<FeeConstraint>
+where
+    FeeConstraint: amount::Constraint + Clone + Copy,
+{
+    /// Reuses the mempool transaction, or decodes transaction data received over RPC.
+    pub(crate) fn transaction(&self) -> Result<Arc<Transaction>, SerializationError> {
+        match &self.decoded {
+            Some(transaction) => Ok(transaction.clone()),
+            None => self.data.as_ref().zcash_deserialize_into(),
+        }
+    }
 }
 
 // Convert from a mempool transaction to a non-coinbase transaction template.
@@ -105,6 +198,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 
         Self {
             data: tx.transaction.transaction.as_ref().into(),
+            decoded: Some(tx.transaction.transaction.clone()),
             hash: tx.transaction.id.mined_id(),
             auth_digest: tx
                 .transaction
@@ -455,6 +549,7 @@ impl TransactionTemplate<NegativeOrZero> {
 
         Ok(Self {
             data: data.into(),
+            decoded: None,
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),

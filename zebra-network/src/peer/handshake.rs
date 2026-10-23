@@ -143,6 +143,12 @@ pub struct ConnectionInfo {
     /// Derived from `remote.version` and the
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
+
+    /// Whether both ends advertised the experimental early-block-relay service bit.
+    ///
+    /// Derived from this connection's version exchange, not gossiped services or user agents.
+    /// This permits early serving but does not authenticate or validate any received block.
+    pub early_block_relay: bool,
 }
 
 /// The peer address that we are handshaking with.
@@ -672,7 +678,7 @@ where
         .is_at_or_near_network_tip(Utc::now());
 
     let network = config.network.clone();
-    let (their_addr, our_services, our_listen_addr) = match connected_addr {
+    let (their_addr, mut our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
         Isolated => {
@@ -696,6 +702,10 @@ where
             (their_addr, our_services, advertise_addr)
         }
     };
+    our_services.set(
+        PeerServices::NODE_EARLY_BLOCK_RELAY,
+        config.experimental_early_block_relay && !matches!(connected_addr, Isolated),
+    );
 
     let start_height = minimum_peer_version
         .chain_tip()
@@ -841,12 +851,16 @@ where
     }
 
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
+    let early_block_relay = our_services
+        .intersection(remote.services)
+        .contains(PeerServices::NODE_EARLY_BLOCK_RELAY);
 
     // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
     let connection_info = Arc::new(ConnectionInfo {
         connected_addr: *connected_addr,
         remote,
         negotiated_version,
+        early_block_relay,
     });
 
     debug!(
@@ -1078,6 +1092,7 @@ where
             let bare_codec = peer_conn.codec_mut();
             bare_codec.reconfigure_version(connection_info.negotiated_version);
             bare_codec.reconfigure_full_body_len();
+            bare_codec.reconfigure_early_block_relay(connection_info.early_block_relay);
 
             debug!("constructing client, spawning server");
 
@@ -1121,6 +1136,7 @@ where
             // (This significantly improves performance, by reducing time system calls.)
             let inbound_ts_collector = address_book_updater.clone();
             let inbound_inv_collector = inv_collector.clone();
+            let early_block_relay = connection_info.early_block_relay;
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
             let peer_rx = peer_rx
@@ -1172,8 +1188,13 @@ where
                 .then(move |msg| {
                     let inbound_inv_collector = inbound_inv_collector.clone();
                     let span = debug_span!(parent: inv_inner_conn_span.clone(), "inventory_filter");
-                    register_inventory_status(msg, connected_addr, inbound_inv_collector)
-                        .instrument(span)
+                    register_inventory_status(
+                        msg,
+                        connected_addr,
+                        early_block_relay,
+                        inbound_inv_collector,
+                    )
+                    .instrument(span)
                 })
                 .boxed();
 
@@ -1278,12 +1299,22 @@ where
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
+/// Compact announcements count only on connections that negotiated experimental early relay.
 pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,
+    early_block_relay: bool,
     inv_collector: broadcast::Sender<InventoryChange>,
 ) -> Result<Message, SerializationError> {
     match (&msg, connected_addr.get_transient_addr()) {
+        (Ok(Message::CompactBlock(block)), Some(transient_addr)) if early_block_relay => {
+            // High-bandwidth compact relay replaces the singleton inventory announcement. Keep
+            // source-less sync downloads routed to the peer holding these reconstructable bytes.
+            let _ = inv_collector.send(InventoryChange::new_available(
+                InventoryHash::Block(block.block_hash()),
+                transient_addr,
+            ));
+        }
         (Ok(Message::Inv(advertised)), Some(transient_addr)) => {
             // We ignore inventory messages with more than one
             // block, because they are most likely replies to a

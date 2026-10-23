@@ -1,4 +1,4 @@
-//! Regression tests for incremental verified-set metrics.
+//! Regression tests for verified-set indexes and incremental metrics.
 
 use std::sync::Arc;
 
@@ -275,4 +275,55 @@ fn verified_set_metrics_dependent_removals() {
     set.clear();
     set.clear();
     assert_metrics_match_rescan(&set);
+}
+
+#[test]
+fn verified_set_mined_v5_removes_all_output_indexes() {
+    let template = template();
+    let output = template.transaction.transaction.outputs()[0].clone();
+    let [mined, survivor] = [0, 1].map(|nonce| {
+        let mut verified = transaction(&template, nonce, None);
+        verified.transaction = Arc::new(transaction::Transaction::test_v5(
+            zebra_chain::parameters::NetworkUpgrade::Nu5,
+            verified.transaction.transaction.inputs(),
+            vec![output.clone(); 3],
+            transaction::LockTime::unlocked(),
+            Height(2_000_000),
+        ))
+        .into();
+        verified
+    });
+    let mut pending = PendingOutputs::default();
+    let mut set = VerifiedSet::default();
+    for tx in [&mined, &survivor] {
+        set.insert(tx.clone(), Vec::new(), &mut pending, None)
+            .expect("the transactions spend distinct external outputs");
+        for index in 0..3 {
+            let outpoint = transparent::OutPoint::from_usize(tx.transaction.id.mined_id(), index);
+            assert_eq!(set.created_output(&outpoint), Some(output.clone()));
+        }
+        for outpoint in tx.transaction.transaction.spent_outpoints() {
+            assert!(set.has_spent_outpoint(&outpoint));
+        }
+    }
+
+    let mined_ids = HashSet::from([mined.transaction.id.mined_id()]);
+    set.clear_mined_dependencies(&mined_ids);
+    assert_eq!(
+        set.remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id())),
+        HashSet::from([mined.transaction.id])
+    );
+    assert_eq!(set.transaction_count(), 1);
+    for (tx, present) in [(&mined, false), (&survivor, true)] {
+        for index in 0..3 {
+            let outpoint = transparent::OutPoint::from_usize(tx.transaction.id.mined_id(), index);
+            assert_eq!(
+                set.created_output(&outpoint),
+                present.then(|| output.clone())
+            );
+        }
+        for outpoint in tx.transaction.transaction.spent_outpoints() {
+            assert_eq!(set.has_spent_outpoint(&outpoint), present);
+        }
+    }
 }

@@ -358,6 +358,20 @@ impl StartCmd {
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
+        let early_blocks = if config.network.experimental_early_block_relay {
+            match read_only_state_service
+                .clone()
+                .oneshot(zebra_state::ReadRequest::EarlyRelayCache)
+                .await
+                .map_err(|error| eyre!(error))?
+            {
+                zebra_state::ReadResponse::EarlyRelayCache(cache) => Some(cache),
+                _ => unreachable!("state returns the early-relay cache for its cache request"),
+            }
+        } else {
+            None
+        };
+
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
             .service(state_service);
@@ -381,7 +395,12 @@ impl StartCmd {
             .timeout(MAX_INBOUND_RESPONSE_TIME)
             .service(
                 Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
-                    .with_submitted_blocks(submitted_blocks.clone()),
+                    .with_submitted_blocks(submitted_blocks.clone())
+                    .with_early_blocks(early_blocks.clone())
+                    .with_compact_relay(
+                        config.network.network.clone(),
+                        read_only_state_service.clone(),
+                    ),
             );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
@@ -398,6 +417,7 @@ impl StartCmd {
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
+        let (block_verifier_setup_tx, block_verifier_setup_rx) = oneshot::channel();
         let (
             block_verifier_router,
             tx_verifier,
@@ -410,6 +430,7 @@ impl StartCmd {
             state.clone(),
             read_only_state_service.clone(),
             tx_verifier_setup_rx,
+            Some(block_verifier_setup_rx),
         )
         .await;
 
@@ -450,6 +471,12 @@ impl StartCmd {
         if tx_verifier_setup_tx.send(mempool.clone()).is_err() {
             warn!("error setting up the transaction verifier with a handle to the mempool service");
         };
+        if block_verifier_setup_tx
+            .send(tower::util::BoxCloneService::new(mempool.clone()))
+            .is_err()
+        {
+            warn!("error setting up the block verifier with a handle to the mempool service");
+        }
 
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
@@ -607,14 +634,19 @@ impl StartCmd {
 
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
+        let committed_gossip = sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change.clone(),
+            block_advertiser.clone(),
+            Some(submit_block_channel.receiver()),
+            submitted_blocks,
+        );
+        let early_gossip = sync::gossip_early_blocks(early_blocks, block_advertiser);
         let block_gossip_task_handle = tokio::spawn(
-            sync::gossip_best_tip_block_hashes(
-                sync_status.clone(),
-                chain_tip_change.clone(),
-                block_advertiser,
-                Some(submit_block_channel.receiver()),
-                submitted_blocks,
-            )
+            async move {
+                tokio::try_join!(committed_gossip, early_gossip)?;
+                Ok::<_, sync::BlockGossipError>(())
+            }
             .in_current_span(),
         );
 

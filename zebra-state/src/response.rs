@@ -86,8 +86,23 @@ impl MiningCandidateChanges {
                         .as_ref()
                         .and_then(|state| state.best_tip())
                         .map(|(_, hash)| hash)
-                        == Some(*parent)
+                        == Some(parent.header.previous_block_hash)
             })
+    }
+
+    /// Returns the body of a still-current candidate for speculative transaction selection.
+    ///
+    /// The block has not passed full verification. Never publish transactions selected against it
+    /// until it is committed and the mempool has processed that tip.
+    pub fn block(&self, hash: block::Hash) -> Option<Arc<Block>> {
+        if !self.is_current(hash) {
+            return None;
+        }
+        self.0
+            .borrow()
+            .as_ref()
+            .filter(|(_, info, _, _)| info.tip_hash == hash)
+            .map(|(block, _, _, _)| block.clone())
     }
 
     /// Marks earlier notifications as observed before reading the current candidate.
@@ -106,6 +121,13 @@ impl MiningCandidateChanges {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
+    /// Authenticated NU5-or-later body admission, optionally published for early relay.
+    ///
+    /// A missing guard means no authentication: disabled optional admission, unsupported pre-NU5
+    /// commitments, or unavailable parent context. Errors preserve contextual failure details.
+    /// Keep the guard until commit completes or verification rejects/cancels the block.
+    EarlyRelay(Option<crate::EarlyRelayGuard>),
+
     /// Response to [`Request::MiningCandidate`], absent if mining is inactive or its worker is busy.
     /// Dropping the guard withdraws early work.
     MiningCandidate(Option<MiningCandidateGuard>),
@@ -462,6 +484,15 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::MiningCandidateChanges`].
     MiningCandidateChanges(MiningCandidateChanges),
 
+    /// Shared authenticated early block retention, from [`ReadRequest::EarlyRelayCache`].
+    EarlyRelayCache(crate::EarlyRelayCache),
+
+    /// Successful contextual screening from [`ReadRequest::CheckBestTipHeader`].
+    ValidBestTipHeader,
+
+    /// Successful body authentication from [`ReadRequest::CheckBestTipBlockCommitments`].
+    ValidBestTipBlockCommitments,
+
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
@@ -740,6 +771,9 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ChainInfo(_)
             | ReadResponse::MiningCandidate(_)
             | ReadResponse::MiningCandidateChanges(_)
+            | ReadResponse::EarlyRelayCache(_)
+            | ReadResponse::ValidBestTipHeader
+            | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {

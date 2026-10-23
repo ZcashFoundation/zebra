@@ -27,6 +27,8 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+mod early_relay;
+mod mempool_reuse;
 mod nu7;
 
 /// Shielded transactions must reach the transaction verifier before transparent transactions.
@@ -1282,6 +1284,13 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .await
             .respond(zs::Response::KnownBlock(None));
         state
+            .expect_request(zs::Request::EarlyRelay {
+                block: block.clone(),
+                require_authentication: false,
+            })
+            .await
+            .respond(zs::Response::EarlyRelay(None));
+        state
             .expect_request(zs::Request::MiningCandidate(block.clone()))
             .await
             .respond_error("early mining is disabled in this fixture".into());
@@ -2310,6 +2319,7 @@ async fn changed_proposals_require_transaction_verification() {
                 match request {
                     zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
                     zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
+                    zs::Request::EarlyRelay { .. } => Ok(zs::Response::EarlyRelay(None)),
                     zs::Request::CommitSemanticallyVerifiedBlock(_) => {
                         Err::<_, BoxError>("fully verified".into())
                     }
@@ -2346,9 +2356,58 @@ async fn changed_proposals_require_transaction_verification() {
     .expect("cache miss verification must not stall");
 }
 
-/// Full-sized proposals of one-input/one-P2PKH-output payments keep the eight-entry cache window.
+/// Even completed accounting must not publish a result after its awaiting proposal is cancelled.
 #[test]
-fn full_size_transparent_proposals_keep_eight_entries() {
+fn cancelled_proposal_is_not_cached() {
+    use std::{collections::HashMap, time::Duration};
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let contextual = zs::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        zs::SemanticallyVerifiedBlock::with_hash(block.clone(), block.hash()),
+        HashMap::new(),
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        Default::default(),
+    )
+    .unwrap();
+    let proposals = watch::channel(VecDeque::new()).0;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            started.send(()).unwrap();
+            held.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        entered.await.unwrap();
+        let mut caching = Box::pin(cache_proposal(
+            &proposals,
+            [0; 32],
+            block,
+            0,
+            Box::new(contextual),
+        ));
+        // Queue accounting without polling its result, just as a tip change can win the select.
+        assert!(caching.as_mut().now_or_never().is_none());
+        release.send(()).unwrap();
+        worker.await.unwrap();
+        // Let accounting finish before dropping its caller: aborting a running blocking job cannot
+        // prevent publication from that job, so only the awaiting future may publish.
+        tokio::task::spawn_blocking(|| {}).await.unwrap();
+        drop(caching);
+        assert!(proposals.borrow().is_empty());
+    });
+}
+
+/// Full-sized proposals of one-input/one-P2PKH-output payments keep the eight-entry cache window.
+#[tokio::test]
+async fn full_size_transparent_proposals_keep_eight_entries() {
     use std::collections::HashMap;
 
     use zebra_chain::amount::DeferredPoolBalanceChange;
@@ -2427,7 +2486,8 @@ fn full_size_transparent_proposals_keep_eight_entries() {
             block.clone(),
             block.transactions.zcash_serialized_size(),
             Box::new(contextual.clone()),
-        );
+        )
+        .await;
     }
     assert_eq!(
         proposals.borrow().len(),
@@ -2437,8 +2497,8 @@ fn full_size_transparent_proposals_keep_eight_entries() {
 }
 
 /// Prior-output scripts share the proposal budget even when their spending inputs are small.
-#[test]
-fn proposal_cache_spent_outputs_share_the_byte_bound() {
+#[tokio::test]
+async fn proposal_cache_spent_outputs_share_the_byte_bound() {
     use std::collections::HashMap;
 
     use zebra_chain::amount::DeferredPoolBalanceChange;
@@ -2466,7 +2526,8 @@ fn proposal_cache_spent_outputs_share_the_byte_bound() {
             ordinary.clone(),
             ordinary.transactions.zcash_serialized_size(),
             Box::new(small.clone()),
-        );
+        )
+        .await;
     }
     assert_eq!(
         proposals.borrow().len(),
@@ -2535,7 +2596,8 @@ fn proposal_cache_spent_outputs_share_the_byte_bound() {
             large.clone(),
             large.transactions.zcash_serialized_size(),
             Box::new(large_contextual.clone()),
-        );
+        )
+        .await;
     }
     let proposals = proposals.borrow();
     assert!(!proposals.is_empty());

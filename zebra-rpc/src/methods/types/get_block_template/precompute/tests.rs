@@ -22,6 +22,10 @@ use crate::{
 
 use super::*;
 
+mod lifecycle;
+mod publication;
+mod speculation;
+
 /// Returns a template with an explicit timestamp boundary.
 fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateResponse {
     let tip_height = NetworkUpgrade::Nu5
@@ -340,7 +344,13 @@ async fn in_flight_coinbase_is_retained_across_height_changes() {
     tokio::time::timeout(Duration::from_secs(10), async {
         // Neither consuming at a different height nor starting the next proof may detach this one.
         store_precomputed_coinbase(&mut next_coinbase, other_height, &cache).await;
-        start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, other_height);
+        start_precomputing_coinbase(
+            &mut next_coinbase,
+            &net,
+            &miner_params,
+            other_height,
+            &cache,
+        );
         release_proof
             .send(())
             .expect("the in-flight proof is still waiting");
@@ -376,7 +386,7 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
     let other_height = height.next().expect("test height is below the maximum");
     let cache = CoinbaseCache::default();
     let mut next_coinbase = None;
-    start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, height);
+    start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, height, &cache);
 
     tokio::time::timeout(Duration::from_secs(10), async {
         while !next_coinbase
@@ -392,7 +402,13 @@ async fn completed_coinbase_is_replaced_without_caching_the_wrong_height() {
         assert!(cache.get(height, Amount::zero(), None).is_none());
         assert!(cache.get(other_height, Amount::zero(), None).is_none());
 
-        start_precomputing_coinbase(&mut next_coinbase, &net, &miner_params, other_height);
+        start_precomputing_coinbase(
+            &mut next_coinbase,
+            &net,
+            &miner_params,
+            other_height,
+            &cache,
+        );
         store_precomputed_coinbase(&mut next_coinbase, other_height, &cache).await;
         assert_eq!(
             cache.get(other_height, Amount::zero(), None),
@@ -658,6 +674,71 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
     }
 }
 
+/// A tip change drops an in-flight proposal even before a replacement template is published.
+#[tokio::test]
+async fn background_proposals_abandon_outdated_parents() {
+    use tokio::sync::{mpsc, oneshot};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = TemplateCache::default();
+        let mut full = template();
+        // Only dispatch and cancellation matter here; the service holds every proposal pending.
+        full.transactions.push(TransactionTemplate::new(
+            full.coinbase_txn.data.clone(),
+            full.coinbase_txn.hash,
+            full.coinbase_txn.auth_digest,
+            vec![],
+            Amount::zero(),
+            0,
+            false,
+        ));
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(full.previous_block_hash);
+        let (entered, mut requests) = mpsc::unbounded_channel();
+        let verifier = tower::buffer::Buffer::new(
+            tower::service_fn(move |request: VerifyRequest| {
+                let entered = entered.clone();
+                async move {
+                    let (release, held) = oneshot::channel::<()>();
+                    entered.send((request.block(), release)).unwrap();
+                    held.await?;
+                    Ok::<_, zebra_consensus::BoxError>(request.block().hash())
+                }
+            }),
+            1,
+        );
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.subscribe(),
+            Network::Mainnet,
+            verifier,
+            tip,
+        ));
+        cache.publish(full.clone());
+        let (proposal, mut release) = requests.recv().await.unwrap();
+        assert_eq!(
+            proposal.header.previous_block_hash,
+            full.previous_block_hash
+        );
+        let next_tip = block::Hash([0xcd; 32]);
+        tip_sender.send_best_tip_hash(next_tip);
+        release.closed().await;
+
+        // A stale publication must not restart obsolete work. A subsequent current-tip proposal
+        // must still be dispatched, so cancellation cannot stop the validation worker.
+        cache.publish(full.clone());
+        full.previous_block_hash = next_tip;
+        cache.publish(full);
+        let (proposal, mut release) = requests.recv().await.unwrap();
+        assert_eq!(proposal.header.previous_block_hash, next_tip);
+        tip_sender.send_best_tip_hash(None);
+        release.closed().await;
+    })
+    .await
+    .expect("tip changes cancel validation without waiting for a new template");
+}
+
 #[tokio::test]
 async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     use futures::FutureExt;
@@ -667,6 +748,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     };
     use zebra_chain::{
         amount::DeferredPoolBalanceChange,
+        serialization::ZcashSerialize,
         transaction::{LockTime, Transaction},
         transparent,
     };
@@ -686,7 +768,11 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         };
         let output =
             transparent::Output::new(1.try_into().unwrap(), transparent::Script::new(&[0x51]));
-        let utxo = transparent::OrderedUtxo::new(output.clone(), Height(1), 1);
+        let utxo = transparent::OrderedUtxo::new(
+            transparent::Output::new(10_001.try_into().unwrap(), output.lock_script.clone()),
+            Height(1),
+            1,
+        );
         let transaction = Transaction::test_v4(
             vec![transparent::Input::PrevOut {
                 outpoint,
@@ -697,15 +783,16 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             LockTime::unlocked(),
             Height(0),
         );
-        full.transactions.push(TransactionTemplate {
-            data: (&transaction).into(),
-            hash: transaction.hash(),
-            auth_digest: block::merkle::AUTH_DIGEST_PLACEHOLDER,
-            depends: vec![],
-            fee: Amount::zero(),
-            sigops: 0,
-            required: false,
-        });
+        let mempool_transaction = VerifiedUnminedTx::new(
+            Arc::new(transaction).into(),
+            10_000.try_into().unwrap(),
+            0,
+            0,
+            Default::default(),
+        )
+        .unwrap();
+        let transaction = &mempool_transaction.transaction.transaction;
+        full.transactions.push((&mempool_transaction).into());
         full.default_roots.merkle_root = [full.coinbase_txn.hash, transaction.hash()]
             .into_iter()
             .collect();
@@ -723,6 +810,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                         Request::Tip => Response::Tip(Some(parent)),
                         Request::BestChainBlockHash(_) => Response::BlockHash(None),
                         Request::KnownBlock(_) => Response::KnownBlock(None),
+                        Request::EarlyRelay { .. } => Response::EarlyRelay(None),
                         Request::MiningCandidate(_) => Response::MiningCandidate(None),
                         Request::AwaitUtxo(requested) => {
                             assert_eq!(requested, outpoint);
@@ -750,7 +838,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 }
             }
         });
-        let (router, _, _handles, _, _) = zebra_consensus::router::init_test(
+        let (router, _, _handles, _, prepared) = zebra_consensus::router::init_test(
             zebra_consensus::Config {
                 checkpoint_sync: false,
             },
@@ -766,11 +854,14 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 .with_max_request_delay(Duration::MAX)
                 .for_unit_tests();
         let mut verifier_requests = verifier.clone();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(full.previous_block_hash);
         let mut tasks = tokio::task::JoinSet::new();
         tasks.spawn(validate_templates(
             cache.subscribe(),
             network.clone(),
             verifier.clone(),
+            tip,
         ));
         cache.publish(empty);
         // The empty template must not reach the verifier.
@@ -807,6 +898,13 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         let expected =
             proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap();
+        let round_trip: BlockTemplateResponse =
+            serde_json::from_value(serde_json::to_value(&full).unwrap()).unwrap();
+        assert_eq!(full, round_trip);
+        assert_eq!(
+            expected,
+            proposal_block_from_template(&round_trip, None, &network).unwrap()
+        );
         cache.publish(full.clone());
         let first = verifier
             .expect_request(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
@@ -830,12 +928,14 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             "the next proposal must wait for the current verification"
         );
         // Forward the worker's request through the real router, populating its consensus cache.
-        first.respond(
-            router
-                .clone()
-                .oneshot(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
-                .await
-                .unwrap(),
+        let request = first.request().clone();
+        first.respond(router.clone().oneshot(request).await.unwrap());
+        let cached = prepared
+            .deserialize(&expected.zcash_serialize_to_vec().unwrap())
+            .unwrap();
+        assert!(
+            Arc::ptr_eq(&cached.block().transactions[1], transaction),
+            "validated proposal cache must share the mempool transaction allocation"
         );
         assert_eq!(
             router
@@ -1196,4 +1296,350 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
     })
     .await
     .expect("candidate publication and rejection rollback must finish before candidate expiry");
+}
+
+/// Candidate fee proofs survive commit, but a changed selection must build its own exact value.
+#[tokio::test]
+async fn candidate_fee_coinbase_is_reused_after_commit_and_rebuilt_for_changed_fees() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        for (address_type, selection_changes) in [
+            (MinerAddressType::Sapling, false),
+            (MinerAddressType::Sapling, true),
+            (MinerAddressType::Unified, false),
+            (MinerAddressType::Unified, true),
+        ] {
+            let network = Network::new_regtest(
+                zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+                    nu5: Some(1),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            let genesis = zebra_chain::block::genesis::regtest_genesis_block();
+            let genesis_hash = genesis.hash();
+            let (state, read_state, tip, _tip_changes) =
+                zebra_state::populated_state([genesis], &network).await;
+            // Hold the tip watch behind committed state throughout the transition. A retained
+            // old-tip snapshot must not evict the prediction before that notification catches up.
+            let (lagged_tip, lagged_tip_sender) = MockChainTip::new();
+            lagged_tip_sender.send_best_tip_height(Height(0));
+            lagged_tip_sender.send_best_tip_hash(genesis_hash);
+            lagged_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+            let miner = MinerParams::from(
+                Address::decode(
+                    &network,
+                    default_miner_address(network.kind(), &address_type),
+                )
+                .unwrap(),
+            );
+            let survivor = VerifiedUnminedTx::new(
+                Arc::new(Transaction::test_v1(
+                    vec![],
+                    vec![],
+                    zebra_chain::transaction::LockTime::Height(Height(1)),
+                ))
+                .into(),
+                10_000.try_into().unwrap(),
+                0,
+                0,
+                Arc::new(vec![]),
+            )
+            .unwrap();
+            let (pool, pool_rx) = watch::channel((genesis_hash, Vec::<VerifiedUnminedTx>::new()));
+            let snapshot_started = Arc::new(tokio::sync::Notify::new());
+            let (release_snapshot, snapshot_released) = watch::channel(false);
+            let mempool = tower::service_fn({
+                let snapshot_started = snapshot_started.clone();
+                move |request| {
+                    let (tip_hash, transactions) = pool_rx.borrow().clone();
+                    let mut snapshot_released = snapshot_released.clone();
+                    let hold = matches!(request, mempool::Request::FullTransactions)
+                        && tip_hash == genesis_hash
+                        && transactions.is_empty();
+                    if hold {
+                        snapshot_started.notify_one();
+                    }
+                    async move {
+                        if hold {
+                            snapshot_released
+                                .wait_for(|released| *released)
+                                .await
+                                .unwrap();
+                        }
+                        Ok::<_, zebra_node_services::BoxError>(match request {
+                            mempool::Request::FullTransactions => {
+                                mempool::Response::FullTransactions {
+                                    transactions,
+                                    transaction_dependencies: Default::default(),
+                                    last_seen_tip_hash: tip_hash,
+                                }
+                            }
+                            mempool::Request::TransactionIds => mempool::Response::TransactionIds(
+                                transactions.iter().map(|tx| tx.transaction.id).collect(),
+                            ),
+                            other => panic!("unexpected mempool request: {other:?}"),
+                        })
+                    }
+                }
+            });
+            let cache = TemplateCache::default();
+            let coinbases = CoinbaseCache::default();
+            let mut changes = cache.subscribe();
+            let (_events, receiver) = broadcast::channel(1);
+            let verifier = tower::service_fn(|request: VerifyRequest| async move {
+                Ok::<_, zebra_consensus::BoxError>(request.block().hash())
+            });
+            let updater = tokio::spawn(run(
+                network.clone(),
+                miner,
+                coinbases.clone(),
+                cache.clone(),
+                mempool,
+                receiver,
+                read_state.clone(),
+                lagged_tip,
+                MockSyncStatus::default(),
+                verifier,
+            ));
+            let initial = loop {
+                if let Some(template) =
+                    cache.template_for_tip(genesis_hash, &network, DateTime32::now())
+                {
+                    break template;
+                }
+                changes.changed().await;
+            };
+            snapshot_started.notified().await;
+            let candidate = Arc::new(
+                proposal_block_from_template(&initial, BlockTemplateTimeSource::CurTime, &network)
+                    .unwrap(),
+            );
+            let candidate_hash = candidate.hash();
+            pool.send_replace((genesis_hash, vec![survivor.clone()]));
+            let zebra_state::Response::MiningCandidate(Some(candidate_guard)) = state
+                .clone()
+                .oneshot(zebra_state::Request::MiningCandidate(candidate.clone()))
+                .await
+                .unwrap()
+            else {
+                panic!("the updater subscribes before publishing its first template");
+            };
+            loop {
+                if let Some(early) =
+                    cache.template_for_tip(candidate_hash, &network, DateTime32::now())
+                {
+                    assert!(
+                        early.transactions.is_empty(),
+                        "speculative selection is never published"
+                    );
+                    break;
+                }
+                changes.changed().await;
+            }
+            let predicted = tokio::time::timeout(Duration::from_secs(25), async {
+                loop {
+                    if let Some(coinbase) = coinbases.get(Height(2), survivor.miner_fee, None) {
+                        break coinbase;
+                    }
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("a fee-bearing proof must finish before committing the candidate");
+            assert_eq!(tip.best_tip_hash(), Some(genesis_hash));
+            let added = VerifiedUnminedTx::new(
+                Arc::new(Transaction::test_v1(
+                    vec![],
+                    vec![],
+                    zebra_chain::transaction::LockTime::Height(Height(2)),
+                ))
+                .into(),
+                20_000.try_into().unwrap(),
+                0,
+                0,
+                Arc::new(vec![]),
+            )
+            .unwrap();
+            let expected_fees = if selection_changes {
+                (survivor.miner_fee + added.miner_fee).unwrap()
+            } else {
+                survivor.miner_fee
+            };
+            let transactions = if selection_changes {
+                vec![survivor, added]
+            } else {
+                vec![survivor]
+            };
+            let expected_count = transactions.len();
+            pool.send_replace((candidate_hash, transactions));
+            state
+                .clone()
+                .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                    candidate.into(),
+                ))
+                .await
+                .unwrap();
+            drop(candidate_guard);
+            release_snapshot.send_replace(true);
+            loop {
+                if let Some(full) =
+                    cache.template_for_tip(candidate_hash, &network, DateTime32::now())
+                {
+                    if !full.transactions.is_empty() {
+                        assert_eq!(full.transactions.len(), expected_count);
+                        if selection_changes {
+                            assert_ne!(
+                                full.coinbase_txn, predicted,
+                                "changed fees must build a fresh proof for the first full template"
+                            );
+                        } else {
+                            assert_eq!(
+                                full.coinbase_txn, predicted,
+                                "matching fees must reuse the same randomized proof"
+                            );
+                        }
+                        assert_eq!(
+                            coinbases.get(Height(2), expected_fees, None),
+                            Some(full.coinbase_txn.clone())
+                        );
+                        break;
+                    }
+                }
+                changes.changed().await;
+            }
+            updater.abort();
+            let _ = updater.await;
+        }
+    })
+    .await
+    .expect("shielded precomputation and changed-fee fallback must finish");
+}
+
+/// Prediction drops mined/conflicting/expired roots, but keeps children of mined transactions.
+#[test]
+fn candidate_selection_excludes_conflicts_and_expiry_but_keeps_mined_children() {
+    use zebra_chain::{
+        transaction::{Hash, LockTime},
+        transparent::{Input, OutPoint, Script},
+    };
+
+    let network = Network::Mainnet;
+    let height = Height(2_000_000);
+    let miner = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+    let make_tx = |source: Hash, tag, expiry| {
+        VerifiedUnminedTx::new(
+            Arc::new(Transaction::test_v4(
+                vec![Input::PrevOut {
+                    outpoint: OutPoint {
+                        hash: source,
+                        index: 0,
+                    },
+                    unlock_script: Script::new(&[tag]),
+                    sequence: 0,
+                }],
+                vec![],
+                LockTime::Height(Height(0)),
+                expiry,
+            ))
+            .into(),
+            10_000.try_into().unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+        )
+        .unwrap()
+    };
+    let mined = make_tx(Hash([1; 32]), 1, Height(0));
+    let mined_child = make_tx(mined.transaction.id.mined_id(), 2, Height(0));
+    let conflict = make_tx(Hash([1; 32]), 3, Height(0));
+    let conflict_child = make_tx(conflict.transaction.id.mined_id(), 4, Height(0));
+    let expired = make_tx(Hash([2; 32]), 5, height);
+    let expired_child = make_tx(expired.transaction.id.mined_id(), 6, Height(0));
+    let independent = make_tx(Hash([3; 32]), 7, Height(0));
+    let mut dependencies = TransactionDependencies::default();
+    for (parent, child) in [
+        (&mined, &mined_child),
+        (&conflict, &conflict_child),
+        (&expired, &expired_child),
+    ] {
+        dependencies.add(
+            child.transaction.id.mined_id(),
+            vec![OutPoint {
+                hash: parent.transaction.id.mined_id(),
+                index: 0,
+            }],
+        );
+    }
+    let mut block = (*zebra_chain::block::genesis::regtest_genesis_block()).clone();
+    block.transactions = vec![mined.transaction.transaction.clone()];
+    let expected: HashSet<_> = [&mined_child, &independent]
+        .iter()
+        .map(|tx| tx.transaction.id)
+        .collect();
+    let (transactions, dependencies) = candidate_mempool(
+        &block,
+        height,
+        vec![
+            mined,
+            mined_child,
+            conflict,
+            conflict_child,
+            expired,
+            expired_child,
+            independent,
+        ],
+        dependencies,
+    );
+    let selected = zip317::select_mempool_transactions(
+        &network,
+        height.next().unwrap(),
+        &miner,
+        transactions,
+        dependencies,
+        None,
+    );
+    assert_eq!(
+        selected
+            .into_iter()
+            .map(|(_, tx)| tx.transaction.id)
+            .collect::<HashSet<_>>(),
+        expected
+    );
+}
+
+/// Idle zero-fee work shares the same proof limit as speculative and normal template builds.
+#[tokio::test]
+async fn coinbase_precomputation_respects_the_shared_build_permit() {
+    let network = Network::Mainnet;
+    let miner = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+    let cache = CoinbaseCache::default();
+    let permit = cache.build.lock().await;
+    let mut next = None;
+    start_precomputing_coinbase(&mut next, &network, &miner, Height(2_000_000), &cache);
+    assert!(
+        next.is_none(),
+        "busy template construction must not admit another proof"
+    );
+    drop(permit);
+    start_precomputing_coinbase(&mut next, &network, &miner, Height(2_000_000), &cache);
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        store_precomputed_coinbase(&mut next, Height(2_000_000), &cache),
+    )
+    .await
+    .unwrap();
+    assert!(cache.get(Height(2_000_000), Amount::zero(), None).is_some());
 }

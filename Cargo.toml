@@ -139,6 +139,7 @@ serde_with = "3.12"
 serde_yml = "0.0"
 sha2 = "0.10"
 sinsemilla = "0.2"
+siphasher = "1.0"
 schemars = "1"
 spandoc = "0.2"
 static_assertions = "1.1"
@@ -388,3 +389,6 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91" }

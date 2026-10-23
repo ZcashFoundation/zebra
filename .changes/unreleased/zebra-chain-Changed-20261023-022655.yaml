@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Iterating over spent transparent outpoints no longer allocates or copies input scripts.
+time: 2026-10-23T02:26:55.080640807+02:00

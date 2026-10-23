@@ -31,7 +31,7 @@ use super::{key, BlockFlush, Queueing, Verifier, BLOCKS};
 
 tokio::task_local! {
     /// Overrides only flush routing; tests still use the real bounded crypto batch worker.
-    pub(super) static FLUSH: Box<dyn Fn(Verifier) -> Result<bool, BoxError> + Send + Sync>;
+    pub(crate) static FLUSH: Box<dyn Fn(Verifier) -> Result<bool, BoxError> + Send + Sync>;
     static REGISTRY_ACCESSES: Cell<usize>;
 }
 
@@ -40,7 +40,7 @@ pub(super) fn record_registry_access() {
 }
 
 /// Keeps paused time from auto-advancing while blocking crypto workers finish.
-async fn without_advancing_time<T>(future: impl Future<Output = T>) -> T {
+pub(in crate::primitives) async fn without_advancing_time<T>(future: impl Future<Output = T>) -> T {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     tokio::pin!(future);
     loop {

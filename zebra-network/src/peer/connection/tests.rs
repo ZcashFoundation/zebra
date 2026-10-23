@@ -25,6 +25,7 @@ use crate::{
     Request, Response, VersionMessage,
 };
 
+mod compact_relay;
 mod prop;
 mod readiness;
 mod vectors;
@@ -78,6 +79,7 @@ fn new_test_connection<A>() -> (
         connected_addr: ConnectedAddr::Isolated,
         remote,
         negotiated_version: fake_version,
+        early_block_relay: false,
     };
 
     let connection = Connection::new(
