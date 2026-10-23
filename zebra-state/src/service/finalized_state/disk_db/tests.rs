@@ -5,13 +5,7 @@
 
 use std::ops::Deref;
 
-use zebra_chain::parameters::Network;
-
-use crate::{
-    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
-    service::finalized_state::disk_db::{DiskDb, DB},
-    Config,
-};
+use crate::service::finalized_state::disk_db::{DiskDb, DB};
 
 // Enable older test code to automatically access the inner database via Deref coercion.
 impl Deref for DiskDb {
@@ -112,6 +106,13 @@ fn open_errors_distinguish_lock_conflicts_from_io_errors() {
 /// dropped, and leaves the primary database in place.
 #[test]
 fn read_only_secondary_removes_its_directory_on_drop() {
+    use zebra_chain::parameters::Network;
+
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        Config,
+    };
+
     let _init_guard = zebra_test::init();
 
     let cache_dir = tempfile::tempdir().expect("temporary directory is writable");
