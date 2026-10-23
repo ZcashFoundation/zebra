@@ -26,6 +26,7 @@ use tokio::{
     task::JoinHandle,
     time::{sleep, sleep_until, Instant},
 };
+use tokio_util::task::AbortOnDropHandle;
 
 use tower::ServiceExt;
 
@@ -343,6 +344,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         cache.subscribe(),
         network.clone(),
         verifier,
+        latest_chain_tip.clone(),
     ));
     let Ok(ReadResponse::MiningCandidateChanges(mut candidate_changes)) = read_state
         .clone()
@@ -642,10 +644,13 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
 }
 
 /// Validate one template at a time, coalescing publications while the verifier is busy.
+///
+/// Abandon outdated parents immediately, including queued conversion and verification work.
 async fn validate_templates(
     mut templates: TemplateChanges,
     network: Network,
     verifier: impl BlockVerifierService,
+    mut latest_chain_tip: impl ChainTip,
 ) {
     loop {
         templates.changed().await;
@@ -658,20 +663,40 @@ async fn validate_templates(
         let Some(template) = template.filter(|template| !template.transactions.is_empty()) else {
             continue;
         };
-        let network = network.clone();
-        let proposal = tokio::task::spawn_blocking(move || {
-            proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
-        })
-        .await
-        .expect("template conversion reports malformed templates as errors rather than panicking");
-        let result = match proposal {
-            Ok(block) => {
-                verifier
-                    .clone()
-                    .oneshot(VerifyRequest::CheckProposal(Arc::new(block)))
-                    .await
+        let parent = template.previous_block_hash;
+        let validation = async {
+            let network = network.clone();
+            let proposal = AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+            }))
+            .await
+            .expect(
+                "template conversion reports malformed templates as errors rather than panicking",
+            );
+            match proposal {
+                Ok(block) => {
+                    verifier
+                        .clone()
+                        .oneshot(VerifyRequest::CheckProposal(Arc::new(block)))
+                        .await
+                }
+                Err(error) => Err(error.into()),
             }
-            Err(error) => Err(error.into()),
+        };
+        let result = tokio::select! {
+            biased;
+            _ = async {
+                loop {
+                    latest_chain_tip.mark_best_tip_seen();
+                    if latest_chain_tip.best_tip_hash() != Some(parent) {
+                        return;
+                    }
+                    if latest_chain_tip.best_tip_changed().await.is_err() {
+                        return;
+                    }
+                }
+            } => continue,
+            result = validation => result,
         };
         if let Err(error) = result {
             tracing::debug!(?error, "background block proposal validation failed");

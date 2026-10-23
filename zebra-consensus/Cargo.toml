@@ -55,6 +55,7 @@ futures-util = { workspace = true }
 metrics = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync", "tracing", "rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true, features = ["timeout", "util", "buffer"] }
 tracing = { workspace = true }
 tracing-futures = { workspace = true }
