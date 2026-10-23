@@ -71,18 +71,23 @@ to committed state if necessary. Bytes already sent cannot be recalled.
 
 These connections also negotiate provisional compact encoding version 1 with
 `sendcmpct`. At most three recipients per announcement receive `cmpctblock`;
-other connections receive ordinary inventory and full blocks. The compact
-encoding includes the complete Zcash header, a nonce, six-byte SipHash-2-4 short
+other connections receive ordinary inventory and full blocks. Up to three opted-in
+peers are selected as compact receive sources, preferring first announcers only
+after their block is committed locally. Unvalidated inventory cannot change this
+selection, and a stalled demotion write cannot hold a source slot.
+The compact encoding includes the complete Zcash header, a nonce, six-byte SipHash-2-4 short
 IDs, and a prefilled coinbase. Short IDs use the complete witnessed identity for
 v5/v6 transactions and the transaction ID for earlier versions.
 
 Reconstruction uses the verified mempool, then one `getblocktxn`/`blocktxn`
 exchange for missing transactions. Collisions, commitment mismatches, unknown
 parents, and a two-second recovery timeout fall back to a full block without
-punishing the announcing peer. Retained bodies expire after 15 seconds and are
-globally bounded; rejected early bodies are no longer served. The normal
-consensus verifier still checks every reconstructed block. Coinbase-only blocks
-use full relay because compact encoding would not save bytes.
+punishing the announcing peer. Repeated recovery responses share a block-size
+payload budget for 15 seconds after delivery, even if publication permission is withdrawn.
+The deadline also bounds backpressured recovery writes, releasing the globally
+bounded snapshot before connection cleanup. The normal consensus verifier still
+checks every reconstructed block. Coinbase-only blocks use full relay because
+compact encoding would not save bytes.
 
 This uses experimental service bit 25 from the
 [temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).

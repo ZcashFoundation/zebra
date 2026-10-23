@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Delivered experimental compact blocks allow repeated transaction recovery within a shared block-size byte budget for fifteen seconds, even after publication permission is withdrawn; expired snapshots are released before connection cleanup.
+time: 2026-10-23T16:50:19.516046357+02:00

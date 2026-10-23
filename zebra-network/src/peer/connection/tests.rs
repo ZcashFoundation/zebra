@@ -41,11 +41,6 @@ fn new_test_connection<A>() -> (
     mpsc::Receiver<Message>,
     ErrorSlot,
 ) {
-    let mock_inbound_service = MockService::build().finish();
-    let (client_tx, client_rx) = mpsc::channel(0);
-    let (_block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
-    let shared_error_slot = ErrorSlot::default();
-
     // Normally the network has more capacity than the sender's single implicit slot,
     // but the smaller capacity makes some tests easier.
     let (peer_tx, peer_rx) = mpsc::channel(0);
@@ -58,6 +53,26 @@ fn new_test_connection<A>() -> (
         .into()
     };
     let peer_tx = peer_tx.sink_map_err(error_converter);
+    let (connection, client_tx, inbound, errors) = new_test_connection_with_sink(peer_tx);
+    (connection, client_tx, inbound, peer_rx, errors)
+}
+
+/// Creates a connection using a caller-supplied transport.
+fn new_test_connection_with_sink<A, Tx>(
+    peer_tx: Tx,
+) -> (
+    Connection<MockService<Request, Response, A>, Tx>,
+    mpsc::Sender<ClientRequest>,
+    MockService<Request, Response, A>,
+    ErrorSlot,
+)
+where
+    Tx: futures::Sink<Message, Error = SerializationError> + Unpin,
+{
+    let mock_inbound_service = MockService::build().finish();
+    let (client_tx, client_rx) = mpsc::channel(0);
+    let (_block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
+    let shared_error_slot = ErrorSlot::default();
 
     let fake_addr: SocketAddr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 4).into();
     let fake_version = CURRENT_NETWORK_PROTOCOL_VERSION;
@@ -87,6 +102,7 @@ fn new_test_connection<A>() -> (
         (
             client_rx,
             block_advert_rx,
+            tokio::sync::watch::channel(Some(Arc::new(tokio::sync::Semaphore::new(3)))).1,
             crate::peer::MinimumPeerVersion::new(
                 zebra_chain::chain_tip::NoChainTip,
                 &zebra_chain::parameters::Network::Mainnet,
@@ -104,7 +120,6 @@ fn new_test_connection<A>() -> (
         connection,
         client_tx,
         mock_inbound_service,
-        peer_rx,
         shared_error_slot,
     )
 }
