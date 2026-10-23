@@ -195,7 +195,7 @@ jobs:
 
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
-  # - state version (from the source code) - v{N}
+  # - state version (from the source code) - v{N}, or v{N-1} when there is no v{N} image and zebrad can upgrade it in place
   # - network (network) - mainnet or testnet
   # - disk target height kind (disk_suffix) - checkpoint or tip
   #
