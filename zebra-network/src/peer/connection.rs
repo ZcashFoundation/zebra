@@ -1026,6 +1026,7 @@ where
     /// Write dequeued adverts even if their callers have stopped waiting for the result.
     ///
     /// Acknowledge only completed local writes, after rechecking live authorization.
+    /// A stalled write must not extend an outstanding request's response deadline.
     async fn send_block_advert(&mut self, advert: BlockAdvert) {
         metrics::counter!(
             "zebra.net.out.requests",
@@ -1037,9 +1038,9 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let delivery = self
-            .peer_tx
-            .send_authorized(
+        let awaiting_response = matches!(self.state, State::AwaitingResponse { .. });
+        let delivery = {
+            let delivery = self.peer_tx.send_authorized(
                 Message::Inv(vec![InventoryHash::Block(advert.hash)]),
                 || {
                     if version >= minimum.current()
@@ -1050,8 +1051,43 @@ where
                         Err(PeerError::AdvertAuthorizationRevoked)
                     }
                 },
-            )
-            .await;
+            );
+            tokio::pin!(delivery);
+            tokio::select! {
+                biased;
+                _ = async {
+                    if awaiting_response {
+                        self.request_timer
+                            .as_mut()
+                            .expect("timeout must be set while awaiting response")
+                            .await;
+                    } else {
+                        futures::future::pending::<()>().await;
+                    }
+                } => {
+                    if matches!(
+                        self.state,
+                        State::AwaitingResponse {
+                            handler: Handler::Ping { .. },
+                            ..
+                        }
+                    ) {
+                        Err(PeerError::ConnectionReceiveTimeout)
+                    } else {
+                        let State::AwaitingResponse { tx, .. } =
+                            std::mem::replace(&mut self.state, State::AwaitingRequest)
+                        else {
+                            unreachable!("the response timer only completes while awaiting a response")
+                        };
+                        let _ = tx.send(Err(PeerError::ConnectionReceiveTimeout.into()));
+                        self.request_timer = None;
+                        // Keep the same send alive, including any item or partial frame in the sink.
+                        delivery.await
+                    }
+                }
+                result = &mut delivery => result,
+            }
+        };
         match delivery {
             Ok(()) => {
                 let _ = advert.result.send(Ok(()));
@@ -1059,7 +1095,8 @@ where
             Err(error) => {
                 let error = SharedPeerError::from(error);
                 let _ = advert.result.send(Err(error.clone().into()));
-                self.fail_with(error).await;
+                // Do not await the stalled sink's close before notifying pending requests.
+                self.shutdown(error);
             }
         }
     }
