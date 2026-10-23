@@ -802,6 +802,36 @@ fn cached_proposal_respects_block_and_parent_invalidation() {
     assert!(bodies.borrow().is_none());
 }
 
+#[test]
+fn compact_header_screening_respects_local_invalidation() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = Arc::new(network.test_block(653599, 583999).unwrap());
+    let child = parent.make_fake_child();
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(parent.prepare(), &finalized_state)
+        .unwrap();
+    state
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(child.hash()).unwrap();
+    assert_eq!(
+        crate::service::read::difficulty::candidate_header_context(
+            &state,
+            &finalized_state.db,
+            &network,
+            &child.header,
+            child.coinbase_height().unwrap(),
+            true,
+        )
+        .unwrap_err(),
+        crate::ValidateContextError::BlockPreviouslyInvalidated {
+            block_hash: child.hash()
+        },
+    );
+}
+
 /// Reject invalidating the only root before changing either live chains or invalidation records.
 #[test]
 fn invalidating_only_non_finalized_root_preserves_state() {

@@ -69,6 +69,18 @@ async fn zakura_bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
             let client = client.expect("both service sets permit ordinary full-node connections");
             assert_eq!(client.connection_info.early_block_relay, early_relay);
             remote.codec_mut().reconfigure_full_body_len();
+            remote
+                .codec_mut()
+                .reconfigure_early_block_relay(early_relay);
+            if early_relay {
+                assert_eq!(
+                    remote.next().await.unwrap().unwrap(),
+                    Message::SendCompact {
+                        high_bandwidth: true,
+                        version: 1
+                    },
+                );
+            }
 
             let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
                 .chain(stream::pending());

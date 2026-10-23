@@ -43,7 +43,7 @@ use crate::common::{
 
 // A standard P2SH output whose redeem script is OP_TRUE. These spends still pass through the
 // real UTXO, maturity, standardness, script, fee, and transaction-version checks.
-fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
+pub(super) fn spend(previous: &Transaction, nu7: bool, fee: u64) -> Result<Transaction> {
     spend_expiring(previous, nu7, fee, Height(if nu7 { 105 } else { 200 }))
 }
 
@@ -76,7 +76,7 @@ fn spend_expiring(
     })
 }
 
-async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
+pub(super) async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
     let data = hex::encode(tx.zcash_serialize_to_vec()?);
     let response: SendRawTransactionResponse = client
         .json_result_from_call("sendrawtransaction", format!(r#"["{data}"]"#))
@@ -86,7 +86,10 @@ async fn send(client: &RpcRequestClient, tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
-async fn mempool(client: &RpcRequestClient, expected: &[transaction::Hash]) -> Result<()> {
+pub(super) async fn mempool(
+    client: &RpcRequestClient,
+    expected: &[transaction::Hash],
+) -> Result<()> {
     let expected: HashSet<_> = expected.iter().map(ToString::to_string).collect();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {

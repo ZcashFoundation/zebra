@@ -487,6 +487,12 @@ pub enum ReadResponse {
     /// Shared authenticated early block retention, from [`ReadRequest::EarlyRelayCache`].
     EarlyRelayCache(crate::EarlyRelayCache),
 
+    /// Successful contextual screening from [`ReadRequest::CheckBestTipHeader`].
+    ValidBestTipHeader,
+
+    /// Successful body authentication from [`ReadRequest::CheckBestTipBlockCommitments`].
+    ValidBestTipBlockCommitments,
+
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
@@ -766,6 +772,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::MiningCandidate(_)
             | ReadResponse::MiningCandidateChanges(_)
             | ReadResponse::EarlyRelayCache(_)
+            | ReadResponse::ValidBestTipHeader
+            | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {
