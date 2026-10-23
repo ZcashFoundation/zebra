@@ -1,7 +1,6 @@
 //! The set of verified transactions in the mempool.
 
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     hash::Hash,
 };
@@ -343,7 +342,10 @@ impl VerifiedSet {
     fn remove_outputs(&mut self, unmined_tx: &UnminedTx) {
         let tx = &unmined_tx.transaction;
 
-        for index in 0..tx.outputs().len() {
+        let output_count = tx
+            .transparent_bundle()
+            .map_or(0, |bundle| bundle.vout.len());
+        for index in 0..output_count {
             self.created_outputs
                 .remove(&transparent::OutPoint::from_usize(
                     unmined_tx.id.mined_id(),
@@ -351,32 +353,11 @@ impl VerifiedSet {
                 ));
         }
 
-        let spent_outpoints = tx.spent_outpoints().map(Cow::Owned);
-
-        // All the nullifier accessors yield owned nullifiers, so they are wrapped as `Cow::Owned`.
-        // They are collected first so `tx` is no longer borrowed while `self` is mutated.
-        let sprout_nfs: Vec<_> = tx.sprout_nullifiers().collect();
-        let sapling_nfs: Vec<_> = tx.sapling_nullifiers().collect();
-        let orchard_nfs: Vec<_> = tx.orchard_nullifiers().collect();
-        let ironwood_nfs: Vec<_> = tx.ironwood_nullifiers().collect();
-
-        Self::remove_from_set(&mut self.spent_outpoints, spent_outpoints);
-        Self::remove_from_set(
-            &mut self.sprout_nullifiers,
-            sprout_nfs.into_iter().map(Cow::Owned),
-        );
-        Self::remove_from_set(
-            &mut self.sapling_nullifiers,
-            sapling_nfs.into_iter().map(Cow::Owned),
-        );
-        Self::remove_from_set(
-            &mut self.orchard_nullifiers,
-            orchard_nfs.into_iter().map(Cow::Owned),
-        );
-        Self::remove_from_set(
-            &mut self.ironwood_nullifiers,
-            ironwood_nfs.into_iter().map(Cow::Owned),
-        );
+        Self::remove_from_set(&mut self.spent_outpoints, tx.spent_outpoints());
+        Self::remove_from_set(&mut self.sprout_nullifiers, tx.sprout_nullifiers());
+        Self::remove_from_set(&mut self.sapling_nullifiers, tx.sapling_nullifiers());
+        Self::remove_from_set(&mut self.orchard_nullifiers, tx.orchard_nullifiers());
+        Self::remove_from_set(&mut self.ironwood_nullifiers, tx.ironwood_nullifiers());
     }
 
     /// Returns `true` if the two sets have common items.
@@ -388,12 +369,9 @@ impl VerifiedSet {
     }
 
     /// Removes some items from a [`HashSet`].
-    ///
-    /// Each item in the list of `items` should be wrapped in a [`Cow`]. This allows this generic
-    /// method to support both borrowed and owned items.
-    fn remove_from_set<'t, T>(set: &mut HashSet<T>, items: impl IntoIterator<Item = Cow<'t, T>>)
+    fn remove_from_set<T>(set: &mut HashSet<T>, items: impl IntoIterator<Item = T>)
     where
-        T: Clone + Eq + Hash + 't,
+        T: Eq + Hash,
     {
         for item in items {
             set.remove(&item);
