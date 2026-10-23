@@ -54,7 +54,8 @@ pub use block::check::{difficulty_is_valid, equihash_solution_is_valid, merkle_r
 pub use block::SemanticBlockVerifier;
 
 pub use block::{
-    PreparedBlockCache, Request, ShieldedActionCounts, VerifyBlockError, MAX_BLOCK_SIGOPS,
+    DecodedBlock, PreparedBlockCache, Request, ShieldedActionCounts, VerifyBlockError,
+    MAX_BLOCK_SIGOPS,
 };
 pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
