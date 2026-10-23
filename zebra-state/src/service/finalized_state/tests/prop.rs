@@ -123,7 +123,8 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         h == nu5_height ||
                         h == nu5_height_plus1 => {
                             let block = block.block.clone().set_block_commitment([0x42; 32]);
-                            let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+                            let checkpoint_verified = CheckpointVerifiedBlock::from(block)
+                                .with_precomputed_auth_data_root();
                             state.commit_finalized_direct(
                                 checkpoint_verified.into(),
                                 None,
@@ -133,7 +134,8 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         },
                     _ => {},
                 }
-                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
+                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone())
+                    .with_precomputed_auth_data_root();
                 let (hash, _) = state.commit_finalized_direct(
                     checkpoint_verified.into(),
                     None,
