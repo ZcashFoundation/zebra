@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Precompute fee-bearing shielded coinbases while a mining candidate is being verified, reusing the proof only when the committed template has matching fees and subsidy context. Limit speculation to one fee proof per committed parent and skip mempool-reset boundaries.
+time: 2026-10-23T02:43:02.124307333+02:00
