@@ -28,6 +28,7 @@ use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
 mod early_relay;
+mod mempool_reuse;
 mod nu7;
 
 /// Shielded transactions must reach the transaction verifier before transparent transactions.
