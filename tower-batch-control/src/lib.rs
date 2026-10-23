@@ -105,6 +105,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Signaling mechanism for batchable services that allows explicit flushing.
 ///
 /// This request type is a generic wrapper for the inner `Req` type.
+#[derive(Debug)]
 pub enum BatchControl<Req: RequestWeight> {
     /// A new batch item.
     Item(Req),
