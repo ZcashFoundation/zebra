@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed `zebrad tip-height` and `zebrad copy-state` leaving a `zebra-secondary_state-*` directory in the system temporary directory each time they ran. These directories are now removed on exit. Existing ones can be deleted safely when no zebrad command is running.
+time: 2026-10-23T11:00:34.623769625Z
