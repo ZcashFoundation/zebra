@@ -19,6 +19,7 @@ use std::{
 };
 
 use tower::{Service, ServiceExt};
+use tower_batch_control::RequestWeight;
 use zebra_chain::{
     block::{Block, Height},
     parameters::{Network, NetworkUpgrade},
@@ -118,6 +119,24 @@ fn cache_key(tx: &Transaction, nu: NetworkUpgrade) -> CacheKey {
         .expect("the transaction was selected for having a Sapling bundle")
         .cache_key()
         .expect("every Sapling item carries a cache key")
+}
+
+#[test]
+fn request_weight_counts_spend_and_output_proofs() {
+    let mut has_multiple_proofs = false;
+
+    for (nu, tx) in mined_sapling_transactions() {
+        let proof_count = tx.sapling_spends().count() + tx.sapling_outputs().count();
+        let item = item(&tx, nu).expect("the transaction was selected for its Sapling bundle");
+
+        assert_eq!(item.request_weight(), proof_count);
+        has_multiple_proofs |= proof_count > 1;
+    }
+
+    assert!(
+        has_multiple_proofs,
+        "test vectors must distinguish proof count from the default weight of one"
+    );
 }
 
 #[test]
