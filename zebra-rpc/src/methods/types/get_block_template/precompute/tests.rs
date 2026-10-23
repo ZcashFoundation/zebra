@@ -658,6 +658,71 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
     }
 }
 
+/// A tip change drops an in-flight proposal even before a replacement template is published.
+#[tokio::test]
+async fn background_proposals_abandon_outdated_parents() {
+    use tokio::sync::{mpsc, oneshot};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = TemplateCache::default();
+        let mut full = template();
+        // Only dispatch and cancellation matter here; the service holds every proposal pending.
+        full.transactions.push(TransactionTemplate {
+            data: full.coinbase_txn.data.clone(),
+            hash: full.coinbase_txn.hash,
+            auth_digest: full.coinbase_txn.auth_digest,
+            depends: vec![],
+            fee: Amount::zero(),
+            sigops: 0,
+            required: false,
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(full.previous_block_hash);
+        let (entered, mut requests) = mpsc::unbounded_channel();
+        let verifier = tower::buffer::Buffer::new(
+            tower::service_fn(move |request: VerifyRequest| {
+                let entered = entered.clone();
+                async move {
+                    let (release, held) = oneshot::channel::<()>();
+                    entered.send((request.block(), release)).unwrap();
+                    held.await?;
+                    Ok::<_, zebra_consensus::BoxError>(request.block().hash())
+                }
+            }),
+            1,
+        );
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.subscribe(),
+            Network::Mainnet,
+            verifier,
+            tip,
+        ));
+        cache.publish(full.clone());
+        let (proposal, mut release) = requests.recv().await.unwrap();
+        assert_eq!(
+            proposal.header.previous_block_hash,
+            full.previous_block_hash
+        );
+        let next_tip = block::Hash([0xcd; 32]);
+        tip_sender.send_best_tip_hash(next_tip);
+        release.closed().await;
+
+        // A stale publication must not restart obsolete work. A subsequent current-tip proposal
+        // must still be dispatched, so cancellation cannot stop the validation worker.
+        cache.publish(full.clone());
+        full.previous_block_hash = next_tip;
+        cache.publish(full);
+        let (proposal, mut release) = requests.recv().await.unwrap();
+        assert_eq!(proposal.header.previous_block_hash, next_tip);
+        tip_sender.send_best_tip_hash(None);
+        release.closed().await;
+    })
+    .await
+    .expect("tip changes cancel validation without waiting for a new template");
+}
+
 #[tokio::test]
 async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     use futures::FutureExt;
@@ -766,11 +831,14 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 .with_max_request_delay(Duration::MAX)
                 .for_unit_tests();
         let mut verifier_requests = verifier.clone();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(full.previous_block_hash);
         let mut tasks = tokio::task::JoinSet::new();
         tasks.spawn(validate_templates(
             cache.subscribe(),
             network.clone(),
             verifier.clone(),
+            tip,
         ));
         cache.publish(empty);
         // The empty template must not reach the verifier.
