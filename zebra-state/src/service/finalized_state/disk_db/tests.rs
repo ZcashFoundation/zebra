@@ -72,3 +72,32 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// Check that lock conflicts are told apart from other I/O errors when opening a database.
+#[test]
+fn open_errors_distinguish_lock_conflicts_from_io_errors() {
+    let _init_guard = zebra_test::init();
+
+    let dir = tempfile::tempdir().expect("temporary directory is writable");
+    let mut opts = rocksdb::Options::default();
+    opts.create_if_missing(true);
+
+    let db_path = dir.path().join("db");
+    let _db = DB::open(&opts, &db_path).expect("new database opens in an empty directory");
+    let lock_error = DB::open(&opts, &db_path)
+        .expect_err("second open fails because the first instance holds the lock");
+    assert!(
+        DiskDb::is_lock_conflict(&lock_error),
+        "lock conflict was not detected: {lock_error}"
+    );
+
+    let blocked_path = dir.path().join("blocked");
+    std::fs::create_dir_all(blocked_path.join("LOCK")).expect("temporary directory is writable");
+    let io_error = DB::open(&opts, &blocked_path)
+        .expect_err("open fails because the lock file path is a directory");
+    assert_eq!(io_error.kind(), rocksdb::ErrorKind::IOError, "{io_error}");
+    assert!(
+        !DiskDb::is_lock_conflict(&io_error),
+        "I/O error was reported as a lock conflict: {io_error}"
+    );
+}
