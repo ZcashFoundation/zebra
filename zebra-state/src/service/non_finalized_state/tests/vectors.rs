@@ -180,7 +180,7 @@ fn large_transfer_chain(
             let transaction = Arc::new(Transaction::test_v4(
                 vec![transparent::Input::PrevOut {
                     outpoint,
-                    unlock_script: transparent::Script::new(&[]),
+                    unlock_script: transparent::Script::new(&[0; 107]),
                     sequence: u32::MAX,
                 }],
                 vec![transparent::Output::new(
@@ -230,6 +230,297 @@ fn large_transfer_chain(
         blocks.push(contextual);
     }
     Ok((chain, blocks, addresses, value))
+}
+
+/// Run with `RUST_LOG=info` and `--ignored --nocapture`; fixture setup is excluded from timings.
+#[test]
+#[ignore = "microbenchmark"]
+fn transparent_chain_push_microbenchmark() -> Result<()> {
+    use std::{hint::black_box, time::Instant};
+    use zebra_chain::serialization::ZcashSerialize;
+
+    let _init_guard = zebra_test::init();
+    let destinations: Vec<_> = (0..9_000).map(|index| index % 2).collect();
+    let (chain, blocks, _, _) = large_transfer_chain(&[&destinations])?;
+    let block = &blocks[0];
+    let mut samples = Vec::new();
+    for iteration in 0..25 {
+        let chain = chain.clone();
+        let block = block.clone();
+        let start = Instant::now();
+        let pushed = black_box(chain.push(block)?);
+        let elapsed = start.elapsed().as_secs_f64() * 1_000.0;
+        if iteration >= 5 {
+            samples.push(elapsed);
+        }
+        drop(pushed);
+    }
+    samples.sort_by(f64::total_cmp);
+    tracing::info!(
+        transactions = block.block.transactions.len(),
+        bytes = block.block.zcash_serialized_size(),
+        min_ms = samples[0],
+        median_ms = (samples[9] + samples[10]) / 2.0,
+        max_ms = samples[19],
+        ?samples,
+        "transparent chain push microbenchmark",
+    );
+    Ok(())
+}
+
+#[test]
+fn transparent_indexes_match_legacy_push_and_rollback() -> Result<()> {
+    use crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes;
+
+    let _init_guard = zebra_test::init();
+    let (mut chain, mut blocks, _, _) = large_transfer_chain(&[&[1, 0, 1], &[1, 1, 0], &[0, 1]])?;
+    // Contextual maps may contain unrelated outputs; they must not become chain entries.
+    let unrelated = transparent::OutPoint {
+        hash: zebra_chain::transaction::Hash([0x88; 32]),
+        index: 17,
+    };
+    let unrelated_output = transparent::OrderedUtxo::new(
+        transparent::Output::new(Amount::zero(), transparent::Script::new(&[])),
+        Height(1),
+        1,
+    );
+    for block in &mut blocks {
+        Arc::make_mut(&mut block.new_outputs).insert(unrelated, unrelated_output.clone());
+        Arc::make_mut(&mut block.spent_outputs).insert(unrelated, unrelated_output.clone());
+    }
+    let mut snapshots = Vec::new();
+    for block in &blocks {
+        chain = chain.push(block.clone())?;
+        assert_legacy_indexes(&chain);
+        snapshots.push(chain.clone());
+    }
+    for (block, snapshot) in blocks.iter().zip(&snapshots) {
+        let forked = chain.fork(block.hash).unwrap();
+        assert!(forked.eq_internal_state(snapshot));
+        assert_legacy_indexes(&forked);
+    }
+    for block in &blocks {
+        assert_eq!(chain.pop_root().0.hash, block.hash);
+        assert_legacy_indexes(&chain);
+        for snapshot in &snapshots {
+            assert_legacy_indexes(snapshot);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn mixed_shielded_indexes_match_legacy_push_and_rollback() -> Result<()> {
+    use crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes;
+
+    let _init_guard = zebra_test::init();
+    for bytes in [
+        &*zebra_test::vectors::BLOCK_MAINNET_396_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_434873_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES,
+    ] {
+        let shielded: Block = bytes.zcash_deserialize_into()?;
+        let (mut chain, blocks, _, _) = large_transfer_chain(&[&[1], &[0, 1]])?;
+        chain.chain_value_pools = ValueBalance::fake_populated_pool();
+        let root = chain.push(blocks[0].clone())?;
+        let mut mixed = blocks[1].block.as_ref().clone();
+        mixed
+            .transactions
+            .extend(shielded.transactions.into_iter().skip(1));
+        Arc::make_mut(&mut mixed.header).merkle_root = mixed
+            .transactions
+            .iter()
+            .map(|transaction| transaction.hash())
+            .collect();
+        let mut mixed = Arc::new(mixed).prepare().test_with_zero_spent_utxos();
+        Arc::make_mut(&mut mixed.spent_outputs).extend(
+            blocks[1]
+                .spent_outputs
+                .iter()
+                .map(|(key, value)| (*key, value.clone())),
+        );
+        // These fixtures exercise index updates, not cross-upgrade value-pool validation.
+        mixed.chain_value_pool_change = ValueBalance::zero();
+        let mut chain = root.clone().push(mixed.clone())?;
+        assert_legacy_indexes(&chain);
+        let reverted = chain.fork(blocks[0].hash).unwrap();
+        assert!(reverted.eq_internal_state(&root));
+        assert!(reverted.push(mixed)?.eq_internal_state(&chain));
+        chain.pop_root();
+        assert_legacy_indexes(&chain);
+        chain.pop_root();
+        assert_legacy_indexes(&chain);
+        assert_legacy_indexes(&root);
+    }
+    Ok(())
+}
+
+#[test]
+fn multi_output_and_interleaved_shielded_indexes_match_legacy() -> Result<()> {
+    use std::collections::{HashMap, HashSet};
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        transaction::{self, LockTime, Transaction},
+    };
+
+    use crate::{
+        service::non_finalized_state::chain::index::tests::assert_legacy_indexes,
+        ContextuallyVerifiedBlock, TransactionLocation,
+    };
+
+    let _init_guard = zebra_test::init();
+    let (mut chain, blocks, addresses, value) = large_transfer_chain(&[&[1], &[1]])?;
+    chain.chain_value_pools = ValueBalance::fake_populated_pool();
+    let root = chain.push(blocks[0].clone())?;
+    let value = u64::from(value);
+    let signed_value = i64::try_from(value)?;
+    let height = blocks[1].height;
+    let mut block = blocks[1].block.as_ref().clone();
+    block.transactions.truncate(1);
+    let mut outpoint = transparent::OutPoint {
+        hash: blocks[0].transaction_hashes[1],
+        index: 0,
+    };
+    let mut spent_output = blocks[0].new_outputs[&outpoint].clone();
+    let mut spent = HashMap::new();
+    let mut expected_transactions = vec![(
+        TransactionLocation::from_usize(blocks[0].height, 1),
+        outpoint.hash,
+    )];
+
+    let shielded_only = [
+        &*zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_1687121_BYTES,
+    ]
+    .into_iter()
+    .map(|bytes| {
+        bytes
+            .zcash_deserialize_into::<Block>()
+            .unwrap()
+            .transactions
+            .into_iter()
+            .find(|transaction| {
+                !transaction.has_transparent_inputs_or_outputs() && transaction.has_shielded_data()
+            })
+            .expect("the fixture contains a shielded-only transaction")
+    })
+    .collect::<Vec<_>>();
+    // The first transaction repeats address B; later transactions pay both A and B again.
+    // The second transaction spends the first transaction's middle output, not output zero.
+    for (index, outputs) in [
+        vec![(3, 0), (value - 7, 1), (4, 1)],
+        vec![(value - 9, 1), (2, 0)],
+        vec![(value - 10, 0), (1, 1)],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let outputs: Vec<_> = outputs
+            .into_iter()
+            .map(|(value, address)| {
+                transparent::Output::new(value.try_into().unwrap(), addresses[address].script())
+            })
+            .collect();
+        let transaction = Arc::new(Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            outputs.clone(),
+            LockTime::unlocked(),
+            Height(0),
+        ));
+        assert!(spent.insert(outpoint, spent_output).is_none());
+        let transaction_index = block.transactions.len();
+        expected_transactions.push((
+            TransactionLocation::from_usize(height, transaction_index),
+            transaction.hash(),
+        ));
+        let output_index = usize::from(index == 0);
+        outpoint = transparent::OutPoint {
+            hash: transaction.hash(),
+            index: output_index.try_into()?,
+        };
+        spent_output =
+            transparent::OrderedUtxo::new(outputs[output_index].clone(), height, transaction_index);
+        block.transactions.push(transaction);
+        if let Some(shielded) = shielded_only.get(index) {
+            block.transactions.push(shielded.clone());
+        }
+    }
+    assert_eq!(block.transactions.len(), 6);
+    Arc::make_mut(&mut block.header).merkle_root = block
+        .transactions
+        .iter()
+        .map(|transaction| transaction.hash())
+        .collect();
+    let mixed = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        Arc::new(block).prepare(),
+        spent,
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        root.chain_value_pools,
+    )?;
+
+    let assert_queries =
+        |chain: &Chain,
+         balances_and_received: [(i64, u64); 2],
+         transactions: &[(TransactionLocation, transaction::Hash)]| {
+            assert_legacy_indexes(chain);
+            for (address, (balance, received)) in addresses.into_iter().zip(balances_and_received) {
+                let selected = HashSet::from([address]);
+                assert_eq!(
+                    chain.partial_transparent_balance_change(&selected),
+                    (balance.try_into().unwrap(), received),
+                );
+                assert_eq!(
+                    chain
+                        .partial_transparent_tx_ids(&selected, blocks[0].height..=height)
+                        .into_iter()
+                        .collect::<Vec<_>>(),
+                    transactions,
+                );
+            }
+        };
+    assert_queries(
+        &root,
+        [(-signed_value, 0), (signed_value, value)],
+        &expected_transactions[..1],
+    );
+    let mut chain = root.clone().push(mixed.clone())?;
+    assert_queries(
+        &chain,
+        [(-5, value - 5), (5, 3 * value - 11)],
+        &expected_transactions,
+    );
+    let snapshot = chain.clone();
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert_queries(
+        &reverted,
+        [(-signed_value, 0), (signed_value, value)],
+        &expected_transactions[..1],
+    );
+    assert!(reverted.push(mixed)?.eq_internal_state(&snapshot));
+    chain.pop_root();
+    assert_queries(
+        &chain,
+        [
+            (signed_value - 5, value - 5),
+            (5 - signed_value, 2 * value - 11),
+        ],
+        &expected_transactions[1..],
+    );
+    chain.pop_root();
+    assert_queries(&chain, [(0, 0); 2], &[]);
+    assert_queries(
+        &snapshot,
+        [(-5, value - 5), (5, 3 * value - 11)],
+        &expected_transactions,
+    );
+    Ok(())
 }
 
 #[test]
