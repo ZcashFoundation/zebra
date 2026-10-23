@@ -668,15 +668,15 @@ async fn background_proposals_abandon_outdated_parents() {
         let cache = TemplateCache::default();
         let mut full = template();
         // Only dispatch and cancellation matter here; the service holds every proposal pending.
-        full.transactions.push(TransactionTemplate {
-            data: full.coinbase_txn.data.clone(),
-            hash: full.coinbase_txn.hash,
-            auth_digest: full.coinbase_txn.auth_digest,
-            depends: vec![],
-            fee: Amount::zero(),
-            sigops: 0,
-            required: false,
-        });
+        full.transactions.push(TransactionTemplate::new(
+            full.coinbase_txn.data.clone(),
+            full.coinbase_txn.hash,
+            full.coinbase_txn.auth_digest,
+            vec![],
+            Amount::zero(),
+            0,
+            false,
+        ));
         let (tip, tip_sender) = MockChainTip::new();
         tip_sender.send_best_tip_hash(full.previous_block_hash);
         let (entered, mut requests) = mpsc::unbounded_channel();
@@ -732,6 +732,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     };
     use zebra_chain::{
         amount::DeferredPoolBalanceChange,
+        serialization::ZcashSerialize,
         transaction::{LockTime, Transaction},
         transparent,
     };
@@ -751,7 +752,11 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         };
         let output =
             transparent::Output::new(1.try_into().unwrap(), transparent::Script::new(&[0x51]));
-        let utxo = transparent::OrderedUtxo::new(output.clone(), Height(1), 1);
+        let utxo = transparent::OrderedUtxo::new(
+            transparent::Output::new(10_001.try_into().unwrap(), output.lock_script.clone()),
+            Height(1),
+            1,
+        );
         let transaction = Transaction::test_v4(
             vec![transparent::Input::PrevOut {
                 outpoint,
@@ -762,15 +767,16 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             LockTime::unlocked(),
             Height(0),
         );
-        full.transactions.push(TransactionTemplate {
-            data: (&transaction).into(),
-            hash: transaction.hash(),
-            auth_digest: block::merkle::AUTH_DIGEST_PLACEHOLDER,
-            depends: vec![],
-            fee: Amount::zero(),
-            sigops: 0,
-            required: false,
-        });
+        let mempool_transaction = VerifiedUnminedTx::new(
+            Arc::new(transaction).into(),
+            10_000.try_into().unwrap(),
+            0,
+            0,
+            Default::default(),
+        )
+        .unwrap();
+        let transaction = &mempool_transaction.transaction.transaction;
+        full.transactions.push((&mempool_transaction).into());
         full.default_roots.merkle_root = [full.coinbase_txn.hash, transaction.hash()]
             .into_iter()
             .collect();
@@ -815,7 +821,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 }
             }
         });
-        let (router, _, _handles, _, _) = zebra_consensus::router::init_test(
+        let (router, _, _handles, _, prepared) = zebra_consensus::router::init_test(
             zebra_consensus::Config {
                 checkpoint_sync: false,
             },
@@ -875,6 +881,13 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         let expected =
             proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap();
+        let round_trip: BlockTemplateResponse =
+            serde_json::from_value(serde_json::to_value(&full).unwrap()).unwrap();
+        assert_eq!(full, round_trip);
+        assert_eq!(
+            expected,
+            proposal_block_from_template(&round_trip, None, &network).unwrap()
+        );
         cache.publish(full.clone());
         let first = verifier
             .expect_request(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
@@ -898,12 +911,14 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             "the next proposal must wait for the current verification"
         );
         // Forward the worker's request through the real router, populating its consensus cache.
-        first.respond(
-            router
-                .clone()
-                .oneshot(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
-                .await
-                .unwrap(),
+        let request = first.request().clone();
+        first.respond(router.clone().oneshot(request).await.unwrap());
+        let cached = prepared
+            .deserialize(&expected.zcash_serialize_to_vec().unwrap())
+            .unwrap();
+        assert!(
+            Arc::ptr_eq(&cached.block().transactions[1], transaction),
+            "validated proposal cache must share the mempool transaction allocation"
         );
         assert_eq!(
             router
