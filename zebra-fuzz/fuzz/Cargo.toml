@@ -30,7 +30,7 @@ zebra-script = { path = "../../zebra-script" }
 # rpc_handler_fuzz / jsonrpsee_envelope_fuzz async harness deps
 tokio = { version = "1.44", features = ["rt", "sync", "macros", "time"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
-futures = "0.3.31"
+futures = "0.3.32"
 jsonrpsee = { version = "0.24.8", features = ["server"] }
 serde_json = "1.0.140"
 
