@@ -251,7 +251,7 @@ impl QueuedBlocks {
     }
 
     /// Try to look up this UTXO in any queued block.
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint)
     }
@@ -373,7 +373,7 @@ impl SentHashes {
     }
 
     /// Try to look up this UTXO in any sent block.
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint)
     }
