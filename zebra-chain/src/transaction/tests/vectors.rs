@@ -1806,6 +1806,13 @@ fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
         !tx.is_valid_non_coinbase(),
         "a non-coinbase transaction with a null-prevout input is invalid"
     );
+    assert_eq!(
+        tx.spent_outpoints().collect::<Vec<_>>(),
+        vec![crate::transparent::OutPoint {
+            hash: crate::transaction::Hash([1; 32]),
+            index: 0,
+        }]
+    );
 
     // The regular shape of a non-coinbase transaction stays valid.
     let mut regular = raw.clone();
