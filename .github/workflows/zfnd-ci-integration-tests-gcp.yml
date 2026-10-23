@@ -601,7 +601,7 @@ jobs:
   #
   # TODO: move these below the rest of the mainnet jobs that just use Zebra cached state
 
-  # Reports a failed run as one of two kinds, each with its own issue and Slack destination:
+  # Reports a failed run as one of two kinds, each with its own dedup issue:
   #   - `test`: a test ran and failed, or hung until the job timed out. `main` may be broken.
   #   - `infra`: no test failed, but the run did: the image build, a GCP instance or disk that
   #     could not be created, a container that never started, or a failure after the test
@@ -665,16 +665,7 @@ jobs:
           echo "Failure kind: ${KIND}"
           echo "kind=${KIND}" >> "${GITHUB_OUTPUT}"
 
-          {
-            echo "summary<<EOF"
-            jq -r '.[] | "• \(.name): \(
-              [.steps[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .name] | first // "no failed step")"' \
-              <<< "${FAILED_JOBS}"
-            echo "EOF"
-          } >> "${GITHUB_OUTPUT}"
-
       - name: Open or update the failure issue
-        id: issue
         uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
           title-template: "${{ steps.classify.outputs.kind == 'test' && '{{refname}} branch CI failed: {{eventName}} in {{workflow}}' || '{{refname}} branch CI infrastructure failed: {{eventName}} in {{workflow}}' }}"
@@ -683,42 +674,6 @@ jobs:
           # If there is already an open issue with this label, any failures become comments on that issue.
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Each kind posts to the Slack incoming webhook stored in its own secret, so the destination
-      # channel can change in Slack without changing this workflow.
-      - name: Post the failure to Slack
-        if: ${{ !cancelled() }}
-        env:
-          KIND: ${{ steps.classify.outputs.kind }}
-          SUMMARY: ${{ steps.classify.outputs.summary }}
-          ISSUE_URL: ${{ steps.issue.outputs.html-url }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
-          RUN_TITLE: "${{ github.workflow }} #${{ github.run_number }}"
-          EVENT_NAME: ${{ github.event_name }}
-          SHA: ${{ github.sha }}
-          SLACK_WEBHOOK_URL: ${{ steps.classify.outputs.kind == 'test' && secrets.SLACK_CI_TEST_FAILURE_WEBHOOK_URL || secrets.SLACK_CI_INFRA_FAILURE_WEBHOOK_URL }}
-        run: |
-          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
-            echo "::warning::No Slack webhook secret is set for ${KIND} failures, so this failure was only recorded in the GitHub issue"
-            exit 0
-          fi
-
-          if [ "${KIND}" = test ]; then
-            HEADLINE=":red_circle: *An integration test failed on main*"
-          else
-            HEADLINE=":construction: *Integration test infrastructure failed on main*"
-          fi
-
-          jq -n \
-            --arg headline "${HEADLINE}" \
-            --arg run "<${RUN_URL}|${RUN_TITLE}> on \`${SHA:0:9}\` (${EVENT_NAME})" \
-            --arg summary "${SUMMARY}" \
-            --arg issue "${ISSUE_URL:+<${ISSUE_URL}|Failure issue>}" \
-            '{text: ([$headline, $run, $summary, $issue] | map(select(. != "")) | join("\n"))}' \
-            | curl --fail-with-body --silent --show-error --max-time 30 \
-                --header 'Content-Type: application/json' \
-                --data @- \
-                "${SLACK_WEBHOOK_URL}"
 
   integration-tests-success:
     name: integration tests success
