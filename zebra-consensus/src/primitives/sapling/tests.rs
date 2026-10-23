@@ -371,3 +371,131 @@ async fn a_bundle_verified_under_one_upgrade_is_not_reused_under_another() {
         "expected SaplingVerificationFailed, got: {error:?}"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn block_flush_resolves_every_sapling_shard_without_timers() {
+    use crate::primitives::flush::{tests, BlockFlush, Queueing, Verifier};
+
+    let _init_guard = zebra_test::init();
+    let (nu, tx) = mined_v4_sapling_transaction();
+    let item = item(&tx, nu).unwrap();
+    assert!(item.request_weight() * 2 < crate::primitives::MAX_BATCH_SIZE);
+    let shards = super::ShardedVerifier::new(2);
+    let flush_shards = shards.clone();
+    let admissions = shards.next.clone();
+    let mut cache = Cached::new(
+        tower_fallback::Fallback::new(shards, tower::service_fn(super::verify_single)),
+        8,
+        TEST_CACHE_VERIFIER_LABEL,
+    )
+    .with_flush(Verifier::Sapling);
+    let context = Arc::new(());
+    let _registration = BlockFlush::register(&context, 1);
+    let flushes = Arc::new(AtomicUsize::new(0));
+    let count = flushes.clone();
+    let start = tokio::time::Instant::now();
+    tests::FLUSH
+        .scope(
+            Box::new(move |verifier| {
+                assert!(matches!(verifier, Verifier::Sapling));
+                count.fetch_add(1, Ordering::SeqCst);
+                flush_shards.try_flush()
+            }),
+            async {
+                let transaction = Queueing::for_transaction(&context).unwrap();
+                let responses = transaction
+                    .scope(|| (0..4).map(|_| cache.call(item.clone())).collect::<Vec<_>>());
+                drop(transaction);
+                for result in
+                    tests::without_advancing_time(futures::future::join_all(responses)).await
+                {
+                    result.expect("bundles in every shard must verify before any timer expires");
+                }
+            },
+        )
+        .await;
+    assert_eq!(admissions.load(Ordering::Relaxed), 4);
+    assert_eq!(flushes.load(Ordering::SeqCst), 1);
+    assert_eq!(tokio::time::Instant::now(), start);
+}
+
+#[tokio::test]
+async fn malformed_bundle_does_not_send_valid_bundles_to_fallback() {
+    let _init_guard = zebra_test::init();
+    let (nu, tx) = mined_v4_sapling_transaction();
+    let valid = item(&tx, nu).unwrap();
+    let mut malformed = valid.clone();
+    malformed.bundle = malformed.bundle.map_authorization(
+        (),
+        |_, _| [0; 192],
+        |_, _| [0; 192],
+        |_, sig| sig,
+        |_, auth| auth,
+    );
+    assert!(valid.request_weight() * 3 < crate::primitives::MAX_BATCH_SIZE);
+    let fallbacks = Arc::new(AtomicUsize::new(0));
+    let count = fallbacks.clone();
+    let mut verifier = tower_fallback::Fallback::new(
+        super::ShardedVerifier::new(1),
+        tower::service_fn(move |item| {
+            count.fetch_add(1, Ordering::SeqCst);
+            super::verify_single(item)
+        }),
+    );
+    let mut responses = Vec::new();
+    for item in [valid.clone(), malformed, valid] {
+        responses.push(verifier.ready().await.unwrap().call(item));
+    }
+    assert!(verifier.primary().try_flush().unwrap());
+    let results = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        futures::future::join_all(responses),
+    )
+    .await
+    .expect("verification must finish");
+    assert!(results[0].is_ok());
+    assert!(results[1].is_err());
+    assert!(results[2].is_ok());
+    assert_eq!(fallbacks.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn single_verifications_share_the_rayon_cpu_budget() {
+    let _init_guard = zebra_test::init();
+    let (nu, tx) = mined_v4_sapling_transaction();
+    let item = item(&tx, nu).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+
+    pool.install(|| {
+        let mut responses = [
+            super::verify_single(item.clone()),
+            super::verify_single(item),
+        ];
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // The only worker queues both fallbacks; neither can execute until it yields.
+        for response in &mut responses {
+            assert!(response.as_mut().poll(&mut cx).is_pending());
+        }
+        while matches!(rayon::yield_now(), Some(rayon::Yield::Executed)) {}
+        for response in &mut responses {
+            assert!(matches!(
+                response.as_mut().poll(&mut cx),
+                Poll::Ready(Ok(()))
+            ));
+        }
+    });
+}
+
+#[test]
+fn shards_respect_configured_cpu_budget() {
+    for (parallelism, expected_shards) in [(1, 1), (4, 1), (8, 2), (32, 8), (64, 8)] {
+        let shards = super::shard_count(parallelism);
+        assert_eq!(shards, expected_shards);
+        let max_batches = (parallelism / shards).max(1);
+        assert!(shards * max_batches <= parallelism);
+    }
+}
