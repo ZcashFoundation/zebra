@@ -123,11 +123,8 @@ impl fmt::Debug for Address {
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            // TEX addresses are Bech32m-encoded with the `tex`, `textest` or
-            // `texregtest` HRP (ZIP 320), not Base58Check-encoded: the
-            // `From<Address> for ZcashAddress` conversion above picks the HRP
-            // for the network kind. This is the inverse of the Bech32 branch
-            // of `FromStr`.
+            // TEX addresses are Bech32m-encoded (ZIP 320), the inverse of the
+            // Bech32 branch of `FromStr`.
             Address::Tex { .. } => f.write_str(&ZcashAddress::from(*self).encode()),
 
             Address::PayToScriptHash { .. } | Address::PayToPublicKeyHash { .. } => {
