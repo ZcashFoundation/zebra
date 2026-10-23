@@ -96,6 +96,31 @@ fn pre_nu6_2_transaction_bundle_and_sighash(
     panic!("mainnet test blocks must contain a transparent-input-free Orchard transaction");
 }
 
+#[test]
+fn one_action_bundles_keep_the_existing_fallback_fanout_bound() {
+    use tower_batch_control::RequestWeight;
+
+    let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+    let mut actions = bundle.actions().clone();
+    actions.tail.clear();
+    let bundle = Bundle::try_from_parts(
+        actions,
+        *bundle.flags(),
+        *bundle.value_balance(),
+        *bundle.anchor(),
+        bundle.authorization().clone(),
+        bundle.bundle_version(),
+    )
+    .unwrap();
+    let item = Item::new(bundle, sighash);
+    assert_eq!(item.bundle.actions().len(), 1);
+    assert_eq!(
+        item.request_weight() * super::super::MAX_BATCH_SIZE,
+        super::HALO2_MAX_BATCH_SIZE,
+        "a failed batch must not retry more bundles than the previous threshold allowed"
+    );
+}
+
 /// A real pre-NU6.2 Orchard proof verifies under the pre-NU6.2 key and is rejected by the
 /// post-NU6.2 key.
 ///
