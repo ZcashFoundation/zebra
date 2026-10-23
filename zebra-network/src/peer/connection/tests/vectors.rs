@@ -741,6 +741,142 @@ async fn block_advert_while_awaiting_response() {
     .expect("adverts and the original response finish before the request timeout");
 }
 
+/// A blocked abandoned advert must not extend an outstanding request's response deadline.
+#[tokio::test(start_paused = true)]
+async fn abandoned_block_advert_preserves_request_deadline() {
+    let _init_guard = zebra_test::init();
+    let (mut connection, mut client_tx, _service, mut outbound, error_slot) = new_test_connection();
+    let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
+    connection.block_advert_rx = advert_rx;
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let connection = connection.run(peer_rx).shared();
+
+    let (tx, mut response) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::Peers,
+            tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(outbound.next().await, Some(Message::GetAddr));
+    assert!(connection.clone().now_or_never().is_none());
+
+    tokio::time::advance(REQUEST_TIMEOUT - Duration::from_secs(1)).await;
+    let (result, delivery) = tokio::sync::oneshot::channel();
+    drop(delivery);
+    advert_tx
+        .try_send(crate::peer_set::BlockAdvert {
+            hash: block::Hash([1; 32]),
+            result,
+        })
+        .unwrap();
+
+    // Leave the outbound channel full so the advert's flush stays pending.
+    assert!(connection.clone().now_or_never().is_none());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert!(
+        connection.clone().now_or_never().is_none(),
+        "an ordinary request timeout must not close the connection",
+    );
+    let error = response
+        .try_recv()
+        .unwrap()
+        .expect("the pending request must receive its timeout without waiting for the advert")
+        .unwrap_err();
+    assert_eq!(error.inner_debug(), "ConnectionReceiveTimeout");
+    assert!(error_slot.try_get_error().is_none());
+
+    assert_eq!(
+        outbound.next().await,
+        Some(Message::Inv(vec![InventoryHash::Block(block::Hash(
+            [1; 32]
+        ))])),
+        "the abandoned advert must still be written after the request times out",
+    );
+    assert!(connection.clone().now_or_never().is_none());
+
+    let (tx, response) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::Peers,
+            tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(outbound.next().await, Some(Message::GetAddr));
+    assert!(connection.clone().now_or_never().is_none());
+    peer_tx.try_send(Ok(Message::Addr(Vec::new()))).unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(
+        response.await.unwrap().unwrap(),
+        Response::Peers(Vec::new())
+    );
+    assert!(error_slot.try_get_error().is_none());
+}
+
+/// Ping deadlines close the connection even when an abandoned advert's flush is stalled.
+#[tokio::test(start_paused = true)]
+async fn ping_deadline_closes_connection_with_or_without_stalled_block_advert() {
+    let _init_guard = zebra_test::init();
+    for stalled_advert in [false, true] {
+        let (mut connection, mut client_tx, _service, mut outbound, error_slot) =
+            new_test_connection();
+        let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
+        connection.block_advert_rx = advert_rx;
+        let (_peer_tx, peer_rx) = mpsc::channel(1);
+        let connection = connection.run(peer_rx).shared();
+
+        let nonce = Nonce::default();
+        let (tx, mut response) = oneshot::channel();
+        client_tx
+            .try_send(ClientRequest {
+                request: Request::Ping(nonce),
+                tx,
+                inv_collector: None,
+                transient_addr: None,
+                span: Span::current(),
+            })
+            .unwrap();
+        assert!(connection.clone().now_or_never().is_none());
+        assert_eq!(outbound.next().await, Some(Message::Ping(nonce)));
+        assert!(connection.clone().now_or_never().is_none());
+
+        tokio::time::advance(REQUEST_TIMEOUT - Duration::from_secs(1)).await;
+        if stalled_advert {
+            let (result, delivery) = tokio::sync::oneshot::channel();
+            drop(delivery);
+            advert_tx
+                .try_send(crate::peer_set::BlockAdvert {
+                    hash: block::Hash([1; 32]),
+                    result,
+                })
+                .unwrap();
+            // Do not drain the advert: its flush must remain pending at the Ping deadline.
+            assert!(connection.clone().now_or_never().is_none());
+        }
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            connection.now_or_never().is_some(),
+            "the Ping timeout must close the connection without waiting for the advert flush",
+        );
+        let error = response.try_recv().unwrap().unwrap().unwrap_err();
+        assert_eq!(error.inner_debug(), "ConnectionReceiveTimeout");
+        assert_eq!(
+            error_slot.try_get_error().unwrap().inner_debug(),
+            "ConnectionReceiveTimeout",
+        );
+        assert!(client_tx.is_closed());
+    }
+}
+
 /// A pending GetBlocks response must not be displaced by a simultaneous unsolicited advert.
 #[tokio::test]
 async fn getblocks_response_precedes_ready_block_advert() {
