@@ -1,4 +1,4 @@
-//! Tests for the block hash gossip task.
+//! Tests for block and transaction gossip.
 //!
 //! These tests cover mined-block coalescing while service readiness waits for eligible peers,
 //! including backpressure (<https://github.com/ZcashFoundation/zebra/issues/11475>).
@@ -24,8 +24,7 @@ use zebra_state::{ChainTipBlock, ChainTipSender};
 
 use crate::{
     components::sync::{
-        gossip_best_tip_block_hashes, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY,
-        TIPS_RESPONSE_TIMEOUT,
+        gossip_best_tip_block_hashes, BlockGossipError, SyncStatus, TIPS_RESPONSE_TIMEOUT,
     },
     BoxError,
 };
@@ -45,6 +44,7 @@ enum Readiness {
 struct GateState {
     readiness: Readiness,
     wakers: Vec<Waker>,
+    response: Option<oneshot::Receiver<Result<zn::Response, BoxError>>>,
 }
 
 /// A fake peer set whose `poll_ready()` is controlled by the test,
@@ -52,17 +52,19 @@ struct GateState {
 #[derive(Clone, Debug)]
 struct GatedPeerSet {
     state: Arc<Mutex<GateState>>,
-    requests: mpsc::UnboundedSender<zn::Request>,
+    requests: mpsc::Sender<zn::Request>,
     waiting: Arc<tokio::sync::Notify>,
 }
 
 impl GatedPeerSet {
-    fn new() -> (Self, mpsc::UnboundedReceiver<zn::Request>) {
-        let (requests, request_receiver) = mpsc::unbounded_channel();
+    fn new() -> (Self, mpsc::Receiver<zn::Request>) {
+        let (requests, request_receiver) =
+            mpsc::channel(usize::try_from(MORE_THAN_CHANNEL_CAPACITY).unwrap());
         let peer_set = GatedPeerSet {
             state: Arc::new(Mutex::new(GateState {
                 readiness: Readiness::Pending,
                 wakers: Vec::new(),
+                response: None,
             })),
             requests,
             waiting: Default::default(),
@@ -76,12 +78,18 @@ impl GatedPeerSet {
         state.readiness = readiness;
         state.wakers.drain(..).for_each(Waker::wake);
     }
+
+    fn hold_next_response(&self) -> oneshot::Sender<Result<zn::Response, BoxError>> {
+        let (sender, receiver) = oneshot::channel();
+        self.state.lock().expect("lock is not poisoned").response = Some(receiver);
+        sender
+    }
 }
 
 impl Service<zn::Request> for GatedPeerSet {
     type Response = zn::Response;
     type Error = BoxError;
-    type Future = future::Ready<Result<zn::Response, BoxError>>;
+    type Future = future::BoxFuture<'static, Result<zn::Response, BoxError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         let mut state = self.state.lock().expect("lock is not poisoned");
@@ -97,8 +105,23 @@ impl Service<zn::Request> for GatedPeerSet {
     }
 
     fn call(&mut self, request: zn::Request) -> Self::Future {
-        let _ = self.requests.send(request);
-        future::ok(zn::Response::Nil)
+        let response = self
+            .state
+            .lock()
+            .expect("lock is not poisoned")
+            .response
+            .take();
+        self.requests
+            .try_send(request)
+            .expect("the bounded test request log has capacity");
+        Box::pin(async move {
+            match response {
+                Some(response) => response
+                    .await
+                    .unwrap_or_else(|_| Err("test broadcast response was abandoned".into())),
+                None => Ok(zn::Response::Nil),
+            }
+        })
     }
 }
 
@@ -108,112 +131,551 @@ fn mined_block(n: u32) -> (block::Hash, Height) {
     (block::Hash(hash), Height(n))
 }
 
-/// If there are never any ready peers, the gossip task must keep consuming mined block
-/// announcements, so `submitblock` never sees a full channel.
+fn set_tip(sender: &mut ChainTipSender, n: u32) -> block::Hash {
+    let (hash, height) = mined_block(n);
+    sender.set_finalized_tip(ChainTipBlock {
+        hash,
+        height,
+        time: Utc::now(),
+        transactions: Vec::new(),
+        transaction_hashes: Arc::new([]),
+        previous_block_hash: mined_block(n.saturating_sub(1)).0,
+    });
+    hash
+}
+
+/// A second tip one second after the first advertisement does not wait for a gossip interval.
 #[tokio::test(start_paused = true)]
-async fn gossip_keeps_draining_mined_blocks_without_ready_peers() {
+async fn gossip_consecutive_tips_without_batch_delay() {
     let _init_guard = zebra_test::init();
-
-    let network = Network::Mainnet;
-    let (_chain_tip_sender, _latest_chain_tip, chain_tip_change) =
-        ChainTipSender::new(None, &network);
-    let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (mut tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    recent_syncs.push_extend_tips_length(0);
     let (peer_set, mut requests) = GatedPeerSet::new();
-
-    let channel = SubmitBlockChannel::new();
-    let mined_block_sender = channel.sender();
-
-    let gossip_task = tokio::spawn(gossip_best_tip_block_hashes(
+    peer_set.set_readiness(Readiness::Ready);
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
         sync_status,
-        chain_tip_change,
+        tip_change,
         peer_set,
-        Some(channel.receiver()),
+        None,
         Default::default(),
     ));
 
-    for n in 0..MORE_THAN_CHANNEL_CAPACITY {
-        mined_block_sender
-            .try_send(mined_block(n))
-            .unwrap_or_else(|error| {
-                panic!("mined block {n} could not be queued for gossip: {error:?}")
-            });
-
-        // Blocks are committed much faster than the readiness timeout.
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    for n in 1..=2 {
+        let hash = set_tip(&mut tip_sender, n);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(10), requests.recv())
+                .await
+                .unwrap(),
+            Some(zn::Request::AdvertiseBlock(hash, None)),
+        );
+        if n == 1 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
-
-    assert!(
-        !gossip_task.is_finished(),
-        "gossip task must keep running without ready peers"
-    );
-    assert!(
-        requests.try_recv().is_err(),
-        "no peers were ready, so nothing should have been broadcast"
-    );
-
-    gossip_task.abort();
+    gossip.abort();
 }
 
-/// Mined blocks that are announced while there are no ready peers are coalesced, and the latest
-/// one is broadcast when peers become ready, without waiting for another block.
+/// In-flight mined broadcasts suppress duplicate tip advertisements only on success.
 #[tokio::test(start_paused = true)]
-async fn gossip_broadcasts_latest_mined_block_when_peers_become_ready() {
+async fn gossip_mined_broadcast_outcome_controls_committed_tip_fallback() {
     let _init_guard = zebra_test::init();
+    for outcome in [Some(true), Some(false), None] {
+        let (mut tip_sender, _latest_tip, tip_change) =
+            ChainTipSender::new(None, &Network::Mainnet);
+        let (sync_status, mut recent_syncs) = SyncStatus::new();
+        recent_syncs.push_extend_tips_length(0);
+        let (peer_set, mut requests) = GatedPeerSet::new();
+        peer_set.set_readiness(Readiness::Ready);
+        let mut response = peer_set.hold_next_response();
+        let channel = SubmitBlockChannel::new();
+        let sender = channel.sender();
 
-    let network = Network::Mainnet;
-    let (_chain_tip_sender, _latest_chain_tip, chain_tip_change) =
-        ChainTipSender::new(None, &network);
+        // Both inputs are ready together: the mined submission must win over the tip fallback.
+        let hash = set_tip(&mut tip_sender, 1);
+        sender.try_send(mined_block(1)).unwrap();
+        let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+            sync_status,
+            tip_change,
+            peer_set,
+            Some(channel.receiver()),
+            Default::default(),
+        ));
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(10), requests.recv())
+                .await
+                .unwrap(),
+            Some(zn::Request::AdvertiseBlockToAll(hash)),
+        );
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(
+            requests.try_recv().is_err(),
+            "in-flight broadcasts suppress the tip fallback"
+        );
+        match outcome {
+            Some(true) => response.send(Ok(zn::Response::Nil)).unwrap(),
+            Some(false) => response.send(Err("broadcast failed".into())).unwrap(),
+            None => {
+                // Keep the response sender alive until the network timeout cancels its receiver.
+                tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, response.closed())
+                    .await
+                    .expect("the production network timeout cancels the pending response");
+                drop(response);
+            }
+        }
+
+        if outcome == Some(true) {
+            // Another submission must not reset the successful best-tip mark.
+            sender.try_send(mined_block(2)).unwrap();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_millis(10), requests.recv())
+                    .await
+                    .unwrap(),
+                Some(zn::Request::AdvertiseBlockToAll(mined_block(2).0)),
+            );
+        } else {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_millis(10), requests.recv())
+                    .await
+                    .unwrap(),
+                Some(zn::Request::AdvertiseBlock(hash, None)),
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(
+            requests.try_recv().is_err(),
+            "the committed tip is advertised only once"
+        );
+        gossip.abort();
+    }
+}
+
+/// Transaction announcements retain batching, with a two-second interval between batches.
+#[tokio::test(start_paused = true)]
+async fn transaction_gossip_batches_every_two_seconds() {
+    use crate::components::mempool::gossip_mempool_transaction_id;
+    use std::collections::HashSet;
+    use zebra_chain::transaction::{Hash, UnminedTxId};
+    use zebra_node_services::mempool::MempoolChange;
+
+    let _init_guard = zebra_test::init();
+    let (sender, receiver) = tokio::sync::broadcast::channel(2);
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let gossip = tokio::spawn(gossip_mempool_transaction_id(receiver, peer_set));
+    let first: HashSet<_> = [UnminedTxId::Legacy(Hash([1; 32]))].into();
+    sender.send(MempoolChange::added(first.clone())).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_millis(10), requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseTransactionIds(first, None)),
+    );
+
+    let second: HashSet<_> = [UnminedTxId::Legacy(Hash([2; 32]))].into();
+    sender.send(MempoolChange::added(second.clone())).unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        requests.try_recv().is_err(),
+        "transaction gossip must batch announcements"
+    );
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_millis(10), requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseTransactionIds(second, None)),
+    );
+    gossip.abort();
+}
+
+/// Backpressure must retain committed inventory rather than silently coalesce unrelated forks.
+#[tokio::test(start_paused = true)]
+async fn gossip_backpressures_committed_blocks_without_ready_peers() {
+    let _init_guard = zebra_test::init();
+    let (_tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
     let (sync_status, _recent_syncs) = SyncStatus::new();
     let (peer_set, mut requests) = GatedPeerSet::new();
-
     let channel = SubmitBlockChannel::new();
-    let mined_block_sender = channel.sender();
-
-    let gossip_task = tokio::spawn(gossip_best_tip_block_hashes(
+    let sender = channel.sender();
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
         sync_status,
-        chain_tip_change,
+        tip_change,
         peer_set.clone(),
         Some(channel.receiver()),
         Default::default(),
     ));
 
-    mined_block_sender
-        .try_send(mined_block(1))
-        .expect("channel has capacity");
-
-    // The latest block is announced just before the first block has waited for the entire
-    // response timeout, so it is still fresh when peers become ready.
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT - Duration::from_millis(1)).await;
-    let (latest_hash, latest_height) = mined_block(2);
-    mined_block_sender
-        .try_send((latest_hash, latest_height))
-        .expect("channel has capacity");
-
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
+    let mut accepted = std::collections::HashSet::new();
+    let mut backpressured = false;
+    for n in 0..MORE_THAN_CHANNEL_CAPACITY {
+        let block = (mined_block(n).0, Height(1));
+        match sender.try_send(block) {
+            Ok(()) => assert!(accepted.insert(block.0)),
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                backpressured = true;
+                break;
+            }
+            Err(error) => panic!("gossip must keep the submission channel open: {error}"),
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    if !backpressured {
+        gossip.abort();
+    }
     assert!(
-        requests.try_recv().is_err(),
-        "no peers were ready, so nothing should have been broadcast"
+        backpressured,
+        "unavailable peers must eventually backpressure independent committed submissions"
     );
+    assert_eq!(
+        accepted.len(),
+        sender.max_capacity() + 16,
+        "a full first-attempt queue must stop receiving committed notifications"
+    );
+    assert!(requests.try_recv().is_err());
 
     peer_set.set_readiness(Readiness::Ready);
-
-    let request = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
-        .await
-        .expect("latest mined block is broadcast once peers are ready")
-        .expect("peer set is still alive");
-    assert_eq!(request, zn::Request::AdvertiseBlockToAll(latest_hash));
-
-    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
-    assert!(
-        requests.try_recv().is_err(),
-        "superseded mined blocks should not be broadcast"
-    );
-    assert!(!gossip_task.is_finished());
-
-    gossip_task.abort();
+    tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, async {
+        while !accepted.is_empty() {
+            let Some(zn::Request::AdvertiseBlockToAll(hash)) = requests.recv().await else {
+                panic!("committed inventory must use all-peer delivery");
+            };
+            assert!(
+                accepted.remove(&hash),
+                "each accepted fork needs one attempt"
+            );
+        }
+    })
+    .await
+    .expect("backpressure must not discard already accepted committed forks");
+    gossip.abort();
 }
 
-/// Real advertiser readiness retains the latest mined block until a peer connects.
+/// Equal-height committed hashes carry no ancestry information and cannot supersede each other.
+#[tokio::test(start_paused = true)]
+async fn gossip_retains_independent_committed_forks_when_peers_become_ready() {
+    let _init_guard = zebra_test::init();
+    let (_tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    let channel = SubmitBlockChannel::new();
+    let sender = channel.sender();
+    let forks = [mined_block(1).0, mined_block(2).0];
+    for hash in forks {
+        sender.try_send((hash, Height(1))).unwrap();
+    }
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        tip_change,
+        peer_set.clone(),
+        Some(channel.receiver()),
+        Default::default(),
+    ));
+    tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, peer_set.waiting.notified())
+        .await
+        .expect("both submissions are consumed before readiness is available");
+    assert!(requests.try_recv().is_err());
+    peer_set.set_readiness(Readiness::Ready);
+
+    let mut remaining: std::collections::HashSet<_> = forks.into_iter().collect();
+    let result = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, async {
+        for _ in forks {
+            let Some(zn::Request::AdvertiseBlockToAll(hash)) = requests.recv().await else {
+                panic!("committed inventory must use all-peer delivery");
+            };
+            assert!(remaining.remove(&hash), "forks must not be duplicated");
+        }
+    })
+    .await;
+    gossip.abort();
+    result.expect("both independent committed forks must survive unavailable peers");
+    assert!(remaining.is_empty());
+}
+
+async fn retry_unchanged_tip(times_out: bool) {
+    let (mut tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    recent_syncs.push_extend_tips_length(0);
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let mut response = peer_set.hold_next_response();
+    let hash = set_tip(&mut tip_sender, 1);
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        tip_change,
+        peer_set,
+        None,
+        Default::default(),
+    ));
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlock(hash, None))
+    );
+    if times_out {
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, response.closed())
+            .await
+            .expect("the production network timeout cancels the pending response");
+        drop(response);
+    } else {
+        response.send(Err("advert write failed".into())).unwrap();
+    }
+    tokio::task::yield_now().await;
+    assert!(
+        requests.try_recv().is_err(),
+        "failed adverts must not busy-loop retries"
+    );
+    let retried = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, requests.recv()).await;
+    gossip.abort();
+    assert_eq!(
+        retried.expect("the unchanged best tip must be retried"),
+        Some(zn::Request::AdvertiseBlock(hash, None))
+    );
+}
+
+/// An ordinary write failure must retry without another tip notification.
+#[tokio::test(start_paused = true)]
+async fn gossip_retries_unchanged_tip_after_failed_advert() {
+    let _init_guard = zebra_test::init();
+    retry_unchanged_tip(false).await;
+}
+
+/// A timed-out ordinary broadcast must retry without another tip notification.
+#[tokio::test(start_paused = true)]
+async fn gossip_retries_unchanged_tip_after_timed_out_advert() {
+    let _init_guard = zebra_test::init();
+    retry_unchanged_tip(true).await;
+}
+
+/// A newer tip supersedes a failed ordinary tip, including while readiness is unavailable.
+#[tokio::test(start_paused = true)]
+async fn gossip_new_tip_supersedes_failed_tip_retry() {
+    let _init_guard = zebra_test::init();
+    let (mut tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    recent_syncs.push_extend_tips_length(0);
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let response = peer_set.hold_next_response();
+    let first = set_tip(&mut tip_sender, 1);
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        tip_change,
+        peer_set.clone(),
+        None,
+        Default::default(),
+    ));
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlock(first, None))
+    );
+    peer_set.set_readiness(Readiness::Pending);
+    response.send(Err("advert write failed".into())).unwrap();
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    let latest = set_tip(&mut tip_sender, 2);
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    peer_set.set_readiness(Readiness::Ready);
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlock(latest, None))
+    );
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
+    gossip.abort();
+    assert!(
+        requests.try_recv().is_err(),
+        "a stale tip must not be retried"
+    );
+}
+
+/// A failed side-chain advert has no best-tip notification to rescue it.
+#[tokio::test(start_paused = true)]
+async fn gossip_retries_side_chain_advert_after_another_submission() {
+    let _init_guard = zebra_test::init();
+    let (mut tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    recent_syncs.push_extend_tips_length(0);
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let channel = SubmitBlockChannel::new();
+    let sender = channel.sender();
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        tip_change,
+        peer_set.clone(),
+        Some(channel.receiver()),
+        Default::default(),
+    ));
+    let tip = set_tip(&mut tip_sender, 1);
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlock(tip, None))
+    );
+    let response = peer_set.hold_next_response();
+    let forks = [mined_block(2).0, mined_block(3).0];
+    sender.try_send((forks[0], Height(1))).unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlockToAll(forks[0]))
+    );
+    peer_set.set_readiness(Readiness::Pending);
+    response
+        .send(Err("side-chain advert failed".into()))
+        .unwrap();
+    // Let the retry become overdue before the new first attempt can enter the scheduler.
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT + Duration::from_millis(1)).await;
+    sender.try_send((forks[1], Height(1))).unwrap();
+    peer_set.set_readiness(Readiness::Ready);
+    let result = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, async {
+        for expected in [forks[1], forks[0]] {
+            let Some(zn::Request::AdvertiseBlockToAll(hash)) = requests.recv().await else {
+                panic!("side-chain retries must remain committed all-peer adverts");
+            };
+            assert_eq!(hash, expected, "first attempts must precede due retries");
+        }
+    })
+    .await;
+    gossip.abort();
+    result.expect("another submission must not erase the failed side-chain advert");
+}
+
+/// A full offline retry backlog must not delay a newly mined block after a peer connects.
+#[tokio::test(start_paused = true)]
+async fn gossip_fresh_mined_block_exhausts_oldest_pending_retry_without_delay() {
+    let _init_guard = zebra_test::init();
+    let (_tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let (sender, receiver) = mpsc::channel(16);
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        tip_change,
+        peer_set.clone(),
+        Some(receiver),
+        Default::default(),
+    ));
+    let started = tokio::time::Instant::now();
+
+    for n in 1..=16 {
+        let response = peer_set.hold_next_response();
+        sender.try_send(mined_block(n)).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(10), requests.recv())
+                .await
+                .unwrap(),
+            Some(zn::Request::AdvertiseBlockToAll(mined_block(n).0)),
+        );
+        response.send(Err("no eligible peers".into())).unwrap();
+        tokio::task::yield_now().await;
+    }
+
+    // The connection arrives halfway through the retry delay, as in fresh-link relay.
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT / 2).await;
+    assert!(requests.try_recv().is_err());
+    // A duplicate must not reclaim capacity or exhaust another hash's retry.
+    sender.try_send(mined_block(1)).unwrap();
+    tokio::task::yield_now().await;
+    sender.try_send(mined_block(17)).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_millis(10), requests.recv())
+            .await
+            .expect("a new mined block must not wait for the offline backlog's retry deadline"),
+        Some(zn::Request::AdvertiseBlockToAll(mined_block(17).0)),
+    );
+    assert!(started.elapsed() < TIPS_RESPONSE_TIMEOUT);
+
+    // All other independent hashes retain their spaced retry, and the evicted hash never retries.
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
+    for n in 2..=16 {
+        assert_eq!(
+            tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+                .await
+                .unwrap(),
+            Some(zn::Request::AdvertiseBlockToAll(mined_block(n).0)),
+        );
+    }
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
+    gossip.abort();
+    assert!(
+        requests.try_recv().is_err(),
+        "the evicted oldest hash must not be advertised again"
+    );
+}
+
+/// Exhausted offline relay work releases bounded capacity without erasing an unattempted fork.
+#[tokio::test(start_paused = true)]
+async fn gossip_exhausts_failed_committed_retry_and_attempts_next_fork() {
+    let _init_guard = zebra_test::init();
+    let (_tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (sync_status, _recent_syncs) = SyncStatus::new();
+    let (peer_set, mut requests) = GatedPeerSet::new();
+    peer_set.set_readiness(Readiness::Ready);
+    let first_response = peer_set.hold_next_response();
+    let (sender, receiver) = mpsc::channel(1);
+    sender.try_send(mined_block(1)).unwrap();
+    let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+        sync_status,
+        tip_change,
+        peer_set.clone(),
+        Some(receiver),
+        Default::default(),
+    ));
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlockToAll(mined_block(1).0))
+    );
+    let retry_response = peer_set.hold_next_response();
+    first_response
+        .send(Err("no eligible peers".into()))
+        .unwrap();
+    tokio::task::yield_now().await;
+    assert!(
+        requests.try_recv().is_err(),
+        "the first fork retains its bounded retry slot"
+    );
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlockToAll(mined_block(1).0))
+    );
+    sender.try_send(mined_block(2)).unwrap();
+    tokio::task::yield_now().await;
+    assert_eq!(
+        sender.capacity(),
+        0,
+        "an in-flight retry must keep backpressuring the next submission"
+    );
+    retry_response
+        .send(Err("still no eligible peers".into()))
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, requests.recv())
+            .await
+            .unwrap(),
+        Some(zn::Request::AdvertiseBlockToAll(mined_block(2).0))
+    );
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
+    gossip.abort();
+    assert!(
+        requests.try_recv().is_err(),
+        "exhausted committed retries must terminate"
+    );
+}
+
+/// Real advertiser readiness retains committed mined blocks until a peer connects.
 #[tokio::test(start_paused = true)]
 async fn gossip_broadcasts_latest_mined_block_when_an_eligible_peer_connects() {
     let _init_guard = zebra_test::init();
@@ -232,24 +694,27 @@ async fn gossip_broadcasts_latest_mined_block_when_an_eligible_peer_connects() {
             Default::default(),
         ));
 
-        let mut latest_block = mined_block(1);
-        mined_block_sender.try_send(latest_block).unwrap();
+        let mut blocks = vec![mined_block(1)];
+        mined_block_sender.try_send(blocks[0]).unwrap();
         tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
         assert!(!gossip_task.is_finished());
         if supersede {
-            latest_block = mined_block(2);
-            mined_block_sender.try_send(latest_block).unwrap();
+            blocks.push(mined_block(2));
+            mined_block_sender.try_send(blocks[1]).unwrap();
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
 
+        // Independent committed submissions are each advertised, oldest first.
         let peer = peers.connect_peer(zn::types::PeerServices::NODE_NETWORK);
-        let (hash, write) = peers.next_block_advert(peer).await.unwrap();
-        assert_eq!(hash, latest_block.0);
-        write.send(Ok(())).unwrap();
-        tokio::time::sleep(PEER_GOSSIP_DELAY * 2).await;
+        for (expected, _) in blocks {
+            let (hash, write) = peers.next_block_advert(peer).await.unwrap();
+            assert_eq!(hash, expected);
+            write.send(Ok(())).unwrap();
+        }
+        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
         assert!(
             peers.next_block_advert(peer).await.is_none(),
-            "only the latest mined block is advertised, exactly once"
+            "each committed block is advertised exactly once"
         );
         assert!(!gossip_task.is_finished());
         gossip_task.abort();
@@ -325,7 +790,7 @@ async fn gossip_broadcasts_tip_change_when_peers_become_ready() {
         previous_block_hash: block::Hash([0xff; 32]),
     });
 
-    tokio::time::sleep(PEER_GOSSIP_DELAY + TIPS_RESPONSE_TIMEOUT * 2).await;
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
     assert!(
         requests.try_recv().is_err(),
         "no peers were ready, so nothing should have been broadcast"
@@ -381,7 +846,7 @@ async fn gossip_keeps_pending_tip_change_when_a_side_chain_block_is_mined() {
     });
 
     // Wait until the chain tip broadcast is waiting for ready peers.
-    tokio::time::sleep(PEER_GOSSIP_DELAY + TIPS_RESPONSE_TIMEOUT).await;
+    tokio::time::sleep(TIPS_RESPONSE_TIMEOUT).await;
 
     // This block doesn't change the best tip.
     let (side_chain_hash, side_chain_height) = mined_block(2);
@@ -670,11 +1135,11 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
                 peer_set.set_readiness(Readiness::Ready);
                 assert_eq!(
                     requests.recv().await,
-                    Some(zn::Request::AdvertiseBlock(hash, None))
+                    Some(zn::Request::AdvertiseBlock(genesis.hash(), None))
                 );
                 assert_eq!(
                     requests.recv().await,
-                    Some(zn::Request::AdvertiseBlock(genesis.hash(), None))
+                    Some(zn::Request::AdvertiseBlock(hash, None))
                 );
                 first_commit = Some(event);
             } else {
