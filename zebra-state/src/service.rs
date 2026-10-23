@@ -1687,7 +1687,64 @@ impl Service<ReadRequest> for ReadStateService {
             .boxed();
         };
 
+        // Cancellation cannot release admission while a detached compact check is still running.
+        static COMPACT_CHECKS: Semaphore = Semaphore::const_new(3);
+        let compact_permit = if matches!(
+            req,
+            ReadRequest::CheckBestTipHeader { .. } | ReadRequest::CheckBestTipBlockCommitments(_)
+        ) {
+            match COMPACT_CHECKS.try_acquire() {
+                Ok(permit) => Some(permit),
+                Err(_) => return async { Err("compact header checks are busy".into()) }.boxed(),
+            }
+        } else {
+            None
+        };
+
         let request_handler = move || match req {
+            ReadRequest::CheckBestTipHeader { header, height } => {
+                if state.early_relay.is_rejected(header.hash()) {
+                    return Err("compact header was deterministically rejected".into());
+                }
+                read::difficulty::candidate_header_context(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                    &header,
+                    height,
+                    true,
+                )?
+                .filter(|_| {
+                    state.best_tip().is_some_and(|(tip_height, tip_hash)| {
+                        tip_hash == header.previous_block_hash
+                            && tip_height.next().ok() == Some(height)
+                    })
+                })
+                .ok_or("compact header does not extend the committed best tip")?;
+                Ok(ReadResponse::ValidBestTipHeader)
+            }
+            ReadRequest::CheckBestTipBlockCommitments(block) => {
+                if state.early_relay.is_rejected(block.hash()) {
+                    return Err("compact block was deterministically rejected".into());
+                }
+                let height = block
+                    .coinbase_height()
+                    .ok_or("compact body has no height")?;
+                if NetworkUpgrade::current(&state.network, height) < NetworkUpgrade::Nu5 {
+                    return Err("compact authentication requires NU5 commitments".into());
+                }
+                let parent = block.header.previous_block_hash;
+                read::difficulty::authenticated_candidate_header(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                    block,
+                    true,
+                )?
+                .filter(|_| state.best_tip().is_some_and(|(_, hash)| hash == parent))
+                .ok_or("compact body does not extend the committed best tip")?;
+                Ok(ReadResponse::ValidBestTipBlockCommitments)
+            }
             ReadRequest::MiningCandidate => {
                 let candidate = state.mining_candidate.borrow().clone();
                 Ok(ReadResponse::MiningCandidate(candidate.and_then(
@@ -2189,7 +2246,10 @@ impl Service<ReadRequest> for ReadStateService {
             }
         };
 
-        timed_span.spawn_blocking(request_handler)
+        timed_span.spawn_blocking(move || {
+            let _compact_permit = compact_permit;
+            request_handler()
+        })
     }
 }
 
