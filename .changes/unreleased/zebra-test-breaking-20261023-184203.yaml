@@ -1,0 +1,4 @@
+project: zebra-test
+kind: breaking
+body: 'A `MockService` now panics when its request queue overflows instead of silently dropping requests, and expected requests get up to 10 seconds by default; absence checks keep the 300 ms window, now named `DEFAULT_REQUEST_OBSERVATION_TIMEOUT` instead of `DEFAULT_MAX_REQUEST_DELAY`.'
+time: 2026-10-23T18:42:03.527950836+02:00
