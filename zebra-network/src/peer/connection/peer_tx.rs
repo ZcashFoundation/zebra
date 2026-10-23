@@ -1,6 +1,6 @@
 //! The peer message sender channel.
 
-use futures::{FutureExt, Sink, SinkExt};
+use futures::{future::poll_fn, FutureExt, Sink, SinkExt};
 
 use zebra_chain::serialization::SerializationError;
 
@@ -26,25 +26,22 @@ where
 {
     /// Sends `msg` on `self.inner`, returning a timeout error if it takes too long.
     pub async fn send(&mut self, msg: Message) -> Result<(), PeerError> {
-        tokio::time::timeout(REQUEST_TIMEOUT, self.inner.send(msg))
-            .await
-            .map_err(|_| PeerError::ConnectionSendTimeout)?
-            .map_err(Into::into)
+        self.send_authorized(msg, || true).await
     }
 
-    /// Recheck authorization after sink readiness, immediately before starting the local write.
+    /// Like [`Self::send`], but rechecks `authorized` after sink readiness,
+    /// immediately before starting the local write.
     pub async fn send_authorized(
         &mut self,
         msg: Message,
-        mut authorized: impl FnMut() -> bool,
+        authorized: impl FnOnce() -> bool,
     ) -> Result<(), PeerError> {
         tokio::time::timeout(REQUEST_TIMEOUT, async {
-            futures::future::poll_fn(|cx| std::pin::Pin::new(&mut self.inner).poll_ready(cx))
-                .await?;
+            poll_fn(|cx| self.inner.poll_ready_unpin(cx)).await?;
             if !authorized() {
                 return Err(PeerError::AdvertAuthorizationRevoked);
             }
-            std::pin::Pin::new(&mut self.inner).start_send(msg)?;
+            self.inner.start_send_unpin(msg)?;
             self.inner.flush().await?;
             Ok(())
         })

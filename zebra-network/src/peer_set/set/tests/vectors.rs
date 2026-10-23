@@ -1053,17 +1053,66 @@ async fn block_advert_success_waits_for_peer_write() {
     );
 }
 
-async fn failed_block_advert_write(all_peers: bool) {
-    let (client, harness, connection, messages) =
+/// A caller timeout must not cancel an advert queued on an unpolled connection.
+#[tokio::test(start_paused = true)]
+async fn block_advert_is_written_after_caller_timeout() {
+    let _init_guard = zebra_test::init();
+    let (client, harness, connection, mut messages) =
         real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
     let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])
         .chain(stream::pending());
+    let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discover)
+        .with_minimum_peer_version(minimum)
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let hash = block::Hash([22; 32]);
+    let advert = timeout(Duration::from_secs(1), advertiser.ready())
+        .await
+        .unwrap()
+        .unwrap()
+        .call(Request::AdvertiseBlockToAll(hash));
+
+    // Leave the connection unpolled until the caller's timeout drops the result receiver.
+    assert!(timeout(Duration::from_secs(6), advert).await.is_err());
+    let mut connection = Box::pin(connection);
+    assert!(connection.as_mut().now_or_never().is_none());
+    assert_eq!(
+        messages
+            .try_recv()
+            .expect("the queued advert must be written despite the caller's timeout"),
+        Message::Inv(vec![InventoryHash::Block(hash)])
+    );
+    assert!(connection.as_mut().now_or_never().is_none());
+    assert!(harness.current_error().is_none());
+}
+
+async fn block_advert_write_outcomes(all_peers: bool, successful_peer: bool) {
+    let (client, harness, connection, messages) =
+        real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+    let (other_client, other_harness, other_connection, mut other_messages) =
+        real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+    let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let other_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+    let discover = stream::iter([
+        Ok::<_, BoxError>(Change::Insert(addr, client.into())),
+        Ok(Change::Insert(other_addr, other_client.into())),
+    ])
+    .chain(stream::pending());
     let (minimum_peer_version, _best_tip) =
         MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
     let (mut peer_set, _guard) = PeerSetBuilder::new()
         .with_discover(discover)
         .with_minimum_peer_version(minimum_peer_version)
+        .with_block_gossip_peer_ips(vec![Ipv4Addr::LOCALHOST.into()])
+        .max_conns_per_ip(2)
         .build();
     timeout(Duration::from_secs(1), peer_set.ready())
         .await
@@ -1077,35 +1126,189 @@ async fn failed_block_advert_write(all_peers: bool) {
     };
     let mut advertiser = peer_set.block_advertiser();
     let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
-    let advert = advertiser.ready().await.unwrap().call(request);
+    let mut advert = Box::pin(advertiser.ready().await.unwrap().call(request));
     drop(messages);
-    let (result, ()) = timeout(Duration::from_secs(1), async {
-        tokio::join!(advert, connection)
-    })
-    .await
-    .expect("the closed wire must fail the actual connection write");
+    timeout(Duration::from_secs(1), connection)
+        .await
+        .expect("the closed wire must fail the actual connection write");
     assert!(
         harness.current_error().is_some(),
         "the connection detected the write failure"
     );
     assert!(
-        result.is_err(),
-        "zero successful peer writes must not be reported as success"
+        advert.as_mut().now_or_never().is_none(),
+        "one failed write cannot decide the result while another is pending"
     );
+    if successful_peer {
+        let mut other_connection = Box::pin(other_connection);
+        assert!(other_connection.as_mut().now_or_never().is_none());
+        assert_eq!(
+            other_messages.try_recv().unwrap(),
+            Message::Inv(vec![InventoryHash::Block(hash)])
+        );
+        assert!(other_connection.as_mut().now_or_never().is_none());
+        assert_eq!(
+            timeout(Duration::from_secs(1), advert)
+                .await
+                .unwrap()
+                .unwrap(),
+            Response::Nil
+        );
+        assert!(
+            other_messages.next().now_or_never().is_none(),
+            "the successful peer must receive the advert exactly once"
+        );
+    } else {
+        drop(other_messages);
+        let (result, ()) = timeout(Duration::from_secs(1), async {
+            tokio::join!(advert, other_connection)
+        })
+        .await
+        .expect("both closed wires must fail their connection writes");
+        assert!(other_harness.current_error().is_some());
+        assert!(
+            result.is_err(),
+            "zero successful peer writes must not be reported as success"
+        );
+    }
 }
 
 /// Committed adverts must propagate actual connection write failures.
 #[tokio::test(start_paused = true)]
 async fn committed_block_advert_reports_peer_write_failure() {
     let _init_guard = zebra_test::init();
-    failed_block_advert_write(true).await;
+    block_advert_write_outcomes(true, false).await;
 }
 
 /// Sampled tip/early adverts must not discard every selected peer's write error.
 #[tokio::test(start_paused = true)]
 async fn ordinary_block_advert_reports_peer_write_failure() {
     let _init_guard = zebra_test::init();
-    failed_block_advert_write(false).await;
+    block_advert_write_outcomes(false, false).await;
+}
+
+/// One failed write must not cause a retry of an advert already written to another selected peer.
+#[tokio::test(start_paused = true)]
+async fn block_advert_succeeds_after_partial_write_failure() {
+    let _init_guard = zebra_test::init();
+    for all_peers in [false, true] {
+        block_advert_write_outcomes(all_peers, true).await;
+    }
+}
+
+/// A stalled connection must not delay success or lose its queued advert after success is returned.
+#[tokio::test(start_paused = true)]
+async fn block_advert_succeeds_without_waiting_for_stalled_peer() {
+    let _init_guard = zebra_test::init();
+    for all_peers in [false, true] {
+        let (client, _harness, connection, mut messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let (slow_client, _slow_harness, slow_connection, mut slow_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+        let slow_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+        let discover = stream::iter([
+            Ok::<_, BoxError>(Change::Insert(addr, client.into())),
+            Ok(Change::Insert(slow_addr, slow_client.into())),
+        ])
+        .chain(stream::pending());
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discover)
+            .with_minimum_peer_version(minimum)
+            .with_block_gossip_peer_ips(vec![Ipv4Addr::LOCALHOST.into()])
+            .max_conns_per_ip(2)
+            .build();
+        timeout(Duration::from_secs(1), peer_set.ready())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let hash = block::Hash([23; 32]);
+        let request = if all_peers {
+            Request::AdvertiseBlockToAll(hash)
+        } else {
+            Request::AdvertiseBlock(hash, None)
+        };
+        let advert = advertiser.ready().await.unwrap().call(request);
+        let mut connection = Box::pin(connection);
+        assert!(connection.as_mut().now_or_never().is_none());
+        assert_eq!(
+            messages.try_recv().unwrap(),
+            Message::Inv(vec![InventoryHash::Block(hash)])
+        );
+        assert!(connection.as_mut().now_or_never().is_none());
+        assert_eq!(
+            timeout(Duration::from_secs(1), advert)
+                .await
+                .expect("one completed write must succeed before a caller's 6-second timeout")
+                .unwrap(),
+            Response::Nil
+        );
+
+        tokio::time::sleep(Duration::from_secs(7)).await;
+        let mut slow_connection = Box::pin(slow_connection);
+        assert!(slow_connection.as_mut().now_or_never().is_none());
+        assert_eq!(
+            slow_messages.try_recv().unwrap(),
+            Message::Inv(vec![InventoryHash::Block(hash)])
+        );
+        assert!(slow_connection.as_mut().now_or_never().is_none());
+        assert!(
+            messages.next().now_or_never().is_none(),
+            "the first peer must not receive a duplicate advert"
+        );
+        assert!(
+            slow_messages.next().now_or_never().is_none(),
+            "the delayed peer must receive its queued advert exactly once"
+        );
+    }
+}
+
+/// An unknown delivery must not be hidden by another peer's definitive failure.
+#[tokio::test(start_paused = true)]
+async fn block_advert_acknowledgement_timeout_keeps_delivery_unknown() {
+    let _init_guard = zebra_test::init();
+    let peer_versions = PeerVersions {
+        peer_versions: vec![CURRENT_NETWORK_PROTOCOL_VERSION; 2],
+    };
+    let (discovered, mut handles) = peer_versions.mock_peer_discovery();
+    let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovered)
+        .with_minimum_peer_version(minimum)
+        .max_conns_per_ip(2)
+        .build();
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let advert = advertiser
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::AdvertiseBlockToAll(block::Hash([24; 32])));
+    handles[0]
+        .block_advert_receiver
+        .try_recv()
+        .unwrap()
+        .result
+        .send(Err("test write failed".into()))
+        .unwrap();
+    let error = timeout(REQUEST_TIMEOUT * 2, advert)
+        .await
+        .expect("the acknowledgement wait must remain bounded")
+        .unwrap_err();
+    assert!(
+        error.is::<tokio::time::error::Elapsed>(),
+        "a timeout must take precedence over a definitive write failure"
+    );
+    let queued = handles[1].block_advert_receiver.try_recv().unwrap();
+    assert_eq!(queued.hash, block::Hash([24; 32]));
+    assert!(queued.result.is_closed());
 }
 
 /// Admission to a full or closed real connection queue is not a successful local write.
@@ -1149,9 +1352,9 @@ async fn block_advert_reports_full_and_closed_connection_queues() {
     }
 }
 
-/// Clones share the existing network concurrency bound, and cancellation returns its permit.
+/// Clones bound concurrent calls; cancellation returns a permit but leaves queued adverts intact.
 #[tokio::test(start_paused = true)]
-async fn block_advertiser_bounds_in_flight_writes_across_clones() {
+async fn block_advertiser_bounds_in_flight_calls_across_clones() {
     let _init_guard = zebra_test::init();
     let (client, _harness, _connection, _messages) =
         real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);

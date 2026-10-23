@@ -102,8 +102,9 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// to avoid async task deadlocks.
 ///
 /// The fourth result is an independently bounded [`crate::BlockAdvertiser`]. Outbound block
-/// adverts must use it, not the ordinary buffered service. Its success acknowledges completed
-/// local transport writes to selected peers; admission alone and zero-peer fanout are not success.
+/// adverts must use it, not the ordinary buffered service. Success acknowledges the first completed
+/// local transport write to a selected peer, without waiting for the others. Admission alone and
+/// zero-peer fanout are not success; timeouts leave delivery unknown. Other queued writes continue.
 /// Readiness waits for an eligible connected peer, independently of ordinary request readiness.
 ///
 /// # Panics
