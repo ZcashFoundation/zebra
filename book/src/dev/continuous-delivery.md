@@ -24,7 +24,7 @@ The event-driven workflow builds an image with its trigger-specific inputs, then
 4. If the zonal MIG does not exist, create it with `--size=1` and apply the stateful policy.
 5. Assign the static IP when the caller passes `use_reserved_ip`: always for `push` and `release`, and for a workflow_dispatch that selects `prod` or runs from the `main` ref. Other dev deployments get no external address (`--no-address`). Zone-to-IP mapping is deterministic: zone `b` → primary, zone `c` → secondary, zone `d` → tertiary.
 
-Cache images come from `zfnd-deploy-integration-tests-gcp.yml`'s `create-state-image` job. Image names encode branch, commit, state-DB version, network, and timestamp. One image per network seeds all three zones. Lookup priority in `gcp-get-cached-disks.sh`: current branch, then `main`, then any branch; most recent first.
+Cache images come from `zfnd-deploy-integration-tests-gcp.yml`'s `create-state-image` job. Image names encode branch, commit, state-DB version, network, and timestamp. One image per network seeds all three zones. Lookup priority in `gcp-get-cached-disks.sh`: current branch, then `main`, then any branch; most recent first. If no image exists for the current state-DB version, the lookup uses the newest image from the previous version when zebrad can upgrade it in place.
 
 Each `deploy-nodes` cell holds its per-MIG concurrency lock through template rollout and optional application-health verification. See the [runbook](gcp-deployment-operations.md#deploy-success-has-two-stages) for details.
 

@@ -195,7 +195,7 @@ jobs:
 
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
-  # - state version (from the source code) - v{N}
+  # - state version (from the source code) - v{N}, or v{N-1} when there is no v{N} image and zebrad can upgrade it in place
   # - network (network) - mainnet or testnet
   # - disk target height kind (disk_suffix) - checkpoint or tip
   #
@@ -951,7 +951,7 @@ jobs:
       # Using the newest image makes future jobs faster, because it is closer to the chain tip.
       #
       # Skips creating updated images if the original image is less than $CACHED_STATE_UPDATE_LIMIT behind the current tip.
-      # Full sync images are always created.
+      # Full sync images, and images upgraded from an earlier database major version, are always created.
       #
       # The image can contain:
       # - Zebra cached state, or
@@ -996,8 +996,14 @@ jobs:
           REPOSITORY_LABEL="${REPOSITORY_LABEL//[^a-z0-9_-]/-}"
           REPOSITORY_LABEL="${REPOSITORY_LABEL:0:63}"
 
+          # Versions look like `v29-0-0`, so the text before the first dash is the major version.
+          MAJOR_UPGRADED=false
+          if [[ "$INITIAL_DISK_DB_VERSION" != "new" && "${INITIAL_DISK_DB_VERSION%%-*}" != "${RUNNING_DB_VERSION%%-*}" ]]; then
+            MAJOR_UPGRADED=true
+          fi
+
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
-          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${FORCE_SAVE_TO_DISK}" == "true" ]]; then
+          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${FORCE_SAVE_TO_DISK}" == "true" ]] || [[ "$MAJOR_UPGRADED" == "true" ]]; then
 
              # Use RUNNING_DB_VERSION for image naming (more reliable than STATE_VERSION)
              # Extract just the major version number for the image name
