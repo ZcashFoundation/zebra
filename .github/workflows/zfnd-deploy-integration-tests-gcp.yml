@@ -476,8 +476,8 @@ jobs:
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
       #
-      # If the container has already finished, `docker wait` should return its status.
-      # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
+      # If the container has already finished, `docker wait` returns its status. A failed
+      # `docker wait` prints no status, which must fail the step, not count as success.
       #
       # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
       # with that status.
@@ -501,7 +501,7 @@ jobs:
           EXIT_STATUS=\$(sudo docker wait ${CONTAINER_ID});
           echo 'Container exit status: '\$EXIT_STATUS;
 
-          if [ \"\$EXIT_STATUS\" -ne 0 ]; then
+          if [ \"\$EXIT_STATUS\" != 0 ]; then
             echo 'Test failed with exit code: '\$EXIT_STATUS;
             exit 1;
           else
