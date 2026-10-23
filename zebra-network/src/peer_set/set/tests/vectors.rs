@@ -999,7 +999,13 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
     let (wire_tx, wire_rx) = mpsc::channel(0);
     let connection = Connection::new(
         tower::service_fn(|_: Request| async { Ok::<_, BoxError>(Response::Nil) }),
-        (client_rx, advert_rx, minimum, bans),
+        (
+            client_rx,
+            advert_rx,
+            client.compact_receive_tx.subscribe(),
+            minimum,
+            bans,
+        ),
         client.error_slot.clone(),
         wire_tx.sink_map_err(|_| {
             SerializationError::from(std::io::Error::new(
