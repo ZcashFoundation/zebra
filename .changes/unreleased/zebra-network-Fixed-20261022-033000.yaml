@@ -1,5 +1,0 @@
-project: zebra-network
-kind: Fixed
-body: 'Connections write a dequeued block advert even if the `BlockAdvertiser` caller stopped
-  waiting for its result ([#11876](https://github.com/ZcashFoundation/zebra/pull/11876)).'
-time: 2026-10-22T03:30:00+02:00

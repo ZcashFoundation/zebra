@@ -1022,6 +1022,7 @@ where
     /// Write dequeued adverts even if their callers have stopped waiting for the result.
     ///
     /// Acknowledge only completed local writes, after rechecking live authorization.
+    /// A stalled write must not extend an outstanding request's response deadline.
     async fn send_block_advert(&mut self, advert: BlockAdvert) {
         metrics::counter!(
             "zebra.net.out.requests",
@@ -1033,16 +1034,26 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let delivery = self
-            .peer_tx
-            .send_authorized(
+        let delivery = tokio::select! {
+            biased;
+            _ = async {
+                if matches!(self.state, State::AwaitingResponse { .. }) {
+                    self.request_timer
+                        .as_mut()
+                        .expect("timeout must be set while awaiting response")
+                        .await;
+                } else {
+                    futures::future::pending::<()>().await;
+                }
+            } => Err(PeerError::ConnectionReceiveTimeout),
+            result = self.peer_tx.send_authorized(
                 Message::Inv(vec![InventoryHash::Block(advert.hash)]),
                 || {
                     version >= minimum.current()
                         && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
                 },
-            )
-            .await;
+            ) => result,
+        };
         match delivery {
             Ok(()) => {
                 let _ = advert.result.send(Ok(()));
@@ -1050,7 +1061,8 @@ where
             Err(error) => {
                 let error = SharedPeerError::from(error);
                 let _ = advert.result.send(Err(error.clone().into()));
-                self.fail_with(error).await;
+                // Do not await the stalled sink's close before notifying pending requests.
+                self.shutdown(error);
             }
         }
     }

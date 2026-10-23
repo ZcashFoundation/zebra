@@ -741,6 +741,59 @@ async fn block_advert_while_awaiting_response() {
     .expect("adverts and the original response finish before the request timeout");
 }
 
+/// A blocked abandoned advert must not extend an outstanding request's response deadline.
+#[tokio::test(start_paused = true)]
+async fn abandoned_block_advert_preserves_request_deadline() {
+    let _init_guard = zebra_test::init();
+    let (mut connection, mut client_tx, _service, mut outbound, error_slot) = new_test_connection();
+    let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
+    connection.block_advert_rx = advert_rx;
+    let connection = connection.run(futures::stream::pending()).shared();
+
+    let (tx, mut response) = oneshot::channel();
+    client_tx
+        .try_send(ClientRequest {
+            request: Request::Peers,
+            tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::current(),
+        })
+        .unwrap();
+    assert!(connection.clone().now_or_never().is_none());
+    assert_eq!(outbound.next().await, Some(Message::GetAddr));
+    assert!(connection.clone().now_or_never().is_none());
+
+    tokio::time::advance(REQUEST_TIMEOUT - Duration::from_secs(1)).await;
+    let (result, delivery) = tokio::sync::oneshot::channel();
+    drop(delivery);
+    advert_tx
+        .try_send(crate::peer_set::BlockAdvert {
+            hash: block::Hash([1; 32]),
+            result,
+        })
+        .unwrap();
+
+    // Leave the outbound channel full so the advert's flush stays pending.
+    assert!(connection.clone().now_or_never().is_none());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        connection.clone().now_or_never(),
+        Some(()),
+        "a stalled advert must close the connection at the original response deadline",
+    );
+    let error = response
+        .try_recv()
+        .unwrap()
+        .expect("the pending request must receive its timeout without waiting for the advert")
+        .unwrap_err();
+    assert_eq!(error.inner_debug(), "ConnectionReceiveTimeout");
+    assert_eq!(
+        error_slot.try_get_error().unwrap().inner_debug(),
+        "ConnectionReceiveTimeout",
+    );
+}
+
 /// A pending GetBlocks response must not be displaced by a simultaneous unsolicited advert.
 #[tokio::test]
 async fn getblocks_response_precedes_ready_block_advert() {
