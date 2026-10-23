@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: 'Mining templates can extend a proof-of-work checked parent before verification completes. Early templates are coinbase-only and withdrawn on rejection or after 30 seconds; cached work is checked against live candidate ownership before serving. Upgrade with the matching `zebra-state` and `zebra-consensus` mining-candidate APIs.'
+time: 2026-10-11T00:00:00Z

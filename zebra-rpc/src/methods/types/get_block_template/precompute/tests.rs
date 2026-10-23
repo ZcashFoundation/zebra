@@ -532,6 +532,10 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
                 std::future::ready(Ok::<_, zebra_node_services::BoxError>(match request {
                     ReadRequest::Tip => ReadResponse::Tip(Some((height, chain_info.tip_hash))),
                     ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                    ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                    ReadRequest::MiningCandidateChanges => {
+                        ReadResponse::MiningCandidateChanges(Default::default())
+                    }
                     other => panic!("unexpected state request: {other:?}"),
                 }))
             }
@@ -719,6 +723,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                         Request::Tip => Response::Tip(Some(parent)),
                         Request::BestChainBlockHash(_) => Response::BlockHash(None),
                         Request::KnownBlock(_) => Response::KnownBlock(None),
+                        Request::MiningCandidate(_) => Response::MiningCandidate(None),
                         Request::AwaitUtxo(requested) => {
                             assert_eq!(requested, outpoint);
                             Response::Utxo(utxo.utxo)
@@ -783,6 +788,21 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 .is_none(),
             "coinbase-only templates must not reach the verifier"
         );
+        cache.clear();
+        tokio::time::pause();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::resume();
+        assert!(
+            tasks.try_join_next().is_none(),
+            "withdrawal must leave the validator running"
+        );
+        assert!(
+            verifier_requests
+                .try_next_request()
+                .now_or_never()
+                .is_none(),
+            "withdrawn templates must not reach the verifier"
+        );
         let expected =
             proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap();
@@ -836,4 +856,343 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     })
     .await
     .expect("background validation must not stall publication");
+}
+
+/// A retained full build must not reserve the mutex ahead of its candidate replacement.
+#[tokio::test]
+async fn candidate_interrupts_a_queued_build_permit_without_deadlock() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let network = Network::new_regtest(Default::default());
+        let genesis = zebra_chain::block::genesis::regtest_genesis_block();
+        let tip_hash = genesis.hash();
+        let (state, read_state, tip, _tip_changes) =
+            zebra_state::populated_state([genesis], &network).await;
+        let candidate_read = Arc::new(tokio::sync::Notify::new());
+        let observed_state = tower::service_fn({
+            let read_state = read_state.clone();
+            let candidate_read = candidate_read.clone();
+            move |request| {
+                let read_state = read_state.clone();
+                let candidate_read = candidate_read.clone();
+                async move {
+                    let response = read_state.oneshot(request).await?;
+                    if matches!(&response, ReadResponse::MiningCandidate(Some(_))) {
+                        candidate_read.notify_one();
+                    }
+                    Ok::<_, zebra_state::BoxError>(response)
+                }
+            }
+        });
+        let snapshot_started = Arc::new(tokio::sync::Notify::new());
+        let snapshot_returned = Arc::new(tokio::sync::Notify::new());
+        let (release_snapshot, snapshot_released) = watch::channel(false);
+        let mempool = tower::service_fn({
+            let snapshot_started = snapshot_started.clone();
+            let snapshot_returned = snapshot_returned.clone();
+            move |request| {
+                assert!(matches!(request, mempool::Request::FullTransactions));
+                snapshot_started.notify_one();
+                let snapshot_returned = snapshot_returned.clone();
+                let mut snapshot_released = snapshot_released.clone();
+                async move {
+                    while !*snapshot_released.borrow_and_update() {
+                        snapshot_released.changed().await.unwrap();
+                    }
+                    snapshot_returned.notify_one();
+                    Ok::<_, zebra_state::BoxError>(mempool::Response::FullTransactions {
+                        transactions: vec![],
+                        transaction_dependencies: Default::default(),
+                        last_seen_tip_hash: tip_hash,
+                    })
+                }
+            }
+        });
+        let miner = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .unwrap(),
+        );
+        let coinbases = CoinbaseCache::default();
+        let cache = TemplateCache::default();
+        let mut publications = cache.subscribe();
+        let (_events, events) = broadcast::channel(1);
+        let updater = tokio::spawn(run(
+            network.clone(),
+            miner,
+            coinbases.clone(),
+            cache.clone(),
+            mempool,
+            events,
+            observed_state,
+            tip,
+            MockSyncStatus::default(),
+            zebra_test::mock_service::MockService::build().for_unit_tests(),
+        ));
+        let initial = loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &network, DateTime32::now()) {
+                break template;
+            }
+            publications.changed().await;
+        };
+        snapshot_started.notified().await;
+        let permit = coinbases.build.clone().lock_owned().await;
+        release_snapshot.send_replace(true);
+        snapshot_returned.notified().await;
+        // On this current-thread runtime the updater continues from the returned snapshot to
+        // its queued mutex acquisition before this test can observe the notification.
+        let candidate = Arc::new(
+            proposal_block_from_template(&initial, BlockTemplateTimeSource::CurTime, &network)
+                .unwrap(),
+        );
+        let candidate_hash = candidate.hash();
+        // Keep the original state buffer alive: dropping its last sender closes the write/tip
+        // channels and stops the updater before it can observe the candidate.
+        let zebra_state::Response::MiningCandidate(Some(_candidate_guard)) = state
+            .clone()
+            .oneshot(zebra_state::Request::MiningCandidate(candidate))
+            .await
+            .unwrap()
+        else {
+            panic!("the real candidate subscription enables early work");
+        };
+        candidate_read.notified().await;
+        // The replacement has now reached the same mutex. Releasing it must not hand ownership
+        // to a retained future that the updater no longer polls.
+        drop(permit);
+        let candidate_work = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(template) =
+                    cache.template_for_tip(candidate_hash, &network, DateTime32::now())
+                {
+                    break template;
+                }
+                publications.changed().await;
+            }
+        })
+        .await;
+        updater.abort();
+        let candidate_work =
+            candidate_work.expect("the candidate must acquire released build capacity");
+        assert_eq!(candidate_work.height, 2);
+        assert_eq!(candidate_work.previous_block_hash, candidate_hash);
+    })
+    .await
+    .expect("the queued-acquisition regression must finish before candidate expiry");
+}
+
+/// Pending transaction verification permits early work; rejection restores the committed parent.
+#[tokio::test]
+async fn pending_verification_publishes_early_work_and_failure_restores_the_tip() {
+    use zebra_chain::{block::genesis::regtest_genesis_block, chain_sync_status::MockSyncStatus};
+    use zebra_consensus::{error::TransactionError, SemanticBlockVerifier, VerifyBlockError};
+    use zebra_node_services::mempool;
+    use zebra_test::mock_service::MockService;
+
+    use crate::methods::types::get_block_template::proposal::proposal_block_from_template;
+
+    let _init_guard = zebra_test::init();
+
+    // Stay below the candidate's 30-second lifetime: expiry must not imitate failure withdrawal.
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let network = Network::new_regtest(Default::default());
+        let genesis = regtest_genesis_block();
+        let tip_hash = genesis.hash();
+        let (state, read_state, tip, _tip_changes) =
+            zebra_state::populated_state([genesis], &network).await;
+        let miner_params = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .expect("hard-coded transparent address is valid"),
+        );
+        let mut mempool: MockService<_, _, _, zebra_state::BoxError> = MockService::build()
+            .with_max_request_delay(Duration::from_secs(10))
+            .for_unit_tests();
+        let mut transactions: MockService<_, _, _, zebra_state::BoxError> = MockService::build()
+            .with_max_request_delay(Duration::from_secs(10))
+            .for_unit_tests();
+        let verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build().for_unit_tests();
+        let (mempool_events, mempool_changes) = broadcast::channel(1);
+        let cache = TemplateCache::default();
+        let mut changes = cache.subscribe();
+        let updater = tokio::spawn(run(
+            network.clone(),
+            miner_params,
+            CoinbaseCache::default(),
+            cache.clone(),
+            mempool.clone(),
+            mempool_changes,
+            read_state.clone(),
+            tip.clone(),
+            MockSyncStatus::default(),
+            verifier,
+        ));
+
+        let original = loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &network, DateTime32::now()) {
+                break template;
+            }
+            changes.changed().await;
+        };
+        assert_eq!(original.height, 1);
+
+        // Keep the full build pending too, so the candidate must interrupt an active updater.
+        let mempool_response = mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await;
+        // Build time before the interruption must still pace the resumed build's successor. It
+        // must exceed twice the mempool pause, so pacing by the pause alone fails the check below.
+        let awaited_build = MEMPOOL_THROTTLE * 3;
+        tokio::time::sleep(awaited_build).await;
+        let candidate = Arc::new(
+            proposal_block_from_template(&original, BlockTemplateTimeSource::CurTime, &network)
+                .expect("the real Regtest template produces a candidate"),
+        );
+        assert_eq!(candidate.transactions.len(), 1);
+        let candidate_hash = candidate.hash();
+        let ReadResponse::MiningCandidateChanges(mut candidates) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .expect("candidate changes are readable")
+        else {
+            panic!("state must return a candidate subscription");
+        };
+        let verification = tokio::spawn(
+            SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
+                .oneshot(zebra_consensus::Request::Commit(candidate.clone())),
+        );
+        let transaction_response = transactions
+            .expect_request_that(|request| {
+                request.transaction == candidate.transactions[0] && request.height == Height(1)
+            })
+            .await;
+
+        let info = loop {
+            if let ReadResponse::MiningCandidate(Some(info)) = read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .expect("the candidate notification is readable")
+            {
+                break info;
+            }
+            candidates.changed().await;
+        };
+        assert_eq!(info.tip_hash, candidate_hash);
+        assert_eq!(info.tip_height, Height(1));
+
+        let early = loop {
+            if let Some(template) =
+                cache.template_for_tip(candidate_hash, &network, DateTime32::now())
+            {
+                break template;
+            }
+            changes.changed().await;
+        };
+        assert!(
+            !verification.is_finished(),
+            "no transaction response has been sent"
+        );
+        assert_eq!(early.previous_block_hash, candidate_hash);
+        assert_eq!(early.height, 2);
+        assert!(
+            early.transactions.is_empty(),
+            "early work must be coinbase-only"
+        );
+        assert_eq!(early.bits, info.expected_difficulty);
+        assert_eq!(early.min_time, info.min_time);
+        assert_eq!(early.max_time, info.max_time);
+        let early_block =
+            proposal_block_from_template(&early, BlockTemplateTimeSource::CurTime, &network)
+                .expect("early work must contain a usable coinbase transaction");
+        assert_eq!(early_block.transactions.len(), 1);
+        assert_eq!(early_block.coinbase_height(), Some(Height(2)));
+        assert_eq!(tip.best_tip_height_and_hash(), Some((Height(0), tip_hash)));
+
+        let added_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([3; 32]));
+        mempool_events
+            .send(MempoolChange::added([added_id].into_iter().collect()))
+            .unwrap();
+        mempool_response.respond(mempool::Response::FullTransactions {
+            transactions: Vec::new(),
+            transaction_dependencies: Default::default(),
+            last_seen_tip_hash: tip_hash,
+        });
+        transaction_response.respond_error(TransactionError::CoinbasePosition.into());
+        assert!(matches!(
+            verification
+                .await
+                .expect("the verifier task must not panic"),
+            Err(VerifyBlockError::Transaction(
+                TransactionError::CoinbasePosition
+            ))
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::MiningCandidate)
+                .await
+                .expect("candidate withdrawal is readable"),
+            ReadResponse::MiningCandidate(None)
+        ));
+
+        let restored = loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &network, DateTime32::now()) {
+                break template;
+            }
+            changes.changed().await;
+        };
+        let restored_at = Instant::now();
+        assert_eq!(restored.height, original.height);
+        assert_eq!(restored.previous_block_hash, tip_hash);
+        assert!(cache
+            .template_for_tip(candidate_hash, &network, DateTime32::now())
+            .is_none());
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::Tip)
+                .await
+                .expect("the committed tip is readable"),
+            ReadResponse::Tip(Some((Height(0), hash))) if hash == tip_hash
+        ));
+        // Resuming the old build must not lose a mempool change received during early work.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            mempool
+                .expect_request(mempool::Request::TransactionIds)
+                .await
+                .respond(mempool::Response::TransactionIds(
+                    [added_id].into_iter().collect(),
+                ));
+            // Restoration is observed near the resumed build's end; unpaced builds wait only
+            // `MEMPOOL_THROTTLE`.
+            assert!(
+                restored_at.elapsed() >= awaited_build / 2,
+                "the resumed build's earlier proof time must pace the next mempool build"
+            );
+            mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await
+                .respond(mempool::Response::FullTransactions {
+                    transactions: Vec::new(),
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                });
+        })
+        .await
+        .expect("a retained build must process mempool changes before the periodic backstop");
+
+        updater.abort();
+        assert!(updater
+            .await
+            .expect_err("the updater runs until aborted")
+            .is_cancelled());
+    })
+    .await
+    .expect("candidate publication and rejection rollback must finish before candidate expiry");
 }

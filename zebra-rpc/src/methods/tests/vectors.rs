@@ -3583,6 +3583,10 @@ async fn getblocktemplate_precomputed() {
                             })
                         }
                         ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected read state request: {other:?}"),
                     });
             }
@@ -3757,9 +3761,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
             loop {
                 let tip_reads = tip_reads.clone();
                 read_state
-                    .expect_request_that(|req| {
-                        matches!(req, ReadRequest::ChainInfo | ReadRequest::Tip)
-                    })
+                    .expect_request_that(|_| true)
                     .await
                     .respond_with(move |req| match req {
                         ReadRequest::ChainInfo => {
@@ -3781,6 +3783,10 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
                         ReadRequest::Tip => {
                             tip_reads.fetch_add(1, Ordering::SeqCst);
                             ReadResponse::Tip(Some((tip_height, tip_hash)))
+                        }
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
                         }
                         other => panic!("unexpected read state request: {other:?}"),
                     });
@@ -3947,6 +3953,10 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         std::future::ready(Ok::<_, BoxError>(match request {
             ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
             ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info.clone()),
+            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+            ReadRequest::MiningCandidateChanges => {
+                ReadResponse::MiningCandidateChanges(Default::default())
+            }
             other => panic!("unexpected state request: {other:?}"),
         }))
     });
@@ -4216,6 +4226,7 @@ async fn getblocktemplate_fallback_rechecks_committed_tip() {
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::Tip => ReadResponse::Tip(Some((context.tip_height, context.tip_hash))),
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
                 other => panic!("unexpected state request: {other:?}"),
             }))
         }
@@ -4310,6 +4321,7 @@ async fn fallback_completion(
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context),
                 ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
                 other => panic!("unexpected state request: {other:?}"),
             }))
         }
@@ -4400,7 +4412,8 @@ async fn getblocktemplate_fallback_builds_off_executor() {
 #[tokio::test(start_paused = true)]
 async fn getblocktemplate_fallback_coalesces_with_updater() {
     let _init_guard = zebra_test::init();
-    for with_updater in [true, false] {
+    for (initialized, with_updater) in [(false, true), (true, true), (false, false), (true, false)]
+    {
         let network = Network::Mainnet;
         let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
         let hash = Hash([1; 32]);
@@ -4423,6 +4436,10 @@ async fn getblocktemplate_fallback_coalesces_with_updater() {
                     }
                     Ok::<_, BoxError>(match request {
                         ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected state request: {other:?}"),
                     })
                 }
@@ -4441,6 +4458,9 @@ async fn getblocktemplate_fallback_coalesces_with_updater() {
             tip,
             sync,
         );
+        if initialized {
+            rpc.gbt.template_cache().unwrap().clear();
+        }
         let (events, _) = broadcast::channel(1);
         let updater = with_updater.then(|| {
             rpc.spawn_block_template_updater(&MempoolTxSubscriber::new(events))
@@ -4469,7 +4489,7 @@ async fn getblocktemplate_fallback_coalesces_with_updater() {
         }
         assert_eq!(
             builds, 1,
-            "callers must share builds; updater: {with_updater}"
+            "callers must share builds; initialized: {initialized}, updater: {with_updater}"
         );
     }
 }
@@ -4565,6 +4585,10 @@ async fn getblocktemplate_refreshes_after_fallback_publication_or_updater_exit()
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                ReadRequest::MiningCandidateChanges => {
+                    ReadResponse::MiningCandidateChanges(Default::default())
+                }
                 other => panic!("unexpected state request: {other:?}"),
             }))
         });
@@ -4692,6 +4716,10 @@ async fn getblocktemplate_bounds_error_tip_read() {
                         std::future::pending::<std::result::Result<ReadResponse, BoxError>>().await
                     }
                     ReadRequest::ChainInfo => Err("cached snapshot failure".into()),
+                    ReadRequest::MiningCandidate => Ok(ReadResponse::MiningCandidate(None)),
+                    ReadRequest::MiningCandidateChanges => {
+                        Ok(ReadResponse::MiningCandidateChanges(Default::default()))
+                    }
                     other => panic!("unexpected state request: {other:?}"),
                 }
             }
@@ -4753,6 +4781,10 @@ async fn getblocktemplate_reports_updater_failure_and_recovers() {
             std::future::ready(Ok::<_, BoxError>(match request {
                 ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
                 ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                ReadRequest::MiningCandidateChanges => {
+                    ReadResponse::MiningCandidateChanges(Default::default())
+                }
                 other => panic!("unexpected state request: {other:?}"),
             }))
         }
@@ -4826,6 +4858,10 @@ async fn fresh_publication_retention(network: Network, cross_difficulty_boundary
         std::future::ready(Ok::<_, BoxError>(match request {
             ReadRequest::ChainInfo => ReadResponse::ChainInfo(context_rx.borrow().clone()),
             ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+            ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+            ReadRequest::MiningCandidateChanges => {
+                ReadResponse::MiningCandidateChanges(Default::default())
+            }
             other => panic!("unexpected state request: {other:?}"),
         }))
     });
@@ -5006,6 +5042,10 @@ async fn getblocktemplate_ignores_previous_tip_error() {
                             };
                             context.tip_hash = hash;
                             Ok(ReadResponse::ChainInfo(context))
+                        }
+                        ReadRequest::MiningCandidate => Ok(ReadResponse::MiningCandidate(None)),
+                        ReadRequest::MiningCandidateChanges => {
+                            Ok(ReadResponse::MiningCandidateChanges(Default::default()))
                         }
                         other => panic!("unexpected state request: {other:?}"),
                     }
@@ -5194,6 +5234,10 @@ async fn getblocktemplate_long_poll_expires_once() {
                             ReadResponse::Tip(Some((chain_info.tip_height, chain_info.tip_hash)))
                         }
                         ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                        ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(Default::default())
+                        }
                         other => panic!("unexpected state request: {other:?}"),
                     })
                 }
@@ -5373,6 +5417,228 @@ async fn getblocktemplate_long_poll_expires_once() {
     }
 }
 
+/// Withdrawn work wakes unsynced polls; synced requests share the updater's replacement build.
+#[tokio::test]
+async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for (stay_synced, withdraw_after_snapshot) in [(false, false), (true, false), (true, true)]
+        {
+            let net = Network::Mainnet;
+            let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+                .zcash_deserialize_into()
+                .unwrap();
+            let mut candidate: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+                .zcash_deserialize_into()
+                .unwrap();
+            let tip_hash = genesis.hash();
+            let (state, real_read_state, _tip, _tip_changes) =
+                zebra_state::populated_state([genesis], &net).await;
+            // Candidates must meet contextual header rules, which historical block 1 doesn't
+            // with only genesis as context.
+            let ReadResponse::ChainInfo(context) = real_read_state
+                .clone()
+                .oneshot(ReadRequest::ChainInfo)
+                .await
+                .unwrap()
+            else {
+                panic!("state must return chain info");
+            };
+            let header = Arc::make_mut(&mut candidate.header);
+            header.time = context.min_time.into();
+            header.difficulty_threshold = context.expected_difficulty;
+            let candidate = Arc::new(candidate);
+            let candidate_hash = candidate.hash();
+            let ReadResponse::MiningCandidateChanges(mut candidates) = real_read_state
+                .oneshot(ReadRequest::MiningCandidateChanges)
+                .await
+                .unwrap()
+            else {
+                panic!("state must return a candidate subscription");
+            };
+            let zebra_state::Response::MiningCandidate(Some(guard)) = state
+                .oneshot(zebra_state::Request::MiningCandidate(candidate))
+                .await
+                .unwrap()
+            else {
+                panic!("the candidate subscription enables early work");
+            };
+            candidates.changed().await;
+            let guard = Arc::new(tokio::sync::watch::Sender::new(Some(guard)));
+            let withdraw_on_read = Arc::new(AtomicBool::new(false));
+
+            // Use the real guard/subscription for withdrawal, but serve modern-height context so
+            // the updater can build a NU5 template without seeding millions of Mainnet blocks.
+            let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+            let now = DateTime32::now();
+            let candidate_info = Arc::new(GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip_height: tip_height.next().unwrap(),
+                tip_hash: candidate_hash,
+                cur_time: now,
+                min_time: now,
+                max_time: now.saturating_add(Duration32::from_minutes(90)),
+                chain_history_root: fake_history_tree(&net).hash(),
+                chain_value_pools: Default::default(),
+            });
+            let parent_info = GetBlockTemplateChainInfo {
+                tip_height,
+                tip_hash,
+                ..(*candidate_info).clone()
+            };
+            let (build_reads, mut builds_started) = tokio::sync::watch::channel(0);
+            let (release_build, build_released) = tokio::sync::watch::channel(false);
+            let candidate_available = Arc::new(AtomicBool::new(true));
+            let read_state = tower::service_fn({
+                let candidate_available = candidate_available.clone();
+                let guard = guard.clone();
+                let withdraw_on_read = withdraw_on_read.clone();
+                move |request| {
+                    let rebuilding = matches!(request, ReadRequest::ChainInfo);
+                    let mut build_released = build_released.clone();
+                    let response = match request {
+                        ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                        ReadRequest::MiningCandidate => {
+                            let snapshot = candidate_available
+                                .load(Ordering::SeqCst)
+                                .then(|| candidate_info.clone());
+                            if withdraw_on_read.load(Ordering::SeqCst) {
+                                guard.send_replace(None);
+                                candidate_available.store(false, Ordering::SeqCst);
+                            }
+                            ReadResponse::MiningCandidate(snapshot)
+                        }
+                        ReadRequest::MiningCandidateChanges => {
+                            ReadResponse::MiningCandidateChanges(candidates.clone())
+                        }
+                        ReadRequest::ChainInfo => {
+                            build_reads.send_modify(|count| *count += 1);
+                            ReadResponse::ChainInfo(parent_info.clone())
+                        }
+                        other => panic!("unexpected state request: {other:?}"),
+                    };
+                    async move {
+                        if rebuilding {
+                            while !*build_released.borrow_and_update() {
+                                build_released.changed().await.unwrap();
+                            }
+                        }
+                        Ok::<_, BoxError>(response)
+                    }
+                }
+            });
+            let (mock_tip, mock_tip_sender) = MockChainTip::new();
+            mock_tip_sender.send_best_tip_height(tip_height);
+            mock_tip_sender.send_best_tip_hash(tip_hash);
+            mock_tip_sender.send_best_tip_block_time(chrono::Utc::now());
+            let mut sync = MockSyncStatus::default();
+            sync.set_is_close_to_tip(true);
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, queue) = RpcImpl::new(
+                net.clone(),
+                mining::Config {
+                    miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                        NetworkType::Main,
+                        [0x7e; 20],
+                    )),
+                    ..Default::default()
+                },
+                false,
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                MockService::build().for_unit_tests(),
+                sync.clone(),
+                mock_tip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
+            let cache = rpc.gbt.template_cache().unwrap();
+            let mut templates = cache.subscribe();
+            let updater = rpc
+                .spawn_block_template_updater(&MempoolTxSubscriber::new(
+                    tokio::sync::broadcast::channel(1).0,
+                ))
+                .unwrap();
+            while cache.template_for_tip(candidate_hash, &net, now).is_none() {
+                templates.changed().await;
+            }
+            let template = rpc
+                .get_block_template(None)
+                .await
+                .expect("the published candidate is valid mining work")
+                .try_into_template()
+                .unwrap();
+            assert_eq!(template.previous_block_hash, candidate_hash);
+            assert_ne!(template.previous_block_hash, tip_hash);
+
+            if withdraw_after_snapshot {
+                withdraw_on_read.store(true, Ordering::SeqCst);
+                let waiting = rpc.precomputed_template_for_state_tip(cache);
+                tokio::pin!(waiting);
+                assert!(
+                    futures::poll!(&mut waiting).is_pending(),
+                    "a snapshot whose guard dropped must not admit cached work"
+                );
+                assert!(guard.borrow().is_none());
+                assert!(
+                    cache.template_for_tip(candidate_hash, &net, now).is_some(),
+                    "the updater has not run yet, so live guard validation must reject this cache"
+                );
+            } else if stay_synced {
+                candidate_available.store(false, Ordering::SeqCst);
+                guard.send_replace(None);
+                while *builds_started.borrow_and_update() == 0 {
+                    builds_started.changed().await.unwrap();
+                }
+                assert!(
+                    cache.is_empty(),
+                    "the updater has withdrawn work and is rebuilding"
+                );
+                let waiting = rpc.get_block_template(None);
+                tokio::pin!(waiting);
+                assert!(futures::poll!(&mut waiting).is_pending());
+                assert_eq!(*builds_started.borrow(), 1, "no on-demand build may start");
+                release_build.send_replace(true);
+                let replacement = waiting.await.unwrap().try_into_template().unwrap();
+                assert_eq!(replacement.previous_block_hash, tip_hash);
+            } else {
+                tokio::time::pause();
+                let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+                    long_poll_id: Some(template.long_poll_id),
+                    ..Default::default()
+                }));
+                tokio::pin!(waiting);
+                assert!(futures::poll!(&mut waiting).is_pending());
+
+                // No tip change or manual cache clearing: only the real guard's withdrawal can wake
+                // the updater, which must invalidate its cached candidate before the sync-gated retry.
+                sync.set_is_close_to_tip(false);
+                candidate_available.store(false, Ordering::SeqCst);
+                guard.send_replace(None);
+                let error = tokio::time::timeout(Duration::from_millis(100), waiting)
+                    .await
+                    .expect("withdrawal must wake the miner without waiting for max_time")
+                    .expect_err("an unsynced node must not return mining work");
+                assert_eq!(
+                    error.code(),
+                    types::get_block_template::constants::NOT_SYNCED_ERROR_CODE.code(),
+                );
+                assert!(cache.is_empty(), "the updater must withdraw rejected work");
+                tokio::time::resume();
+            }
+            updater.abort();
+            queue.abort();
+        }
+    })
+    .await
+    .expect("the regression must complete before the candidate's 30-second expiry");
+}
+
 /// Checks that `getblocktemplate` doesn't serve a precomputed template for a block the state has
 /// already committed, even while the chain tip channel still names that block's parent.
 ///
@@ -5472,6 +5738,10 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
                         chain_value_pools: Default::default(),
                     }),
                     ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                    ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                    ReadRequest::MiningCandidateChanges => {
+                        ReadResponse::MiningCandidateChanges(Default::default())
+                    }
                     other => panic!("unexpected read state request: {other:?}"),
                 });
             }
@@ -6920,6 +7190,12 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
             request.respond(ReadResponse::Tip(Some((tip_height, tip_hash))));
         }
     }
+    tokio::select! {
+        _ = &mut waiting => panic!("the cache has no current template"),
+        request = read_state.expect_request(ReadRequest::MiningCandidate) => {
+            request.respond(ReadResponse::MiningCandidate(None));
+        }
+    }
 
     // Consume the first reply, leaving the call waiting for a template, before moving the tip.
     assert!(futures::poll!(&mut waiting).is_pending());
@@ -6930,6 +7206,12 @@ async fn getblocktemplate_rechecks_the_tip_after_waiting_for_a_template() {
         _ = &mut waiting => panic!("a template for the superseded tip must not be served"),
         request = read_state.expect_request(ReadRequest::Tip) => {
             request.respond(ReadResponse::Tip(Some((committed_height, committed_hash))));
+        }
+    }
+    tokio::select! {
+        _ = &mut waiting => panic!("the cache has no current template"),
+        request = read_state.expect_request(ReadRequest::MiningCandidate) => {
+            request.respond(ReadResponse::MiningCandidate(None));
         }
     }
 
