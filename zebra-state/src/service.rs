@@ -64,7 +64,7 @@ use crate::{
 };
 
 pub(crate) type MiningCandidate = (
-    block::Hash,
+    Arc<block::Block>,
     Arc<crate::GetBlockTemplateChainInfo>,
     watch::Receiver<Arc<OwnedSemaphorePermit>>,
     tokio::time::Instant,
@@ -1313,6 +1313,7 @@ impl Service<Request> for StateService {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 tokio::spawn(async move {
                     let compute_state = state.clone();
+                    let candidate_block = block.clone();
                     let parent = block.header.previous_block_hash;
                     let compute_permit = cancelled.borrow().clone();
                     let compute = tokio::task::spawn_blocking(move || {
@@ -1344,7 +1345,7 @@ impl Service<Request> for StateService {
                         return;
                     }
                     state.mining_candidate.send_replace(Some((
-                        parent,
+                        candidate_block,
                         info.clone(),
                         cancelled.clone(),
                         deadline,
@@ -1816,7 +1817,8 @@ impl Service<ReadRequest> for ReadStateService {
                         (cancelled.has_changed().is_ok()
                             && tokio::time::Instant::now() < deadline
                             && state.mining_candidate_is_allowed(info.tip_hash)
-                            && state.best_tip().map(|(_, hash)| hash) == Some(parent))
+                            && state.best_tip().map(|(_, hash)| hash)
+                                == Some(parent.header.previous_block_hash))
                         .then_some(info)
                     },
                 )))
