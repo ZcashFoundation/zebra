@@ -11,6 +11,10 @@
 # Within each of these categories:
 # - prefer newer images to older images
 #
+# If no category has an image for the current state version, the same search
+# runs on the previous state version, which zebrad upgrades in place. The
+# disk type availability checks use the same fallback.
+#
 # In ZcashFoundation/zebra, images written by copies of the repository are
 # skipped. Copies share the GCP project and name their images
 # `<prefix>-r<repository id>-<sha>-...`.
@@ -24,6 +28,18 @@ set -eo pipefail
 echo "Extracting local state version..."
 LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "${GITHUB_WORKSPACE}/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
 echo "STATE_VERSION: ${LOCAL_STATE_VERSION}"
+
+# zebrad only reuses a database from the immediately previous major version, and
+# only when the current major version has a format upgrade named `<major>.0.0`.
+# Otherwise it would start from an empty database, so there is no fallback.
+UPGRADES_DIR="${GITHUB_WORKSPACE}/zebra-state/src/service/finalized_state/disk_format"
+STATE_VERSIONS=("${LOCAL_STATE_VERSION}")
+if grep -rqF "Version::new(${LOCAL_STATE_VERSION}, 0, 0)" "${UPGRADES_DIR}/upgrade.rs" "${UPGRADES_DIR}/upgrade"; then
+    STATE_VERSIONS+=("$((LOCAL_STATE_VERSION - 1))")
+    echo "PREVIOUS_STATE_VERSION: ${STATE_VERSIONS[1]}"
+else
+    echo "No previous state version fallback: no ${LOCAL_STATE_VERSION}.0.0 format upgrade."
+fi
 
 # Function to print the newest ready image named `<image_prefix>-<name_pattern>`.
 # GCE filters use RE2, which has no negative lookahead, so images from copies of
@@ -46,8 +62,9 @@ find_newest_image() {
 find_cached_disk_image() {
     local git_pattern="${1}"
     local git_source="${2}"
+    local state_version="${3}"
     local disk_name
-    local disk_search_pattern="${git_pattern}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
+    local disk_search_pattern="${git_pattern}-v${state_version}-${NETWORK}-${DISK_SUFFIX}"
 
     # `set -e` does not apply inside the command substitutions that call this function,
     # so a failed query must be returned explicitly, or it would look like "no image".
@@ -74,13 +91,23 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     echo "Finding a ${DISK_PREFIX}-${DISK_SUFFIX} disk image for ${NETWORK}..."
     CACHED_DISK_NAME=""
 
-    # Try to find one from the current cache scope.
-    # Images are named `<prefix>-<cache scope>-<short sha>-v<state version>-...`.
-    CACHED_DISK_NAME=$(find_cached_disk_image "${CACHE_SCOPE}-[0-9a-f]+" "cache scope")
-    # If no image was found, try to find an image based on the `main` branch.
-    CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image "main-[0-9a-f]+" "main branch")}
-    # If we still have no image, try to find one from any branch.
-    CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image ".+-[0-9a-f]+" "any branch")}
+    # Search the current state version first, then the previous one.
+    for state_version in "${STATE_VERSIONS[@]}"; do
+        # Try to find one from the current cache scope.
+        # Images are named `<prefix>-<cache scope>-<short sha>-v<state version>-...`.
+        CACHED_DISK_NAME=$(find_cached_disk_image "${CACHE_SCOPE}-[0-9a-f]+" "cache scope" "${state_version}")
+        # If no image was found, try to find an image based on the `main` branch.
+        CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image "main-[0-9a-f]+" "main branch" "${state_version}")}
+        # If we still have no image, try to find one from any branch.
+        CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image ".+-[0-9a-f]+" "any branch" "${state_version}")}
+
+        if [[ -n "${CACHED_DISK_NAME}" ]]; then
+            if [[ "${state_version}" != "${LOCAL_STATE_VERSION}" ]]; then
+                echo "::warning::No v${LOCAL_STATE_VERSION} cached state image exists. Using the v${state_version} image ${CACHED_DISK_NAME}, which zebrad upgrades in place."
+            fi
+            break
+        fi
+    done
 
     # Handle the case where no suitable disk image is found
     if [[ -z "${CACHED_DISK_NAME}" && "${ALLOW_MISSING:-false}" == "true" ]]; then
@@ -100,20 +127,24 @@ fi
 find_available_disk_type() {
     local base_name="${1}"
     local disk_type="${2}"
+    local state_version
     local disk_name
 
-    disk_name=$(find_newest_image "${base_name}-cache" ".+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${disk_type}")
-
     # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
-    if [[ -n "${disk_name}" ]]; then
-        echo "Found ${disk_type^^} disk: ${disk_name} for ${base_name^^} on network: ${NETWORK}" >&2
-        disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
-        echo "Description: ${disk_description}" >&2
-        echo "true" # This is the actual return value when a disk is found
-    else
-        echo "No ${disk_type^^} disk found for ${base_name^^} on network: ${NETWORK}" >&2
-        echo "false" # This is the actual return value when no disk is found
-    fi
+    for state_version in "${STATE_VERSIONS[@]}"; do
+        disk_name=$(find_newest_image "${base_name}-cache" ".+-[0-9a-f]+-v${state_version}-${NETWORK}-${disk_type}")
+
+        if [[ -n "${disk_name}" ]]; then
+            echo "Found ${disk_type^^} disk: ${disk_name} for ${base_name^^} on network: ${NETWORK} (state version ${state_version})" >&2
+            disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
+            echo "Description: ${disk_description}" >&2
+            echo "true" # This is the actual return value when a disk is found
+            return
+        fi
+    done
+
+    echo "No ${disk_type^^} disk found for ${base_name^^} on network: ${NETWORK}" >&2
+    echo "false" # This is the actual return value when no disk is found
 }
 if [[ -n "${NETWORK}" ]]; then
     # Check for specific disk images (lwd_tip_disk, zebra_tip_disk, zebra_checkpoint_disk)
