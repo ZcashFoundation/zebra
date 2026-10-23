@@ -1401,17 +1401,23 @@ async fn nu7_stretched_first_halving() -> Result<()> {
             .await?;
 
         // Unlike the non-verbose query, verbose getrawmempool fails until the mempool is active.
+        let mut last_error = None;
         tokio::time::timeout(Duration::from_secs(30), async {
-            while client
+            while let Err(error) = client
                 .json_result_from_call::<serde_json::Value>("getrawmempool", "[true]")
                 .await
-                .is_err()
             {
+                last_error = Some(error);
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })
         .await
-        .map_err(|_| eyre!("mempool did not become active within 30 seconds after genesis"))?;
+        .map_err(|_| {
+            eyre!(
+                "mempool did not become active within 30 seconds after genesis \
+                 (last RPC error: {last_error:?})"
+            )
+        })?;
 
         let mut subsidies = Vec::new();
         let mut pool = 0;
