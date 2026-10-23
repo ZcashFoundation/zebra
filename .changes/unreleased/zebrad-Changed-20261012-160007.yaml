@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Peer misbehavior scores are applied every 5 seconds instead of every 30, so misbehaving
+  peers are banned sooner.
+time: 2026-10-12T16:00:07.000000000+02:00
