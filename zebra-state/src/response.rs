@@ -106,6 +106,13 @@ impl MiningCandidateChanges {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
+    /// Authenticated NU5-or-later body admission, optionally published for early relay.
+    ///
+    /// A missing guard means no authentication: disabled optional admission, unsupported pre-NU5
+    /// commitments, or unavailable parent context. Errors preserve contextual failure details.
+    /// Keep the guard until commit completes or verification rejects/cancels the block.
+    EarlyRelay(Option<crate::EarlyRelayGuard>),
+
     /// Response to [`Request::MiningCandidate`], absent if mining is inactive or its worker is busy.
     /// Dropping the guard withdraws early work.
     MiningCandidate(Option<MiningCandidateGuard>),
@@ -462,6 +469,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::MiningCandidateChanges`].
     MiningCandidateChanges(MiningCandidateChanges),
 
+    /// Shared authenticated early block retention, from [`ReadRequest::EarlyRelayCache`].
+    EarlyRelayCache(crate::EarlyRelayCache),
+
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
@@ -740,6 +750,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ChainInfo(_)
             | ReadResponse::MiningCandidate(_)
             | ReadResponse::MiningCandidateChanges(_)
+            | ReadResponse::EarlyRelayCache(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {

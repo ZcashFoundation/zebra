@@ -16,7 +16,7 @@ use zebra_chain::{
 use crate::{
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
-    request::{block_retained_bytes, output_retained_bytes},
+    request::{block_wire_and_retained_bytes, output_retained_bytes},
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
     KnownBlock, MinedBlockNotifications, NonFinalizedState, SemanticallyVerifiedBlock,
 };
@@ -148,9 +148,11 @@ impl QueuedBlocks {
     /// Conservative content/metadata charge, computed once without copying transactions or outputs.
     fn retained_bytes(queued: &QueuedSemanticallyVerified) -> usize {
         let prepared = &queued.0;
-        let mut bytes = block_retained_bytes(&prepared.block, &prepared.transaction_hashes)
-            .saturating_add(size_of::<(QueuedSemanticallyVerified, usize, block::Hash)>())
-            .saturating_add(2 * size_of::<(block::Hash, HashSet<block::Hash>)>());
+        let mut bytes =
+            block_wire_and_retained_bytes(&prepared.block, &prepared.transaction_hashes)
+                .1
+                .saturating_add(size_of::<(QueuedSemanticallyVerified, usize, block::Hash)>())
+                .saturating_add(2 * size_of::<(block::Hash, HashSet<block::Hash>)>());
         // Charge the semantic output map and its UTXO-cache copy independently.
         bytes =
             bytes.saturating_add(output_retained_bytes(&prepared.new_outputs).saturating_mul(2));

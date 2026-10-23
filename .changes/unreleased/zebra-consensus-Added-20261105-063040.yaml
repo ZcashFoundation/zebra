@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added authenticated early-relay block verification through `Request::CommitEarlyRelay`, including rejection classification for negotiated downloads ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).
+time: 2026-11-05T06:30:40.214783469+01:00
