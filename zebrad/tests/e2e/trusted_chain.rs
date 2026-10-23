@@ -21,7 +21,7 @@ use crate::common::{
         os_assigned_rpc_port_config, random_known_rpc_port_config, read_listen_addr_from_logs,
         testdir, use_live_peers,
     },
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_active, ZebradTestDirExt, LAUNCH_DELAY},
     regtest::MiningRpcMethods,
 };
 
@@ -50,9 +50,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let indexer_listen_addr = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tracing::info!("waiting for Zebra state cache to be opened");
-
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_active(&rpc_client).await?;
 
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
@@ -76,7 +75,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     tracing::info!("got genesis chain tip change, submitting more blocks ..");
 
-    let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
         let (block, height) = rpc_client.block_from_template(&net).await?;
@@ -215,7 +213,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("newly submitted blocks are in the best chain, checking for reset");
-    tokio::time::sleep(Duration::from_secs(3)).await;
     let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
     let (expected_height, expected_hash) = latest_chain_tip2
         .best_tip_height_and_hash()
@@ -275,14 +272,15 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         [127, 0, 0, 1],
         random_known_port(),
     )));
-    let indexer_listen_addr = config.rpc.indexer_listen_addr.unwrap();
     let test_dir = testdir()?.with_config(&mut config)?;
 
-    let _child = test_dir.spawn_child(args!["start"])?;
+    let mut child = test_dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
 
-    tracing::info!("waiting for Zebra state cache to be opened");
-
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    // Both RPC endpoints are opened after the state database is initialized.
+    let _ = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let indexer_listen_addr = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra

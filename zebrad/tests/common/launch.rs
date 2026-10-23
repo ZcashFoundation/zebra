@@ -13,10 +13,12 @@ use std::{
     time::Duration,
 };
 
+use color_eyre::eyre::eyre;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network::{self, *};
 use zebra_network::CacheDir;
+use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::{
     args,
     command::{Arguments, TestDirExt},
@@ -205,6 +207,27 @@ where
 
         Ok(self)
     }
+}
+
+/// Waits until the mempool of a launched `zebrad` is active, failing after [`LAUNCH_DELAY`].
+///
+/// Verbose `getrawmempool` fails until the mempool is active, which needs a chain tip. On Regtest,
+/// which commits its own genesis block, success also means `zebrad` can answer mining RPCs.
+pub async fn wait_for_mempool_active(client: &RpcRequestClient) -> Result<()> {
+    let mut last_error = None;
+    tokio::time::timeout(LAUNCH_DELAY, async {
+        while let Err(error) = client
+            .json_result_from_call::<serde_json::Value>("getrawmempool", "[true]")
+            .await
+        {
+            last_error = Some(error);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        eyre!("mempool did not become active within {LAUNCH_DELAY:?} (last RPC error: {last_error:?})")
+    })
 }
 
 /// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
