@@ -5613,6 +5613,62 @@ async fn rpc_submitblock_errors() {
     // for the success case.
 }
 
+/// Admission pressure is an operational error, not a consensus rejection.
+#[tokio::test]
+async fn rpc_submitblock_resource_pressure_is_operational() {
+    let _init_guard = zebra_test::init();
+    for failure in [
+        zebra_consensus::RouterError::Checkpoint {
+            source: Box::new(zebra_consensus::VerifyCheckpointError::QueuedLimit),
+        },
+        zebra_consensus::RouterError::Block {
+            source: Box::new(zebra_consensus::VerifyBlockError::Commit(
+                zebra_state::CommitBlockError::OrphanQueueFull,
+            )),
+        },
+    ] {
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_logs, logs) = watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            false,
+            "0.0.1",
+            "RPC pressure test",
+            mempool,
+            state,
+            read_state,
+            verifier.clone(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            logs,
+            None,
+        );
+        let call = tokio::spawn(async move {
+            rpc.submit_block(
+                HexData(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec()),
+                None,
+            )
+            .await
+        });
+        verifier
+            .expect_request_that(|_| true)
+            .await
+            .respond(Err(BoxError::from(failure)));
+        let error = tokio::time::timeout(Duration::from_secs(5), call)
+            .await
+            .expect("admission pressure answers the RPC caller")
+            .expect("the RPC task does not panic")
+            .expect_err("resource pressure must not return a consensus rejection result");
+        assert_eq!(error.code(), 0);
+        queue.abort();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_validateaddress() {
     let _init_guard = zebra_test::init();

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Checkpoint submissions retain bounded work while preserving ordinary prefetch and accepted commits after caller cancellation. Failed ranges release capacity needed for recovery, and surviving ranges advance verification so later checkpoints can continue. Synchronization retries local admission pressure and failed-range suffixes with the downloaded body within the original verification deadline.
+time: 2026-10-14T20:34:39.515118675+02:00

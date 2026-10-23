@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
@@ -27,6 +27,255 @@ use crate::{
     tests::FakeChainHelper,
     Config,
 };
+
+/// Build value-conserving transfers with complete spent-output maps, including intra-block spends.
+/// This exercises chain indexing, not proof-of-work, script, or subsidy verification.
+fn large_transfer_chain(
+    destinations: &[&[usize]],
+) -> Result<(
+    Chain,
+    Vec<crate::ContextuallyVerifiedBlock>,
+    [transparent::Address; 2],
+    Amount<NonNegative>,
+)> {
+    use std::collections::HashMap;
+    use zebra_chain::{
+        amount::{DeferredPoolBalanceChange, MAX_MONEY},
+        parameters::NetworkKind,
+        transaction::{self, LockTime, Transaction},
+    };
+
+    let network = Network::Mainnet;
+    let finalized_height = Height(600_000);
+    let value: Amount<NonNegative> = (MAX_MONEY / 2 + 1).try_into()?;
+    let pools = ValueBalance::from_transparent_amount(value);
+    let addresses = [
+        transparent::Address::from_script_hash(NetworkKind::Mainnet, [0x41; 20]),
+        transparent::Address::from_script_hash(NetworkKind::Mainnet, [0x42; 20]),
+    ];
+    let chain = Chain::new(
+        &network,
+        finalized_height,
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        pools,
+    );
+    let mut outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0x11; 32]),
+        index: 0,
+    };
+    let mut utxo = transparent::OrderedUtxo::new(
+        transparent::Output::new(value, addresses[0].script()),
+        finalized_height,
+        1,
+    );
+    let mut parent = block::Hash([0x22; 32]);
+    let mut blocks = Vec::new();
+    for (block_index, destinations) in destinations.iter().enumerate() {
+        let height = (finalized_height + i64::try_from(block_index + 1)?)
+            .expect("the fixture heights are below the maximum");
+        let mut transactions = vec![Arc::new(Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output::new(
+                Amount::zero(),
+                transparent::Script::new(&[]),
+            )],
+            LockTime::unlocked(),
+            Height(0),
+        ))];
+        let mut spent = HashMap::new();
+        for &destination in *destinations {
+            let transaction = Arc::new(Transaction::test_v4(
+                vec![transparent::Input::PrevOut {
+                    outpoint,
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: u32::MAX,
+                }],
+                vec![transparent::Output::new(
+                    value,
+                    addresses[destination].script(),
+                )],
+                LockTime::unlocked(),
+                Height(0),
+            ));
+            assert!(spent.insert(outpoint, utxo).is_none());
+            outpoint = transparent::OutPoint {
+                hash: transaction.hash(),
+                index: 0,
+            };
+            utxo = transparent::OrderedUtxo::new(
+                transaction.outputs()[0].clone(),
+                height,
+                transactions.len(),
+            );
+            transactions.push(transaction);
+        }
+        let mut header: block::Header =
+            zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+        header.previous_block_hash = parent;
+        header.merkle_root = transactions
+            .iter()
+            .map(|transaction| transaction.hash())
+            .collect();
+        let block = Arc::new(Block {
+            header: Arc::new(header),
+            transactions,
+        })
+        .set_work(10);
+        assert_eq!(
+            block.transaction_fees(
+                &spent
+                    .iter()
+                    .map(|(outpoint, output)| (*outpoint, output.utxo.clone()))
+                    .collect(),
+            )?,
+            Amount::<NonNegative>::zero()
+        );
+        let contextual = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block.prepare(),
+            spent,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            pools,
+        )?;
+        assert_eq!(contextual.chain_value_pool_change, ValueBalance::zero());
+        parent = contextual.hash;
+        blocks.push(contextual);
+    }
+    Ok((chain, blocks, addresses, value))
+}
+
+#[test]
+fn large_self_transfers_preserve_non_finalized_indexes() -> Result<()> {
+    use std::collections::HashSet;
+
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, addresses, value) = large_transfer_chain(&[&[1], &[1, 1]])?;
+    let root = chain.push(blocks[0].clone())?;
+    let chain = root.clone().push(blocks[1].clone())?;
+    let selected = HashSet::from([addresses[1]]);
+    assert_eq!(
+        chain.partial_transparent_balance_change(&selected).0,
+        value.constrain::<NegativeAllowed>()?
+    );
+    let (created, spent) = chain.partial_transparent_utxo_changes(&selected);
+    assert_eq!(created.len(), 3);
+    assert_eq!(spent.len(), 2);
+    assert_eq!(
+        created
+            .iter()
+            .filter(|(location, _)| !spent.contains(location))
+            .count(),
+        1
+    );
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert!(reverted.push(blocks[1].clone())?.eq_internal_state(&chain));
+    Ok(())
+}
+
+#[test]
+fn reverting_intra_block_transfers_preserves_non_finalized_indexes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, _, _) = large_transfer_chain(&[&[1], &[0, 1]])?;
+    let root = chain.push(blocks[0].clone())?;
+    let chain = root.clone().push(blocks[1].clone())?;
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert!(reverted.push(blocks[1].clone())?.eq_internal_state(&chain));
+    Ok(())
+}
+
+#[test]
+fn finalizing_self_transfers_preserves_non_finalized_indexes() -> Result<()> {
+    use std::collections::HashSet;
+
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, addresses, value) = large_transfer_chain(&[&[0, 0], &[1]])?;
+    let mut chain = chain.push(blocks[0].clone())?.push(blocks[1].clone())?;
+    let (finalized, _) = chain.pop_root();
+    assert_eq!(finalized.hash, blocks[0].hash);
+    let selected = HashSet::from([addresses[0]]);
+    assert_eq!(
+        chain.partial_transparent_balance_change(&selected).0,
+        (Amount::<NegativeAllowed>::zero() - value.constrain::<NegativeAllowed>()?)?
+    );
+    let (created, spent) = chain.partial_transparent_utxo_changes(&selected);
+    assert!(created.is_empty());
+    assert_eq!(spent.len(), 1);
+    let (finalized, _) = chain.pop_root();
+    assert_eq!(finalized.hash, blocks[1].hash);
+    assert_eq!(
+        chain.partial_transparent_balance_change(&HashSet::from(addresses)),
+        (Amount::<NegativeAllowed>::zero(), 0)
+    );
+    assert_eq!(chain.partial_transparent_transfers.len(), 0);
+    Ok(())
+}
+
+#[test]
+fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
+    use std::collections::HashSet;
+    use zebra_chain::amount::DeferredPoolBalanceChange;
+
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, addresses, value) = large_transfer_chain(&[&[1], &[1]])?;
+    let root = chain.push(blocks[0].clone())?;
+    let mut block = blocks[1].block.as_ref().clone();
+    block.transactions[0] = Arc::new(
+        block.transactions[0]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(vec![transparent::Output::new(value, addresses[1].script())]),
+    );
+    block.transactions[1] = Arc::new(
+        block.transactions[1]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(vec![transparent::Output::new(
+                Amount::zero(),
+                transparent::Script::new(&[]),
+            )]),
+    );
+    Arc::make_mut(&mut block.header).merkle_root = block
+        .transactions
+        .iter()
+        .map(|transaction| transaction.hash())
+        .collect();
+    assert_eq!(
+        block.transaction_fees(
+            &blocks[1]
+                .spent_outputs
+                .iter()
+                .map(|(outpoint, output)| (*outpoint, output.utxo.clone()))
+                .collect(),
+        )?,
+        value
+    );
+    let block = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        Arc::new(block).prepare(),
+        blocks[1].spent_outputs.clone(),
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        root.chain_value_pools,
+    )?;
+    assert_eq!(block.chain_value_pool_change, ValueBalance::zero());
+    let chain = root.clone().push(block.clone())?;
+    assert_eq!(
+        chain
+            .partial_transparent_balance_change(&HashSet::from([addresses[1]]))
+            .0,
+        value.constrain::<NegativeAllowed>()?
+    );
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert!(reverted.push(block)?.eq_internal_state(&chain));
+    Ok(())
+}
 
 #[test]
 fn construct_empty() {
@@ -329,6 +578,76 @@ fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, Finalized
     .expect("opening an ephemeral database should succeed");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
     (state, finalized_state)
+}
+
+#[test]
+fn cached_proposal_respects_block_and_parent_invalidation() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = Arc::new(network.test_block(653599, 583999).unwrap());
+    let mut solved = parent.make_fake_child().set_work(10);
+    Arc::make_mut(&mut Arc::make_mut(&mut solved).header).nonce = [1; 32].into();
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(parent.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    // Retain the successful proposal payload before committing its solved counterpart.
+    let mut proposal = (*solved).clone();
+    Arc::make_mut(&mut proposal.header).nonce = [0; 32].into();
+    let mut proposal_state = state.clone();
+    proposal_state.disable_metrics();
+    proposal_state
+        .commit_block(Arc::new(proposal).prepare(), &finalized_state)
+        .unwrap();
+    let mut cached = proposal_state.best_tip_block().unwrap().clone();
+    assert_ne!(cached.hash, solved.hash());
+    cached.rebind(solved.clone(), std::time::Instant::now());
+    state
+        .commit_block(solved.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(solved.hash()).unwrap();
+
+    let normal_error = state
+        .commit_block(solved.clone().prepare(), &finalized_state)
+        .unwrap_err();
+    assert_eq!(
+        normal_error,
+        crate::ValidateContextError::BlockPreviouslyInvalidated {
+            block_hash: solved.hash(),
+        }
+    );
+    assert_eq!(
+        state.commit_prevalidated_contextual(cached.clone(), &finalized_state),
+        Err(normal_error),
+    );
+    assert_eq!(state.best_tip().unwrap().1, parent.hash());
+    assert!(!state.any_chain_contains(&solved.hash()));
+
+    // A different solved hash is not itself invalidated, but cannot restore its removed parent.
+    let mut sibling = (*solved).clone();
+    Arc::make_mut(&mut sibling.header).nonce = [2; 32].into();
+    let sibling = Arc::new(sibling);
+    cached.rebind(sibling.clone(), std::time::Instant::now());
+    // Keep another root live: invalidating the only non-finalized root is rejected.
+    let other_root = parent.clone().set_work(20);
+    state
+        .commit_new_chain(other_root.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(parent.hash()).unwrap();
+    let normal_error = state
+        .commit_block(sibling.prepare(), &finalized_state)
+        .unwrap_err();
+    assert_eq!(
+        normal_error,
+        crate::ValidateContextError::NotReadyToBeCommitted
+    );
+    assert_eq!(
+        state.commit_prevalidated_contextual(cached, &finalized_state),
+        Err(normal_error),
+    );
+    assert_eq!(state.best_tip().unwrap().1, other_root.hash());
+    assert!(!state.any_chain_contains(&parent.hash()));
 }
 
 /// Reject invalidating the only root before changing either live chains or invalidation records.

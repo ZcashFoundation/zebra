@@ -5,7 +5,10 @@
 use std::{cmp::min, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    stream::{FuturesUnordered, StreamExt},
+    TryFutureExt,
+};
 use tokio::time::timeout;
 use tracing_futures::Instrument;
 
@@ -13,6 +16,8 @@ use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
 use zebra_test::mock_service::MockService;
 
 use super::*;
+
+mod retention;
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -1115,6 +1120,7 @@ async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Repor
             child: Some(QueuedBlock {
                 block: checked_block_2,
                 tx,
+                retained: RetainedBlockPermit(Arc::new(AtomicUsize::new(1))),
             }),
         })
         .expect("the verifier holds the receiver");
