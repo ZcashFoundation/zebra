@@ -32,7 +32,8 @@ use zebra_chain::{
 
 use crate::{
     address_book_updater::{
-        AddressBookChangeSender, AddressBookService, AddressBookUpdater, MIN_CHANNEL_SIZE,
+        AddressBookChangeSender, AddressBookRequest, AddressBookService, AddressBookUpdater,
+        MIN_CHANNEL_SIZE,
     },
     connection_metrics::{
         network_kind_label, record_connection_attempt_finished, record_connection_attempt_started,
@@ -286,7 +287,7 @@ where
         config.clone(),
         outbound_connector.clone(),
         peerset_tx.clone(),
-        address_book_updater.clone(),
+        address_book_service.clone(),
     );
     let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
     peer_set.extend_tasks([initial_peers_join.abort_handle()]);
@@ -361,13 +362,13 @@ where
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
 /// disk cache initial peers, then send the resulting peer connections over `peerset_tx`.
 ///
-/// Also sends every initial peer address to the `address_book_updater`.
-#[instrument(skip(config, outbound_connector, peerset_tx, address_book_updater))]
+/// Also adds every initial peer address to the address book.
+#[instrument(skip(config, outbound_connector, peerset_tx, address_book_service))]
 async fn add_initial_peers<S>(
     config: Config,
     outbound_connector: S,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-    address_book_updater: AddressBookChangeSender,
+    address_book_service: AddressBookService,
 ) -> Result<ActiveConnectionCounter, BoxError>
 where
     S: Service<
@@ -379,7 +380,7 @@ where
         + 'static,
     S::Future: Send + 'static,
 {
-    let initial_peers = limit_initial_peers(&config, address_book_updater).await;
+    let initial_peers = limit_initial_peers(&config, &address_book_service).await;
 
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
@@ -516,10 +517,10 @@ where
 /// Returns randomly chosen entries from the provided set of addresses,
 /// in a random order.
 ///
-/// Also sends every initial peer to the `address_book_updater`.
+/// Also adds every initial peer to the address book, before returning.
 async fn limit_initial_peers(
     config: &Config,
-    address_book_updater: AddressBookChangeSender,
+    address_book_service: &AddressBookService,
 ) -> HashSet<PeerSocketAddr> {
     let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
@@ -557,12 +558,26 @@ async fn limit_initial_peers(
     //
     // Initial peers are limited because:
     // - the number of initial peers is limited
-    // - this code only runs once at startup
+    // - this code runs at startup, then at most once every
+    //   `MIN_INITIAL_PEER_RECOVERY_INTERVAL` while the node has no outbound peers
+    //
+    // # Correctness
+    //
+    // Add peers through the address book service, rather than the change channel,
+    // so later service requests, like the crawler's ready peer count, see them.
     for peer in preferred_peers.values().flatten() {
-        let peer_addr = MetaAddr::new_initial_peer(*peer);
-        // `send` only waits when the channel is full.
-        // The address book updater runs in its own thread, so we will only wait for a short time.
-        let _ = address_book_updater.send(peer_addr).await;
+        // The address book serves each request without waiting, so this is quick.
+        let added = address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::Change(MetaAddr::new_initial_peer(
+                *peer,
+            )))
+            .boxed()
+            .await;
+        if let Err(error) = added {
+            debug!(?error, "error adding initial peer, is Zebra shutting down?");
+            break;
+        }
     }
 
     // Split out the `initial_peers` that will be shuffled and returned,
@@ -960,8 +975,11 @@ enum CrawlerAction {
     HandshakeFinished,
     /// Clear a finished demand crawl (DemandHandshakeOrCrawl with no peers).
     DemandCrawlFinished,
-    /// Clear a finished TimerCrawl.
-    TimerCrawlFinished,
+    /// Clear a finished TimerCrawl, which saw `ready_candidates` candidates ready to dial.
+    TimerCrawlFinished { ready_candidates: usize },
+    /// Clear a finished re-add of the initial peers, which left `ready_candidates`
+    /// candidates ready to dial.
+    InitialPeersReadded { ready_candidates: usize },
 }
 
 /// Given a channel `demand_rx` that signals a need for new peers, try to find
@@ -983,6 +1001,12 @@ enum CrawlerAction {
 /// The crawler terminates when a crawl or `peerset_tx` returns a
 /// permanent internal error. Transient errors and individual peer errors should
 /// be handled within the crawler.
+///
+/// If a timer crawl finishes with no outbound connections and no ready candidates,
+/// re-add the initial peers to the address book, at most once every
+/// [`constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL`]. This resolves the DNS seeders
+/// and reloads the disk cache again, and makes failed initial peers eligible for
+/// another connection attempt after the usual reconnection delay.
 ///
 /// Uses `active_outbound_connections` to limit the number of active outbound connections
 /// across both the initial peers and crawler. The limit is based on `config`.
@@ -1053,6 +1077,11 @@ where
     crawl_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let mut crawl_timer = IntervalStream::new(crawl_timer).map(|tick| TimerCrawl { tick });
+
+    // On Regtest, or without any configured peers or disk cache, there is nothing to re-add.
+    let has_initial_peer_sources = !config.initial_peer_hostnames().is_empty()
+        || (config.cache_dir.is_enabled() && !config.network.is_regtest());
+    let mut last_initial_peer_readd: Option<Instant> = None;
 
     // # Concurrency
     //
@@ -1177,26 +1206,17 @@ where
                             "crawling for more peers in response to the crawl timer"
                         );
 
-                        // Queue a dial attempt for each free outbound slot that has a
-                        // candidate ready to dial, so the crawler keeps trying to fill
-                        // the peer set up to the outbound connection limit.
-                        //
-                        // Capping the queued attempts at the ready candidate count avoids
-                        // spawning fallback crawls for demand that can't be met. The
-                        // demand handler re-checks the connection limit before each
-                        // handshake, so excess signals are dropped, and failed handshakes
-                        // restore their demand signal.
-                        let ready_candidates = ready_peer_count(&address_book_service).await;
-                        let mut fill_demand_tx = crawl_demand_tx.clone();
-                        for _ in 0..spare_capacity.min(ready_candidates) {
-                            if fill_demand_tx.try_send(MorePeers).is_err() {
-                                break;
-                            }
-                        }
+                        // Keep trying to fill the peer set up to the outbound connection limit.
+                        let ready_candidates = queue_ready_candidate_demand(
+                            &address_book_service,
+                            crawl_demand_tx.clone(),
+                            spare_capacity,
+                        )
+                        .await;
 
                         crawl(crawl_service, crawl_demand_tx).await?;
 
-                        Ok(TimerCrawlFinished)
+                        Ok(TimerCrawlFinished { ready_candidates })
                     }
                     .in_current_span(),
                 );
@@ -1211,8 +1231,65 @@ where
                 // congested it can generate a lot of demand signal very rapidly.
                 trace!("demand-based crawl finished");
             }
-            Ok(TimerCrawlFinished) => {
+            Ok(TimerCrawlFinished { ready_candidates }) => {
                 debug!("timer-based crawl finished");
+
+                let readd_is_due = last_initial_peer_readd.is_none_or(|last_readd| {
+                    last_readd.elapsed() >= constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL
+                });
+
+                // Inbound peers don't stop a re-add: outbound peers are chosen by this node,
+                // so they are harder for an attacker to control.
+                if has_initial_peer_sources
+                    && readd_is_due
+                    && ready_candidates == 0
+                    && active_outbound_connections.update_count() == 0
+                {
+                    warn!(
+                        "no outbound peer connections and no peer addresses ready to connect to, \
+                         adding the initial peers again. \
+                         Hint: check the network connection and the configured initial peers",
+                    );
+                    last_initial_peer_readd = Some(Instant::now());
+
+                    let config = config.clone();
+                    let address_book_service = address_book_service.clone();
+                    let demand_tx = demand_tx.clone();
+                    // There are no outbound connections, so every outbound slot is spare.
+                    let spare_capacity = config.peerset_outbound_connection_limit();
+
+                    handshakes.spawn(
+                        async move {
+                            // Resolving DNS retries until it finds a peer when there are no
+                            // cached peers, so stop it before the next re-add.
+                            let readd = tokio::time::timeout(
+                                constants::INITIAL_PEER_RECOVERY_TIMEOUT,
+                                limit_initial_peers(&config, &address_book_service),
+                            )
+                            .await;
+                            if readd.is_err() {
+                                info!(
+                                    timeout = ?constants::INITIAL_PEER_RECOVERY_TIMEOUT,
+                                    "timed out resolving the initial peers, \
+                                     retrying after the next recovery interval",
+                                );
+                            }
+
+                            let ready_candidates = queue_ready_candidate_demand(
+                                &address_book_service,
+                                demand_tx,
+                                spare_capacity,
+                            )
+                            .await;
+
+                            Ok(InitialPeersReadded { ready_candidates })
+                        }
+                        .in_current_span(),
+                    );
+                }
+            }
+            Ok(InitialPeersReadded { ready_candidates }) => {
+                info!(?ready_candidates, "finished adding the initial peers again");
             }
 
             // Fatal errors and shutdowns
@@ -1227,6 +1304,29 @@ where
         // Avoids remote peers starving other Zebra tasks using outbound connection errors.
         tokio::task::yield_now().await;
     }
+}
+
+/// Queue a dial attempt using `demand_tx` for each of the `spare_capacity` outbound slots
+/// that has a candidate ready to dial. Returns the number of ready candidates.
+///
+/// Capping the queued attempts at the ready candidate count avoids spawning fallback crawls
+/// for demand that can't be met. The demand handler re-checks the connection limit before
+/// each handshake, so excess signals are dropped, and failed handshakes restore their
+/// demand signal.
+async fn queue_ready_candidate_demand(
+    address_book_service: &AddressBookService,
+    mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
+    spare_capacity: usize,
+) -> usize {
+    let ready_candidates = ready_peer_count(address_book_service).await;
+
+    for _ in 0..spare_capacity.min(ready_candidates) {
+        if demand_tx.try_send(MorePeers).is_err() {
+            break;
+        }
+    }
+
+    ready_candidates
 }
 
 /// Try to get more peers using `crawl_service`, then queue a connection attempt using `demand_tx`.

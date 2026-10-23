@@ -1154,9 +1154,24 @@ impl MetaAddrChange {
         let change_to_never_attempted = self.peer_addr_state().is_never_attempted();
         let is_misbehavior_update = self.misbehavior_score() != 0;
 
+        // Re-adding a failed initial peer makes it eligible for another connection attempt.
+        // Otherwise, a failed initial peer with no last seen time is never attempted again.
+        //
+        // # Security
+        //
+        // Initial peers come from the config, the DNS seeders, or the disk cache, never
+        // from remote peers. The previous attempt and failure times are kept, so the peer
+        // still waits for the reconnection delay.
+        let is_initial_peer_retry =
+            matches!(self, NewInitial { .. }) && previous.last_connection_state == Failed;
+
         // Invalid changes
 
-        if change_to_never_attempted && previous_has_been_attempted && !is_misbehavior_update {
+        if change_to_never_attempted
+            && previous_has_been_attempted
+            && !is_misbehavior_update
+            && !is_initial_peer_retry
+        {
             // Existing entry has been attempted, change is NeverAttempted
             // - ignore the change
             //
@@ -1177,7 +1192,11 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_concurrent && !connection_has_more_progress && !is_misbehavior_update {
+        if change_is_concurrent
+            && !connection_has_more_progress
+            && !is_misbehavior_update
+            && !is_initial_peer_retry
+        {
             // Change is close together in time, and it would revert the connection to an earlier
             // state.
             //
@@ -1238,19 +1257,21 @@ impl MetaAddrChange {
                 untrusted_last_seen: previous
                     .untrusted_last_seen
                     .or_else(|| self.untrusted_last_seen(local_now)),
-                // The peer has not been attempted, so these fields must be None
-                last_response: None,
-                rtt: None,
-                ping_sent_at: None,
-                last_attempt: None,
-                last_failure: None,
+                // These fields are None, unless a failed initial peer was re-added.
+                // Keeping them makes the re-added peer wait for the reconnection delay.
+                last_response: previous.last_response,
+                rtt: previous.rtt,
+                ping_sent_at: previous.ping_sent_at,
+                last_attempt: previous.last_attempt,
+                last_failure: previous.last_failure,
                 last_connection_state: self.peer_addr_state(),
                 is_inbound: previous.is_inbound || self.is_inbound(),
-                user_agent: None,
-                negotiated_version: None,
+                user_agent: previous.user_agent,
+                negotiated_version: previous.negotiated_version,
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
+            // or the change re-adds a failed initial peer,
             // and the change is later, either in time or in connection progress
             // (this is checked above and returns None early):
             // - update the fields from the change
