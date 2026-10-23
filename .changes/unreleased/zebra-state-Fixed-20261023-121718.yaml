@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Run note commitment tree updates alongside non-tree updates when committing non-finalized blocks.
+time: 2026-10-23T12:17:18.280273661+02:00

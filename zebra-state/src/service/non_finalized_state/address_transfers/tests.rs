@@ -17,7 +17,7 @@ proptest! {
     ) {
         let mut index = AddressTransfers::default();
         let mut expected: HashMap<Address, TransparentTransfers> = HashMap::new();
-        let mut outputs: HashMap<Address, Vec<(transparent::OutPoint, transparent::OrderedUtxo)>> = HashMap::new();
+        let mut outputs: HashMap<Address, Vec<(transparent::OutPoint, Arc<transparent::OrderedUtxo>)>> = HashMap::new();
         let mut readers = Vec::new();
         for (step, (id, revert)) in operations.into_iter().enumerate() {
             let address = address(id);
@@ -36,11 +36,11 @@ proptest! {
                 let mut hash = [0; 32];
                 hash[..4].copy_from_slice(&step.to_le_bytes());
                 let outpoint = transparent::OutPoint { hash: transaction::Hash(hash), index: 0 };
-                let utxo = transparent::OrderedUtxo::new(
+                let utxo = Arc::new(transparent::OrderedUtxo::new(
                     transparent::Output::new(1u64.try_into().unwrap(), transparent::Script::new(&[])),
                     Height(step),
                     0,
-                );
+                ));
                 index.get_or_insert_mut(address).update_chain_tip_with(&(&outpoint, &utxo)).unwrap();
                 expected.entry(address).or_default().update_chain_tip_with(&(&outpoint, &utxo)).unwrap();
                 history.push((outpoint, utxo));
