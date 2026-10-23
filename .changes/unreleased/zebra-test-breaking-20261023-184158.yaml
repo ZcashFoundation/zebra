@@ -1,0 +1,4 @@
+project: zebra-test
+kind: breaking
+body: 'A `Transcript` now checks the request of entries that expect an error, and fails a step that takes longer than 60 seconds.'
+time: 2026-10-23T18:41:58.887116723+02:00
