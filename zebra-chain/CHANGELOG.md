@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.1] - 2026-10-23
+
+### Fixed
+
+- Display TEX addresses as Bech32m with the `tex`, `textest` or `texregtest` HRP (ZIP 320). `transparent::Address` previously printed and serialized them as the P2PKH address with the same key hash.
+
 ## [15.0.0] - 2026-10-22
 
 ### Breaking Changes

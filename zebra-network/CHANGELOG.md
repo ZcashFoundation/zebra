@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.1] - 2026-10-23
+
+### Changed
+
+- The `zebra.net.in.errors` `error` label uses the serialization error kind, and handshake `remote_version` and `negotiated_version` labels use known protocol versions or `other` ([#11874](https://github.com/ZcashFoundation/zebra/pull/11874)).
+
+### Fixed
+
+- Peer misbehaviour scores are no longer dropped when several arrive while the batched scores are being written to the address book ([#10601](https://github.com/ZcashFoundation/zebra/issues/10601)).
+
 ## [15.0.0] - 2026-10-22
 
 ### Breaking Changes
