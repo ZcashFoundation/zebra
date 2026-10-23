@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: Added
+body: Added bounded verified block-transaction candidate lookup through the `VerifiedTransactionsForBlock` mempool request and response variants ([#11939](https://github.com/ZcashFoundation/zebra/pull/11939)).
+time: 2026-11-05T06:30:56.679671011+01:00
