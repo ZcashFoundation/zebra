@@ -1735,8 +1735,10 @@ where
 
         // Reference for the legacy error code:
         // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1259-L1260>
-        let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex)
+        let raw_transaction_bytes = hex_data::decode(raw_transaction_hex.as_bytes())
             .map_error(server::error::LegacyCode::Deserialization)?;
+        // Free the hex string before awaiting verification, as consuming decoding used to.
+        drop(raw_transaction_hex);
         let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
             .map_error(server::error::LegacyCode::Deserialization)?;
 
@@ -4800,7 +4802,7 @@ impl SendRawTransactionResponse {
 #[serde(untagged)]
 pub enum GetBlockResponse {
     /// The request block, hex-encoded.
-    Raw(#[serde(with = "hex")] SerializedBlock),
+    Raw(#[serde(with = "hex_data")] SerializedBlock),
     /// The block object.
     Object(Box<BlockObject>),
 }
@@ -5162,7 +5164,7 @@ impl Default for GetBlockHashResponse {
 #[serde(untagged)]
 pub enum GetRawTransactionResponse {
     /// The raw transaction, encoded as hex bytes.
-    Raw(#[serde(with = "hex")] SerializedTransaction),
+    Raw(#[serde(with = "hex_data")] SerializedTransaction),
     /// The transaction object.
     Object(Box<TransactionObject>),
 }
