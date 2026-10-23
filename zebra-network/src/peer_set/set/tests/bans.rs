@@ -63,7 +63,13 @@ async fn reject_revoked_request(upgrade: bool, delayed_sink: bool) {
         let inbound: MockService<Request, Response, PanicAssertion> = MockService::build().finish();
         let connection = Connection::new(
             inbound,
-            (client_rx, advert_rx, minimum.clone(), bans_rx.clone()),
+            (
+                client_rx,
+                advert_rx,
+                client.compact_receive_tx.subscribe(),
+                minimum.clone(),
+                bans_rx.clone(),
+            ),
             client.error_slot.clone(),
             outbound_tx.sink_map_err(|_| {
                 SerializationError::from(std::io::Error::new(
