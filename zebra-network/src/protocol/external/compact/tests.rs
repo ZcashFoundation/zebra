@@ -62,20 +62,58 @@ fn response(block: &Block, indexes: &[usize]) -> BlockTransactions {
 }
 
 #[test]
+fn compact_short_id_literal_vectors() {
+    // Generated independently with Python hashlib.sha256 and handwritten SipHash-2-4:
+    // Hash header || LE64(nonce), take the first two LE64 words, then low six SipHash bytes.
+    // The fixed mainnet header includes its complete 1,344-byte Equihash solution.
+    let block_bytes = &**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES;
+    let block = Block::zcash_deserialize(block_bytes).unwrap();
+    let mut compact = CompactBlock::from_block(&block, 0x8877_6655_4433_2211).unwrap();
+    let keys = compact.keys();
+    assert_eq!(keys, (0x1f23_5750_38c4_9917, 0x555b_c930_792d_bafe));
+
+    // The legacy identity is SHA256d of ZIP-243 test vector 0's v4 transaction.
+    let v4_txid = transaction::Hash([
+        0x76, 0x8b, 0xd1, 0x68, 0x80, 0xc7, 0x70, 0xbb, 0xf0, 0x15, 0x92, 0x73, 0x87, 0xf9, 0xdc,
+        0x7e, 0x2e, 0x8d, 0xfe, 0xcc, 0xef, 0x55, 0xc3, 0x57, 0x4a, 0xb4, 0x04, 0xdf, 0x99, 0x23,
+        0xbf, 0x80,
+    ]);
+    assert_eq!(
+        short_id(keys, UnminedTxId::Legacy(v4_txid)),
+        [0x9b, 0x7c, 0xe3, 0x31, 0x28, 0x95],
+    );
+
+    // The witnessed identity is ZIP-244 test vector 0's txid followed by its auth digest.
+    let v5_wtxid = transaction::WtxId {
+        id: transaction::Hash([
+            0x55, 0x2c, 0x96, 0xbd, 0x33, 0x83, 0x4b, 0xa1, 0xa8, 0xa3, 0xec, 0xd8, 0x0a, 0x2c,
+            0x9c, 0xb4, 0x11, 0x87, 0x55, 0x3a, 0x3d, 0xcf, 0xe7, 0x92, 0x83, 0x16, 0xbb, 0x70,
+            0x70, 0x4b, 0x85, 0xd0,
+        ]),
+        auth_digest: transaction::AuthDigest([
+            0x12, 0x76, 0x7e, 0x5f, 0x67, 0x85, 0x67, 0x36, 0x0f, 0xb3, 0xa1, 0xcb, 0x9c, 0xf8,
+            0x58, 0x61, 0x3f, 0xfe, 0x22, 0x63, 0xb6, 0x53, 0xc6, 0xa3, 0x70, 0xee, 0x1f, 0x68,
+            0x20, 0xab, 0xdc, 0x57,
+        ]),
+    };
+    assert_eq!(
+        short_id(keys, UnminedTxId::Witnessed(v5_wtxid)),
+        [0xdf, 0x54, 0x2d, 0x79, 0x0c, 0xbd],
+    );
+
+    let mut header_bytes = compact.header.zcash_serialize_to_vec().unwrap();
+    assert_eq!(header_bytes.as_slice(), &block_bytes[..1487]);
+    // Changing the final solution byte must change the actual compact key derivation.
+    header_bytes[1486] ^= 1;
+    compact.header = Arc::new(block::Header::zcash_deserialize(header_bytes.as_slice()).unwrap());
+    assert_ne!(compact.keys(), keys);
+}
+
+#[test]
 fn compact_short_id_identity_vectors() {
     let block = fixture();
     let compact = CompactBlock::from_block(&block, 0x0807_0605_0403_0201).unwrap();
-    let mut key_bytes = block.header.zcash_serialize_to_vec().unwrap();
-    key_bytes.extend_from_slice(&compact.nonce.to_le_bytes());
-    let digest = Sha256::digest(&key_bytes);
-    let keys = (
-        u64::from_le_bytes(digest[..8].try_into().unwrap()),
-        u64::from_le_bytes(digest[8..16].try_into().unwrap()),
-    );
-    assert_eq!(compact.keys(), keys);
-    // The key commits to the Equihash solution at the end of the complete header.
-    key_bytes[block.header.zcash_serialized_size() - 1] ^= 1;
-    assert_ne!(digest, Sha256::digest(key_bytes));
+    let keys = compact.keys();
 
     // SipHash's published length-32 vector, truncated to low 48 bits in wire order.
     let identity = transaction::Hash(std::array::from_fn(|index| u8::try_from(index).unwrap()));
@@ -91,29 +129,18 @@ fn compact_short_id_identity_vectors() {
         let id = UnminedTxId::from(tx.as_ref());
         let variant = tx.as_ref().clone().with_transparent_inputs(inputs(&[2]));
         let variant_id = UnminedTxId::from(&variant);
-        let bytes = match id {
+        match id {
             UnminedTxId::Legacy(id) => {
                 assert_eq!(tx.version(), 4);
                 assert_ne!(id, variant.hash());
-                id.0.to_vec()
             }
             UnminedTxId::Witnessed(id) => {
                 assert!(matches!(tx.version(), 5 | 6));
                 assert_eq!(id.id, variant.hash());
                 assert_ne!(id.auth_digest, variant.auth_digest().unwrap());
-                <[u8; 64]>::from(id).to_vec()
             }
-        };
-        let mut hash = SipHasher24::new_with_keys(keys.0, keys.1);
-        hash.write(&bytes);
-        assert_eq!(
-            short_id(compact.keys(), id).as_slice(),
-            &hash.finish().to_le_bytes()[..6]
-        );
-        assert_ne!(
-            short_id(compact.keys(), id),
-            short_id(compact.keys(), variant_id)
-        );
+        }
+        assert_ne!(short_id(keys, id), short_id(keys, variant_id));
     }
 }
 
