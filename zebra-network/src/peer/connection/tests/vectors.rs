@@ -1478,10 +1478,11 @@ fn overload_probability_reduces_over_time() {
 /// Test that connections are randomly terminated in response to `Overloaded` errors.
 ///
 /// TODO: do a similar test on the real service stack created in the `start` command.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn connection_is_randomly_disconnected_on_overload() {
     let _init_guard = zebra_test::init();
 
+    // All peer traffic uses in-memory channels; preserve the waits using virtual time.
     // The number of times we repeat the test
     const TEST_RUNS: usize = 220;
     // The expected number of tests before a test failure due to random chance.
