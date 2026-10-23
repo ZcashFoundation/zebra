@@ -156,7 +156,6 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
 /// Test if the RPC server will panic correctly when there is a port conflict.
 #[tokio::test]
 async fn rpc_server_spawn_port_conflict() {
-    use std::time::Duration;
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_known_port();
@@ -199,8 +198,7 @@ async fn rpc_server_spawn_port_conflict() {
         .await
         .expect("RPC server should start");
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
+    // The awaited startup has already bound the listening socket.
     RpcServer::start(rpc_impl, conf)
         .await
         .expect_err("RPC server should not start");
