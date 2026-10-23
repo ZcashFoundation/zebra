@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added authenticated early-relay admission requests, responses, guards, a bounded expiring `EarlyRelayCache`, and hash-only suppression of authenticated deterministic rejections. Handle the new request and response variants in exhaustive matches; cached bodies are not fully verified state blocks.
+time: 2026-10-23T02:45:50.909649991+02:00

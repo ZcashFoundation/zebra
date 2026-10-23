@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Added default-off `network.experimental_early_block_relay` for coordinated private-network experiments: compatible peers can relay authenticated next-tip blocks before transaction verification finishes; legacy peers retain committed-only relay.'
+time: 2026-10-23T02:44:07.561109259+02:00

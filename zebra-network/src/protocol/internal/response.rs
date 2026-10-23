@@ -74,6 +74,14 @@ pub enum Response {
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
     Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
+    /// Blocks downloaded from a connection that bilaterally negotiated experimental early relay.
+    ///
+    /// All block responses on such connections carry this provenance, even for committed blocks.
+    /// The source address is unchanged. This is not evidence of validity: receivers must authenticate
+    /// the header and body before exempting any later transaction-validation failure from punishment.
+    /// Inbound serving handlers return [`Response::Blocks`], not this outbound-only classification.
+    EarlyBlocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
+
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
@@ -99,7 +107,7 @@ impl fmt::Display for Response {
             Response::TransactionIds(ids) => format!("TransactionIds {{ ids: {} }}", ids.len()),
 
             // Display heights for single-block responses (which Zebra requests and expects)
-            Response::Blocks(blocks) if blocks.len() == 1 => {
+            Response::Blocks(blocks) | Response::EarlyBlocks(blocks) if blocks.len() == 1 => {
                 match blocks.first().expect("len is 1") {
                     Available((block, _)) => format!(
                         "Block {{ height: {}, hash: {} }}",
@@ -113,7 +121,7 @@ impl fmt::Display for Response {
                     Missing(hash) => format!("Block {{ missing: {hash} }}"),
                 }
             }
-            Response::Blocks(blocks) => format!(
+            Response::Blocks(blocks) | Response::EarlyBlocks(blocks) => format!(
                 "Blocks {{ blocks: {}, missing: {} }}",
                 blocks.iter().filter(|r| r.is_available()).count(),
                 blocks.iter().filter(|r| r.is_missing()).count()
@@ -143,13 +151,17 @@ impl Response {
             Response::TransactionIds(_) => "TransactionIds",
 
             Response::Blocks(_) => "Blocks",
+            Response::EarlyBlocks(_) => "EarlyBlocks",
             Response::Transactions(_) => "Transactions",
         }
     }
 
     /// Returns true if the response is a block or transaction inventory download.
     pub fn is_inventory_download(&self) -> bool {
-        matches!(self, Response::Blocks(_) | Response::Transactions(_))
+        matches!(
+            self,
+            Response::Blocks(_) | Response::EarlyBlocks(_) | Response::Transactions(_)
+        )
     }
 
     /// Returns true if self is the [`Response::Nil`] variant.

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Added bilateral experimental early block relay, new request and response variants, and negotiated connection metadata. Initialize the default-off `Config::experimental_early_block_relay` field and handle the new variants in exhaustive matches.
+time: 2026-10-23T02:44:07.553855407+02:00

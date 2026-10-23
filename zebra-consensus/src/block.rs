@@ -29,7 +29,7 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
-    parameters::{subsidy::SubsidyError, Network},
+    parameters::{subsidy::SubsidyError, Network, NetworkUpgrade},
     serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize},
     transparent,
     work::equihash,
@@ -262,6 +262,22 @@ pub enum VerifyBlockError {
     #[error("block exceeds the maximum serialized size")]
     OversizedBlock,
 
+    /// An authenticated early-relay body failed later transaction or contextual verification.
+    #[error("authenticated early-relay block failed validation: {0}")]
+    EarlyRelay(#[source] Box<VerifyBlockError>),
+
+    /// Header/body authentication failed before the early-relay scoring exemption.
+    #[error("early-relay authentication failed: {0}")]
+    EarlyRelayAdmission(#[source] zs::ValidateContextError),
+
+    /// The parent context was unavailable before the bounded authentication wait expired.
+    #[error("early-relay parent context is unavailable")]
+    EarlyRelayUnavailable,
+
+    /// This authenticated hash recently failed deterministic transaction validation.
+    #[error("authenticated early-relay block was already rejected")]
+    EarlyRelayRejected,
+
     /// Error when attempting to commit a block after semantic verification.
     #[error("unable to commit block after semantic verification: {0}")]
     Commit(#[from] zs::CommitBlockError),
@@ -287,6 +303,7 @@ impl VerifyBlockError {
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
         match self {
+            VerifyBlockError::EarlyRelay(source) => source.is_duplicate_request(),
             VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
             VerifyBlockError::Commit(commit_err) => commit_err.is_duplicate_request(),
             _ => false,
@@ -299,6 +316,8 @@ impl VerifyBlockError {
     /// See [`zs::ValidateContextError::is_auth_commitment_mismatch()`].
     pub fn is_auth_commitment_mismatch(&self) -> bool {
         match self {
+            VerifyBlockError::EarlyRelay(source) => source.is_auth_commitment_mismatch(),
+            VerifyBlockError::EarlyRelayAdmission(source) => source.is_auth_commitment_mismatch(),
             VerifyBlockError::Commit(commit_err) => commit_err.is_auth_commitment_mismatch(),
             _ => false,
         }
@@ -310,6 +329,9 @@ impl VerifyBlockError {
     /// See [`zs::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
     pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
         match self {
+            VerifyBlockError::EarlyRelay(source) => {
+                source.is_descendant_of_auth_commitment_mismatch()
+            }
             VerifyBlockError::Commit(commit_err) => {
                 commit_err.is_descendant_of_auth_commitment_mismatch()
             }
@@ -325,7 +347,43 @@ impl VerifyBlockError {
             Equihash { .. } | Subsidy(_) => 100,
             Transaction(err) => err.mempool_misbehavior_score(),
             Commit(err) => err.misbehavior_score(),
+            EarlyRelayAdmission(error) => match error {
+                zs::ValidateContextError::TimeTooEarly { .. }
+                | zs::ValidateContextError::TimeTooLate { .. }
+                | zs::ValidateContextError::BlockPreviouslyInvalidated { .. } => 0,
+                _ => 100,
+            },
+            OversizedBlock => 100,
             _other => 0,
+        }
+    }
+
+    /// Includes content-derived totals and subsidy checks, but not unavailable state or time rules.
+    fn is_deterministic_rejection(&self) -> bool {
+        match self {
+            Self::Transaction(error)
+            | Self::Block {
+                source: BlockError::Transaction(error),
+            } => error.is_deterministic_for_block(),
+            Self::Block {
+                source:
+                    BlockError::TooManyTransparentSignatureOperations { .. }
+                    | BlockError::SummingMinerFees { .. },
+            } => true,
+            Self::Commit(zs::CommitBlockError::ValidateContextError(error)) => matches!(
+                error.as_ref(),
+                zs::ValidateContextError::InvalidSubsidy { .. }
+            ),
+            _ => false,
+        }
+    }
+
+    /// Only authenticated bodies receive the negotiated post-admission scoring exemption.
+    fn for_early_relay(self, authenticated: bool) -> Self {
+        if authenticated && self.misbehavior_score() != 0 && !self.is_auth_commitment_mismatch() {
+            Self::EarlyRelay(Box::new(self))
+        } else {
+            self
         }
     }
 }
@@ -538,6 +596,9 @@ where
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());
 
         async move {
+            let mut early_relay_authenticated = false;
+            let mut early_relay = None;
+            let result = async {
             let phase_start = Instant::now();
             let hash = block.hash();
             // Check that this block is actually a new block.
@@ -571,14 +632,20 @@ where
             // > The block data MUST be validated and checked against the server's usual
             // > acceptance rules (excluding the check for a valid proof-of-work).
             // <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-            if request.is_proposal() || network.disable_pow() {
-                check::difficulty_threshold_is_valid(&block.header, &network, &height, &hash)?;
-            } else {
-                // Do the difficulty checks first, to raise the threshold for
-                // attacks that use any other fields.
-                check::difficulty_is_valid(&block.header, &network, &height, &hash)?;
-                check::equihash_solution_is_valid(&block.header)?;
-            }
+            let header = block.header.clone();
+            let pow_network = network.clone();
+            let skip_pow = request.is_proposal() || network.disable_pow();
+            tokio::task::spawn_blocking(move || {
+                if skip_pow {
+                    check::difficulty_threshold_is_valid(&header, &pow_network, &height, &hash)?;
+                } else {
+                    check::difficulty_is_valid(&header, &pow_network, &height, &hash)?;
+                    check::equihash_solution_is_valid(&header)?;
+                }
+                Ok::<_, VerifyBlockError>(())
+            })
+            .await
+            .expect("PoW verification operates on a decoded header")?;
 
             // Exact decoder matches avoid hashing the body again, but only while the matched
             // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
@@ -636,9 +703,19 @@ where
             // Cache hits already bind the Merkle root through exact bytes or the proposal key.
             // On misses, bind the body before announcing early work and reuse these hashes below.
             let transaction_hashes = if cached.is_none() {
-                let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
-                check::merkle_root_validity(&network, &block, &hashes)?;
-                Some(hashes)
+                let block = block.clone();
+                let network = network.clone();
+                Some(tokio::task::spawn_blocking(move || {
+                    if size.is_none()
+                        && u64::try_from(block.zcash_serialized_size()).unwrap_or(u64::MAX)
+                            > block::MAX_BLOCK_BYTES
+                    {
+                        return Err(VerifyBlockError::OversizedBlock);
+                    }
+                    let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
+                    check::merkle_root_validity(&network, &block, &hashes)?;
+                    Ok::<_, VerifyBlockError>(hashes)
+                }).await.expect("body hashing operates on decoded transactions")?)
             } else {
                 None
             };
@@ -646,57 +723,6 @@ where
             let now = Utc::now();
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
-
-            // Keep early work alive while the remaining checks and state commit run.
-            let _mining_candidate = if request.is_proposal() {
-                None
-            } else {
-                state_service
-                    .clone()
-                    .oneshot(zs::Request::MiningCandidate(block.clone()))
-                    .await
-                    .ok()
-            };
-
-            if let Some(cached) = cached {
-                // Cache hits skip transaction verification, so record their checks and commit
-                // under the same phases as other blocks.
-                metrics::histogram!(
-                    "zebra.consensus.block.phase.duration_seconds",
-                    "phase" => "block_checks"
-                )
-                .record(phase_start.elapsed().as_secs_f64());
-                let phase_start = Instant::now();
-                let mut contextual = (*cached).clone();
-                contextual.rebind(block, received_time);
-                let commit = match request {
-                    Request::CommitMined(_, notifications)
-                    | Request::CommitDecoded(_, Some(notifications)) => {
-                        contextual.into_mined_request(notifications)
-                    }
-                    Request::Commit(_) | Request::CommitDecoded(_, None) => {
-                        zs::Request::CommitContextuallyVerifiedBlock(Box::new(contextual))
-                    }
-                    Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
-                };
-                let result = state_service.oneshot(commit).await;
-                metrics::histogram!(
-                    "zebra.consensus.block.phase.duration_seconds",
-                    "phase" => "state_commit"
-                )
-                .record(phase_start.elapsed().as_secs_f64());
-                return match result {
-                    Ok(zs::Response::Committed(committed_hash)) => {
-                        assert_eq!(committed_hash, hash, "state must commit correct hash");
-                        Ok(hash)
-                    }
-                    Err(source) => Err(map_commit_error(source, hash)),
-                    _ => unreachable!("wrong response for contextual block commit"),
-                };
-            }
-
-            let transaction_hashes =
-                transaction_hashes.expect("cache hits return after committing the block");
 
             // Since errors cause an early exit, try to do the
             // quick checks first.
@@ -727,6 +753,90 @@ where
 
             // Bound shielded work before output recovery or proof verification.
             check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+            let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
+                && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
+            early_relay = if request.is_proposal()
+                || NetworkUpgrade::current(&network, height) < NetworkUpgrade::Nu5
+            {
+                None
+            } else {
+                match state_service.clone().oneshot(zs::Request::EarlyRelay {
+                    block: block.clone(),
+                    require_authentication,
+                }).await {
+                    Ok(zs::Response::EarlyRelay(guard)) => {
+                        if require_authentication && guard.is_none() {
+                            return Err(VerifyBlockError::EarlyRelayUnavailable);
+                        }
+                        early_relay_authenticated = require_authentication;
+                        guard
+                    }
+                    Err(source) if require_authentication => {
+                        return Err(match source.downcast::<zs::ValidateContextError>() {
+                            Ok(source) => VerifyBlockError::EarlyRelayAdmission(*source),
+                            Err(source) => VerifyBlockError::StateService { source, hash },
+                        });
+                    }
+                    _ => None,
+                }
+            };
+            if require_authentication
+                && early_relay.as_ref().is_some_and(zs::EarlyRelayGuard::is_rejected)
+            {
+                return Err(VerifyBlockError::EarlyRelayRejected);
+            }
+
+            // Keep early work alive while the remaining checks and state commit run.
+            let _mining_candidate = if request.is_proposal() {
+                None
+            } else {
+                state_service
+                    .clone()
+                    .oneshot(zs::Request::MiningCandidate(block.clone()))
+                    .await
+                    .ok()
+            };
+
+            if let Some(cached) = cached {
+                // Cache hits skip transaction verification, so record their checks and commit
+                // under the same phases as other blocks.
+                metrics::histogram!(
+                    "zebra.consensus.block.phase.duration_seconds",
+                    "phase" => "block_checks"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
+                let phase_start = Instant::now();
+                let mut contextual = (*cached).clone();
+                contextual.rebind(block, received_time);
+                let commit = match request {
+                    Request::CommitMined(_, notifications)
+                    | Request::CommitDecoded(_, Some(notifications)) => {
+                        contextual.into_mined_request(notifications)
+                    }
+                    Request::Commit(_) | Request::CommitEarlyRelay(_) | Request::CommitDecoded(_, None) => {
+                        zs::Request::CommitContextuallyVerifiedBlock(Box::new(contextual))
+                    }
+                    Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
+                };
+                let result = state_service.oneshot(commit).await;
+                metrics::histogram!(
+                    "zebra.consensus.block.phase.duration_seconds",
+                    "phase" => "state_commit"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
+                return match result {
+                    Ok(zs::Response::Committed(committed_hash)) => {
+                        assert_eq!(committed_hash, hash, "state must commit correct hash");
+                        Ok(hash)
+                    }
+                    Err(source) => Err(map_commit_error(source, hash)),
+                    _ => unreachable!("wrong response for contextual block commit"),
+                };
+            }
+
+            let transaction_hashes =
+                transaction_hashes.expect("cache hits return after committing the block");
+
 
             // Now do the slower checks
 
@@ -899,7 +1009,7 @@ where
                     contextual: None,
                     notifications,
                 },
-                Request::Commit(_) | Request::CommitDecoded(_, None) => {
+                Request::Commit(_) | Request::CommitEarlyRelay(_) | Request::CommitDecoded(_, None) => {
                     zs::Request::CommitSemanticallyVerifiedBlock(prepared_block)
                 }
                 Request::CheckProposal(_) => unreachable!("proposals return after validation"),
@@ -928,6 +1038,13 @@ where
 
                 _ => unreachable!("wrong response for semantic block commit"),
             }
+            }.await;
+            result.map_err(|error: VerifyBlockError| {
+                if let Some(guard) = early_relay.as_ref().filter(|_| error.is_deterministic_rejection()) {
+                    guard.reject();
+                }
+                error.for_early_relay(early_relay_authenticated)
+            })
         }
         .instrument(span)
         .boxed()

@@ -358,6 +358,20 @@ impl StartCmd {
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
+        let early_blocks = if config.network.experimental_early_block_relay {
+            match read_only_state_service
+                .clone()
+                .oneshot(zebra_state::ReadRequest::EarlyRelayCache)
+                .await
+                .map_err(|error| eyre!(error))?
+            {
+                zebra_state::ReadResponse::EarlyRelayCache(cache) => Some(cache),
+                _ => unreachable!("state returns the early-relay cache for its cache request"),
+            }
+        } else {
+            None
+        };
+
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
             .service(state_service);
@@ -381,7 +395,8 @@ impl StartCmd {
             .timeout(MAX_INBOUND_RESPONSE_TIME)
             .service(
                 Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
-                    .with_submitted_blocks(submitted_blocks.clone()),
+                    .with_submitted_blocks(submitted_blocks.clone())
+                    .with_early_blocks(early_blocks.clone()),
             );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
@@ -607,14 +622,19 @@ impl StartCmd {
 
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
+        let committed_gossip = sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change.clone(),
+            block_advertiser.clone(),
+            Some(submit_block_channel.receiver()),
+            submitted_blocks,
+        );
+        let early_gossip = sync::gossip_early_blocks(early_blocks, block_advertiser);
         let block_gossip_task_handle = tokio::spawn(
-            sync::gossip_best_tip_block_hashes(
-                sync_status.clone(),
-                chain_tip_change.clone(),
-                block_advertiser,
-                Some(submit_block_channel.receiver()),
-                submitted_blocks,
-            )
+            async move {
+                tokio::try_join!(committed_gossip, early_gossip)?;
+                Ok::<_, sync::BlockGossipError>(())
+            }
             .in_current_span(),
         );
 

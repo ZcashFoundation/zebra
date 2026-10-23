@@ -43,6 +43,35 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
+### Experimental early block relay
+
+For private relay experiments, set `experimental_early_block_relay = true` in
+`[network]` on each participating Zebra node. It defaults to `false` and requires
+both ends of a connection to advertise the experimental capability during the
+handshake. Older Zebra nodes and zcashd retain committed-block relay behavior.
+
+After NU5, opted-in nodes can advertise and serve an authenticated child of the
+committed best tip before transaction verification finishes. Full validation is
+still required before committing it. The cache retains one body for at most
+15 seconds, with a 2 MB wire limit and a conservative 64 MiB decoded-content
+charge. Rejection, cancellation, or expiry withdraws the body; after withdrawal,
+the admission slot stays reserved until its deadline or the next committed tip
+to bound replayed advertisements. Locally invalidated hashes are ineligible.
+At most eight authenticated, deterministic rejection hashes are remembered for
+60 seconds to suppress repeated expensive verification. Unauthenticated variants,
+timeouts, and infrastructure failures do not populate this set. Ordinary
+committed announcements are unchanged. Compatible peers do not punish one another
+for later transaction validation failures, but still reject malformed or
+unauthenticated bodies.
+
+This uses experimental service bit 25 from the
+[temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).
+[Zakura v1.7.0](https://github.com/zakura-core/zakura/blob/0ca01e6a46d711f8b46fb64742048bb4911a7052/zakura-network/src/protocol/external/types.rs#L159)
+uses bit 24 for `NODE_P2P_V2`, not early relay; experimental assignments
+must remain distinct from Zakura's capabilities. This is not a production protocol
+allocation: use it only with explicitly coordinated participants. Regtest's disabled
+proof of work does not measure the cost of authenticated admission on a public network.
+
 ### Testing NU7 reissuance
 
 Use a fresh test chain and replace the activation-height section above with:
