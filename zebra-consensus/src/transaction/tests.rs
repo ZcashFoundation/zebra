@@ -1519,6 +1519,7 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         state.clone(),
         read_state.clone(),
         mempool_setup_rx,
+        None,
     );
     let startup_reads = async {
         for _ in 0..2 {
