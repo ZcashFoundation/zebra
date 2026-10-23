@@ -44,7 +44,10 @@ mod tests;
 ///
 /// To compensate for larger proofs, we process the batch once there are over
 /// [`HALO2_MAX_BATCH_SIZE`] total actions among pending items in the queue.
-const HALO2_MAX_BATCH_SIZE: usize = super::MAX_BATCH_SIZE;
+///
+/// Each batch ends with one multi-scalar multiplication, so a threshold of twice the shared batch
+/// size reduces those for large Orchard blocks; 256 measured slower.
+const HALO2_MAX_BATCH_SIZE: usize = 2 * super::MAX_BATCH_SIZE;
 
 /// The type of verification results.
 type VerifyResult = bool;
