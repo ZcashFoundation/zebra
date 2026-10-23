@@ -53,7 +53,7 @@ condition just goes false. Change the workflow in the same PR.
 
 ## Labels written by CI
 
-Four labels are dedup keys for the auto-opened CI failure issues: the failure workflow finds the
+Five labels are dedup keys for the auto-opened CI failure issues: the failure workflow finds the
 open issue carrying its key and appends to it instead of opening a new one. **Never apply these by
 hand**, and close a stale auto-issue rather than relabelling it, so the next failure opens a fresh
 one.
@@ -62,7 +62,8 @@ one.
 |---|---|
 | `ci-fail/advisory` | `advisory.yml` — scheduled cargo-deny advisory checks on `main` |
 | `ci-fail/binaries` | `release-binaries.yml` |
-| `ci-fail/main` | `zfnd-ci-integration-tests-gcp.yml` — integration tests on `main` |
+| `ci-fail/main` | `zfnd-ci-integration-tests-gcp.yml` — an integration test failed on `main` |
+| `ci-fail/main-infra` | `zfnd-ci-integration-tests-gcp.yml` — the integration test infrastructure failed on `main`, such as a GCP instance that could not be created |
 | `ci-fail/release` | `zfnd-deploy-nodes-gcp.yml` — node deployment and health verification |
 
 ## Adding or removing a label
