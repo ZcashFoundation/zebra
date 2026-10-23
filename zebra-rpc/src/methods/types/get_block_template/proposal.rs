@@ -7,7 +7,7 @@ use std::{num::ParseIntError, str::FromStr, sync::Arc};
 use zebra_chain::{
     block::{self, Block, Height},
     parameters::{Network, NetworkUpgrade},
-    serialization::{BytesInDisplayOrder, DateTime32, SerializationError, ZcashDeserializeInto},
+    serialization::{BytesInDisplayOrder, DateTime32, SerializationError},
     work::equihash::Solution,
 };
 use zebra_node_services::BoxError;
@@ -167,6 +167,8 @@ impl FromStr for BlockTemplateTimeSource {
 /// Returns a block proposal generated from a [`BlockTemplateResponse`] RPC response.
 ///
 /// If `time_source` is not supplied, uses the current time from the template.
+/// Locally constructed templates share their mempool transaction allocations; templates received
+/// over RPC deserialize their transaction data.
 pub fn proposal_block_from_template(
     template: &BlockTemplateResponse,
     time_source: impl Into<Option<BlockTemplateTimeSource>>,
@@ -204,10 +206,11 @@ pub fn proposal_block_from_template(
         .time_from_template(template)
         .into();
 
-    let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
+    let mut transactions = Vec::with_capacity(tx_templates.len() + 1);
+    transactions.push(coinbase_txn.transaction()?);
 
     for tx_template in tx_templates {
-        transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
+        transactions.push(tx_template.transaction()?);
     }
 
     let commitment_bytes = match NetworkUpgrade::current(net, height) {

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Reduced retained proposal memory by sharing mempool transaction allocations during block template conversion.
+time: 2026-10-23T02:41:51.85008477+02:00
