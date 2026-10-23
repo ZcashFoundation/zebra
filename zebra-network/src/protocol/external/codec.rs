@@ -427,7 +427,8 @@ impl Decoder for Codec {
                 }
 
                 // Cap the upfront reservation instead of trusting body_len; grows
-                // further in the same step as more of the body arrives (below).
+                // as more of the body arrives, never beyond the declared length
+                // (below).
                 src.reserve(HEADER_LEN + body_len.min(INITIAL_BODY_RESERVATION_STEP));
 
                 self.state = DecodeState::Body {
@@ -445,10 +446,22 @@ impl Decoder for Codec {
                 checksum,
             } => {
                 if src.len() < body_len {
-                    // Grow in the same bounded step as the body arrives, instead
-                    // of trusting the peer-declared remaining length upfront.
+                    // Grow as the body arrives, never reserving beyond the
+                    // declared length, instead of trusting the peer-declared
+                    // remaining length upfront.
                     let remaining = body_len - src.len();
-                    src.reserve(remaining.min(INITIAL_BODY_RESERVATION_STEP));
+
+                    if src.capacity() - src.len() < remaining.min(INITIAL_BODY_RESERVATION_STEP) {
+                        // `BytesMut::reserve` grows the underlying `Vec` by doubling its
+                        // capacity, which can overshoot `body_len` by up to ~2x (see #11793
+                        // review). Allocate exactly instead: proportional to the bytes
+                        // received so far, capped at the declared body length.
+                        let target = body_len
+                            .min(src.len() + src.len().max(2 * INITIAL_BODY_RESERVATION_STEP));
+                        let mut grown = BytesMut::with_capacity(target + HEADER_LEN);
+                        grown.extend_from_slice(src);
+                        *src = grown;
+                    }
 
                     trace!(?self.state, len = src.len(), "src buffer does not have an entire body, waiting");
                     return Ok(None);
