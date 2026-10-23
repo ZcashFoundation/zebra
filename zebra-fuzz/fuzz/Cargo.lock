@@ -3780,7 +3780,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -4761,9 +4761,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.14.0-pre.2"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9234c534431e406c7f8f59983d3f115234855ffb233f78f2ba3d2351f318cd7"
+checksum = "372023d82d978ab3f27b8e9f7f9b56fc61f3c9cc2b72ec2f8e3bbb278497e474"
 dependencies = [
  "bech32",
  "bs58",
@@ -4798,9 +4798,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.17.0-pre.2"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d5caff2ce11d394455aadae43b7a5d4f7e62d24d679d7576c351fc088be5dd4"
+checksum = "6e35ad8dafd173b0465e5963b520b241f497d978319faed46547bd81f403fa98"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -4839,9 +4839,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.31.0-pre.2"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f51d0187f228671d1a10bd7c0eee81e74a77d6b74e61c68acc409c0609ac970"
+checksum = "50ad9ffda3d83c35e401b2f914980762f201ab40525cb0aab67b8d91e180e7df"
 dependencies = [
  "blake2b_simd",
  "corez",
@@ -4868,9 +4868,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.31.0-pre.2"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72913f5c15db4fea0ef6115b7d93a0c97f8b26f3afffeb460490696b358e0fba"
+checksum = "f2ec0c92cb3bca94f8d875260b09eaad8f97eb8ebe7b5ca099ad0ae10eb19d84"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -4892,9 +4892,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.11.0-pre.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b92a9bf4c5aaac45d5d283c41e3649501e3c271bf0d5eb1f7604c9a89c4f5f52"
+checksum = "266da226b6be42545b9fc299f1def9f5e525764845b8afa874f167155de943ba"
 dependencies = [
  "corez",
  "document-features",
@@ -4931,9 +4931,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.11.0-pre.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f97c4ba309c2bc4516a8c5696a481eb5fff5ee8c632c303098876920ce91ea9"
+checksum = "eb804d0179500e9543502dd6dfa178826617107897e6fe171241e5b767b7a0dd"
 dependencies = [
  "bip32",
  "bs58",
@@ -4955,7 +4955,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "14.0.0"
+version = "15.0.0"
 dependencies = [
  "bech32",
  "bitflags",
@@ -5024,7 +5024,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "17.0.0"
+version = "18.0.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5098,7 +5098,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "14.0.0"
+version = "15.0.0"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -5133,7 +5133,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "12.0.0"
+version = "13.0.0"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -5147,7 +5147,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "18.0.0"
+version = "19.0.0"
 dependencies = [
  "base64",
  "chrono",
@@ -5205,7 +5205,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "13.0.0"
+version = "14.0.0"
 dependencies = [
  "libzcash_script",
  "rand 0.10.2",
@@ -5218,7 +5218,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "15.0.0"
+version = "16.0.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -5258,7 +5258,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "color-eyre",
  "futures",
