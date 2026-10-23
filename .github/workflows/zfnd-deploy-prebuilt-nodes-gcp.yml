@@ -558,7 +558,7 @@ jobs:
       ${{
         !cancelled() &&
         needs.deploy-nodes.result == 'success' &&
-        (inputs.environment == 'stage' || inputs.environment == 'prod')
+        inputs.environment != 'dev'
       }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
