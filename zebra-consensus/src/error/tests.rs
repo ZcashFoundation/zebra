@@ -57,7 +57,45 @@ fn verification_errors_have_high_misbehavior_score() {
         TransactionError::RedJubjub(zebra_chain::primitives::redjubjub::Error::InvalidSignature),
         TransactionError::RedPallas(zebra_chain::primitives::reddsa::Error::InvalidSignature),
         TransactionError::Script(zebra_script::Error::ScriptInvalid),
+        TransactionError::Subsidy(SubsidyError::InvalidMinerFees),
     ] {
         assert_eq!(error.mempool_misbehavior_score(), 100, "{error:?}");
+        assert!(error.is_deterministic_for_block(), "{error:?}");
+    }
+}
+
+#[test]
+fn early_relay_rejection_excludes_transient_and_unclassified_errors() {
+    for error in [
+        TransactionError::TransparentInputNotFound,
+        TransactionError::LockedUntilAfterBlockHeight(block::Height(10)),
+        TransactionError::LockedUntilAfterBlockTime(Utc::now()),
+        TransactionError::ExpiredTransaction {
+            expiry_height: block::Height(1),
+            block_height: block::Height(2),
+            transaction_hash: [0; 32].into(),
+        },
+        TransactionError::ImmatureTransparentCoinbaseSpend {
+            outpoint: transparent::OutPoint {
+                hash: [0; 32].into(),
+                index: 0,
+            },
+            spend_height: block::Height(2),
+            min_spend_height: block::Height(101),
+            created_height: block::Height(1),
+        },
+        TransactionError::ValidateMempoolLockTimeError("state unavailable".into()),
+        TransactionError::Subsidy(SubsidyError::ParentChainValuePoolsRequired(block::Height(
+            10,
+        ))),
+        TransactionError::InternalDowncastError("worker unavailable".into()),
+        TransactionError::Io("disk unavailable".into()),
+        TransactionError::Other("unknown failure".into()),
+        TransactionError::Amount("unclassified amount error".into()),
+        TransactionError::Balance("unclassified balance error".into()),
+        TransactionError::Script(zebra_script::Error::TxIndex),
+        TransactionError::Script(zebra_script::Error::TxCoinbase),
+    ] {
+        assert!(!error.is_deterministic_for_block(), "{error:?}");
     }
 }

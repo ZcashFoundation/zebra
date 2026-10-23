@@ -1,4 +1,4 @@
-//! Regression tests for non-finalized write notifications.
+//! Regression tests for block writer notifications.
 
 use std::time::Duration;
 
@@ -102,8 +102,15 @@ async fn write_worker_survives_rejected_root_invalidation() {
     let before = state.clone();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) =
-        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+        finalized,
+        state,
+        tip_sender,
+        state_sender,
+        false,
+        None,
+        super::super::early_relay::EarlyRelayState::new(None),
+    );
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -169,8 +176,15 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     let (finalized, state, genesis) = new_state_with_mainnet_genesis();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) =
-        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+        finalized,
+        state,
+        tip_sender,
+        state_sender,
+        false,
+        None,
+        super::super::early_relay::EarlyRelayState::new(None),
+    );
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -226,4 +240,93 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     .await
     .unwrap()
     .unwrap();
+}
+
+#[test]
+fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
+    use std::sync::Mutex;
+
+    use zebra_chain::parameters::testnet::ConfiguredActivationHeights;
+
+    // Close the state only after the writer reports a failed commit, not at its initial
+    // shutdown check. Observing the error event makes this interleaving deterministic.
+    struct CloseStateOnError {
+        resets: Mutex<Option<UnboundedReceiver<(Option<Height>, block::Hash)>>>,
+    }
+
+    impl tracing::Subscriber for CloseStateOnError {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            metadata.fields().field("last_valid_height").is_some()
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            unreachable!("only checkpoint failure events are enabled")
+        }
+
+        fn event(&self, _: &tracing::Event<'_>) {
+            drop(self.resets.lock().unwrap().take());
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut finalized = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .unwrap();
+    let genesis = block::genesis::regtest_genesis_block();
+    finalized
+        .commit_finalized(genesis.clone().into(), None)
+        .unwrap();
+    let child = genesis.make_fake_child().set_block_commitment([0; 32]);
+    let non_finalized = NonFinalizedState::new(&network);
+    let (chain_tip_sender, _, _) = ChainTipSender::new(None, &network);
+    let (non_finalized_state_sender, _snapshot) = watch::channel(non_finalized.clone());
+    let (queued, finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (invalid_block_reset_sender, resets) = tokio::sync::mpsc::unbounded_channel();
+    let (rsp_tx, rsp_rx) = oneshot::channel();
+    queued.send((child.into(), rsp_tx, None)).unwrap();
+    drop(queued);
+    let worker = WriteBlockWorkerTask {
+        finalized_block_write_receiver,
+        non_finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
+        finalized_state: finalized,
+        non_finalized_state: non_finalized,
+        invalid_block_reset_sender,
+        non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        chain_tip_sender,
+        non_finalized_state_sender,
+        backup_dir_path: None,
+        early_relay: super::super::early_relay::EarlyRelayState::new(None),
+    };
+    tracing::subscriber::with_default(
+        CloseStateOnError {
+            resets: Mutex::new(Some(resets)),
+        },
+        || worker.run(),
+    );
+    let error = rsp_rx
+        .blocking_recv()
+        .expect("writer shutdown must preserve the original commit response")
+        .unwrap_err();
+    assert!(matches!(
+        error.inner(),
+        crate::CommitBlockError::ValidateContextError(source)
+            if matches!(**source, ValidateContextError::InvalidBlockCommitment(_))
+    ));
 }

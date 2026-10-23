@@ -262,3 +262,47 @@ async fn recv_submitted_block(
     }
     std::future::pending().await
 }
+
+/// Advertises authenticated next-tip bodies only to peers that negotiated early relay.
+///
+/// A single watch slot coalesces candidates while the bounded advertiser is busy. Committed
+/// gossip runs independently, so this path never replaces or delays its legacy-peer announcements.
+pub async fn gossip_early_blocks<ZN>(
+    cache: Option<zebra_state::EarlyRelayCache>,
+    broadcast_network: ZN,
+) -> Result<(), BlockGossipError>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    ZN::Future: Send,
+{
+    let Some(cache) = cache else {
+        return std::future::pending().await;
+    };
+    let mut receiver = cache.subscribe();
+    receiver.mark_changed();
+    while receiver.changed().await.is_ok() {
+        let Some(hash) = *receiver.borrow_and_update() else {
+            continue;
+        };
+        if cache.get(&hash).is_none() {
+            continue;
+        }
+        let result = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, async {
+            let mut network = broadcast_network.clone();
+            network.ready().await?;
+            if cache.get(&hash).is_none() {
+                return Ok(zn::Response::Nil);
+            }
+            network.call(zn::Request::AdvertiseEarlyBlock(hash)).await
+        })
+        .await;
+        if !matches!(result, Ok(Ok(_))) {
+            debug!(
+                ?hash,
+                ?result,
+                "early block advertisement was not delivered"
+            );
+        }
+    }
+    Ok(())
+}

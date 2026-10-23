@@ -400,6 +400,7 @@ where
             connected_addr: self.connected_addr.unwrap_or(ConnectedAddr::Isolated),
             remote,
             negotiated_version,
+            early_block_relay: false,
         });
 
         let client = Client {
