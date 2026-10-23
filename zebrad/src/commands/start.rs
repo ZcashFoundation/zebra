@@ -396,7 +396,11 @@ impl StartCmd {
             .service(
                 Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
                     .with_submitted_blocks(submitted_blocks.clone())
-                    .with_early_blocks(early_blocks.clone()),
+                    .with_early_blocks(early_blocks.clone())
+                    .with_compact_relay(
+                        config.network.network.clone(),
+                        read_only_state_service.clone(),
+                    ),
             );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
