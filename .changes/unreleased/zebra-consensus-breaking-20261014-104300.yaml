@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Batch verifiers use the new idle-timeout constructors from `tower-batch-control`. Upgrade both crates together ([#11673](https://github.com/ZcashFoundation/zebra/pull/11673)).
+time: 2026-10-14T10:43:00.524152966+02:00
