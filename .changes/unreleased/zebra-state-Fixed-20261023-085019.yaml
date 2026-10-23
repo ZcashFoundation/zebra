@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Fixed the database open panic reporting every I/O error as a lock conflict: it now includes the RocksDB error, and only suggests checking for another zebrad process when the database lock is actually held.'
+time: 2026-10-23T08:50:19.322442313Z
