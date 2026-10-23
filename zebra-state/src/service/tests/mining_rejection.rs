@@ -214,6 +214,7 @@ fn rejection_during_queued_mining_computation_prevents_publication() {
                 _ = guard.0.closed() => {}
             }
             assert!(!changes.is_current(block.hash()));
+            assert!(changes.block(block.hash()).is_none());
             assert_eq!(
                 read.oneshot(ReadRequest::MiningCandidate).await.unwrap(),
                 ReadResponse::MiningCandidate(None)
@@ -266,6 +267,7 @@ async fn published_mining_rejection_invalidates_live_and_detached_reads() {
         };
         changes.changed().await;
         assert!(changes.is_current(hash));
+        assert!(Arc::ptr_eq(&changes.block(hash).unwrap(), &block));
         assert!(matches!(
             read.clone().oneshot(ReadRequest::MiningCandidate).await.unwrap(),
             ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == hash
@@ -290,7 +292,12 @@ async fn published_mining_rejection_invalidates_live_and_detached_reads() {
             !detached.is_current(hash),
             "cached template work is no longer authorized"
         );
+        assert!(
+            detached.block(hash).is_none(),
+            "transaction selection cannot use the rejected body"
+        );
         assert!(!changes.is_current(hash));
+        assert!(changes.block(hash).is_none());
         assert_eq!(
             read.oneshot(ReadRequest::MiningCandidate).await.unwrap(),
             ReadResponse::MiningCandidate(None)
@@ -374,6 +381,7 @@ async fn rejection_capacity_disables_mining_without_rejecting_an_unknown_block()
         );
         assert!(!changes.is_current(hash));
         assert!(!detached.is_current(hash));
+        assert!(detached.block(hash).is_none());
         assert_eq!(
             read.clone()
                 .oneshot(ReadRequest::MiningCandidate)
