@@ -265,9 +265,15 @@ impl Transaction {
 
     /// Returns the outpoints spent by this transaction's transparent inputs.
     pub fn spent_outpoints(&self) -> impl Iterator<Item = transparent::OutPoint> + '_ {
-        self.inputs()
+        self.transparent_bundle()
             .into_iter()
-            .filter_map(|input| input.outpoint())
+            .flat_map(|bundle| &bundle.vin)
+            .map(|input| input.prevout())
+            .filter(|outpoint| **outpoint != zcash_transparent::bundle::OutPoint::NULL)
+            .map(|outpoint| transparent::OutPoint {
+                hash: Hash(*outpoint.hash()),
+                index: outpoint.n(),
+            })
     }
 
     /// Compute the hash (txid) of this transaction.
