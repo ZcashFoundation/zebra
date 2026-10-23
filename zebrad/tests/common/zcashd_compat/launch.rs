@@ -21,7 +21,7 @@ use super::{
 };
 use crate::common::{
     config::{read_listen_addr_from_logs, testdir},
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_activation, ZebradTestDirExt},
 };
 
 /// How long to poll zcashd's own RPC before giving up.
@@ -179,8 +179,8 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
         .expect("managed zebrad child was just spawned");
     let _ = read_listen_addr_from_logs(zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    // Extra stability margin before poking zcashd
-    sleep(LAUNCH_DELAY).await;
+    // Mining callers need Zebra's genesis block and mempool, not just an open RPC port.
+    wait_for_mempool_activation(&setup.zebra_client).await?;
 
     wait_for_zcashd_rpc(&setup.zcashd_client).await?;
 

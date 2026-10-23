@@ -37,7 +37,7 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
 };
 
@@ -150,8 +150,8 @@ async fn nu7_v4_mempool_activation() -> Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
 
         let (first, height) = client.block_from_template(&network).await?;
         assert_eq!(height, Height(1));
@@ -278,8 +278,8 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .take()
             .expect("test directory is retained for restart");
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
         let coinbase_value = |block: &Block| {
             block.transactions[0]
                 .outputs()
@@ -543,8 +543,8 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
 
         let mut child = test_dir.spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
         let restarted_template = template(&client, 107, &[]).await?;
         assert_eq!(restarted_template.previous_block_hash(), restored.hash());
         let block = proposal_block_from_template(&restarted_template, None, &network)?;
@@ -822,8 +822,8 @@ async fn nu7_subsidy_and_funding_streams_across_activation() -> Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
 
         let branch = |upgrade: NetworkUpgrade| {
             hex::encode(u32::from(upgrade.branch_id().expect("has a branch id")).to_be_bytes())
@@ -1049,8 +1049,8 @@ async fn nu7_block_rules_at_activation() -> Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
         let verify_code = i64::from(i32::from(LegacyCode::Verify));
 
         let mature_coinbase = mine(&client, &network, 1).await?.transactions[0].clone();
@@ -1152,8 +1152,8 @@ async fn lockbox_disbursements_at_activation_and_p2pkh_funding_stream() -> Resul
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
 
         let mut pool = 0;
         for height in 1..NU6_1 {
@@ -1277,8 +1277,8 @@ async fn lockbox_disbursement_above_the_pool_is_rejected() -> Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
 
         for height in 1..NU6_1 {
             mine_checked(&client, &network, &miner, height).await?;
@@ -1393,31 +1393,13 @@ async fn nu7_stretched_first_halving() -> Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
         // Only Regtest commits its genesis block itself; configured Testnets get it from peers.
         client
             .submit_block(Arc::unwrap_or_clone(regtest_genesis_block()))
             .await?;
 
-        // Unlike the non-verbose query, verbose getrawmempool fails until the mempool is active.
-        let mut last_error = None;
-        tokio::time::timeout(Duration::from_secs(30), async {
-            while let Err(error) = client
-                .json_result_from_call::<serde_json::Value>("getrawmempool", "[true]")
-                .await
-            {
-                last_error = Some(error);
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        })
-        .await
-        .map_err(|_| {
-            eyre!(
-                "mempool did not become active within 30 seconds after genesis \
-                 (last RPC error: {last_error:?})"
-            )
-        })?;
+        wait_for_mempool_activation(&client).await?;
 
         let mut subsidies = Vec::new();
         let mut pool = 0;
@@ -1533,8 +1515,8 @@ async fn nu7_funding_streams_at_boundary_activation() -> Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let client = RpcRequestClient::new(rpc_address);
+        wait_for_mempool_activation(&client).await?;
 
         let mut subsidies = Vec::new();
         let mut pool = 0;
@@ -1618,7 +1600,7 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
                         return Ok(());
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })
         .await
@@ -1713,8 +1695,8 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
             .with_config(&mut config_a)?
             .spawn_child(args!["start"])?;
         let rpc_a = read_listen_addr_from_logs(&mut node_a, OPENED_RPC_ENDPOINT_MSG)?;
-        tokio::time::sleep(LAUNCH_DELAY).await;
         let a = RpcRequestClient::new(rpc_a);
+        wait_for_mempool_activation(&a).await?;
 
         let mut coinbases = Vec::new();
         for height in 1..NU7 - 1 {
@@ -1757,7 +1739,7 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
                         return Ok::<_, color_eyre::Report>(());
                     }
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })
         .await??;
@@ -1803,6 +1785,7 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
         let reason = rejected(&a, &overpaid).await?;
         assert!(reason.contains("invalidminerfees"), "{reason}");
         assert!(a.submit_block(overpaid).await.is_err());
+        // Preserve the observation window: an immediate tip check would not catch delayed gossip.
         tokio::time::sleep(Duration::from_secs(3)).await;
         assert_eq!(chain_info(&b).await?["blocks"], tip);
         assert_eq!(json(&b, "getbestblockhash", "[]".into()).await?, best);
