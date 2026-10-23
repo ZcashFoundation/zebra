@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added stack traces to Sentry error events, with Zebra's frames marked in-app, so Sentry can show suspect commits. Sentry now groups logged errors by stack trace, so existing issues may reappear as new ones ([#11645](https://github.com/ZcashFoundation/zebra/issues/11645)).
+time: 2026-10-21T10:20:35.825574744Z
