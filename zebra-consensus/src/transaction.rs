@@ -832,6 +832,24 @@ where
     }
 }
 
+/// Rechecks context and version rules without preparing scripts or shielded verification.
+pub(crate) fn check_cached_transaction(
+    tx: &Transaction,
+    height: block::Height,
+    time: DateTime<Utc>,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    check_common_consensus_rules(tx, height, network)?;
+    check::lock_time_has_passed(tx, height, time)?;
+    let upgrade = NetworkUpgrade::current(network, height);
+    match tx.tx_version() {
+        TxVersion::V4 => verify_v4_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V5 => verify_v5_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V6 => verify_v6_transaction_network_upgrade(tx, upgrade),
+        _ => Err(TransactionError::WrongVersion),
+    }
+}
+
 /// Applies every consensus rule that a transaction must satisfy in both block and mempool
 /// context.
 ///
