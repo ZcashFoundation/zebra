@@ -5,7 +5,6 @@
 use std::{
     cmp::max,
     collections::{HashMap, HashSet},
-    convert,
     pin::Pin,
     task::Poll,
     time::Duration,
@@ -37,6 +36,7 @@ use crate::{
     components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
 };
 
+mod diagnostics;
 mod downloads;
 pub mod end_of_support;
 mod gossip;
@@ -51,6 +51,7 @@ mod tests;
 use downloads::Downloads;
 use hedge::SuccessHedge;
 
+pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::{record_tip_block_delay, show_block_chain_progress};
@@ -435,6 +436,27 @@ where
     /// `TransparentInputNotFound` drops since the last verified block, bounded by the
     /// full-verify concurrency limit so a poisoned hash batch can't suppress restarts.
     utxo_race_drops: usize,
+
+    /// Publishes the syncer state that the progress task logs when sync stalls.
+    diagnostics: watch::Sender<SyncDiagnostics>,
+}
+
+/// A sync round that ended early, and why.
+struct RestartError {
+    reason: RestartReason,
+    /// The block error kind, for [`RestartReason::BlockError`].
+    kind: Option<&'static str>,
+    error: Report,
+}
+
+impl RestartError {
+    fn new(reason: RestartReason, error: impl Into<Report>) -> Self {
+        Self {
+            reason,
+            kind: None,
+            error: error.into(),
+        }
+    }
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -545,6 +567,8 @@ where
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
         let (sync_status, recent_syncs) = SyncStatus::new_for_network(&config.network.network);
+        let (diagnostics, diagnostics_receiver) = watch::channel(SyncDiagnostics::default());
+        let sync_status = sync_status.with_diagnostics(diagnostics_receiver);
 
         let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
         let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);
@@ -579,6 +603,7 @@ where
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
             utxo_race_drops: 0,
+            diagnostics,
         };
 
         (new_syncer, sync_status)
@@ -592,7 +617,9 @@ where
         self.request_genesis().await?;
 
         loop {
-            if self.try_to_sync().await.is_err() {
+            let start_tip = self.latest_chain_tip.best_tip_height();
+            let result = self.try_to_sync().await;
+            if result.is_err() {
                 self.downloads.cancel_all();
             }
 
@@ -603,13 +630,60 @@ where
             } else {
                 SYNC_RESTART_DELAY
             };
-            info!(
-                timeout = ?restart_delay,
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "waiting to restart sync"
-            );
+            let state_tip = self.latest_chain_tip.best_tip_height();
+            let made_progress = state_tip > start_tip;
+            let (reason, kind, error) = match result {
+                Ok(()) => (RestartReason::ExhaustedTips, None, None),
+                Err(restart) => (
+                    restart.reason,
+                    restart.kind,
+                    Some(format!("{:#}", restart.error)),
+                ),
+            };
+            self.record_restart(reason, made_progress);
+
+            if error.is_some() && !made_progress {
+                warn!(
+                    reason = reason.as_str(),
+                    kind,
+                    made_progress,
+                    error,
+                    timeout = ?restart_delay,
+                    ?state_tip,
+                    "sync failed without advancing the state tip, waiting to restart sync"
+                );
+            } else {
+                info!(
+                    reason = reason.as_str(),
+                    kind,
+                    made_progress,
+                    error,
+                    timeout = ?restart_delay,
+                    ?state_tip,
+                    "waiting to restart sync"
+                );
+            }
             sleep(restart_delay).await;
         }
+    }
+
+    /// Counts a finished sync round.
+    fn record_restart(&self, reason: RestartReason, made_progress: bool) {
+        metrics::counter!(
+            "sync.restart.count",
+            "reason" => reason.as_str(),
+            "made_progress" => if made_progress { "true" } else { "false" },
+        )
+        .increment(1);
+
+        self.diagnostics.send_modify(|diagnostics| {
+            diagnostics.last_restart = Some(reason);
+            diagnostics.restarts_without_progress = if made_progress {
+                0
+            } else {
+                diagnostics.restarts_without_progress.saturating_add(1)
+            };
+        });
     }
 
     /// Tries to synchronize the chain as far as it can.
@@ -625,7 +699,7 @@ where
     /// necessary. This includes outer timeouts, where an entire syncing step takes an extremely
     /// long time. (These usually indicate hangs.)
     #[instrument(skip(self))]
-    async fn try_to_sync(&mut self) -> Result<(), Report> {
+    async fn try_to_sync(&mut self) -> Result<(), RestartError> {
         self.prospective_tips = HashSet::new();
 
         self.reobtain_hashes.clear();
@@ -638,22 +712,15 @@ where
         );
         let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
             .await
-            .map_err(Into::into)
-            // TODO: replace with flatten() when it stabilises (#70142)
-            .and_then(convert::identity)
-            .map_err(|e| {
-                info!("temporary error obtaining tips: {:#}", e);
-                e
-            })?;
+            .map_err(|e| RestartError::new(RestartReason::ObtainTipsTimeout, e))?
+            .map_err(|e| Self::tips_restart_error(RestartReason::ObtainTipsError, e))?;
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
             // Avoid hangs due to service readiness or other internal operations
             extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
                 .await
-                .map_err(Into::into)
-                // TODO: replace with flatten() when it stabilises (#70142)
-                .and_then(convert::identity)?;
+                .map_err(|e| RestartError::new(RestartReason::SyncStepTimeout, e))??;
         }
 
         info!("exhausted prospective tip set");
@@ -672,13 +739,14 @@ where
     async fn try_to_sync_once(
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, Report> {
+    ) -> Result<IndexSet<block::Hash>, RestartError> {
         // Check whether any block tasks are currently ready.
         while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
             // Some temporary errors are ignored, and syncing continues with other blocks.
             // If it turns out they were actually important, syncing will run out of blocks, and
             // the syncer will reset itself.
-            self.handle_block_response(rsp)?;
+            self.handle_block_response(rsp)
+                .map_err(Self::block_restart_error)?;
         }
         // Re-request any blocks that just failed with `NotFound`, before pausing
         // on the lookahead limit (#5709).
@@ -704,7 +772,8 @@ where
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
-            self.handle_block_response(response)?;
+            self.handle_block_response(response)
+                .map_err(Self::block_restart_error)?;
             // A block that just failed with `NotFound` is what unblocks the
             // verifier, so re-request it now rather than waiting for the pause
             // loop to clear — which it cannot until this block arrives (#5709).
@@ -724,7 +793,8 @@ where
             );
 
             let response = self.request_blocks(extra_hashes).await;
-            extra_hashes = Self::handle_hash_response(response)?;
+            extra_hashes =
+                Self::handle_hash_response(response).map_err(Self::block_restart_error)?;
         } else {
             info!(
                 tips.len = self.prospective_tips.len(),
@@ -735,10 +805,10 @@ where
                 "extending tips",
             );
 
-            extra_hashes = self.extend_tips().await.map_err(|e| {
-                info!("temporary error extending tips: {:#}", e);
-                e
-            })?;
+            extra_hashes = self
+                .extend_tips()
+                .await
+                .map_err(|e| Self::tips_restart_error(RestartReason::ExtendTipsError, e))?;
         }
         self.update_metrics();
 
@@ -761,6 +831,9 @@ where
 
         let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
         for hash in hashes.by_ref() {
+            // Queueing can wait for network capacity, so publish the downloads queued so far.
+            self.update_metrics();
+
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
@@ -773,6 +846,7 @@ where
                     error,
                     BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
                 ) {
+                    self.count_block_error(&error);
                     self.reobtain_hashes.insert(hash);
                     break;
                 }
@@ -1097,6 +1171,9 @@ where
                 .map_err(Into::into);
 
             // 3 layers of results is not ideal, but we need the timeout on the outside.
+            if let Ok(Ok(Err(error))) = &response {
+                self.count_block_error(error);
+            }
             match response {
                 Ok(Ok(Ok(response))) => self
                     .handle_block_response(Ok(response))
@@ -1133,6 +1210,9 @@ where
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
         let response = self.downloads.download_and_verify(self.genesis_hash).await;
+        if let Err(error) = &response {
+            self.count_block_error(error);
+        }
         Self::handle_response(response).map_err(|e| eyre!(e))?;
 
         let response = self.downloads.next().await.expect("downloads is nonempty");
@@ -1166,12 +1246,18 @@ where
         // propagating — this prevents dropping unprocessed hashes from the
         // batch, which would create frontier gaps and stalls (#5709).
         for hash in hashes.into_iter() {
+            // Queueing can wait for network capacity, so publish the downloads queued so far.
+            self.update_metrics();
+
             match self.downloads.download_and_verify(hash).await {
                 Ok(()) => {}
                 Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
                     debug!("block request was already queued, continuing");
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    self.count_block_error(&error);
+                    return Err(error);
+                }
             }
         }
 
@@ -1217,6 +1303,10 @@ where
         &mut self,
         response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
+        if let Err(error) = &response {
+            self.count_block_error(error);
+        }
+
         match response {
             Ok((height, hash)) => {
                 trace!(?height, ?hash, "verified and committed block to state");
@@ -1400,6 +1490,67 @@ where
         )
     }
 
+    /// Returns a bounded label for a block download or verify error, for metrics and logs.
+    fn block_error_kind(e: &BlockDownloadVerifyError) -> &'static str {
+        use BlockDownloadVerifyError::*;
+
+        match e {
+            Invalid { error, .. } if error.is_duplicate_request() => "already_verified",
+            Invalid { error, .. }
+                if error.is_auth_commitment_mismatch()
+                    || error.is_descendant_of_auth_commitment_mismatch() =>
+            {
+                "auth_commitment_mismatch"
+            }
+            e if Self::is_utxo_lookup_timeout(e) => "utxo_lookup_timeout",
+            e if Self::is_post_checkpoint_verify_timeout(e) => "final_checkpoint_verify_timeout",
+            Invalid { .. } => "invalid",
+            ValidationRequestError { error, .. }
+                if error.is::<tower::timeout::error::Elapsed>() =>
+            {
+                "verify_timeout"
+            }
+            ValidationRequestError { .. } => "validation_request",
+            DownloadFailed { error, .. } if is_not_found(error.as_ref()) => "not_found",
+            DownloadFailed { .. } => "download_failed",
+            DownloadTimedOut { .. } => "download_timed_out",
+            AboveLookaheadHeightLimit { .. } => "above_lookahead_limit",
+            BehindTipHeightLimit { .. } => "behind_tip",
+            InvalidHeight { .. } => "invalid_height",
+            DuplicateBlockQueuedForDownload { .. } => "duplicate_queued",
+            CancelledDuringDownload { .. }
+            | CancelledAwaitingVerifierReadiness { .. }
+            | CancelledDuringVerification { .. } => "cancelled",
+            NetworkServiceError { .. } => "network_service",
+            VerifierServiceError { .. } => "verifier_service",
+            Timeout => "network_ready_timeout",
+        }
+    }
+
+    /// Counts a block that failed to queue, download, or verify.
+    fn count_block_error(&self, error: &BlockDownloadVerifyError) {
+        metrics::counter!("sync.block.error.count", "kind" => Self::block_error_kind(error))
+            .increment(1);
+    }
+
+    /// Wraps an error from obtaining or extending tips, which also queue the blocks they find, so
+    /// a block that failed to queue is reported as a block error.
+    fn tips_restart_error(reason: RestartReason, error: Report) -> RestartError {
+        match error.downcast::<BlockDownloadVerifyError>() {
+            Ok(error) => Self::block_restart_error(error),
+            Err(error) => RestartError::new(reason, error),
+        }
+    }
+
+    /// Wraps a block error that restarts the sync.
+    fn block_restart_error(error: BlockDownloadVerifyError) -> RestartError {
+        RestartError {
+            reason: RestartReason::BlockError,
+            kind: Some(Self::block_error_kind(&error)),
+            error: error.into(),
+        }
+    }
+
     /// Handles a response to block hash submission, passing through any extra hashes.
     ///
     /// See [`Self::handle_response`] for more details.
@@ -1463,8 +1614,16 @@ where
     }
 
     fn update_metrics(&mut self) {
+        let in_flight = self.downloads.in_flight();
+        let oldest_in_flight_since = self.downloads.oldest_in_flight_since();
+
         metrics::gauge!("sync.prospective_tips.len",).set(self.prospective_tips.len() as f64);
-        metrics::gauge!("sync.downloads.in_flight",).set(self.downloads.in_flight() as f64);
+        metrics::gauge!("sync.downloads.in_flight",).set(in_flight as f64);
+
+        self.diagnostics.send_modify(|diagnostics| {
+            diagnostics.in_flight = in_flight;
+            diagnostics.oldest_in_flight_since = oldest_in_flight_since;
+        });
     }
 
     /// Return if the sync should be restarted based on the given error
@@ -1586,7 +1745,11 @@ where
                     )
                 }
 
-                warn!(?e, "error downloading and verifying block");
+                warn!(
+                    ?e,
+                    kind = Self::block_error_kind(e),
+                    "error downloading and verifying block"
+                );
                 true
             }
         }

@@ -19,7 +19,10 @@ use zebra_chain::{
 };
 use zebra_state::{ChainTipChange, TipAction, MAX_BLOCK_REORG_HEIGHT};
 
-use crate::components::{health::ChainTipMetrics, sync::SyncStatus};
+use crate::components::{
+    health::ChainTipMetrics,
+    sync::{RestartReason, SyncStatus},
+};
 
 /// The tracing target of the sync progress logs.
 #[cfg_attr(not(feature = "sentry"), allow(dead_code))]
@@ -183,6 +186,13 @@ pub async fn show_block_chain_progress(
             metrics::gauge!("sync.estimated_network_tip_height").set(estimated_height.0 as f64);
             metrics::gauge!("sync.estimated_distance_to_tip").set(remaining_sync_blocks as f64);
 
+            // Measured here, so the age keeps growing while the syncer waits on that block.
+            let oldest_in_flight_age = sync_status
+                .oldest_in_flight_since()
+                .map(|since| instant_now.saturating_duration_since(since));
+            metrics::gauge!("sync.downloads.oldest_age_seconds")
+                .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
+
             // Work out how long it has been since the state height has increased.
             //
             // Non-finalized forks can decrease the height, we only want to track increases.
@@ -210,6 +220,11 @@ pub async fn show_block_chain_progress(
             } else {
                 last_log_time = instant_now;
             }
+
+            #[cfg(feature = "sentry")]
+            crate::sentry::flush_metrics();
+
+            let diagnostics = sync_status.diagnostics();
 
             // Use the spacing at the estimated network tip, which changes at NU7 (ZIP 218).
             let target_block_spacing =
@@ -268,6 +283,10 @@ pub async fn show_block_chain_progress(
                     %target_block_spacing,
                     %max_block_spacing,
                     ?is_syncer_stopped,
+                    last_restart = diagnostics.last_restart.map(RestartReason::as_str),
+                    restarts_without_progress = diagnostics.restarts_without_progress,
+                    in_flight = diagnostics.in_flight,
+                    oldest_in_flight_secs = oldest_in_flight_age.map(|age| age.as_secs()),
                     "chain updates have stalled, \
                      state height has not increased for {} minutes. \
                      Hint: check your network connection, \
