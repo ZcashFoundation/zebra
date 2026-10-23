@@ -1,4 +1,5 @@
-//! Sends selected histograms to Sentry as distributions.
+//! Sends selected histograms to Sentry as distributions, and selected counters and gauges once a
+//! minute.
 
 use std::sync::Arc;
 
@@ -16,8 +17,10 @@ const DISTRIBUTIONS: &[&str] = &[
     "state.block_writer.phase.duration_seconds",
 ];
 
-/// A [`Recorder`] that sends the [`DISTRIBUTIONS`] histograms to Sentry, with their labels as
-/// attributes, and ignores every other metric.
+/// A [`Recorder`] that sends the [`DISTRIBUTIONS`] histograms and the [`periodic`] counters and
+/// gauges to Sentry, with their labels as attributes, and ignores every other metric.
+///
+/// [`periodic`]: super::periodic
 #[derive(Debug)]
 pub(crate) struct SentryRecorder;
 
@@ -28,12 +31,12 @@ impl Recorder for SentryRecorder {
 
     fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
 
-    fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
-        Counter::noop()
+    fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+        super::periodic::counter(key).unwrap_or_else(Counter::noop)
     }
 
-    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
-        Gauge::noop()
+    fn register_gauge(&self, key: &Key, _: &Metadata<'_>) -> Gauge {
+        super::periodic::gauge(key).unwrap_or_else(Gauge::noop)
     }
 
     fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {

@@ -107,6 +107,38 @@ The header time is set by the block's miner, so a single value is only approxima
 Nodes that follow the same chain see the same header times, so comparing these
 values across nodes over the same period shows which nodes accept blocks sooner.
 
+## Sync stall metrics
+
+These metrics show why the syncer stopped advancing the chain tip. Their labels have a fixed
+set of values. Block heights and hashes are in the matching log fields instead.
+
+Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter as
+one total per minute for each set of labels, and each gauge's latest value once a minute, along
+with `sync.downloads.in_flight`.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `sync.restart.count` | counter | `reason`, `made_progress` | Sync rounds that ended, by why they ended and whether the state tip advanced during the round |
+| `sync.block.error.count` | counter | `kind` | Block download and verify errors, including the ones the syncer recovers from without restarting |
+| `sync.downloads.oldest_age_seconds` | gauge | none | How long the oldest block still being downloaded or verified has been waiting, or 0 when none are |
+
+`reason` is one of:
+
+- `exhausted_tips`: the syncer downloaded every block its peers advertised. This is the normal end of a round.
+- `obtain_tips_timeout` or `obtain_tips_error`: asking peers for new block hashes timed out or failed.
+- `extend_tips_error`: asking peers to extend the known hashes failed.
+- `sync_step_timeout`: one sync step took longer than the block verify timeout, which usually indicates a hang.
+- `block_error`: a block download or verify error restarted the sync. The error's `kind` is in the `waiting to restart sync` log.
+
+`kind` names the error, for example `not_found`, `download_timed_out`, `invalid`, `verify_timeout`,
+`utxo_lookup_timeout`, `already_verified`, or `cancelled`.
+
+When a round fails without advancing the state tip, Zebra logs a `sync failed without advancing the
+state tip` warning with the `reason`, `kind`, and `error`. The `chain updates have stalled` warning
+includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
+`oldest_in_flight_secs`.
+
 ## Network metric aggregation
 
 Connection state, request, response, message, and byte metrics are aggregated across
