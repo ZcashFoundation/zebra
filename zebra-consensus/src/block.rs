@@ -8,7 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     io::{self, Write},
     pin::Pin,
@@ -21,9 +21,9 @@ use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{oneshot, watch, Semaphore};
 use tokio_util::task::AbortOnDropHandle;
-use tower::{Service, ServiceExt};
+use tower::{util::BoxCloneService, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -31,9 +31,11 @@ use zebra_chain::{
     block,
     parameters::{subsidy::SubsidyError, Network, NetworkUpgrade},
     serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize},
+    transaction::{UnminedTxId, WtxId},
     transparent,
     work::equihash,
 };
+use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{error::*, transaction as tx, BoxError};
@@ -53,6 +55,9 @@ pub struct SemanticBlockVerifier<S, V> {
     network: Network,
     state_service: S,
     transaction_verifier: V,
+    mempool: Option<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    mempool_setup_rx:
+        Option<oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>>,
     /// Successful proposals, newest first; shared by all outstanding verification requests.
     proposals: Arc<watch::Sender<ProposalCache>>,
     /// Admission remains owned by blocking checks even if their requesting future is cancelled.
@@ -106,6 +111,9 @@ where
 }
 
 type ProposalCache = VecDeque<PreparedProposal>;
+
+/// Cache availability must not hold up block verification.
+const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
 
 #[derive(Debug)]
 struct PreparedProposal {
@@ -603,11 +611,22 @@ where
             network: network.clone(),
             state_service,
             transaction_verifier,
+            mempool: None,
+            mempool_setup_rx: None,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
             blocking_checks: Arc::new(Semaphore::new(4)),
             #[cfg(test)]
             proposal_key_computations: Default::default(),
         }
+    }
+
+    /// Enables optional reuse once the mempool service finishes starting.
+    pub(crate) fn with_mempool(
+        mut self,
+        receiver: oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    ) -> Self {
+        self.mempool_setup_rx = Some(receiver);
+        self
     }
 
     /// Returns a read-only decoder sharing this verifier's successful proposal cache.
@@ -642,6 +661,17 @@ where
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
         let received_time = Instant::now();
+        if let Some(receiver) = self.mempool_setup_rx.as_mut() {
+            match receiver.try_recv() {
+                Ok(mempool) => {
+                    self.mempool = Some(mempool);
+                    self.mempool_setup_rx = None;
+                }
+                Err(oneshot::error::TryRecvError::Closed) => self.mempool_setup_rx = None,
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+        }
+        let mempool = self.mempool.clone();
 
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
@@ -916,6 +946,58 @@ where
             }
             let phase_start = Instant::now();
 
+            // Query only this block's candidates, against the mempool's processed tip.
+            let candidates = if let Some(mempool) = mempool {
+                match tokio::time::timeout(
+                    MEMPOOL_REUSE_TIMEOUT,
+                    mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {
+                        transaction_hashes: transaction_hashes.clone(),
+                        parent_hash: block.header.previous_block_hash,
+                    }),
+                ).await {
+                    Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(transactions))) => {
+                        transactions
+                    }
+                    _ => HashMap::new(),
+                }
+            } else {
+                HashMap::new()
+            };
+            let verified = if candidates.is_empty() {
+                HashMap::new()
+            } else {
+                let block = block.clone();
+                let transaction_hashes = transaction_hashes.clone();
+                let network = network.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mut candidates = candidates;
+                    let upgrade = NetworkUpgrade::current(&network, height);
+                    for (&hash, transaction) in transaction_hashes.iter().zip(&block.transactions) {
+                        let Some(candidate) = candidates.get(&hash) else { continue };
+                        // Admission records the tip height only after confirming it still matches
+                        // the verification request. Older entries are safe only within that epoch.
+                        let same_epoch = candidate.height
+                            .and_then(|tip| tip + 1)
+                            .is_some_and(|height| NetworkUpgrade::current(&network, height) == upgrade);
+                        if transaction.is_coinbase() || !same_epoch {
+                            candidates.remove(&hash);
+                            continue;
+                        }
+                        let id = match transaction.auth_digest() {
+                            None => UnminedTxId::Legacy(hash),
+                            Some(auth_digest) => UnminedTxId::Witnessed(WtxId { id: hash, auth_digest }),
+                        };
+                        if id != candidate.transaction.id {
+                            candidates.remove(&hash);
+                            continue;
+                        }
+                        // Cached proofs and scripts do not establish expiry or block lock time.
+                        tx::check_cached_transaction(transaction, height, block.header.time, &network)?;
+                    }
+                    Ok::<_, TransactionError>(candidates)
+                }).await.expect("candidate checks operate on decoded transactions")?
+            };
+
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
 
@@ -924,6 +1006,8 @@ where
                 &transaction_hashes,
             ));
             let mut batch_flush = None;
+            let mut sigops = 0;
+            let mut block_miner_fees = Ok(Amount::zero());
 
             // Dispatch shielded transactions first: their proof batches are the longest checks, so
             // starting them before the transparent checks shortens the block's critical path.
@@ -932,11 +1016,14 @@ where
                 .filter(|(_, tx)| tx.has_shielded_data())
                 .chain(transactions().filter(|(_, tx)| !tx.has_shielded_data()))
             {
+                if let Some(cached) = verified.get(&transaction_hash) {
+                    sigops += cached.block_sigop_count();
+                    block_miner_fees += cached.miner_fee;
+                    continue;
+                }
                 if transaction.has_shielded_data() && batch_flush.is_none() {
-                    let shielded_transactions = block
-                        .transactions
-                        .iter()
-                        .filter(|tx| tx.has_shielded_data())
+                    let shielded_transactions = transactions()
+                        .filter(|(hash, tx)| tx.has_shielded_data() && !verified.contains_key(hash))
                         .count();
                     batch_flush = Some(crate::primitives::flush::BlockFlush::register(
                         &known_utxos,
@@ -961,8 +1048,6 @@ where
             // Get the transaction results back from the transaction verifier.
 
             // Sum up some block totals from the transaction responses.
-            let mut sigops = 0;
-            let mut block_miner_fees = Ok(Amount::zero());
             let mut transaction_error = None;
 
             use futures::StreamExt;

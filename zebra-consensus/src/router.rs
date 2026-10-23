@@ -23,7 +23,11 @@ use std::{
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
+};
 use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
@@ -287,6 +291,8 @@ where
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
 /// Mempool state queries use `read_state_service` directly, without the state writer's buffer.
+/// The optional `block_mempool` channel enables reuse of same-epoch verified transactions.
+/// Both mempool handles must refer to the mempool using this network and these verifiers.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -299,13 +305,16 @@ where
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
-#[instrument(skip(state_service, read_state_service, mempool))]
+#[instrument(skip(state_service, read_state_service, mempool, block_mempool))]
 pub async fn init<S, ReadState, Mempool>(
     config: Config,
     network: &Network,
     mut state_service: S,
     read_state_service: ReadState,
     mempool: oneshot::Receiver<Mempool>,
+    block_mempool: Option<
+        oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    >,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -445,6 +454,10 @@ where
 
     let block =
         SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+    let block = match block_mempool {
+        Some(receiver) => block.with_mempool(receiver),
+        None => block,
+    };
     let prepared_blocks = block.prepared_blocks();
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
@@ -530,6 +543,7 @@ where
             Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
         >()
         .1,
+        None,
     )
     .await
 }

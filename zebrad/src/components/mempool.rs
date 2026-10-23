@@ -43,7 +43,8 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    transaction::UnminedTxId,
+    serialization::TrustedPreallocate,
+    transaction::{Transaction, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
@@ -952,6 +953,30 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+                Request::VerifiedTransactionsForBlock {
+                    transaction_hashes,
+                    parent_hash,
+                } => {
+                    let transactions = if *last_seen_tip_hash == parent_hash
+                        && transaction_hashes.len()
+                            <= usize::try_from(Transaction::max_allocation())
+                                .expect("block transaction limit fits in usize")
+                    {
+                        transaction_hashes
+                            .iter()
+                            .filter_map(|hash| {
+                                storage
+                                    .transactions()
+                                    .get(hash)
+                                    .map(|tx| (*hash, tx.clone()))
+                            })
+                            .collect()
+                    } else {
+                        Default::default()
+                    };
+
+                    async move { Ok(Response::VerifiedTransactionsForBlock(transactions)) }.boxed()
+                }
                 Request::TransactionWithDepsByMinedId(tx_id) => {
                     trace!(?req, "got mempool request");
 
@@ -1159,6 +1184,9 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
+                    Request::VerifiedTransactionsForBlock { .. } => {
+                        Response::VerifiedTransactionsForBlock(Default::default())
+                    }
                     Request::TransactionWithDepsByMinedId(_)
                     | Request::AwaitOutput(_)
                     | Request::UnspentOutput(_) => {
