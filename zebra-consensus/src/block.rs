@@ -744,8 +744,12 @@ where
             ));
             let mut batch_flush = None;
 
-            for (&transaction_hash, transaction) in
-                transaction_hashes.iter().zip(block.transactions.iter())
+            // Dispatch shielded transactions first: their proof batches are the longest checks, so
+            // starting them before the transparent checks shortens the block's critical path.
+            let transactions = || transaction_hashes.iter().zip(block.transactions.iter());
+            for (&transaction_hash, transaction) in transactions()
+                .filter(|(_, tx)| tx.has_shielded_data())
+                .chain(transactions().filter(|(_, tx)| !tx.has_shielded_data()))
             {
                 if transaction.has_shielded_data() && batch_flush.is_none() {
                     let shielded_transactions = block
