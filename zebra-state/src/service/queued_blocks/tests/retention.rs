@@ -106,6 +106,169 @@ fn assert_indexes(queue: &QueuedBlocks) {
     assert_eq!(known, outputs);
 }
 
+fn assert_no_orphan_indexing(queue: &QueuedBlocks) {
+    assert_indexes(queue);
+    assert_eq!(queue.queued_bytes, 0);
+    assert_eq!(
+        queue.blocks.capacity(),
+        0,
+        "ready blocks must never be queued"
+    );
+    assert_eq!(queue.by_parent.capacity(), 0);
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.0.capacity(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ready_commit_skips_orphan_indexes_and_keeps_sent_outputs() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = orphan_state().await;
+        state
+            .queue_and_commit_to_non_finalized_state(parent.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        // The checkpoint transition retains its queue path.
+        state.non_finalized_state_queued_blocks = QueuedBlocks::default();
+        let first = parent.make_fake_child();
+        let second = first.clone().set_block_commitment([1; 32]);
+        let prepared = first.clone().prepare();
+        let shared = *prepared.new_outputs.keys().next().unwrap();
+        let (committed, mut commits) = mpsc::channel(2);
+        let (validated, bodies) = watch::channel(None);
+        for block in [&first, &second] {
+            drop(state.queue_and_commit_to_non_finalized_state(
+                block.clone().prepare(),
+                None,
+                Some(MinedBlockNotifications::new(
+                    committed.clone(),
+                    validated.clone(),
+                )),
+            ));
+            assert_no_orphan_indexing(&state.non_finalized_state_queued_blocks);
+            assert!(state
+                .non_finalized_block_write_sent_hashes
+                .contains(&block.hash()));
+            // Sibling outputs stay known until the state learns that readers can see them.
+            assert!(state
+                .non_finalized_block_write_sent_hashes
+                .utxo(&shared)
+                .is_some());
+            assert_eq!(commits.recv().await, Some((block.hash(), Height(2))));
+            assert!(state
+                .read_service
+                .latest_non_finalized_state()
+                .any_chain_contains(&block.hash()));
+        }
+        assert!(bodies.borrow().is_none());
+        let duplicate = state
+            .queue_and_commit_to_non_finalized_state(first.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(duplicate.inner().is_duplicate_request());
+        // Both committed siblings are now in the published state, so their sent outputs are gone.
+        assert!(state
+            .non_finalized_block_write_sent_hashes
+            .utxo(&shared)
+            .is_none());
+    })
+    .await
+    .expect("ready siblings must commit despite dropped response receivers");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ready_commit_contextual_failure_can_retry_without_orphan_indexes() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = orphan_state().await;
+        state
+            .queue_and_commit_to_non_finalized_state(parent.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        state.non_finalized_state_queued_blocks = QueuedBlocks::default();
+        let child = parent.make_fake_child();
+        let mut invalid = child.clone().prepare();
+        invalid.height = Height(3);
+        let (committed, mut commits) = mpsc::channel(1);
+        let (validated, bodies) = watch::channel(None);
+        let error = state
+            .queue_and_commit_to_non_finalized_state(
+                invalid,
+                None,
+                Some(MinedBlockNotifications::new(committed.clone(), validated)),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(!error.inner().is_duplicate_request());
+        assert_eq!(state.best_tip(), Some((Height(1), parent.hash())));
+        assert!(commits.try_recv().is_err());
+        assert!(bodies.borrow().is_none());
+        assert_eq!(committed.capacity(), 1);
+        assert_no_orphan_indexing(&state.non_finalized_state_queued_blocks);
+        assert_eq!(
+            state
+                .queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None)
+                .await
+                .unwrap()
+                .unwrap(),
+            child.hash(),
+        );
+        assert_eq!(state.best_tip(), Some((Height(2), child.hash())));
+        assert_no_orphan_indexing(&state.non_finalized_state_queued_blocks);
+    })
+    .await
+    .expect("a rejected ready block must not poison same-hash retry");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ready_commit_writer_shutdown_clears_orphans() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = orphan_state().await;
+        state
+            .queue_and_commit_to_non_finalized_state(parent.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        state.non_finalized_state_queued_blocks = QueuedBlocks::default();
+        let child = parent.make_fake_child();
+        let descendant = child.make_fake_child();
+        let waiting =
+            state.queue_and_commit_to_non_finalized_state(descendant.prepare(), None, None);
+        let (sender, receiver) = mpsc::unbounded_channel();
+        drop(receiver);
+        state.block_write_sender.non_finalized = Some(sender);
+        let response =
+            state.queue_and_commit_to_non_finalized_state(child.clone().prepare(), None, None);
+        for response in [response, waiting] {
+            assert_eq!(
+                response.await.unwrap().unwrap_err().inner(),
+                &crate::CommitBlockError::WriteTaskExited,
+            );
+        }
+        assert!(state.non_finalized_state_queued_blocks.blocks.is_empty());
+        assert_indexes(&state.non_finalized_state_queued_blocks);
+        state.non_finalized_state_queued_blocks = QueuedBlocks::default();
+        let sibling = child.set_block_commitment([1; 32]);
+        assert_eq!(
+            state
+                .queue_and_commit_to_non_finalized_state(sibling.prepare(), None, None)
+                .await
+                .unwrap()
+                .unwrap_err()
+                .inner(),
+            &crate::CommitBlockError::WriteTaskExited,
+        );
+        assert_no_orphan_indexing(&state.non_finalized_state_queued_blocks);
+    })
+    .await
+    .expect("writer shutdown must answer ready and orphaned callers");
+}
+
 /// A locally mined orphan isn't abandoned when its caller drops, because the state owns its
 /// notifications, so overflow evicts the highest waited-for orphan instead.
 #[tokio::test(flavor = "multi_thread")]
@@ -217,7 +380,13 @@ async fn mined_orphan_survives_caller_drop_and_overflow() {
 async fn full_orphan_queue_does_not_block_ready_parent() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(30), async {
-        let (mut state, parent) = orphan_state().await;
+        let (mut state, root) = orphan_state().await;
+        state
+            .queue_and_commit_to_non_finalized_state(root.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let parent = root.make_fake_child();
         let child = parent.make_fake_child();
         let (committed, mut commits) = mpsc::channel(1);
         let (validated, bodies) = watch::channel(None);
@@ -226,7 +395,12 @@ async fn full_orphan_queue_does_not_block_ready_parent() {
             None,
             Some(MinedBlockNotifications::new(committed.clone(), validated)),
         ));
-        for orphan in orphan_blocks(&child, MAX_BLOCK_REORG_HEIGHT - 1) {
+        let mut sibling = child.clone();
+        Arc::make_mut(&mut Arc::make_mut(&mut sibling).header).previous_block_hash =
+            [0xee; 32].into();
+        let shared = *child.clone().prepare().new_outputs.keys().next().unwrap();
+        drop(state.queue_and_commit_to_non_finalized_state(sibling.clone().prepare(), None, None));
+        for orphan in orphan_blocks(&child, MAX_BLOCK_REORG_HEIGHT - 2) {
             drop(state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None));
         }
         assert_eq!(
@@ -244,7 +418,7 @@ async fn full_orphan_queue_does_not_block_ready_parent() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(commits.recv().await, Some((child.hash(), Height(2))));
+        assert_eq!(commits.recv().await, Some((child.hash(), Height(3))));
         assert!(state
             .read_service
             .latest_non_finalized_state()
@@ -255,6 +429,11 @@ async fn full_orphan_queue_does_not_block_ready_parent() {
         );
         assert!(!state.non_finalized_state_queued_blocks.has(child.hash()));
         assert_indexes(&state.non_finalized_state_queued_blocks);
+        assert!(state.non_finalized_state_queued_blocks.has(sibling.hash()));
+        assert!(state
+            .non_finalized_state_queued_blocks
+            .utxo(&shared)
+            .is_some());
         let ordinary = child.make_fake_child();
         assert!(
             !state
@@ -267,7 +446,7 @@ async fn full_orphan_queue_does_not_block_ready_parent() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(state.best_tip(), Some((Height(3), ordinary.hash())));
+        assert_eq!(state.best_tip(), Some((Height(4), ordinary.hash())));
     })
     .await
     .expect("a full orphan queue must not block its ready parent or ordinary commits");
