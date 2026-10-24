@@ -20,7 +20,8 @@ For full stack documentation, see the [Observability README](../README.md).
 
 | Dashboard | Description |
 |-----------|-------------|
-| `network_health.json` | Peer connections, bandwidth (default home) |
+| `zebra_overview.json` | Node overview (default home) |
+| `network_health.json` | Peer connections, bandwidth |
 | `syncer.json` | Sync progress, block downloads |
 | `mempool.json` | Transaction pool metrics |
 | `peers.json` | Peer connection details |
@@ -28,7 +29,6 @@ For full stack documentation, see the [Observability README](../README.md).
 | `checkpoint_verification.json` | Checkpoint sync progress |
 | `transaction-verification.json` | Transaction verification |
 | `network_messages.json` | P2P protocol messages |
-| `errors.json` | Error tracking |
 
 ## Datasources
 
