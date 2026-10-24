@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Avoid repeated map growth when looking up verified mempool transactions for a block ([#11992](https://github.com/ZcashFoundation/zebra/issues/11992)).
+time: 2026-10-24T04:22:58.54108298+02:00

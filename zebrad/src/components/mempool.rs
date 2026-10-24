@@ -19,7 +19,7 @@
 //!      to peers
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     iter,
     ops::Bound,
@@ -962,15 +962,16 @@ impl Service<Request> for Mempool {
                             <= usize::try_from(Transaction::max_allocation())
                                 .expect("block transaction limit fits in usize")
                     {
-                        transaction_hashes
-                            .iter()
-                            .filter_map(|hash| {
-                                storage
-                                    .transactions()
-                                    .get(hash)
-                                    .map(|tx| (*hash, tx.clone()))
-                            })
-                            .collect()
+                        let mut transactions = HashMap::with_capacity(
+                            transaction_hashes.len().min(storage.transactions().len()),
+                        );
+                        transactions.extend(transaction_hashes.iter().filter_map(|hash| {
+                            storage
+                                .transactions()
+                                .get(hash)
+                                .map(|tx| (*hash, tx.clone()))
+                        }));
+                        transactions
                     } else {
                         Default::default()
                     };
