@@ -136,6 +136,7 @@ impl Handler {
     /// Taking ownership of the message means that we can pass ownership of its
     /// contents to responses without additional copies.  If the message is not
     /// interpretable as a response, we return ownership to the caller.
+    /// Singleton block inventories go only to inbound gossip, completing discovery with no hashes.
     ///
     /// Unexpected messages are left unprocessed, and may be rejected later.
     ///
@@ -411,9 +412,16 @@ impl Handler {
                         .iter()
                         .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
-                Handler::Finished(Ok(Response::BlockHashes(
-                    block_hashes(&items[..]).collect(),
-                )))
+                let hashes = if items.len() == 1 {
+                    // A singleton can be an advert racing getblocks. Let inbound download it,
+                    // rather than starting the same verification through the syncer as well.
+                    // If inbound drops it, the unchanged locator discovers it again next round.
+                    ignored_msg = Some(Message::Inv(items));
+                    Vec::new()
+                } else {
+                    block_hashes(&items[..]).collect()
+                };
+                Handler::Finished(Ok(Response::BlockHashes(hashes)))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
@@ -967,8 +975,8 @@ where
 
                             self.update_state_metrics(None);
 
-                            // If the message was not consumed as a response,
-                            // check whether it can be handled as a request.
+                            // Returned messages can be inbound requests, including block adverts
+                            // that also completed a FindBlocks response.
                             let unused_msg = if let Some(request_msg) = request_msg {
                                 // do NOT instrument with the request span, this is
                                 // independent work

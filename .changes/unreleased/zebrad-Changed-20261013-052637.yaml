@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Download newly advertised blocks promptly when a block-discovery request is pending, tolerating blocks committed by gossip during discovery without restarting sync ([#11709](https://github.com/ZcashFoundation/zebra/issues/11709)).'
+time: 2026-10-13T05:26:37Z
