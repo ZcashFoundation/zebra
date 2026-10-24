@@ -1,199 +1,225 @@
-# Zebra Startup & Sync Process
+# Startup and sync
 
-When Zebra starts up, it launches [a lot of concurrent tasks](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/commands/start.rs).
+An open listener does not establish readiness; use the
+[health checks](health.md). Startup tasks run concurrently, so log messages
+interleave. The examples omit timestamps, tracing spans, and variable fields.
+See [tracing](tracing.md) for filters and [metrics](metrics.md) for dashboards.
 
-## Grafana Dashboards
+## Load configuration and diagnostics
 
-You can see what Zebra is doing during the sync using its [Grafana dashboards](metrics.md).
+Zebra loads [configuration](config.md), applies command-line overrides, and
+initializes logging and the CPU thread pool. It logs the build version,
+network, compiled features, state format, and loaded configuration.
 
-## Example Startup Logs
-
-Zebra logs the progress of each of its major startup tasks.
-
-In this section, we re-ordered some logs, trimmed (`...`) verbose parts of the logs, and re-formatted some long lines.
-
-(The order of the logs or tasks might be different in each Zebra run, because these tasks are run concurrently.)
-
-### Load Configuration
-
-Zebra loads its configuration from its config file.
-
-Some important parts of the config are:
-
-- `consensus.checkpoint_sync`: use all the checkpoints, or just use the mandatory ones
-- `network.listen_addr`: the Zcash listener port
-- `network.network`: the configured Zcash network (mainnet or testnet)
-- `network.initial_mainnet_peers`: the initial DNS seeder or fixed address peers
-- `network.peerset_initial_target_size`: the initial target size of the peer set, also used to calculate connection limits
-- `state.cache_dir`: where the cached state is stored on disk
-- `rpc.listen_addr`: optional JSON-RPC listener port
-
-See [the full list of configuration options](https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html).
+Without a configuration file, the log includes:
 
 ```text
-zebrad::commands::start: Starting zebrad
-zebrad::commands::start: config=ZebradConfig {
-  consensus: Config { checkpoint_sync: true, ... },
-  network: Config {
-    listen_addr: 127.0.0.1:8233,
-    network: Mainnet,
-    initial_mainnet_peers: {
-      "dnsseed.str4d.xyz:8233",
-      "dnsseed.z.cash:8233",
-      "mainnet.seeder.shieldedinfra.net:8233",
-      "mainnet.seeder.zfnd.org:8233",
-      "seeder.zec.rocks:8233"
-    },
-    peerset_initial_target_size: 25, ...
-  },
-  state: Config { cache_dir: "/home/user/.cache/state/v28/mainnet", ... },
-  rpc: Config { listen_addr: Some(127.0.0.1:8232) }, ...
-}
+No config file provided, using default configuration
+initialized rayon thread pool for CPU-bound tasks
 ```
 
-### Open Cached State
+Environment overrides still apply when this message says “default
+configuration.” With a file, Zebra instead logs `Using config file at:` and
+the selected path. Configured metrics and tracing-filter reload listeners
+start during this application initialization, before the node state opens.
 
-Zebra opens the configured cached state, or creates a new empty state.
+The startup command then logs:
 
 ```text
-zebrad::commands::start: initializing node state
-zebra_state::service::finalized_state::disk_db: the open file limit is high enough for Zebra current_limit=1048576 min_limit=512 ideal_limit=1024
-zebra_state::service::finalized_state::disk_db: Opened Zebra state cache at /home/user/.cache/state/v28/mainnet
-zebra_state::service::finalized_state: loaded Zebra state cache tip=None
-zebra_state::service: created new read-only state service
-...
+Starting zebrad
 ```
 
-### Peer Handling
+On Linux, it checks the TCP slow-start-after-idle setting and warns if it is
+enabled. See [Linux TCP tuning](troubleshooting.md#linux-tcp-tuning-for-block-propagation).
+In [zcashd-compat mode](zcashd-compat.md), Zebra performs its preflight checks
+before opening state. It also resolves the zcashd binary when supervision is
+enabled.
 
-#### Discover Initial Peers
+## Open the state
 
-Zebra queries DNS seeders for initial peer IP addresses, then tries to connect to `network.peerset_initial_target_size` initial peers.
+Zebra selects the checkpoint boundary and opens or creates the state database,
+restoring eligible non-finalized block backups. See [upgrading](upgrading.md)
+for format migrations.
 
 ```text
-zebrad::commands::start: initializing network
-open_listener{addr=127.0.0.1:8233}: zebra_network::peer_set::initialize: Trying to open Zcash protocol endpoint at 127.0.0.1:8233...
-open_listener{addr=127.0.0.1:8233}: zebra_network::peer_set::initialize: Opened Zcash protocol endpoint at 127.0.0.1:8233
-zebra_network::address_book_updater: starting the address book updater
-add_initial_peers: zebra_network::config: resolved seed peer IP addresses seed="mainnet.seeder.zfnd.org:8233" remote_ip_count=25
-...
-add_initial_peers: zebra_network::peer_set::initialize: limiting the initial peers list from 112 to 25
+initializing node state
+opening database, this may take a few minutes
+loaded Zebra state cache
+logging database metrics on startup
 ```
 
-**DNS Seeder**: A DNS server which returns IP addresses of full nodes on the Zcash network to assist in peer discovery. [Zcash Foundation dnsseeder](https://github.com/ZcashFoundation/dnsseeder)
+The `Opened Zebra state cache at` message identifies the actual database
+path. The `loaded Zebra state cache` event includes `chain_tip`: `None` for
+empty state, or the restored block hash and height. Check these fields after
+restoring a snapshot or changing `[state] cache_dir`.
 
-#### Connect to Initial Peers
+Database opening precedes block downloads; a pause here is not a
+peer-discovery failure. Format upgrades and checks run on a separate thread
+and overlap syncing.
 
-Zebra connects to the initial peers, and starts an ongoing task to crawl for more peers. If Zebra is making a lot of requests, it opens new connections to peers, up to the connection limit.
+## Initialize peer connections
 
-It also starts a service that responds to Zcash network queries from remote peers.
+Zebra opens `[network] listen_addr` and combines configured seed peers with
+cached peer addresses.
 
 ```text
-add_initial_peers: zebra_network::peer_set::initialize: connecting to initial peer set initial_peer_count=25 initial_peers={[2a01:4f9:c010:7391::1]:8233, 202.61.207.45:8233, ...}
-add_initial_peers: zebra_network::peer_set::initialize: an initial peer connection failed successes=5 errors=8 addr=89.58.36.182:8233 e=Connection refused (os error 111)
-...
-add_initial_peers: zebra_network::peer_set::initialize: finished connecting to initial seed peers handshake_success_total=11 handshake_error_total=14 outbound_connections=11
-zebra_network::peer_set::initialize: sending initial request for peers active_initial_peer_count=11
-crawl_and_dial: zebra_network::peer_set::initialize: starting the peer address crawler crawl_new_peer_interval=30s outbound_connections=11
+initializing network
+starting the address book updater
+resolved seed peer IP addresses
+connecting to initial peer set
+starting the peer address crawler
 ```
 
-#### Requests to Peers
+The DNS message appears when a seed resolves. The `loaded cached peer IP
+addresses` event appears when Zebra reads a usable cache. The listener reports
+`Opened Zcash protocol endpoint at` followed by its bound address. Individual
+seed lookups and peer connections can fail while other connections succeed.
 
-Zebra randomly chooses peers for each request:
+## Initialize verification and the mempool
 
-- choosing peers that are not already answering a request, and
-- prefers peers that have answered fewer requests recently.
-
-This helps load balance requests across peers.
-
-### Initialize JSON-RPC Server
-
-Applications like `lightwalletd` can query and send data to Zebra using JSON-RPC.
-
-Submitted transactions are retried a few times, using an ongoing retry task.
-
-The RPC service is optional, if it is not configured, its tasks do not run.
+The mempool holds verified, unmined transactions.
 
 ```text
-zebra_rpc::server: Trying to open RPC endpoint at 127.0.0.1:57638...
-zebra_rpc::server: Opened RPC endpoint at 127.0.0.1:57638
+initializing verifiers
+initializing block verifier router
+initializing syncer
+initializing mempool
+fully initializing inbound peer request handler
 ```
 
-### Initialize Verifiers
+The router's log includes `tip` and `max_checkpoint_height`; see
+[first sync](run.md#first-sync) for checkpoint and full verification rules.
 
-Zebra verifies blocks and transactions using these services, which depend on the Sprout and Sapling parameters. If the parameters have not been cached, downloading and verifying them can take a few minutes.
-
-Zebra has two different verification modes for blocks:
-
-- checkpoint: check that the block hashes between checkpoints form a chain
-- full verification: check signatures, proofs, spent transparent outputs, and all the other consensus rules
-
-Mempool transactions are always fully verified.
-
-Zebra also starts ongoing tasks to batch verify signatures and proofs.
+A separate startup task checks stored block hashes against the compiled
+checkpoints. Its first message is:
 
 ```text
-zebrad::commands::start: initializing verifiers
-init{config=Config { ... } ... }: zebra_consensus::primitives::groth16::params: checking and loading Zcash Sapling and Sprout parameters
-init{config=Config { checkpoint_sync: true, ... } ... }: zebra_consensus::chain: initializing chain verifier tip=None max_checkpoint_height=Height(1644839)
-...
+starting state checkpoint validation
 ```
 
-### Initialize Transaction Mempool
+This check does not fully revalidate the stored database. A mismatch aborts
+startup or operation with an invalid-chain error. With incomplete state and
+checkpoint sync enabled, Zebra reports that remaining checkpoints will be
+verified during syncing.
 
-Zebra syncs transactions from other peers, verifies them, then gossips their hashes.
+On Mainnet and public Testnet, the mempool activates when Zebra is near the
+chain tip, rather than during the bulk initial download. Regtest enables it
+from height zero. Transactions admitted to the mempool use transaction
+verification, not checkpoint verification.
 
-This involves a number of ongoing tasks.
+## Start application interfaces
 
-The mempool isn't activated until Zebra reaches the network consensus chain tip.
+Zebra starts JSON-RPC when `[rpc] listen_addr` is set, logging
+`Opened RPC endpoint at` and its bound address without waiting for sync.
+
+Additional services depend on configuration:
+
+| Service | Startup condition | Message |
+| --- | --- | --- |
+| Block-template updater | Mining configuration enables template preparation, and JSON-RPC or the internal miner can use it | `spawned block template updater task` |
+| Managed zcashd | Both `[zcashd_compat] enabled` and `manage_zcashd` are true | `zcashd-compat mode enabled` |
+| Indexer gRPC | `[rpc] indexer_listen_addr` is set | `spawning indexer RPC server` |
+| Experimental lightwalletd-compatible gRPC | `[rpc] lightwalletd_listen_addr` is set | `spawning lightwalletd gRPC server` |
+
+See [RPC](rpc.md), [mining](mining.md), and
+[zcashd compatibility](zcashd-compat.md) for the interface contracts.
+The indexer warning `configure an indexer_listen_addr to start the indexer RPC
+server` means that this optional listener is disabled; it is not a sync error.
+
+## Launch background tasks
+
+These markers indicate task startup, not completed work:
+
+| Task | Work | Message |
+| --- | --- | --- |
+| Block gossip | Advertise new best-tip block hashes to peers | `spawning block gossip task` |
+| Block notification | Run `[notify] block_notify_command` when configured | `spawning block notify task` |
+| Mempool queue checker | Poll the mempool to collect completed transaction-verification work | `spawning mempool queue checker task` |
+| Transaction gossip | Advertise transactions added to the mempool | `spawning mempool transaction gossip task` |
+| Old database cleanup | Remove eligible old database directories when `[state] delete_old_database` is true | `spawning delete old databases task` |
+| Progress reporting | Estimate sync progress, log it, and update health data | `spawning progress logging task` |
+| Health server | Serve health and readiness when `[health] listen_addr` is set | `initializing health endpoints` |
+| End-of-support check | Enforce the Mainnet release support window | `spawning end of support checking task` |
+| Mempool crawler | Request unmined transactions from peers when enabled near the tip | `spawning mempool crawler task` |
+| Block syncer | Download and verify blocks needed to extend local state | `spawning syncer task` |
+
+The block-notification marker appears even without a configured
+[command](config.md#notify). The [health](health.md) marker appears even when
+disabled; an enabled listener also logs `opened health endpoint at` and its
+address. See [end of support](run.md#end-of-support) for the release cutoff.
+
+On Regtest, Zebra commits the genesis block locally if it is absent, then runs
+the syncer to recover blocks from peers. The internal miner starts last when
+its build feature and configuration enable it, with `spawning Zcash miner`.
+
+Once these tasks have been launched, Zebra logs:
 
 ```text
-zebrad::commands::start: initializing mempool
-zebrad::components::mempool::crawler: initializing mempool crawler task
-zebrad::components::mempool::queue_checker: initializing mempool queue checker task
-zebrad::components::mempool::gossip: initializing transaction gossip task
+spawned initial Zebra tasks
 ```
 
-### Syncing the Block Chain
+This marks task startup, not readiness. Ordinary sync retries do not require
+restarting the process.
 
-#### Initialize Block Syncer
+## Sync the chain
 
-Zebra syncs blocks from other peers, verifies them, then gossips their hashes:
+### Download genesis and discover extensions
 
-1. Download the genesis block by hash
-2. Ask a few peers for the hashes of the next 500 blocks
-3. Download the blocks based on the hashes from peers
-4. Verify, save, and gossip the downloaded blocks
-5. Repeat from step 2 until we run out of blocks to sync
-
-This involves a number of ongoing tasks.
+On Mainnet or Testnet with empty state, Zebra downloads and verifies the
+genesis block. The syncer and progress reporter emit:
 
 ```text
-zebrad::commands::start: initializing syncer
-zebrad::components::sync::gossip: initializing block gossip task
+starting genesis block download and verify
+initial sync is waiting to download the genesis block
 ```
 
-#### Sync to the Chain Tip
-
-Starting at the cached state chain tip, Zebra syncs to the network consensus chain tip, using ongoing tasks.
-
-Zebra also has an ongoing sync progress task, which logs progress towards the tip every minute.
+With existing state, Zebra resumes from its stored chain. It sends block
+locators, which identify known chain ancestors, to peers and requests hashes
+of later blocks. Responses contain at most 500 block hashes. The syncer
+schedules downloads and verification concurrently within `[sync]` limits,
+then asks for further extensions:
 
 ```text
-zebrad::commands::start: spawned initial Zebra tasks
-zebrad::components::sync: starting genesis block download and verify
-zebrad::commands::start: initial sync is waiting to download the genesis block sync_percent=0.000 % current_height=None
-sync:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_count=1 current_range=(Unbounded, Included(Height(0)))
-sync:try_to_sync: zebrad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(0))
-sync:try_to_sync: zebrad::components::sync: extending tips tips.len=1 in_flight=499 lookahead_limit=2000 state_tip=Some(Height(0))
-sync:try_to_sync:obtain_tips:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_count=400 current_range=(Excluded(Height(0)), Included(Height(400)))
-...
-zebrad::commands::start: estimated progress to chain tip sync_percent=0.537 % current_height=Height(9119) remaining_sync_blocks=1687657 time_since_last_state_block=PT0S
-...
+starting sync, obtaining new tips
+extending tips
 ```
 
-#### Handling Gossiped Block Hashes
+### Verify checkpoint ranges
 
-Zebra's peer request service downloads gossiped block hashes, then verifies, saves, and gossips their hashes itself.
+Successful [checkpoint ranges](run.md#first-sync) produce:
 
-This handles small numbers of new blocks near the chain tip.
+```text
+verified checkpoint range
+```
+
+This event includes `block_count` and `current_range`. Range verification and
+state writes are separate stages; incoming blocks do not immediately imply a
+higher committed tip.
+
+### Fully verify recent blocks
+
+Above the checkpoint boundary, Zebra fully verifies blocks and transactions.
+The progress reporter logs:
+
+```text
+estimated progress to chain tip
+```
+
+Its fields include `current_height`, `remaining_sync_blocks`, `sync_percent`,
+and `time_since_last_state_block`. The estimate uses block times, target block
+spacing, and the local clock. It is not a guaranteed completion percentage or
+remaining-time prediction.
+
+### Follow new blocks
+
+Near the chain tip, the bulk syncer and block announcements from peers overlap.
+Zebra reports the transition with:
+
+```text
+close to finishing initial sync, confirming using syncer and gossiped blocks
+finished initial sync to chain tip, using gossiped blocks
+```
+
+The syncer remains active to recover missing blocks while the inbound handler
+downloads and verifies announced blocks. Monitor tip freshness and peers;
+see [troubleshooting](troubleshooting.md) if height stops advancing.

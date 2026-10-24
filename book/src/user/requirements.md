@@ -81,7 +81,7 @@ are optional for synchronization; enable them to let other nodes connect to
 Zebra.
 
 Configure the [P2P listener and advertised address](config.md#network), then
-permit its [port](run.md) through the firewall and publish it when
+permit its [port](run.md#ports) through the firewall and publish it when
 [running in Docker](docker.md#p2p-networking). Do not expose management
 endpoints merely to make peer-to-peer networking reachable.
 Zebra can learn its public IP from outbound peers, but this does not establish
