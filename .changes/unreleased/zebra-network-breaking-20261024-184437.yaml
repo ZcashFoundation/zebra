@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: 'Deserializing a Regtest `Config` now fails when `[network.testnet_parameters]` sets `network_magic`, `slow_start_interval`, `target_difficulty_limit`, `disable_pow`, `genesis_hash`, `pre_blossom_halving_interval`, or `temporary_orchard_disabling_soft_fork_height` to a value other than the one Regtest uses; these values were previously ignored. Remove the field, or use a configured Testnet to change it. `network_name` is still ignored.'
+time: 2026-10-24T18:44:37.097358188+02:00

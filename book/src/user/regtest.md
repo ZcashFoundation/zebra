@@ -48,9 +48,12 @@ The RPC examples read `./regtest-rpc/.cookie`; keep it private. See
 
 See the [network field reference](config.md#network) for Regtest defaults and
 supported overrides, and [Ports](run.md#ports) for listener addresses.
-Zebra type-checks but ignores the fields marked as ignored on Regtest.
-For example, `disable_pow = false` does not enable proof-of-work validation.
-Use a [custom Testnet](custom-testnets.md) to change those fixed parameters.
+Zebra rejects conflicting overrides of fixed Regtest consensus and networking
+parameters and names the field in the configuration error. For example,
+`disable_pow = false` is an error; `disable_pow = true` is accepted. Matching
+fixed values can be omitted. Regtest ignores `network_name`; its name remains
+`Regtest`, so older saved configurations still load.
+Use a [custom Testnet](custom-testnets.md) to change those parameters.
 
 Set `should_allow_unshielded_coinbase_spends = false` to require shielding
 coinbase spends. The option is the inverse of zcashd's
