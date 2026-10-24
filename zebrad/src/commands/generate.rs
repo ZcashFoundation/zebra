@@ -63,7 +63,7 @@ impl Runnable for GenerateCmd {
 # | -------- | ------------------------------------- | ---------------------------------------------- |
 # | Linux    | `$XDG_CONFIG_HOME` or `$HOME/.config` | `/home/alice/.config/zebrad.toml`              |
 # | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
-# | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
+# | Windows  | `{FOLDERID_LocalAppData}`             | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
 
 "
         .to_owned();
