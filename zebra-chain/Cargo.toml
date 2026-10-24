@@ -174,5 +174,9 @@ harness = false
 name = "transaction"
 harness = false
 
+[[bench]]
+name = "note_commitment_tree"
+harness = false
+
 [lints]
 workspace = true
