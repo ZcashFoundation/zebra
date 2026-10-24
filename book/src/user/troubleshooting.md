@@ -1,136 +1,223 @@
 # Troubleshooting
 
-## Known Issues
+Use the first error and the startup context, not only the process exit code.
+Record the Zebra version, network, effective configuration, selected state
+path, and the last height that advanced. The startup log includes build and
+state-format metadata; see [Startup and sync](startup.md).
 
-There are a few bugs in Zebra that we're still working on fixing:
+## Configuration does not load or take effect
 
-- [Progress bar estimates can become extremely large](https://github.com/console-rs/indicatif/issues/556). This may be improved in recent versions of the progress bar library.
+| Symptom | Cause | Remedy |
+| --- | --- | --- |
+| `Zebra could not load the provided configuration file and/or environment variables` | Unknown fields or invalid TOML/environment values | Compare the reported field with the [configuration reference](config.md) and a generated reference file. |
+| A file change has no effect | Zebra loaded a different file | Check `Using config file at:`; pass `--config /path/to/zebrad.toml` before `start` to select it explicitly. |
+| A loaded file's value has no effect | An environment override replaces it | Check [environment variables](config.md#environment-variables), including service-manager and container settings. |
+| An environment variable is rejected as sensitive | The field forbids environment overrides | Set it in the configuration file. |
+| The P2P port stays unchanged after switching networks | An explicit `[network] listen_addr` retains its port | Remove that setting or change its port. |
 
-- Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
-
-- Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
-
-- Experimental Tor support is disabled until Zebra upgrades to the latest `arti-client`. [#8328](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648)
-
-## Memory Issues
-
-- If Zebra's build runs out of RAM, try setting `export CARGO_BUILD_JOBS=2`.
-- If Zebra's tests timeout or run out of RAM, try running `cargo test -- --test-threads=2`. Note that `cargo` uses all processor cores on your machine
-  by default.
-
-## Network Issues
-
-Some of Zebra's tests download Zcash blocks, so they might be unreliable
-depending on your network connection. You can set `SKIP_NETWORK_TESTS=1`
-to skip the network tests.
-
-## Issues with Tests on macOS
-
-Some of Zebra's tests deliberately cause errors that make Zebra panic. macOS
-records these panics as crash reports. If you are seeing "Crash Reporter"
-dialogs during Zebra tests, you can disable them using this Terminal.app
-command:
+Generate the reference without overwriting the active file:
 
 ```sh
-defaults write com.apple.CrashReporter DialogType none
+zebrad generate --output-file zebrad-defaults.toml
 ```
 
-## Improving Performance
+## A listener cannot bind
 
-Zebra typically syncs in around three days on Mainnet and half a day on
-Testnet under optimal conditions. The actual sync speed depends on your network
-connection, hardware, and the overall Zcash network load. The major constraint we've found on `zebrad` performance is the
-network weather, especially the ability to make good connections to other Zcash
-network peers. If you're having trouble syncing, try the following config
-changes.
+The bind error names the endpoint and requested address; the P2P message starts
+with `Opening Zcash network protocol listener`.
 
-### Release Build
+For an address-in-use error, identify the conflicting listener on Linux:
 
-Make sure you're using a release build on your native architecture.
-
-### Syncer Lookahead Limit
-
-If your connection is slow, try
-[downloading fewer blocks at a time](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html#structfield.checkpoint_verify_concurrency_limit):
-
-```toml
-[sync]
-checkpoint_verify_concurrency_limit = 1000
-download_concurrency_limit = 25
+```sh
+ss -ltnp
 ```
 
-### Peer Set Size
+Stop the conflicting process or choose a distinct address for that endpoint;
+each listener has its own [port setting](run.md#ports).
 
-If your connection is slow, try [connecting to fewer peers](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.peerset_initial_target_size):
+For an unavailable-address error, choose an address assigned to the host or
+container. Without IPv6 support, use an IPv4 listener:
 
 ```toml
 [network]
-peerset_initial_target_size = 25
+listen_addr = "0.0.0.0:8233"
 ```
 
-### Turn off debug logging
+This example listens on all IPv4 interfaces for Mainnet; use the
+[network's P2P port](run.md#ports) or an explicit alternate port. Do not expose
+administrative endpoints to work around a bind error.
 
-Zebra logs at info level by default.
+## The database is locked or cannot open
 
-If Zebra is slow, make sure it is logging at info level:
+- **`Database likely already open`:** another writer or an I/O error prevents
+  opening state. Check services, containers, and manually started nodes. Stop
+  the existing writer or give the second node a distinct `[state] cache_dir`
+  and listeners. If no writer exists, check permissions and storage health.
+  Do not delete RocksDB's `LOCK` file; wait for the owner to exit before
+  modifying state.
+- **`Permission denied creating` or `Opening database`:** check access to the
+  parent directories and write permission on the cache root. In containers,
+  check the mounted volume and effective UID/GID; see
+  [Docker ownership handling](docker.md).
+
+## Disk space is exhausted
+
+The error `No space left on device` means that a write or directory creation
+cannot complete. On Linux, check both capacity and available inodes on the
+filesystem containing the cache. Replace the path below with an existing
+cache directory:
+
+```sh
+df -h /path/to/zebra-cache
+df -i /path/to/zebra-cache
+```
+
+Stop Zebra before moving its database. Free unrelated files or move the cache
+to storage with sufficient free space, then update `[state] cache_dir` and any
+environment or mount overrides. Do not delete individual RocksDB files to
+make room: they form one database.
+
+Keep room for growth and maintenance; snapshot restoration also needs
+[space for both the archive and extracted state](snapshots.md#resolve-the-archive).
+
+## Sync is slow or stalled
+
+The syncer retries downloads and sync rounds automatically; `waiting to
+restart sync` does not request a process restart. Check `current_height` and
+`time_since_last_state_block` for continued progress.
+
+For `initial sync can't download and verify the genesis block` or
+`chain updates have stalled`, match the accompanying evidence:
+
+| Symptom | Cause | Remedy |
+| --- | --- | --- |
+| No successful peer activity | Peer connectivity is failing | Check DNS errors, `resolved seed peer IP addresses`, configured seed addresses, and outbound connectivity. |
+| Block-header times are rejected | A header is more than two hours ahead of the node's clock, violating the [protocol rule][blockheader] | Correct the time source if the clock is skewed; do not disable validation. Clock skew also distorts progress estimates. |
+| Storage errors or resource saturation accompany the stall | The node cannot sustain downloads, verification, or state writes | Check capacity and permissions; compare [system requirements](requirements.md) and [limit contention](#limit-resource-contention). |
+| `Zebra refuses to run` | The Mainnet release has reached [end of support](run.md#end-of-support) | [Upgrade](upgrading.md); restarting the same binary does not help. |
+| A restored node starts from genesis | Zebra did not open the intended snapshot | Follow [snapshot troubleshooting](snapshots.md#troubleshooting) before allowing another full download. |
+
+[blockheader]: https://zips.z.cash/protocol/protocol.pdf#blockheader
+
+### Limit resource contention
+
+For CPU or logging contention, use a release build and remove temporary debug
+filters. In builds that retain debug instrumentation, restrict it to the
+component under investigation:
 
 ```toml
 [tracing]
-filter = 'info'
+filter = "info,zebra_network=debug"
 ```
 
-Or restrict debug logging to a specific Zebra component:
+Default release builds compile out debug and trace events; a filter cannot
+restore them. See [compiled log levels](tracing.md#filters-and-compiled-log-levels).
+
+Queued blocks consume memory, and concurrent verification competes for CPU.
+Choose [sync concurrency limits](config.md#sync) for measured capacity rather
+than raising every limit.
+
+For a bandwidth-constrained node, reduce download concurrency before changing
+verification limits:
 
 ```toml
-[tracing]
-filter = 'info,zebra_network=debug'
+[sync]
+download_concurrency_limit = 25
 ```
 
-If you keep on seeing multiple info logs per second, please
-[open a bug.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+Measure height advancement and resource use before and after a change; use
+[metrics](metrics.md). Zebra raises limits below the
+[minimum bounds](config.md#sync) and logs the adjustment.
 
 ### Linux TCP tuning for block propagation
 
-On Linux, the kernel resets each TCP connection's congestion window after a short idle period
-(`net.ipv4.tcp_slow_start_after_idle=1`, the default on most distros). Zcash's
-pull-based, single-request-per-block propagation means most peer connections are
-idle between blocks, so every full-block transfer starts from a cold congestion
-window. On long-haul links this can cap single-peer throughput far below the
-available bandwidth — even between nodes with 1–2 Gbps connections, observed
-throughput during block propagation can be as low as ~6 Mbps.
+Linux enables `net.ipv4.tcp_slow_start_after_idle` by default. It reduces a TCP
+connection's congestion window after an idle period defined by the current
+retransmission timeout. When peers are idle between block requests, this
+restart can limit subsequent block-transfer throughput. Zebra checks the
+setting on Linux and warns at startup when it is nonzero.
 
-> **Warning: these settings are system-wide.** They affect _every_ TCP
-> connection on the host and every program using it, not just Zebra. Review
-> the implications before applying, particularly on multi-tenant or
-> production hosts running unrelated workloads.
+Inspect the effective setting:
 
-The recommended sysctl config is:
-
-```text
-# Disable slow-start-after-idle so TCP doesn't reset its congestion window
-# between block requests. This is the highest-impact setting for full-block
-# propagation on long-haul links.
-net.ipv4.tcp_slow_start_after_idle=0
-
-# Use CUBIC congestion control (already the default on most Linux distros;
-# set explicitly so the configuration is self-documenting).
-net.ipv4.tcp_congestion_control=cubic
-
-# Use fq_codel as the default queueing discipline.
-net.core.default_qdisc=fq_codel
+```sh
+sysctl net.ipv4.tcp_slow_start_after_idle
 ```
 
-To apply persistently, write the block above to
-`/etc/sysctl.d/99-zebra-network.conf` and reload with
-`sudo sysctl --system`. To apply for the current boot only, use
-`sudo sysctl -w <key>=<value>` for each line.
+To retain the congestion window across idle periods, set:
 
-Zebra logs a warning at startup on Linux if `tcp_slow_start_after_idle` is
-enabled.
+```sh
+sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0
+```
+
+This setting affects all TCP users in the network namespace, not only Zebra.
+Review other workloads before changing it. To persist it for the host, put
+this line in `/etc/sysctl.d/99-zebra-network.conf`:
+
+```text
+net.ipv4.tcp_slow_start_after_idle=0
+```
+
+Apply persistent host settings with `sudo sysctl --system`. See the
+[Linux TCP sysctl reference][ip-sysctl] for the kernel behavior.
 
 #### Running Zebra in Docker
 
-These sysctls must be applied on the **host**, not inside the container.
-Containers share the host's network stack settings for these knobs, so
-setting them inside the container has no effect. Apply them on the
-Docker host (and remember the system-wide caveat above).
+Apply the setting in the network namespace containing Zebra. With Docker's
+separate container networking, add
+`--sysctl net.ipv4.tcp_slow_start_after_idle=0` to the `docker run` options.
+With `--network=host`, configure the host instead; Docker does not allow
+network sysctl overrides in host-network mode. Changing only the host setting
+is not a substitute for configuring an existing separate container network
+namespace. See [Docker's sysctl rules][docker-sysctl].
+
+[ip-sysctl]: https://docs.kernel.org/networking/ip-sysctl.html
+[docker-sysctl]: https://docs.docker.com/reference/cli/docker/container/run/#sysctl
+
+## Known limitation: private peer addresses
+
+Zebra does not reject private IP addresses merely because they are private.
+It can connect to them and distribute peer addresses; filtering them by
+default remains tracked in
+[issue #3117](https://github.com/ZcashFoundation/zebra/issues/3117).
+
+Use network-level egress controls if the node must not reach internal
+services. Do not rely on the public Zcash network configuration to isolate a
+node from private address ranges.
+
+## Build and test resource failures
+
+For compilation memory exhaustion, reduce [Cargo build parallelism][cargo-env]:
+
+```sh
+export CARGO_BUILD_JOBS=2
+```
+
+This limits build jobs, not node threads. For test resource contention, limit
+[nextest's test concurrency][nextest-threads] separately:
+
+```sh
+cargo nextest run --locked --test-threads=2
+```
+
+For CI's nextest profiles, follow
+[continuous integration](../dev/continuous-integration.md).
+
+For unreliable external connectivity, set `SKIP_NETWORK_TESTS=1` to skip tests
+that use Zebra's [network-test guard][network-test-guard]. It does not skip
+every network-dependent test or disable IPv6 tests. Unset it before claiming
+network-test coverage.
+
+[cargo-env]: https://doc.rust-lang.org/cargo/reference/environment-variables.html
+[nextest-threads]: https://nexte.st/docs/running/
+[network-test-guard]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-test/src/net.rs
+
+## Reporting a persistent failure
+
+Include the recorded version, network, configuration, first error, and
+surrounding logs in a [bug report][issues]. Redact RPC cookies, credentials,
+wallet information, and private infrastructure details before publishing
+logs. For suspected vulnerabilities, follow the
+[security policy](https://github.com/ZcashFoundation/zebra/security/policy)
+instead of opening a public issue.
+
+[issues]: https://github.com/ZcashFoundation/zebra/issues/new/choose
