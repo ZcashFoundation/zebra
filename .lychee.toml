@@ -27,10 +27,6 @@ exclude = [
     "^https://github.com/.*/pull/0000",
     # IACR eprint server returns 403 to automated link checkers
     "^https://eprint\\.iacr\\.org/",
-
-    # Dead upstream links in historical audit document (zebra-dependencies-for-audit.md)
-    "^https://github.com/iqlusioninc/abscissa/tree/develop",
-    "^https://github.com/servo/bincode/releases/tag/v1\\.3\\.3",
 ]
 
 # Exclude paths
