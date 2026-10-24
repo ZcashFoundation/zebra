@@ -1,6 +1,6 @@
 //! Transactions and transaction-related structures.
 
-use std::fmt;
+use std::{fmt, sync::OnceLock};
 
 pub use zcash_primitives::transaction::TxVersion;
 
@@ -55,9 +55,10 @@ use crate::{
 };
 
 /// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Transaction(
     zp_tx::Transaction,
+    OnceLock<AuthDigest>,
     /// Exact canonical byte count retained by decoding; zero means the body must be measured.
     /// Private immutable access to the inner value prevents callers from keeping stale evidence.
     u32,
@@ -72,10 +73,11 @@ impl std::ops::Deref for Transaction {
 }
 
 impl Transaction {
-    /// New or rebuilt bodies have no decoded-size evidence. The inner value is private and only
-    /// exposed immutably, so every body mutation must replace the transaction through this helper.
+    /// Starts with an empty digest cache and no decoded-size evidence whenever a transaction body
+    /// is built or decoded. The inner value is private and only exposed immutably, so every body
+    /// mutation must replace the transaction through this helper.
     fn from_inner(inner: zp_tx::Transaction) -> Self {
-        Self(inner, 0)
+        Self(inner, OnceLock::new(), 0)
     }
 
     /// Access the inner `zcash_primitives::transaction::Transaction`.
@@ -293,18 +295,20 @@ impl Transaction {
         Hash(txid_bytes)
     }
 
-    /// Compute the authorizing data commitment for this transaction.
+    /// Return the authorizing data commitment, computing it once per immutable transaction body.
     ///
     /// Returns `None` for pre-V5 transactions (which don't have auth digests).
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self.tx_version() {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
-            _ => {
+            _ => Some(*self.1.get_or_init(|| {
                 let hash = self.0.auth_commitment();
-                let bytes: &[u8] = hash.as_ref();
-                let digest_bytes: [u8; 32] = bytes.try_into().ok()?;
-                Some(AuthDigest(digest_bytes))
-            }
+                AuthDigest(
+                    hash.as_ref()
+                        .try_into()
+                        .expect("authorizing data commitments are 32 bytes"),
+                )
+            })),
         }
     }
 
@@ -830,6 +834,12 @@ impl PartialEq for Transaction {
 
 impl Eq for Transaction {}
 
+impl fmt::Debug for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Transaction").field(&self.0).finish()
+    }
+}
+
 impl std::fmt::Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut fmter = f.debug_struct("Transaction");
@@ -905,8 +915,8 @@ impl crate::serialization::ZcashSerialize for Transaction {
     }
 
     fn zcash_serialized_size(&self) -> usize {
-        if self.1 != 0 {
-            return usize::try_from(self.1).expect("decoded transaction sizes fit usize");
+        if self.2 != 0 {
+            return usize::try_from(self.2).expect("decoded transaction sizes fit usize");
         }
         let mut writer = crate::serialization::FakeWriter(0);
         self.zcash_serialize(&mut writer)
@@ -1085,7 +1095,7 @@ fn deserialize_and_check<R: std::io::Read>(
     let mut transaction = Transaction::from_inner(inner);
     // The count is capped by MAX_BLOCK_BYTES; the bound below makes both casts lossless.
     const { assert!(crate::block::MAX_BLOCK_BYTES <= u32::MAX as u64) };
-    transaction.1 = (crate::block::MAX_BLOCK_BYTES - limited.limit()) as u32;
+    transaction.2 = (crate::block::MAX_BLOCK_BYTES - limited.limit()) as u32;
     Ok(transaction)
 }
 
@@ -1175,12 +1185,6 @@ impl<R: std::io::Read> std::io::Read for RecordingReader<R> {
         let n = self.inner.read(buf)?;
         self.recorded.extend_from_slice(&buf[..n]);
         Ok(n)
-    }
-}
-
-impl Clone for Transaction {
-    fn clone(&self) -> Self {
-        Transaction(self.0.clone(), self.1)
     }
 }
 
@@ -1408,7 +1412,7 @@ impl Transaction {
             None,
             None,
         );
-        Transaction::from_inner(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V5 transaction with an Orchard bundle, for tests.
@@ -1440,7 +1444,7 @@ impl Transaction {
             orchard_bundle,
         );
 
-        Transaction::from_inner(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V6 transaction with Orchard and Ironwood bundles, for tests.
@@ -1473,7 +1477,7 @@ impl Transaction {
             ironwood_bundle,
         );
 
-        Transaction::from_inner(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Converts Zebra transparent inputs and outputs into a librustzcash bundle,
@@ -1559,7 +1563,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        Transaction::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Self::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Rebuild this transaction with a different expiry height (recomputes txid).
@@ -1627,7 +1631,7 @@ impl Transaction {
             bundle,
             data.ironwood_bundle().cloned(),
         );
-        Transaction::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Self::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.
