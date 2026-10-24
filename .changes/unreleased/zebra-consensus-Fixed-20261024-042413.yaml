@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Skip the unused shielded signature hash when verifying transparent-only transactions ([#11991](https://github.com/ZcashFoundation/zebra/issues/11991)).
+time: 2026-10-24T04:24:13.93752717+02:00
