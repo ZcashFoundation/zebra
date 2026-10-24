@@ -55,7 +55,8 @@ There are two ways to run the pair:
   automatically.
 
 Both modes require Zebra to retain complete block history. Startup rejects zcashd-compat mode
-when historical block bodies are unavailable, even if the sidecar is already synchronized.
+when `state.prune_blocks_older_than` is set or historical bodies are unavailable, even before the
+first deletion or if the sidecar is already synchronized.
 A pruned node cannot be the sidecar's archive source: it does not advertise `NODE_NETWORK`,
 returns `notfound` for unavailable blocks, and stops block inventory at missing history.
 Historical headers remain available, but they do not replace the blocks needed by the sidecar.

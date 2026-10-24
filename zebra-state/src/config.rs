@@ -16,9 +16,9 @@ use tracing::Span;
 use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
     service::finalized_state::restorable_db_versions,
-    state_database_format_version_in_code, BoxError,
+    state_database_format_version_in_code, BoxError, StateInitError,
 };
 
 /// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
@@ -114,6 +114,22 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// The number of recent finalized block bodies to retain, or `None` for archive operation.
+    ///
+    /// Defaults to `None`. The minimum is 10,000 on Mainnet and Testnet, or
+    /// [`MAX_BLOCK_REORG_HEIGHT`] + 1 on Regtest. Zero is invalid.
+    ///
+    /// Retention is measured from the durable finalized tip; non-finalized blocks and genesis
+    /// are always retained. Only historical transaction bodies are deleted, not validation state.
+    /// Increasing retention affects future pruning only and never restores deleted bodies.
+    ///
+    /// Pruning is irreversible. To disable it after deletion, restore an archive snapshot or
+    /// fully resync in a separate cache directory. Normal RocksDB compaction reclaims space
+    /// eventually; deletion does not guarantee an immediate reduction in disk usage.
+    ///
+    /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
+    pub prune_blocks_older_than: Option<u32>,
+
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
     ///
     /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
@@ -181,6 +197,25 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 }
 
 impl Config {
+    /// Rejects retention windows that cannot safely serve this network.
+    pub(crate) fn validate_pruning(&self, network: &Network) -> Result<(), StateInitError> {
+        let Some(configured) = self.prune_blocks_older_than else {
+            return Ok(());
+        };
+        let minimum = if network.is_regtest() {
+            MAX_BLOCK_REORG_HEIGHT + 1
+        } else {
+            10_000
+        };
+        if configured < minimum {
+            return Err(StateInitError::InvalidPruningRetention {
+                configured,
+                minimum,
+            });
+        }
+        Ok(())
+    }
+
     /// Returns the path for the database, based on the kind, major version and network.
     /// Each incompatible database format or network gets its own unique path.
     pub fn db_path(
@@ -246,6 +281,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            prune_blocks_older_than: None,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
