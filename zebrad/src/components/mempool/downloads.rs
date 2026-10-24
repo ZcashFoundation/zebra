@@ -663,11 +663,13 @@ where
             .await
             .map_err(CloneError::from)
             .map_err(TransactionDownloadVerifyError::StateError)?
-            .call(zs::Request::Transaction(txid.mined_id()))
+            .call(zs::Request::KnownTransaction(txid.mined_id()))
             .await
         {
-            Ok(zs::Response::Transaction(None)) => Ok(()),
-            Ok(zs::Response::Transaction(Some(_))) => Err(TransactionDownloadVerifyError::InState),
+            Ok(zs::Response::KnownTransaction(false)) => Ok(()),
+            Ok(zs::Response::KnownTransaction(true)) => {
+                Err(TransactionDownloadVerifyError::InState)
+            }
             Ok(_) => unreachable!("wrong response"),
             Err(e) => Err(TransactionDownloadVerifyError::StateError(e.into())),
         }?;

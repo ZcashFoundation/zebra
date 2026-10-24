@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Changed `gettxout` to answer from the UTXO set without requiring the creating transaction body;
+  once that body is pruned, `version` is null.
+time: 2026-10-24T23:13:51.699720838+02:00
