@@ -183,9 +183,6 @@ async fn test_chain_tip_change(
     mock_chain_tip_sender.send_best_tip_height(Height::MIN);
     mock_chain_tip_sender.send_best_tip_hash(zebra_chain::block::Hash([0; 32]));
 
-    // Wait for RPC server to send a message
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     tokio::time::timeout(Duration::from_secs(3), response.next())
         .await
         .expect("should receive chain tip change notification before timeout")
@@ -245,9 +242,6 @@ async fn start_server_and_get_client() -> Result<(
     )
     .await
     .map_err(|err| eyre!(err))?;
-
-    // wait for the server to start
-    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let endpoint = tonic::transport::channel::Endpoint::new(format!("http://{listen_addr}"))
         .unwrap()

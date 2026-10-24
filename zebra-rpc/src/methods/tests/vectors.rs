@@ -3574,8 +3574,9 @@ async fn getblocktemplate_precomputed() {
 
     // The RPC validates the tip against the state, then must answer from the precomputed template:
     // the mempool never responds again, so selecting transactions for a fresh template would block
-    // forever.
+    // forever. An aborted responder can still claim a request until it stops, so wait for it.
     mempool_responder.abort();
+    let _ = mempool_responder.await;
 
     let template = tokio::time::timeout(Duration::from_secs(1), rpc.get_block_template(None))
         .await
@@ -3596,6 +3597,7 @@ async fn getblocktemplate_precomputed() {
         Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
 
     read_state_responder.abort();
+    let _ = read_state_responder.await;
 
     let (read_state_responder, mempool_responder) =
         spawn_responders(next_tip_height, next_tip_hash);
