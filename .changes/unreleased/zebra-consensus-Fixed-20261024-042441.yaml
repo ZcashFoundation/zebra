@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Avoid reserializing ordinarily decoded blocks for the size check with `DecodedBlock::deserialize`, retaining the fallback for constructed blocks ([#11989](https://github.com/ZcashFoundation/zebra/issues/11989)).
+time: 2026-10-24T04:24:41.719627195+02:00
