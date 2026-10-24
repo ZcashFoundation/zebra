@@ -226,7 +226,7 @@ consensus rule. Reorganizations cannot replace blocks already finalized by this
 node.
 
 With backups enabled, persistent state restores recent blocks from a
-[non-finalized backup](state-db-upgrades.md);
+[non-finalized backup](state-db-upgrades.md#non-finalized-state-backup);
 see the [state settings](../user/config.md#state).
 
 The [`StateService` interface][state-service] accepts mutations and queries.
