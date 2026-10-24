@@ -8,7 +8,10 @@
 use std::{
     collections::HashMap,
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -6309,8 +6312,20 @@ tokio::task_local! {
     pub(super) static HALO2_CACHE_VERIFIER: crate::primitives::halo2::CachedVerifierService;
     /// Private Sapling cache for the current transaction-verification test.
     pub(crate) static SAPLING_CACHE_VERIFIER: crate::primitives::sapling::VerifierService;
+    /// Number of shielded sighashes computed by this task's transaction verifier.
+    static SHIELDED_SIGHASH_REQUESTS: Arc<AtomicUsize>;
     /// The thread that ran each transaction preparation by this task's verifier.
     static PREPARATION_THREADS: Arc<Mutex<Vec<std::thread::ThreadId>>>;
+}
+
+/// Counts a shielded sighash computed by the transaction verifier.
+pub(super) fn count_shielded_sighash() {
+    let _ = SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.fetch_add(1, Ordering::SeqCst));
+}
+
+/// Returns and resets the number of shielded sighashes counted in this task.
+fn take_shielded_sighash_requests() -> usize {
+    SHIELDED_SIGHASH_REQUESTS.with(|count| count.swap(0, Ordering::SeqCst))
 }
 
 /// Records the thread running the current transaction preparation.
@@ -6336,12 +6351,15 @@ pub(super) fn with_verifier_task_locals<T>(
     let halo2 = HALO2_CACHE_VERIFIER.try_with(Clone::clone).ok();
     let sapling = SAPLING_CACHE_VERIFIER.try_with(Clone::clone).ok();
     let flush = FLUSH.try_with(Clone::clone).ok();
+    let requests = SHIELDED_SIGHASH_REQUESTS.try_with(Clone::clone).ok();
     let threads = PREPARATION_THREADS.try_with(Clone::clone).ok();
     move || {
         scoped(&HALO2_CACHE_VERIFIER, halo2, || {
             scoped(&SAPLING_CACHE_VERIFIER, sapling, || {
                 scoped(&FLUSH, flush, || {
-                    scoped(&PREPARATION_THREADS, threads, prepare)
+                    scoped(&SHIELDED_SIGHASH_REQUESTS, requests, || {
+                        scoped(&PREPARATION_THREADS, threads, prepare)
+                    })
                 })
             })
         })
@@ -6375,7 +6393,8 @@ async fn preparation_offloads(future: impl Future<Output = ()>) -> Vec<bool> {
     threads.iter().map(|id| !pollers.contains(id)).collect()
 }
 
-/// Both entry points must prepare shielded transactions off the async task.
+/// Both entry points must prepare shielded transactions off the async task, and keep counting
+/// their shielded sighashes.
 #[test]
 fn shielded_preparation_runs_on_blocking_thread() {
     let _init_guard = zebra_test::init();
@@ -6383,41 +6402,44 @@ fn shielded_preparation_runs_on_blocking_thread() {
         let (upgrade, tx) = cacheable_mainnet_sapling_transaction();
         let height = tx.expiry_height().unwrap();
         assert_eq!(NetworkUpgrade::current(&Network::Mainnet, height), upgrade);
-        let offloads = preparation_offloads(async {
-            let state = service_fn(|_| async { unreachable!("the fixture has no inputs") });
-            timeout(
-                test_timeout(),
-                BlockTxVerifier::new(&Network::Mainnet, state)
-                    .oneshot(cache_test_block_request(&tx, height)),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-
-            let state = service_fn(|request| async move {
-                assert!(matches!(
-                    request,
-                    zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
-                ));
-                Ok::<_, crate::BoxError>(
-                    zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+        let requests = Arc::new(AtomicUsize::new(0));
+        let offloads =
+            preparation_offloads(SHIELDED_SIGHASH_REQUESTS.scope(requests.clone(), async {
+                let state = service_fn(|_| async { unreachable!("the fixture has no inputs") });
+                timeout(
+                    test_timeout(),
+                    BlockTxVerifier::new(&Network::Mainnet, state)
+                        .oneshot(cache_test_block_request(&tx, height)),
                 )
-            });
-            timeout(
-                test_timeout(),
-                MempoolTxVerifier::new_for_tests(&Network::Mainnet, state).oneshot(
-                    MempoolRequest {
-                        transaction: Arc::new(tx).into(),
-                        height,
-                    },
-                ),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        })
-        .await;
+                .await
+                .unwrap()
+                .unwrap();
+
+                let state = service_fn(|request| async move {
+                    assert!(matches!(
+                        request,
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    ));
+                    Ok::<_, crate::BoxError>(
+                        zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+                    )
+                });
+                timeout(
+                    test_timeout(),
+                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, state).oneshot(
+                        MempoolRequest {
+                            transaction: Arc::new(tx).into(),
+                            height,
+                        },
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            }))
+            .await;
         assert_eq!(offloads, [true, true]);
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
     });
 }
 
@@ -6469,6 +6491,226 @@ async fn transparent_preparation_inline_work_is_bounded() {
         .await;
         assert_eq!(offloads, [offloaded]);
     }
+}
+
+/// Transparent-only verification skips the shielded digest, not scripts or version checks.
+#[test]
+fn shielded_sighash_is_requested_only_for_shielded_bundles() {
+    use zebra_chain::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};
+
+    let _init_guard = zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(SHIELDED_SIGHASH_REQUESTS.scope(
+        Arc::default(),
+        async {
+            for version in [4, 5, 6] {
+                let nu = NetworkUpgrade::Nu6_3;
+                let height = nu.activation_height(&Network::Mainnet).unwrap();
+                for script_should_succeed in [true, false] {
+                    let (input, mut output, known_utxos) = mock_transparent_transfer(
+                        (height - 1).unwrap(),
+                        script_should_succeed,
+                        0,
+                        Amount::try_from(10_001).unwrap(),
+                    );
+                    // Count an unspent output's CHECKSIG without executing it.
+                    output.lock_script = transparent::Script::new(&[0xac]);
+                    let tx = match version {
+                        4 => Transaction::test_v4(
+                            vec![input],
+                            vec![output],
+                            LockTime::unlocked(),
+                            height,
+                        ),
+                        5 => Transaction::test_v5(
+                            nu,
+                            vec![input],
+                            vec![output],
+                            LockTime::unlocked(),
+                            height,
+                        ),
+                        6 => Transaction::test_v6(
+                            nu,
+                            vec![input],
+                            vec![output],
+                            LockTime::unlocked(),
+                            height,
+                        ),
+                        _ => unreachable!("only supported versions are tested"),
+                    };
+                    let tx = Arc::new(tx);
+                    let cached = Arc::new(
+                        zebra_script::CachedFfiTransaction::new(
+                            tx.clone(),
+                            Arc::new(
+                                known_utxos
+                                    .values()
+                                    .map(|utxo| utxo.utxo.output.clone())
+                                    .collect(),
+                            ),
+                            nu,
+                        )
+                        .unwrap(),
+                    );
+                    let unsupported = NetworkUpgrade::Overwinter;
+                    let result = super::dispatch_version_verification(
+                        &tx,
+                        unsupported,
+                        crate::script::Verifier,
+                        cached,
+                        tx.unmined_id(),
+                    );
+                    assert_eq!(
+                        result.err(),
+                        Some(TransactionError::UnsupportedByNetworkUpgrade(
+                            version,
+                            unsupported
+                        )),
+                    );
+                    assert_eq!(take_shielded_sighash_requests(), 0);
+
+                    let state = service_fn(|_| async { unreachable!("all UTXOs are supplied") });
+                    let result = timeout(
+                        test_timeout(),
+                        BlockTxVerifier::new(&Network::Mainnet, state).oneshot(BlockRequest {
+                            transaction_hash: tx.hash(),
+                            transaction: tx,
+                            known_utxos: Arc::new(known_utxos),
+                            height,
+                            time: DateTime::<Utc>::MAX_UTC,
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                    if script_should_succeed {
+                        let response = result.expect("the transparent script is valid");
+                        assert_eq!(response.miner_fee, Some(Amount::try_from(10_000).unwrap()));
+                        assert_eq!(response.sigops, 1);
+                    } else {
+                        assert_eq!(
+                            result,
+                            Err(TransactionError::Script(zebra_script::Error::ScriptInvalid)),
+                        );
+                    }
+                    assert_eq!(
+                        take_shielded_sighash_requests(),
+                        0,
+                        "V{version} transparent verification must not compute a shielded sighash",
+                    );
+                }
+            }
+
+            let (sapling_nu, sapling_tx) = cacheable_mainnet_sapling_transaction();
+            let orchard_tx = cacheable_mainnet_orchard_transaction();
+            let orchard_nu =
+                NetworkUpgrade::current(&Network::Mainnet, orchard_tx.expiry_height().unwrap());
+            let (sprout_height, sprout_tx) = test_transactions(&Network::Mainnet)
+                .rev()
+                .find(|(_, tx)| {
+                    tx.version() == 4 && tx.inputs().is_empty() && tx.has_sprout_joinsplit_data()
+                })
+                .expect("the vectors contain a V4 Sprout transaction");
+            let sprout_nu = NetworkUpgrade::current(&Network::Mainnet, sprout_height);
+            for (nu, tx) in [
+                (sapling_nu, sapling_tx),
+                (orchard_nu, orchard_tx),
+                (sprout_nu, (*sprout_tx).clone()),
+            ] {
+                let shielded_checks = usize::from(tx.has_sapling_shielded_data())
+                    + usize::from(tx.has_orchard_shielded_data())
+                    + tx.joinsplit_count()
+                    + usize::from(tx.has_sprout_joinsplit_data());
+                let cached = Arc::new(
+                    zebra_script::CachedFfiTransaction::new(
+                        Arc::new(tx.clone()),
+                        Arc::new(Vec::new()),
+                        nu,
+                    )
+                    .unwrap(),
+                );
+                let checks = super::dispatch_version_verification(
+                    &tx,
+                    nu,
+                    crate::script::Verifier,
+                    cached,
+                    tx.unmined_id(),
+                )
+                .unwrap();
+                assert_eq!(take_shielded_sighash_requests(), 1);
+                assert_eq!(checks.0.len(), shielded_checks);
+                timeout(test_timeout(), checks.check())
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+                // Adding a failing transparent input must not discard any shielded checks.
+                let (input, _, utxos) =
+                    mock_transparent_transfer(Height(1), false, 0, Amount::try_from(1).unwrap());
+                let mixed = Arc::new(tx.with_transparent_inputs(vec![input]));
+                let cached = Arc::new(
+                    zebra_script::CachedFfiTransaction::new(
+                        mixed.clone(),
+                        Arc::new(
+                            utxos
+                                .values()
+                                .map(|utxo| utxo.utxo.output.clone())
+                                .collect(),
+                        ),
+                        nu,
+                    )
+                    .unwrap(),
+                );
+                let checks = super::dispatch_version_verification(
+                    &mixed,
+                    nu,
+                    crate::script::Verifier,
+                    cached,
+                    mixed.unmined_id(),
+                )
+                .unwrap();
+                assert_eq!(take_shielded_sighash_requests(), 1);
+                assert_eq!(checks.0.len(), shielded_checks + 1);
+                assert!(timeout(test_timeout(), checks.check())
+                    .await
+                    .unwrap()
+                    .is_err());
+            }
+
+            // Both V6 pools require the digest, including an Ironwood-only transaction.
+            for (orchard, ironwood) in [(true, false), (false, true), (true, true)] {
+                let bundle = |pool| {
+                    fake_bundle_for_branch(zcash_protocol::consensus::BranchId::Nu6_3, pool, 1, 5)
+                        .expect("both pools exist at NU6.3")
+                };
+                let tx = Arc::new(fake_v6_transaction(
+                    NetworkUpgrade::Nu6_3,
+                    orchard.then(|| bundle(::orchard::ValuePool::Orchard)),
+                    ironwood.then(|| bundle(::orchard::ValuePool::Ironwood)),
+                ));
+                let cached = Arc::new(
+                    zebra_script::CachedFfiTransaction::new(
+                        tx.clone(),
+                        Arc::new(Vec::new()),
+                        NetworkUpgrade::Nu6_3,
+                    )
+                    .unwrap(),
+                );
+                let checks = super::dispatch_version_verification(
+                    &tx,
+                    NetworkUpgrade::Nu6_3,
+                    crate::script::Verifier,
+                    cached,
+                    tx.unmined_id(),
+                )
+                .unwrap();
+                assert_eq!(take_shielded_sighash_requests(), 1);
+                assert_eq!(checks.0.len(), usize::from(orchard) + usize::from(ironwood));
+                assert!(timeout(test_timeout(), checks.check())
+                    .await
+                    .unwrap()
+                    .is_err());
+            }
+        },
+    ));
 }
 
 /// Returns a block request that mines `tx` at `height`.
