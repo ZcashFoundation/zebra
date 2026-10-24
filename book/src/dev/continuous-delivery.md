@@ -40,7 +40,7 @@ and Sentry variables. Authentication uses the
 
 ## Image publication
 
-The [image builder](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-build-docker-image.yml#L176-L200)
+The [image builder](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-build-docker-image.yml#L176-L199)
 publishes to `us-docker.pkg.dev/<GCP_PROJECT>/zebra/<image_name>`.
 The `GCP_PROJECT` variable comes from the selected GitHub environment.
 
@@ -63,11 +63,12 @@ The tag recipes produce these development tags; matching conditions combine:
 | Branch ref, including manual dispatch from a branch | Sanitized branch name |
 | Default-branch ref | `edge` |
 | Scheduled run | `nightly`, the default `type=schedule` pattern |
-| Any event with a commit SHA | `sha-<first-seven-characters>` |
+| Nonrelease event with a commit SHA | `sha-<first-seven-characters>` |
 
 The pinned [metadata action](https://github.com/docker/metadata-action/blob/030e881283bb7a6894de51c315a6bfe6a94e05cf/README.md#tags-input)
-defines these defaults. Its SHA recipe ignores the `event` attribute, so
-release builds also receive a SHA tag. For version tags and `latest`, see
+defines these defaults. The workflow disables SHA tags for release events in
+both registries; PR, branch-push, scheduled, and manual runs keep them for CI.
+For version tags and `latest`, see
 [Docker images](../user/docker.md#images-and-tags).
 
 ## Zonal instance groups
