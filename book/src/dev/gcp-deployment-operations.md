@@ -361,21 +361,23 @@ The integration workflow's `create-state-image` job produces names of the
 form:
 
 ```text
-{prefix}-{ref-slug}-{sha}-v{major}-{network}-{tip|checkpoint}[-u]-{HHMMSS}
+{prefix}-{cache-scope}-{sha}-v{major}-{network}-{tip|checkpoint}[-u]-{HHMMSS}
 ```
 
-The prefix is `zebrad-cache` or `lwd-cache`. The ref slug is truncated to 12
-characters, the SHA to seven, and the time is UTC. The database major comes
-from the running test's logs, not merely from the source constant.
+The prefix is `zebrad-cache` or `lwd-cache`. In `ZcashFoundation/zebra`, the
+cache scope is the branch slug truncated to 12 characters; a slug of the
+form `r<digits>` gets a `b` prefix. Copies of the repository use
+`r<repository-id>` instead. The SHA is truncated to seven characters and
+the time is UTC. The database major comes from the running test's logs,
+not merely from the source constant.
 
 The [lookup script](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/scripts/gcp-get-cached-disks.sh)
 requires a `READY` image matching purpose, database major, network, and
-state kind. It tries a branch-specific pattern, then `main`, then any
-branch, selecting the newest match in each query. The current first
-pattern places the branch where generated names put the commit SHA, so it
-does not provide the intended same-branch preference for ordinary branch
-names. Do not rely on same-branch or same-commit cache selection. Inspect
-the chosen image in the job output.
+state kind. It tries the current cache scope followed by a commit SHA,
+then `main`, then any branch, selecting the newest match in each query.
+Upstream lookup excludes images written by copies of the repository.
+Branch slugs can collide after truncation; selection does not require the
+current commit. Inspect the chosen image in the job output.
 
 If no category has an image for the current database major, lookup repeats
 the search for the immediately previous major only when Zebra has an
