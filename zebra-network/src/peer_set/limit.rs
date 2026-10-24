@@ -3,7 +3,13 @@
 //! These types can be used to count any kind of active resource.
 //! But they are currently used to track the number of open connections.
 
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use tokio::sync::mpsc;
 
@@ -41,6 +47,9 @@ pub struct ActiveConnectionCounter {
 
     /// The channel used to receive opened or closed connection notifications.
     status_notification_rx: mpsc::UnboundedReceiver<ConnectionStatus>,
+
+    /// The number of connections holding a non-serving slot, shared with their trackers.
+    non_serving_count: Arc<AtomicUsize>,
 
     /// Active connection count progress transmitter.
     #[cfg(feature = "progress-bar")]
@@ -82,6 +91,7 @@ impl ActiveConnectionCounter {
             label: label.into(),
             status_notification_rx,
             status_notification_tx,
+            non_serving_count: Arc::default(),
             #[cfg(feature = "progress-bar")]
             connection_bar,
         }
@@ -168,6 +178,12 @@ pub struct ConnectionTracker {
 
     /// The label for this connection counter, typically its type.
     label: Arc<str>,
+
+    /// The non-serving slot count shared with the connection counter.
+    non_serving_count: Arc<AtomicUsize>,
+
+    /// Whether this connection holds one of the counter's non-serving slots.
+    is_non_serving: bool,
 }
 
 impl fmt::Debug for ConnectionTracker {
@@ -188,6 +204,20 @@ impl ConnectionTracker {
         }
     }
 
+    /// Claims one of the `limit` slots shared by connections to peers that can't serve historic
+    /// blocks, and returns `false` if they are all taken. Dropping the tracker frees the slot.
+    pub fn try_mark_non_serving(&mut self, limit: usize) -> bool {
+        if !self.is_non_serving {
+            self.is_non_serving = self
+                .non_serving_count
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                    (count < limit).then_some(count + 1)
+                })
+                .is_ok();
+        }
+        self.is_non_serving
+    }
+
     /// Create and return a new active connection tracker, and add 1 to `counter`.
     /// All connection trackers share a label with their connection counter.
     ///
@@ -205,6 +235,8 @@ impl ConnectionTracker {
         Self {
             status_notification_tx: counter.status_notification_tx.clone(),
             has_marked_open: false,
+            non_serving_count: counter.non_serving_count.clone(),
+            is_non_serving: false,
             label: counter.label.clone(),
         }
     }
@@ -229,5 +261,9 @@ impl Drop for ConnectionTracker {
         // the active connection tracker.
         self.mark_open();
         let _ = self.status_notification_tx.send(ConnectionStatus::Closed);
+
+        if self.is_non_serving {
+            self.non_serving_count.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 }

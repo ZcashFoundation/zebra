@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{meta_addr::MetaAddr, AddressBookPeers, PeerSocketAddr};
+use crate::{meta_addr::MetaAddr, types::PeerServices, AddressBookPeers, PeerSocketAddr};
 
 /// A mock [`AddressBookPeers`] implementation that's always empty.
 #[derive(Debug, Default, Clone)]
@@ -50,6 +50,10 @@ impl AddressBookPeers for MockAddressBookPeers {
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
         self.add_peer(peer)
     }
+
+    fn local_services(&self) -> PeerServices {
+        PeerServices::NODE_NETWORK
+    }
 }
 
 /// A shared version of [`MockAddressBookPeers`] that can be used in shared state tests.
@@ -79,6 +83,10 @@ impl AddressBookPeers for SharedMockAddressBookPeers {
 
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
         self.inner.lock().unwrap().add_peer(peer)
+    }
+
+    fn local_services(&self) -> PeerServices {
+        self.inner.lock().unwrap().local_services()
     }
 }
 

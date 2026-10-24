@@ -163,7 +163,8 @@ where
 /// Returns the next candidate for a connection attempt, if any are available.
 ///
 /// Returns peers in reconnection order, based on
-/// [`AddressBook::reconnection_peers`](crate::AddressBook::reconnection_peers).
+/// [`AddressBook::reconnection_peers`](crate::AddressBook::reconnection_peers),
+/// but tries peers that might serve historic blocks before peers known not to.
 ///
 /// Skips peers that have recently been active, attempted, or failed.
 ///

@@ -61,6 +61,75 @@ use InventoryResponse::*;
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
+/// Pruned bodies are missing on the parsed and raw block paths; other read errors propagate.
+#[tokio::test(flavor = "multi_thread")]
+async fn inbound_pruned_blocks_are_missing_without_hiding_corruption() {
+    use zebra_state::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(30), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let hash = block.hash();
+        let height = block.coinbase_height().unwrap();
+        let mut state: MockService<_, _, PanicAssertion, BoxError> =
+            MockService::build().for_unit_tests();
+        let state_service = Buffer::new(BoxService::new(state.clone()), 1);
+        let (_tip_sender, tip, _tip_change) = ChainTipSender::new(None, &Mainnet);
+        let (verifier, _calls) = recording_block_verifier();
+        let (mut inbound, _peers, mut misbehavior) =
+            setup_gossiped_block_misbehavior_with_state(verifier, state_service, tip).await;
+
+        for (request, state_request, missing) in [
+            (
+                Request::BlocksByHash([hash].into()),
+                zebra_state::Request::Block(hash.into()),
+                Response::Blocks(vec![Missing(hash)]),
+            ),
+            (
+                Request::RawBlocksByHash([hash].into()),
+                zebra_state::Request::RawBlock(hash.into()),
+                Response::RawBlocks(vec![Missing(hash)]),
+            ),
+        ] {
+            for (error, expected) in [
+                (
+                    BlockReadError::BlockBodyUnavailable { height },
+                    Ok(missing.clone()),
+                ),
+                (
+                    BlockReadError::CorruptBlock { height },
+                    Err(BlockReadError::CorruptBlock { height }),
+                ),
+            ] {
+                let request = request.clone();
+                let query = async { inbound.ready().await.unwrap().call(request).await };
+                let respond = async {
+                    state
+                        .expect_request(state_request.clone())
+                        .await
+                        .respond_error(error.into());
+                };
+                let (response, ()) = tokio::join!(query, respond);
+                match expected {
+                    Ok(expected) => assert_eq!(response.unwrap(), expected),
+                    Err(expected) => assert_eq!(
+                        response.unwrap_err().downcast_ref::<BlockReadError>(),
+                        Some(&expected),
+                    ),
+                }
+                assert!(matches!(
+                    misbehavior.try_recv(),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+                ));
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
 /// Raw block requests serve each committed block as exactly its serialized bytes, report unknown
 /// blocks as missing, and agree with the parsed block responses.
 #[tokio::test(flavor = "multi_thread")]
@@ -292,6 +361,7 @@ async fn early_raw_block_requests_keep_early_bodies_revocable() -> Result<(), Bo
                 sync_downloads: Default::default(),
                 address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                     SocketAddr::from(([0, 0, 0, 0], 0)),
+                    PeerServices::NODE_NETWORK,
                     &network,
                     DEFAULT_MAX_CONNS_PER_IP,
                     Span::none(),
@@ -683,6 +753,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1448,6 +1519,7 @@ async fn setup(
     let state_config = StateConfig::ephemeral();
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1730,6 +1802,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -2447,6 +2520,7 @@ async fn compact_and_sync_share_committed_success_and_recover_owner() -> Result<
                     sync_downloads: sync.in_flight_hashes(),
                     address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                         "0.0.0.0:0".parse().unwrap(),
+                        PeerServices::NODE_NETWORK,
                         &Mainnet,
                         DEFAULT_MAX_CONNS_PER_IP,
                         Span::none(),
@@ -2684,6 +2758,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
             sync_downloads: Default::default(),
             address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                 SocketAddr::from(([0, 0, 0, 0], 0)),
+                PeerServices::NODE_NETWORK,
                 &network,
                 DEFAULT_MAX_CONNS_PER_IP,
                 Span::none(),

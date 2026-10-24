@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 
-use crate::{meta_addr::MetaAddr, PeerSocketAddr};
+use crate::{meta_addr::MetaAddr, types::PeerServices, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod mock;
@@ -28,5 +28,12 @@ pub trait AddressBookPeers {
     /// Defaults to `0` for implementers that don't track misbehavior.
     fn misbehavior_score(&self, _addr: PeerSocketAddr) -> u32 {
         0
+    }
+
+    /// Returns the services this node advertises to peers.
+    ///
+    /// Defaults to no services, so implementers that don't track them never claim to serve blocks.
+    fn local_services(&self) -> PeerServices {
+        PeerServices::empty()
     }
 }
