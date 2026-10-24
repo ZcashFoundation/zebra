@@ -44,6 +44,10 @@ unit_tests:
   - ".config/nextest.toml"
   # zebrad's metric catalog tests read the dashboards, alert rules, and catalog here.
   - "docker/observability/**"
+  # Pages that tests compare with the code.
+  - "book/src/README.md"
+  - "book/src/user/config.md"
+  - "book/src/user/rpc.md"
   - ".github/workflows/tests-unit.yml"
   - ".github/actions/setup-zebra-build/**"
   - ".github/scripts/apt-install.sh"
