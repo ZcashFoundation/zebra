@@ -1355,10 +1355,10 @@ fn verify_transparent_inputs_and_outputs(
         // Coinbase transactions don't have any PrevOut inputs.
         Ok(AsyncChecks::new())
     } else {
-        // feed all of the inputs to the script verifier
-        let inputs = tx.inputs();
+        // Feed every native input to the script verifier without rebuilding its script.
+        let input_count = tx.transparent_bundle().map_or(0, |bundle| bundle.vin.len());
 
-        let script_checks = (0..inputs.len())
+        let script_checks = (0..input_count)
             .map(move |input_index| {
                 let request = script::Request {
                     cached_ffi_transaction: cached_ffi_transaction.clone(),
