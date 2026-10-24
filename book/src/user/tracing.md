@@ -39,18 +39,18 @@ information from `zebrad`, and debug events from `zebra_network`. Directives
 can also select spans and their fields; see the syntax reference before using
 field filters.
 
-Override the configured filter with either command form:
+Override the configured filter with any of these command forms:
 
 ```sh
 zebrad -c zebrad.toml --filters 'info,zebra_network=debug'
+zebrad -c zebrad.toml --filters 'info,zebra_network=debug' start
 zebrad -c zebrad.toml start 'info,zebra_network=debug'
 ```
 
-Use the top-level `--filters` option without an explicit subcommand. With
-`start`, use positional filter arguments instead: the current CLI does not
-forward the top-level option to an explicit `start` command. Positional
-arguments are joined with commas. An explicit filter takes precedence over
-the default selected by `-v`.
+The top-level `--filters` option applies with or without an explicit `start`.
+Positional filters after `start` take precedence over `--filters` and are
+joined with commas. An explicit filter takes precedence over the default
+selected by `-v`.
 
 The utility commands `generate` and `tip-height` use
 [fixed filters](config.md#tracing) and disable flamegraph collection.
