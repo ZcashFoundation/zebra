@@ -1,0 +1,9 @@
+project: zebra-network
+kind: breaking
+body: >-
+  Network configuration now has a runtime-only `Config::local_services` field for truthful version
+  and local-address service advertisements. Pass the local service mask to `AddressBook::new` and
+  `MetaAddr::new_local_listener_change`, and include `services` when constructing
+  `MetaAddrChange::NewLocal`. Unset handshake services now use the configured local services.
+  Cached alternate listeners retain their advertised service capabilities.
+time: 2026-10-25T00:57:38.119496636+02:00

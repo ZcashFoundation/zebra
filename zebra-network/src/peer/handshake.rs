@@ -470,7 +470,7 @@ where
 
     /// Provide the services this node advertises to other peers.  Optional.
     ///
-    /// If this is unset, the node will advertise itself as a client.
+    /// If this is unset, the configured local service capabilities are used.
     pub fn with_advertised_services(mut self, services: PeerServices) -> Self {
         self.our_services = Some(services);
         self
@@ -537,7 +537,7 @@ where
         });
         let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
-        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
+        let our_services = self.our_services.unwrap_or(config.local_services);
         let relay = self.relay.unwrap_or(false);
         let network = config.network.clone();
         let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, &network);
@@ -1224,10 +1224,10 @@ where
             let alternate_addrs = connected_addr
                 .get_alternate_addrs(remote_canonical_addr)
                 .map(|addr| {
-                    // Assume the connecting node is a server node, and it's available now.
+                    // Preserve the listener's advertised services; assume it is available now.
                     MetaAddr::new_gossiped_meta_addr(
                         addr,
-                        PeerServices::NODE_NETWORK,
+                        connection_info.remote.address_from.untrusted_services(),
                         DateTime32::now(),
                     )
                 });

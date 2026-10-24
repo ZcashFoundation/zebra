@@ -1055,6 +1055,7 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             .send(InboundSetupData {
                 address_book: Arc::new(Mutex::new(zn::AddressBook::new(
                     "127.0.0.1:0".parse().unwrap(),
+                    zn::types::PeerServices::NODE_NETWORK,
                     &network,
                     zn::constants::DEFAULT_MAX_CONNS_PER_IP,
                     tracing::Span::none(),

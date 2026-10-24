@@ -269,6 +269,23 @@ impl StartCmd {
         false
     }
 
+    /// Selects truthful local services and rejects sidecars that require unavailable history.
+    pub(super) fn network_services(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Result<zebra_network::types::PeerServices, Report> {
+        let mut services = config.network.local_services;
+        if history.is_pruned() {
+            if config.zcashd_compat.enabled {
+                return Err(eyre!(
+                    "zcashd-compat requires an archive node; pruned block history is unavailable"
+                ));
+            }
+            services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
+        }
+        Ok(services)
+    }
+
     async fn start(&self) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
@@ -373,6 +390,17 @@ impl StartCmd {
             )
             .await;
 
+        let zebra_state::ReadResponse::HistoryCapabilities(history) = read_only_state_service
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
+            .await
+            .map_err(|error| eyre!(error))?
+        else {
+            unreachable!("state returns history capabilities for its capabilities request");
+        };
+        let mut network_config = config.network.clone();
+        network_config.local_services = Self::network_services(&config, history)?;
+
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
@@ -423,7 +451,7 @@ impl StartCmd {
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
-                config.network.clone(),
+                network_config,
                 inbound,
                 latest_chain_tip.clone(),
                 user_agent(),

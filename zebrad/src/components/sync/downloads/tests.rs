@@ -211,6 +211,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     let buffered_mempool = Buffer::new(BoxService::new(mempool_service), 10);
     let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        zebra_network::types::PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
