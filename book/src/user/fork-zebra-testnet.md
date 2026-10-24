@@ -80,6 +80,9 @@ zebrad -c public-testnet.toml copy-state \
   --target-config-path prefix-target.toml
 ```
 
+With `--target-config-path`, `ZEBRA_TARGET_STATE__CACHE_DIR` overrides the
+target cache directory without changing the source's configuration.
+
 The height is inclusive. The command stops at the source's finalized tip if
 it is lower than the requested height, so check the resulting prefix rather
 than assuming it reached the cutoff:
