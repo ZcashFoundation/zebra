@@ -39,7 +39,7 @@ use crate::{
     address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
-    meta_addr::{MetaAddr, PeerAddrState},
+    meta_addr::MetaAddr,
     peer::{self, ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
         crawler_services,
@@ -2481,37 +2481,22 @@ async fn self_connections_should_fail() {
         "invalid address inserted into address book: port must be valid for inbound connections"
     );
 
-    // Wait for the crawler's failed self-connection to reach the address book.
-    let self_connection_status = tokio::time::timeout(CRAWLER_TEST_DURATION, async {
+    // Wait for the crawler's nonce-reuse failure to remove the dial target.
+    tokio::time::timeout(CRAWLER_TEST_DURATION, async {
         loop {
-            let status = address_book
+            if address_book
                 .lock()
                 .expect("unexpected panic in address book")
                 .get(real_self_listener.addr())
-                .expect("unexpected dropped listener address in address book");
-            if status.last_connection_state == PeerAddrState::Failed {
-                break status;
+                .is_none()
+            {
+                break;
             }
-
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     })
     .await
-    .expect("the crawler should finish a self-connection attempt");
-
-    // Make sure we fetched from the address book correctly
-    assert_eq!(
-        self_connection_status.addr(),
-        real_self_listener.addr(),
-        "wrong address fetched from address book"
-    );
-
-    // Make sure the self-connection failed
-    assert_eq!(
-        self_connection_status.last_connection_state,
-        PeerAddrState::Failed,
-        "self-connection should have failed"
-    );
+    .expect("the crawler should suppress the self address");
 }
 
 /// Test that the number of nonces is limited when peers send an invalid response or

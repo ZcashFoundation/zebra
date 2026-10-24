@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Avoided caching and redialing inbound source ports, and suppressed outbound addresses after self-connection nonce reuse ([#10622](https://github.com/ZcashFoundation/zebra/issues/10622)).
+time: 2026-10-24T08:13:12.338115-07:00
