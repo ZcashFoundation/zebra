@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'The example mining Compose stack starts again: it sets `ZEBRA_MINING__EXTRA_COINBASE_DATA` instead of the unknown `ZEBRA_MINING__MINER_DATA`, and enables the loopback health listener its health check probes.'
+time: 2026-10-24T17:00:20.867565681+02:00

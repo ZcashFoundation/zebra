@@ -161,9 +161,9 @@ interprets these variables; other settings go to
 | `FEATURES` | Image default `default-release-binaries`; passed to nextest in test mode. Setting it on a runtime container cannot change compiled features. |
 | `SHORT_SHA` | Preserved in test images from the build argument. The entrypoint unsets an empty value in test mode to avoid unnecessary Cargo rebuilds. |
 
-The files `docker/.env` and `docker/test.env` contain obsolete variables:
-`ZEBRA_CONF_PATH`, `ZEBRA_CACHE_DIR`, and `LOG_FILE` are not entrypoint aliases.
-Use the variables above; unknown `ZEBRA_*` configuration fields fail loading.
+Use `docker/.env` for node configuration examples and `docker/test.env` for
+test settings. `ZEBRA_SECTION__KEY` variables override values in mounted
+configuration files; unknown `ZEBRA_*` configuration fields fail loading.
 
 ### RPC
 
@@ -323,7 +323,7 @@ concurrently, give each unique container names, port mappings, and state volumes
 | `docker/docker-compose.lwd.yml` | Zebra plus lightwalletd, with separate state volumes. Enables unauthenticated RPC and plaintext lightwalletd endpoints; pins both services to `linux/amd64`. Requires the network restrictions below. |
 | `docker/docker-compose.observability.yml` | Builds the runtime image locally and adds Prometheus, Grafana, Jaeger, and Alertmanager. Enables metrics, tracing, and unauthenticated RPC. Requires the network restrictions below. |
 | `docker/docker-compose.test.yml` | Builds the `tests` target, loads `docker/test.env`, and mounts Zebra and lightwalletd caches. |
-| `docker/mining/docker-compose.yml` | Mining-pool example with Zebra, Redis, S-NOMP, and optional nheqminer under the `miner` profile. Defaults to Testnet and keeps RPC internal. Requires corrections described below. |
+| `docker/mining/docker-compose.yml` | Mining-pool example with Zebra, Redis, S-NOMP, and optional nheqminer under the `miner` profile. Defaults to Testnet and keeps RPC and Zebra's health listener internal. |
 
 For the base node, pin the service's `image` to `zfnd/zebra:7.0.0` if a moving
 `latest` tag is not appropriate. Remove or change its `platform: linux/amd64`
@@ -403,11 +403,9 @@ The configuration and dashboard files are under
 
 ### Running CI tests locally
 
-The test image contains the source tree and nextest. Replace the obsolete
-test selectors in `docker/test.env` with the current entrypoint variables.
-In particular, remove `ZEBRA_TEST_LIGHTWALLETD`: it is not a recognized Zebra
-configuration field. Select the `ci` profile to run the current unit and
-integration test set:
+The test image contains the source tree and nextest. Configure test selection
+in `docker/test.env`, or pass overrides when starting the container. Select
+the `ci` profile to run the current unit and integration test set:
 
 ```sh
 docker compose -f docker/docker-compose.test.yml build
@@ -429,9 +427,7 @@ The runtime image does not contain Cargo or test binaries.
 
 ### Mining example limitations
 
-The mining example is not directly runnable as supplied. It sets
-`ZEBRA_MINING__MINER_DATA`, but the configuration field is
-`[mining] extra_coinbase_data`. It also checks `/healthy` on port `8080`
-without enabling Zebra's health listener, while S-NOMP requires Zebra to
-be healthy before starting. See [Mining with Docker](mining-docker.md) for
-configuration and the other limitations of this example.
+The mining example requires a reward address in `docker/mining/.env`.
+S-NOMP waits for Zebra's internal `/healthy` endpoint before starting, but
+mining still requires a synchronized node. See
+[Mining with Docker](mining-docker.md) for configuration and limitations.
