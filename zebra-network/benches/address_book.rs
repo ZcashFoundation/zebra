@@ -32,6 +32,7 @@ fn addr(index: usize) -> PeerSocketAddr {
 fn book(advertised: usize) -> AddressBook {
     let mut book = AddressBook::new(
         "127.0.0.1:18233".parse().unwrap(),
+        PeerServices::NODE_NETWORK,
         &Network::new_regtest(Default::default()),
         1,
         tracing::Span::none(),

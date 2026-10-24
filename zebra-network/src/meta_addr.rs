@@ -278,6 +278,7 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
+        services: PeerServices,
     },
 
     /// Updates an existing `MetaAddr` when an outbound connection attempt
@@ -459,10 +460,14 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
-    pub fn new_local_listener_change(addr: impl Into<PeerSocketAddr>) -> MetaAddrChange {
+    /// Returns a [`MetaAddrChange::NewLocal`] for our listener address and advertised services.
+    pub fn new_local_listener_change(
+        addr: impl Into<PeerSocketAddr>,
+        services: PeerServices,
+    ) -> MetaAddrChange {
         NewLocal {
             addr: canonical_peer_addr(addr),
+            services,
         }
     }
 
@@ -683,7 +688,7 @@ impl MetaAddr {
         chrono_now: chrono::DateTime<Utc>,
         network: &Network,
     ) -> bool {
-        self.last_known_info_is_valid_for_outbound(network)
+        self.address_is_valid_for_outbound(network)
             && !self.was_recently_updated(instant_now, chrono_now)
             && self.is_probably_reachable(chrono_now)
     }
@@ -695,22 +700,6 @@ impl MetaAddr {
     /// used to permanently reject entire [`MetaAddr`]s.
     pub fn address_is_valid_for_outbound(&self, network: &Network) -> bool {
         address_is_valid_for_outbound_connections(self.addr, network.clone()).is_ok()
-    }
-
-    /// Is the last known information for this peer valid for outbound
-    /// connections?
-    ///
-    /// The last known info might be outdated or untrusted, so this check can
-    /// only be used to:
-    /// - reject `NeverAttempted...` [`MetaAddrChange`]s, and
-    /// - temporarily stop outbound connections to a [`MetaAddr`].
-    pub fn last_known_info_is_valid_for_outbound(&self, network: &Network) -> bool {
-        let is_node = match self.services {
-            Some(services) => services.contains(PeerServices::NODE_NETWORK),
-            None => true,
-        };
-
-        is_node && self.address_is_valid_for_outbound(network)
     }
 
     /// Should this peer considered reachable?
@@ -775,7 +764,7 @@ impl MetaAddr {
     /// Returns `None` if services are unknown or this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
-        if self.services.is_none() || !self.last_known_info_is_valid_for_outbound(network) {
+        if self.services.is_none() || !self.address_is_valid_for_outbound(network) {
             return None;
         }
 
@@ -866,8 +855,7 @@ impl MetaAddrChange {
             NewGossiped {
                 untrusted_services, ..
             } => Some(*untrusted_services),
-            // TODO: create a "services implemented by Zebra" constant (#2324)
-            NewLocal { .. } => Some(PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS),
+            NewLocal { services, .. } => Some(*services),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
             UpdatePingSent { .. } => None,
