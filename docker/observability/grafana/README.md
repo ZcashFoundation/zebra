@@ -4,12 +4,15 @@ Pre-built dashboards for monitoring Zebra nodes.
 
 ## Quick Start
 
+Export `GF_SECURITY_ADMIN_PASSWORD` with a strong, unique password before running Compose.
+
 ```bash
 # From repository root - starts Zebra + all observability tools
 docker compose -f docker/docker-compose.observability.yml up -d
 ```
 
-Access Grafana at <http://localhost:3000> (admin/admin - you'll be prompted to change on first login).
+Access Grafana at <http://localhost:3000> as `admin` with that password.
+For an existing Grafana volume, use the account's current password.
 
 For full stack documentation, see the [Observability README](../README.md).
 
