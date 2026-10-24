@@ -18,7 +18,7 @@ const PARTITIONS: usize = 256;
 type AddressMap = HashMap<Address, Arc<TransparentTransfers>>;
 
 /// A copy-on-write transparent address index.
-/// Updates copy only the touched partitions and histories.
+/// Updates copy touched partitions and histories, but share created-output entries at other heights.
 #[derive(Clone, Debug)]
 pub(crate) struct AddressTransfers {
     // Clones keep this seed so each address stays in the same partition.
