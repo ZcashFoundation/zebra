@@ -16,7 +16,7 @@ See the [workflow inventory](https://github.com/ZcashFoundation/zebra/blob/main/
 | --- | --- | --- |
 | Matching push to `main` | `stage` | Mainnet and Testnet in all three zones |
 | Matching push to `next` | `next` | Mainnet and Testnet in all three zones |
-| Published release with a tag starting with `v` | `prod` | Mainnet and Testnet in all three zones |
+| `release: released` with a tag starting with `v` | `prod` | Mainnet and Testnet in all three zones |
 | Manual dispatch | Selected `dev`, `next`, or `prod` | One selected network and zone |
 | Matching repository-owned PR | `dev` | Image build only; no node deployment |
 
@@ -27,8 +27,9 @@ the wrapper. These filters are independent of `.github/path-filters.yml`.
 A documentation-only push does not deploy nodes. Fork PRs skip the
 wrapper's image build.
 
-The release condition tests the tag prefix, not the prerelease flag, so a
-published `v`-prefixed release candidate also selects `prod`. Docker Hub
+The `released` activity covers stable publication and promotion of a
+prerelease to a stable release. Prerelease publication does not trigger this
+workflow. Manual dispatch still uses the selected environment. Docker Hub
 publication belongs to release automation, not this deployment wrapper.
 See the [release process](release-process.md) before publishing a release
 or dispatching a production deployment.
