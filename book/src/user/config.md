@@ -106,13 +106,12 @@ from modification by other users.
   or `private_key`, ignoring case, even for unknown fields. Store these values
   in the file. This rejects `ZEBRA_STATE__ELASTICSEARCH_PASSWORD`, but not path
   fields such as `cookie_dir`.
-- Do not export `ZEBRA_TARGET_` variables for `copy-state`. Its target loader
-  uses this prefix with `--target-config-path`, but Zebra 7.0.0's base loader
-  also reads it through `ZEBRA_`: `ZEBRA_TARGET_STATE__CACHE_DIR` creates the
-  unknown root key `target_state` and fails loading before the copy starts.
-  Put target settings in the `--target-config-path` file. Only its `[state]`
-  settings are used, although the whole file is deserialized. Without that
-  option, the target uses an ephemeral state configuration.
+- For `copy-state`, use `ZEBRA_TARGET_` variables with `--target-config-path`
+  to override target settings, for example
+  `ZEBRA_TARGET_STATE__CACHE_DIR=/srv/zebra-target`. The source/base loader
+  ignores this prefix. Only the target's `[state]` settings are used, although
+  the whole file is deserialized. Without `--target-config-path`, the target
+  uses an ephemeral state configuration and ignores target overrides.
 
 | Environment variable | TOML setting |
 | --- | --- |

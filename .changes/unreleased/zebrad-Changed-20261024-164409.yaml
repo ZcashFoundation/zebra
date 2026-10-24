@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Accept `ZEBRA_TARGET_` environment overrides for `copy-state` without failing to load the source configuration.
+time: 2026-10-24T16:44:09.411382663+02:00
