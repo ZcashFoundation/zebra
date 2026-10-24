@@ -20,7 +20,7 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{default_test_config, persistent_test_config, testdir},
-    launch::{spawn_zebrad_without_rpc, ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{spawn_zebrad_without_rpc, wait_for_mempool_active, ZebradTestDirExt, LAUNCH_DELAY},
     test_type::TestType::*,
 };
 
@@ -223,10 +223,10 @@ fn delete_old_databases() -> Result<()> {
 
 /// Check that new states are created with the current state format version,
 /// and that restarting `zebrad` doesn't change the format version.
-#[tokio::test]
-async fn new_state_format() -> Result<()> {
+#[test]
+fn new_state_format() -> Result<()> {
     for network in Network::iter() {
-        state_format_test("new_state_format_test", &network, 2, None).await?;
+        state_format_test("new_state_format_test", &network, 2, None)?;
     }
 
     Ok(())
@@ -237,14 +237,14 @@ async fn new_state_format() -> Result<()> {
 ///
 /// TODO: test partial updates, once we have some updates that take a while.
 ///       (or just add a delay during tests)
-#[tokio::test]
-async fn update_state_format() -> Result<()> {
+#[test]
+fn update_state_format() -> Result<()> {
     let mut fake_version = state_database_format_version_in_code();
     fake_version.minor = 0;
     fake_version.patch = 0;
 
     for network in Network::iter() {
-        state_format_test("update_state_format_test", &network, 3, Some(&fake_version)).await?;
+        state_format_test("update_state_format_test", &network, 3, Some(&fake_version))?;
     }
 
     Ok(())
@@ -254,8 +254,8 @@ async fn update_state_format() -> Result<()> {
 /// and that restarting `zebrad` doesn't change the format version.
 ///
 /// Future version compatibility is a best-effort attempt, this test can be disabled if it fails.
-#[tokio::test]
-async fn downgrade_state_format() -> Result<()> {
+#[test]
+fn downgrade_state_format() -> Result<()> {
     let mut fake_version = state_database_format_version_in_code();
     fake_version.minor = u16::MAX.into();
     fake_version.patch = 0;
@@ -266,15 +266,14 @@ async fn downgrade_state_format() -> Result<()> {
             &network,
             3,
             Some(&fake_version),
-        )
-        .await?;
+        )?;
     }
 
     Ok(())
 }
 
 /// Test state format changes, see calling tests for details.
-async fn state_format_test(
+fn state_format_test(
     base_test_name: &str,
     network: &Network,
     reopen_count: usize,
@@ -289,30 +288,30 @@ async fn state_format_test(
     let zebrad = spawn_zebrad_without_rpc(network.clone(), test_name, false, false, None, false)?;
 
     // Skip the test unless it has the required state and environmental variables.
-    let Some(mut zebrad) = zebrad else {
+    let Some(zebrad) = zebrad else {
         return Ok(());
     };
 
     tracing::info!(?network, "running {test_name} using zebrad");
 
-    zebrad.expect_stdout_line_matches("creating new database with the current format")?;
-    zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
-
-    // Give Zebra enough time to actually write the database to disk.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    let logs = zebrad.kill_and_return_output(false)?;
-
-    assert!(
-        !logs.contains("marked database format as upgraded"),
-        "unexpected format upgrade in logs:\n\
-         {logs}"
+    let (mut failure_messages, ignore_messages) = UseAnyState.zebrad_failure_messages();
+    failure_messages.extend(
+        [
+            "marked database format as upgraded",
+            "marked database format as downgraded",
+        ]
+        .map(str::to_owned),
     );
-    assert!(
-        !logs.contains("marked database format as downgraded"),
-        "unexpected format downgrade in logs:\n\
-         {logs}"
-    );
+    let mut zebrad = zebrad.with_failure_regex_iter(failure_messages, ignore_messages);
+
+    // Format validation finishes after the version has been written. Reject unexpected changes
+    // throughout startup rather than waiting an arbitrary interval after the state loads.
+    zebrad.expect_stdout_line_matches_all_unordered([
+        "creating new database with the current format",
+        "loaded Zebra state cache",
+        "database format is valid",
+    ])?;
+    zebrad.kill_and_consume_output(false)?;
 
     let output = zebrad.wait_with_output()?;
     let mut output = output.assert_failure()?;
@@ -345,9 +344,6 @@ async fn state_format_test(
         )
         .expect("can't write fake database version to disk");
 
-        // Give zebra_state enough time to actually write the database version to disk.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
         let running_version = state_database_format_version_in_code();
 
         match fake_version.cmp(&running_version) {
@@ -367,44 +363,42 @@ async fn state_format_test(
             expect_newer_version = false;
         }
 
-        let mut zebrad =
+        let zebrad =
             spawn_zebrad_without_rpc(network.clone(), test_name, false, false, dir, false)?
                 .expect("unexpectedly missing required state or env vars");
+        let (mut failure_messages, ignore_messages) = UseAnyState.zebrad_failure_messages();
+        if !expect_older_version {
+            failure_messages.push("marked database format as upgraded".to_owned());
+        }
+        if !expect_newer_version {
+            failure_messages.push("marked database format as downgraded".to_owned());
+        }
+        let mut zebrad = zebrad.with_failure_regex_iter(failure_messages, ignore_messages);
 
         tracing::info!(?network, "running {test_name} using zebrad");
 
         if expect_older_version {
             zebrad.expect_stdout_line_matches("trying to open older database format")?;
-            zebrad.expect_stdout_line_matches("marked database format as upgraded")?;
-            zebrad.expect_stdout_line_matches("database is fully upgraded")?;
+            zebrad.expect_stdout_line_matches_all_unordered([
+                "marked database format as upgraded",
+                "database is fully upgraded",
+                "database format is valid",
+            ])?;
         } else if expect_newer_version {
             zebrad.expect_stdout_line_matches("trying to open newer database format")?;
-            zebrad.expect_stdout_line_matches("marked database format as downgraded")?;
+            zebrad.expect_stdout_line_matches_all_unordered([
+                "marked database format as downgraded",
+                "database format is valid",
+            ])?;
         } else {
             zebrad.expect_stdout_line_matches("trying to open current database format")?;
-            zebrad.expect_stdout_line_matches("loaded Zebra state cache")?;
+            zebrad.expect_stdout_line_matches_all_unordered([
+                "loaded Zebra state cache",
+                "database format is valid",
+            ])?;
         }
 
-        // Give Zebra enough time to actually write the database to disk.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
-        let logs = zebrad.kill_and_return_output(false)?;
-
-        if !expect_older_version {
-            assert!(
-                !logs.contains("marked database format as upgraded"),
-                "unexpected format upgrade in logs:\n\
-                 {logs}"
-            );
-        }
-
-        if !expect_newer_version {
-            assert!(
-                !logs.contains("marked database format as downgraded"),
-                "unexpected format downgrade in logs:\n\
-                 {logs}"
-            );
-        }
+        zebrad.kill_and_consume_output(false)?;
 
         let output = zebrad.wait_with_output()?;
         let mut output = output.assert_failure()?;
@@ -427,9 +421,12 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
 
     use futures::{stream::FuturesUnordered, StreamExt};
 
-    use zebra_chain::parameters::{
-        testnet::{ConfiguredCheckpoints, RegtestParameters},
-        Network,
+    use zebra_chain::{
+        parameters::{
+            testnet::{ConfiguredCheckpoints, RegtestParameters},
+            Network,
+        },
+        serialization::ZcashSerialize,
     };
     use zebra_node_services::rpc_client::RpcRequestClient;
     use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
@@ -448,27 +445,52 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     // Start Zebra and generate some blocks.
 
     tracing::info!("starting Zebra and generating some blocks");
-    let mut child = test_dir.spawn_child(args!["start"])?;
+    let mut child = test_dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
     // Avoid dropping the test directory and cleanup of the state cache needed by the next zebrad instance.
     let test_dir = child.dir.take().expect("should have test directory");
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
     let rpc_client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_active(&rpc_client).await?;
     let generated_block_hashes = rpc_client.generate(50).await?;
-    // Wait for non-finalized backup task to make a second write to the backup cache
-    tokio::time::sleep(Duration::from_secs(6)).await;
+    let last_hash = *generated_block_hashes
+        .last()
+        .expect("should have at least one block hash");
+    let backup_tip_path = config
+        .state
+        .non_finalized_state_backup_dir(&network)
+        .expect("persistent state has non-finalized backups enabled")
+        .join(last_hash.to_string());
+    let backup_tip_bytes = rpc_client
+        .get_block(50)
+        .await
+        .map_err(|err| eyre!(err))?
+        .expect("the generated tip block is in the state")
+        .zcash_serialize_to_vec()?;
+
+    // The backup writer visits this chain in height order. Wait for the complete tip block,
+    // not just its file, which can exist before its contents have been written.
+    tokio::time::timeout(LAUNCH_DELAY, async {
+        loop {
+            if tokio::fs::read(&backup_tip_path)
+                .await
+                .is_ok_and(|bytes| bytes.ends_with(&backup_tip_bytes))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .wrap_err("timed out waiting for the non-finalized tip backup")?;
 
     child.kill(true)?;
     // Wait for zebrad to fully terminate to ensure database lock is released.
     child
         .wait_with_output()
         .wrap_err("failed to wait for zebrad to fully terminate")?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
     // Prepare checkpoint heights/hashes
-    let last_hash = *generated_block_hashes
-        .last()
-        .expect("should have at least one block hash");
     let configured_checkpoints = ConfiguredCheckpoints::HeightsAndHashes(vec![
         (Height(0), network.genesis_hash()),
         (Height(50), last_hash),
@@ -478,13 +500,14 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     // max checkpoint height and that it can still commit more blocks to its state.
 
     tracing::info!("restarting Zebra to check that non-finalized state is restored");
-    let mut child = test_dir.spawn_child(args!["start"])?;
+    let mut child = test_dir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
     let test_dir = child.dir.take().expect("should have test directory");
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let rpc_client = RpcRequestClient::new(rpc_address);
 
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    wait_for_mempool_active(&rpc_client).await?;
     let blockchain_info = rpc_client.blockchain_info().await?;
     tracing::info!(
         ?blockchain_info,
@@ -527,7 +550,6 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     child
         .wait_with_output()
         .wrap_err("failed to wait for zebrad to fully terminate")?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
     // max checkpoint height and that it can still commit more blocks to its state
@@ -541,12 +563,12 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     config.state.ephemeral = false;
     let mut child = test_dir
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
     let test_dir = child.dir.take().expect("should have test directory");
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
     let rpc_client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_active(&rpc_client).await?;
 
     assert_eq!(
         rpc_client.blockchain_info().await?.best_block_hash(),
@@ -578,7 +600,6 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     child
         .wait_with_output()
         .wrap_err("failed to wait for zebrad process to exit after kill")?;
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.
@@ -590,12 +611,12 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     config.state.should_backup_non_finalized_state = false;
     let mut child = test_dir
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let rpc_client = RpcRequestClient::new(rpc_address);
 
-    // Wait for Zebra to load its state cache
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    wait_for_mempool_active(&rpc_client).await?;
 
     tracing::info!("checking that Zebra commits blocks with empty non-finalized state");
     rpc_client

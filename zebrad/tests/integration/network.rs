@@ -23,7 +23,9 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
     config::{default_test_config, testdir, use_live_peers},
-    launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{
+        can_spawn_zebrad_for_test_type, wait_for_mempool_active, ZebradTestDirExt, LAUNCH_DELAY,
+    },
     test_type::TestType::*,
 };
 
@@ -385,13 +387,9 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 
     // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
     tracing::info!("committed genesis block, mining blocks with invalid PoW");
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    wait_for_mempool_active(&rpc_client_1).await?;
 
     rpc_client_1.call("generate", "[500]").await?;
-
-    tracing::info!("wait for misbehavior messages to flush into address updater channel");
-
-    tokio::time::sleep(Duration::from_secs(30)).await;
 
     tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
 
@@ -454,7 +452,6 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     use crate::common::{
         config::{os_assigned_rpc_port_config, read_listen_addr_from_logs},
-        launch::LAUNCH_DELAY,
         regtest::MiningRpcMethods,
     };
 
@@ -483,9 +480,8 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     let upstream_rpc_addr = read_listen_addr_from_logs(&mut upstream, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let upstream_client = RpcRequestClient::new(upstream_rpc_addr);
+    wait_for_mempool_active(&upstream_client).await?;
 
     const BLOCKS_TO_MINE: u32 = 100;
     for _ in 0..BLOCKS_TO_MINE {
