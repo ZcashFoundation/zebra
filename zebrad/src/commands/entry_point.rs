@@ -42,7 +42,7 @@ pub struct EntryPoint {
     pub verbose: bool,
 
     /// Filter strings which override the config file and defaults
-    // This can be applied to the default start command if no subcommand is provided.
+    // Applies to start, unless positional filters are provided.
     #[clap(long, help = "tracing filters which override the zebrad.toml config")]
     filters: Vec<String>,
 }
@@ -77,7 +77,12 @@ impl EntryPoint {
         // Add the default subcommand to args after the top-level args if cmd is None
         if entry_point.should_add_default_subcommand() {
             args.push(EntryPoint::default_cmd_as_str().into());
-            // This duplicates the top-level filters args, but the tracing component only checks `StartCmd.filters`.
+        }
+
+        // Only `StartCmd.filters` overrides the config; its positional filters take precedence.
+        if entry_point.cmd.is_none()
+            || matches!(&entry_point.cmd, Some(ZebradCmd::Start(cmd)) if cmd.filters.is_empty())
+        {
             for filter in entry_point.filters {
                 args.push(filter.into())
             }
