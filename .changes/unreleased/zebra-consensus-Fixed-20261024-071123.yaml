@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Dispatch transparent script checks using the native input count without rebuilding inputs ([#12000](https://github.com/ZcashFoundation/zebra/issues/12000)).
+time: 2026-10-24T07:11:23.738959306+02:00
