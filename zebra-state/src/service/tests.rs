@@ -30,7 +30,7 @@ use crate::{
     arbitrary::Prepare,
     init_test,
     service::{
-        arbitrary::{populated_state, PreparedChain},
+        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
         chain_tip::TipAction,
         StateService,
     },
@@ -43,6 +43,65 @@ use crate::{
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_propagates_incomplete_block_body_errors() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        // Exercise the size fallback used before block-info backfilling has finished.
+        batch.zs_delete(&db.cf_handle("block_info").unwrap(), height);
+        db.write_batch(batch).unwrap();
+
+        let expected = BlockReadError::BlockBodyUnavailable { height };
+        for query in [height.into(), block.hash().into()] {
+            for request in [
+                ReadRequest::Block(query),
+                ReadRequest::AnyChainBlock(query),
+                ReadRequest::BlockAndSize(query),
+                ReadRequest::SpentOutputs(query),
+                ReadRequest::TipBlockSize,
+            ] {
+                let error = read_state.clone().oneshot(request).await.unwrap_err();
+                assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+            }
+            let error = state
+                .clone()
+                .oneshot(Request::Block(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+
+        let ancestors = super::block_iter::any_ancestor_blocks(
+            &read_state.latest_non_finalized_state(),
+            db,
+            block.hash(),
+        );
+        let error =
+            super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10).unwrap_err();
+        assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+    })
+    .await
+    .unwrap();
+}
 
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -592,7 +651,7 @@ proptest! {
     fn some_block_less_than_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -609,7 +668,7 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -647,7 +706,7 @@ proptest! {
 
         let response = crate::service::check::legacy_chain(
             nu_activation_height,
-            chain.clone().into_iter().rev(),
+            chain.clone().into_iter().rev().map(Ok),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
         ).map_err(|error| error.to_string());
@@ -666,7 +725,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));

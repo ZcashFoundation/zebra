@@ -115,6 +115,7 @@ fn update_latest_chain_channels(
     } else {
         let finalized_tip = finalized_state
             .tip_block()
+            .expect("the finalized tip must have a complete stored body")
             .map(crate::CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
         chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);

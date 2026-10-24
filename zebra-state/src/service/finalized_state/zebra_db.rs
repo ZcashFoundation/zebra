@@ -95,7 +95,7 @@ impl ZebraDb {
     /// and returns a shared high-level typed database wrapper.
     ///
     /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
-    /// This argument is only used when running tests, it is ignored in production code.
+    /// This argument is only used in tests or with `proptest-impl`, and is ignored otherwise.
     //
     // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
     #[allow(clippy::unwrap_in_result)]
@@ -160,8 +160,9 @@ impl ZebraDb {
         // Format upgrades try to write to the database, so we always skip them
         // if `read_only` is `true`.
         //
-        // We also allow skipping them when we are running tests.
-        let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
+        // We also allow skipping them in unit tests and dependent crates' test fixtures.
+        let debug_skip_format_upgrades =
+            read_only || (cfg!(any(test, feature = "proptest-impl")) && debug_skip_format_upgrades);
 
         // Open the low-level database and do initial checks.
         //

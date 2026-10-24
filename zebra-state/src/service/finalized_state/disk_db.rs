@@ -1144,6 +1144,23 @@ impl DiskDb {
 
     // Accessor methods
 
+    /// Returns true for a secondary instance following a primary database.
+    pub(super) fn is_read_only(&self) -> bool {
+        self.mode.is_read_only()
+    }
+
+    /// Returns an iterator borrowing raw keys and values without serialized copies.
+    pub(super) fn raw_iterator_cf_opt<C>(
+        &self,
+        cf: &C,
+        options: ReadOptions,
+    ) -> rocksdb::DBRawIteratorWithThreadMode<'_, DB>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+    {
+        self.db.raw_iterator_cf_opt(cf, options)
+    }
+
     /// Returns the configured database kind for this database.
     pub fn db_kind(&self) -> String {
         self.db_kind.clone()

@@ -249,6 +249,7 @@ fn spent_outputs_resolves_value_height_and_generated() {
 
     // The single parent commits at height 1 (genesis is 0), and the spender at height 2.
     let spent = spent_outputs_for_block(None::<Arc<Chain>>, &state.db, Height(2).into())
+        .expect("stored block body is complete")
         .expect("block is in the best chain");
 
     let utxo = spent
@@ -310,7 +311,9 @@ fn spent_outputs_memory_does_not_hold_every_parent() {
         )
     });
 
-    let spent = spent.expect("block is in the best chain");
+    let spent = spent
+        .expect("stored block body is complete")
+        .expect("block is in the best chain");
     assert_eq!(spent.len(), PARENTS, "every spent output is resolved");
 
     // Holding every parent would peak around PARENTS * PADDING (20 MB).
@@ -340,7 +343,9 @@ fn spent_outputs_work_is_linear_for_a_shared_parent() {
     let (spent, heap) =
         measure(|| spent_outputs_for_block(None::<Arc<Chain>>, &state.db, Height(2).into()));
 
-    let spent = spent.expect("block is in the best chain");
+    let spent = spent
+        .expect("stored block body is complete")
+        .expect("block is in the best chain");
     assert_eq!(spent.len(), OUTPUTS, "every spent output is resolved");
 
     // Converting the parent's outputs once per input would allocate ~OUTPUTS times the parent.

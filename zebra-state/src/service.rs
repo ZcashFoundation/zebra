@@ -343,16 +343,36 @@ impl StateService {
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
+        Self::new_with_debug(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            false,
+        )
+        .await
+    }
+
+    /// Creates state services with optional format checks disabled for corruption tests.
+    async fn new_with_debug(
+        config: Config,
+        network: &Network,
+        max_checkpoint_height: block::Height,
+        checkpoint_verify_concurrency_limit: usize,
+        debug_skip_format_upgrades: bool,
+    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let (finalized_state, finalized_tip, timer) = {
             let config = config.clone();
             let network = network.clone();
             tokio::task::spawn_blocking(move || {
                 let timer = CodeTimer::start();
-                let finalized_state = FinalizedState::new(
+                let finalized_state = FinalizedState::new_with_debug(
                     &config,
                     &network,
+                    debug_skip_format_upgrades,
                     #[cfg(feature = "elasticsearch")]
                     true,
+                    false,
                 )
                 .expect(
                     "opening the read-write finalized state database failed; check that the \
@@ -362,7 +382,10 @@ impl StateService {
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
-                let finalized_tip = finalized_state.db.tip_block();
+                let finalized_tip = finalized_state
+                    .db
+                    .tip_block()
+                    .expect("the finalized tip must have a complete stored body");
 
                 (finalized_state, finalized_tip, timer)
             })
@@ -1815,23 +1838,27 @@ impl Service<ReadRequest> for ReadStateService {
                 state.latest_best_chain(),
                 &state.db,
                 hash_or_height,
-            ))),
+            )?)),
 
             ReadRequest::AnyChainBlock(hash_or_height) => Ok(ReadResponse::Block(read::any_block(
                 state.latest_non_finalized_state().chain_iter(),
                 &state.db,
                 hash_or_height,
-            ))),
+            )?)),
 
             // Used by the get_block (raw) RPC and the StateService.
             ReadRequest::BlockAndSize(hash_or_height) => Ok(ReadResponse::BlockAndSize(
-                read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height),
+                read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height)?,
             )),
 
             // Used by the get_block (verbosity 3) RPC.
-            ReadRequest::SpentOutputs(hash_or_height) => Ok(ReadResponse::SpentOutputs(
-                read::spent_outputs_for_block(state.latest_best_chain(), &state.db, hash_or_height),
-            )),
+            ReadRequest::SpentOutputs(hash_or_height) => {
+                Ok(ReadResponse::SpentOutputs(read::spent_outputs_for_block(
+                    state.latest_best_chain(),
+                    &state.db,
+                    hash_or_height,
+                )?))
+            }
 
             // Used by the get_block (verbose) RPC and the StateService.
             ReadRequest::BlockHeader(hash_or_height) => {
@@ -2226,23 +2253,18 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::TipBlockSize => {
-                // Respond with the length of the obtained block if any.
-                Ok(ReadResponse::TipBlockSize(
-                    state
-                        .best_tip()
-                        .and_then(|(tip_height, _)| {
-                            read::block_info(
-                                state.latest_best_chain(),
-                                &state.db,
-                                tip_height.into(),
-                            )
-                        })
-                        .map(|info| info.size().try_into().expect("u32 should fit in usize"))
-                        .or_else(|| {
-                            find::tip_block(state.latest_best_chain(), &state.db)
-                                .map(|b| b.zcash_serialized_size())
-                        }),
-                ))
+                let size = state
+                    .best_tip()
+                    .and_then(|(tip_height, _)| {
+                        read::block_info(state.latest_best_chain(), &state.db, tip_height.into())
+                    })
+                    .map(|info| info.size().try_into().expect("u32 should fit in usize"));
+                let size = match size {
+                    Some(size) => Some(size),
+                    None => find::tip_block(state.latest_best_chain(), &state.db)?
+                        .map(|block| block.zcash_serialized_size()),
+                };
+                Ok(ReadResponse::TipBlockSize(size))
             }
 
             ReadRequest::NonFinalizedBlocksListener { .. }

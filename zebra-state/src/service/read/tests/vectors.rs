@@ -591,7 +591,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.chain_iter(),
         &finalized_state.db,
         side_hash.into(),
-    );
+    )?;
     assert!(
         found.is_some(),
         "any_block should find side chain block by hash"
@@ -603,7 +603,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.best_chain(),
         &finalized_state.db,
         side_hash.into(),
-    );
+    )?;
     assert!(
         found.is_none(),
         "block should NOT find side chain block by hash"
@@ -614,7 +614,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.chain_iter(),
         &finalized_state.db,
         best_hash.into(),
-    );
+    )?;
     assert!(
         found.is_some(),
         "any_block should find best chain block by hash"
@@ -626,7 +626,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
         non_finalized_state.best_chain(),
         &finalized_state.db,
         best_hash.into(),
-    );
+    )?;
     assert!(
         found.is_some(),
         "block should find best chain block by hash"
