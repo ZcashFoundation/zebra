@@ -63,6 +63,8 @@ pub struct SemanticBlockVerifier<S, V> {
     blocking_checks: Arc<Semaphore>,
     #[cfg(test)]
     proposal_key_computations: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    block_size_serializations: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 async fn run_blocking<T: Send + 'static>(
@@ -160,19 +162,36 @@ fn cache_proposal(
     });
 }
 
-/// A decoded submission, optionally carrying an exact match to a successful proposal.
+/// A decoded submission, optionally carrying its consumed size or an exact proposal match.
 ///
 /// The private match is bound to this immutable block, including its submitted header. It proves
 /// byte identity only: the verifier must still check proof of work, time, and live state. A weak
 /// handle does not retain contextual data after cache eviction or authorize reuse by another cache.
+///
+/// Ordinary decoding records only the consumed wire size, not any validation or authorization.
 #[derive(Clone, Debug)]
 pub struct DecodedBlock {
     block: Arc<block::Block>,
+    consumed_size: Option<usize>,
     matched: Option<(Weak<zs::ContextuallyVerifiedBlock>, usize)>,
 }
 
 impl DecodedBlock {
-    /// Returns the decoded block without exposing or transferring its exact-match evidence.
+    /// Decodes a block with the consensus byte limit, retaining its consumed wire size.
+    ///
+    /// Trailing bytes are accepted but excluded from the size. All other semantic and contextual
+    /// checks still run. Call from a blocking worker.
+    pub fn deserialize(mut bytes: &[u8]) -> Result<Self, SerializationError> {
+        let input_size = bytes.len();
+        let block = Arc::new(block::Block::zcash_deserialize(&mut bytes)?);
+        Ok(Self {
+            block,
+            consumed_size: Some(input_size - bytes.len()),
+            matched: None,
+        })
+    }
+
+    /// Returns the decoded block without exposing or transferring its private evidence.
     pub fn block(&self) -> Arc<block::Block> {
         self.block.clone()
     }
@@ -182,6 +201,7 @@ impl From<Arc<block::Block>> for DecodedBlock {
     fn from(block: Arc<block::Block>) -> Self {
         Self {
             block,
+            consumed_size: None,
             matched: None,
         }
     }
@@ -190,6 +210,7 @@ impl From<Arc<block::Block>> for DecodedBlock {
 impl PartialEq for DecodedBlock {
     fn eq(&self, other: &Self) -> bool {
         self.block == other.block
+            && self.consumed_size == other.consumed_size
             && self
                 .matched
                 .as_ref()
@@ -219,11 +240,9 @@ impl PreparedBlockCache {
     /// and malformed input use ordinary deserialization.
     /// No full-body hash pass or transaction-byte allocation is needed. Run large inputs on a worker.
     pub fn deserialize(&self, bytes: &[u8]) -> Result<DecodedBlock, SerializationError> {
-        self.reuse(bytes).map(Ok).unwrap_or_else(|| {
-            block::Block::zcash_deserialize(bytes)
-                .map(Arc::new)
-                .map(Into::into)
-        })
+        self.reuse(bytes)
+            .map(Ok)
+            .unwrap_or_else(|| DecodedBlock::deserialize(bytes))
     }
 
     fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
@@ -274,6 +293,7 @@ impl PreparedBlockCache {
         };
         Some(DecodedBlock {
             block,
+            consumed_size: None,
             matched: Some((matched, bytes.len())),
         })
     }
@@ -610,6 +630,8 @@ where
             )),
             #[cfg(test)]
             proposal_key_computations: Default::default(),
+            #[cfg(test)]
+            block_size_serializations: Default::default(),
         }
     }
 
@@ -653,6 +675,8 @@ where
         let blocking_checks = self.blocking_checks.clone();
         #[cfg(test)]
         let proposal_key_computations = self.proposal_key_computations.clone();
+        #[cfg(test)]
+        let block_size_serializations = self.block_size_serializations.clone();
 
         let block = request.block();
 
@@ -745,7 +769,11 @@ where
             let size = decoded_match
                 .as_ref()
                 .map(|(_, size)| *size)
-                .or_else(|| proposal_key.map(|(_, size)| size));
+                .or_else(|| proposal_key.map(|(_, size)| size))
+                .or(match &request {
+                    Request::CommitDecoded(decoded, _) => decoded.consumed_size,
+                    _ => None,
+                });
             if size.is_some_and(|size| {
                 u64::try_from(size).expect("block sizes fit u64") > block::MAX_BLOCK_BYTES
             }) {
@@ -772,11 +800,14 @@ where
                 // A trusted wire-size bound keeps small-body hashing cheaper than a worker hop.
                 let inline = size.is_some_and(|size| size <= 4 * 1024);
                 let checks = move || {
-                    if size.is_none()
-                        && u64::try_from(block.zcash_serialized_size()).unwrap_or(u64::MAX)
+                    if size.is_none() {
+                        #[cfg(test)]
+                        block_size_serializations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        if u64::try_from(block.zcash_serialized_size()).unwrap_or(u64::MAX)
                             > block::MAX_BLOCK_BYTES
-                    {
-                        return Err(VerifyBlockError::OversizedBlock);
+                        {
+                            return Err(VerifyBlockError::OversizedBlock);
+                        }
                     }
                     let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
                     check::merkle_root_validity(&network, &block, &hashes)?;
