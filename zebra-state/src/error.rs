@@ -105,6 +105,16 @@ pub enum StateInitError {
         path: PathBuf,
     },
 
+    /// An older-major database cannot be reused read-only until its format transition completes.
+    #[error(
+        "cannot reuse read-only state at {path:?}: its format transition requires a writable Zebra \
+         start to complete before read-only reuse"
+    )]
+    ReadOnlyDatabaseNeedsUpgrade {
+        /// The older-major database that must finish its format transition.
+        path: PathBuf,
+    },
+
     /// A read-only state was requested together with an ephemeral database.
     ///
     /// A read-only secondary follows another process's primary database and must
