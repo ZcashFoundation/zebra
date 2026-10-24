@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
+mod book;
 mod prop;
 mod snapshot;
 pub mod utils;
