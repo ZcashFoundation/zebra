@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `ParametersBuilder::try_with_funding_streams` for fallible funding stream configuration and the `ParametersBuilderError::{MissingFundingStreamDefault, InvalidFundingStreamHeightRange, InvalidFundingStreamNumerators, InvalidFundingStreamAddress, WrongFundingStreamAddressNetwork, InvalidLockboxDisbursementAddress, InvalidLockboxDisbursementTotal}` variants for funding stream and lockbox validation ([#12048](https://github.com/ZcashFoundation/zebra/pull/12048)).
+time: 2026-11-05T06:29:43.986315641+01:00
