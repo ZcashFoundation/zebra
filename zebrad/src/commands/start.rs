@@ -272,16 +272,16 @@ impl StartCmd {
         false
     }
 
-    /// Selects truthful local services and rejects sidecars that require unavailable history.
+    /// Disables archive service and sidecars as soon as pruning is enabled or history is missing.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
     ) -> Result<zebra_network::types::PeerServices, Report> {
         let mut services = config.network.local_services;
-        if history.is_pruned() {
+        if config.state.prune_blocks_older_than.is_some() || history.is_pruned() {
             if config.zcashd_compat.enabled {
                 return Err(eyre!(
-                    "zcashd-compat requires an archive node; pruned block history is unavailable"
+                    "zcashd-compat requires an archive node; pruning is enabled or history is missing"
                 ));
             }
             services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
@@ -289,13 +289,14 @@ impl StartCmd {
         Ok(services)
     }
 
-    async fn start(&self) -> Result<(), Report> {
+    /// Starts the node, rejecting incompatible pruning settings before opening writable state.
+    pub(super) async fn start(&self, config: Arc<ZebradConfig>) -> Result<(), Report> {
         let (initialized_tx, initialized_rx) = oneshot::channel();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
         // Runtime shutdown cancels any tasks spawned by incomplete startup.
         run_until_shutdown(
-            self.start_with_shutdown(initialized_tx, shutdown_rx),
+            self.start_with_shutdown(config, initialized_tx, shutdown_rx),
             shutdown(),
             initialized_rx,
             shutdown_tx,
@@ -306,12 +307,15 @@ impl StartCmd {
     /// Initializes the node and runs it until a task exits or shutdown is requested.
     async fn start_with_shutdown(
         &self,
+        config: Arc<ZebradConfig>,
         initialized: oneshot::Sender<()>,
         mut shutdown: oneshot::Receiver<()>,
     ) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
-        let config = APPLICATION.config();
+        // State initialization can prune immediately. Check the pruning config before starting
+        // services; check persisted history separately once the state is open.
+        Self::network_services(&config, zebra_state::HistoryCapabilities::default())?;
         config.notify.validate()?;
         #[cfg(feature = "zmq")]
         let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
@@ -441,7 +445,7 @@ impl StartCmd {
         };
 
         let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound())
+            .buffer(Self::state_buffer_bound(&config))
             .service(state_service);
 
         info!("initializing network");
@@ -1143,9 +1147,7 @@ impl StartCmd {
 
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
-    fn state_buffer_bound() -> usize {
-        let config = APPLICATION.config();
-
+    fn state_buffer_bound(config: &ZebradConfig) -> usize {
         // Ignore the checkpoint verify limit, because it is very large.
         // Mempool reads bypass the state writer's buffer.
         //
@@ -1175,7 +1177,7 @@ impl Runnable for StartCmd {
             .take();
 
         rt.expect("runtime should not already be taken")
-            .run(self.start());
+            .run(self.start(APPLICATION.config()));
 
         info!("stopping zebrad");
     }

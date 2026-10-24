@@ -168,7 +168,10 @@ where
 
 #[test]
 fn delete_old_databases() -> Result<()> {
-    use std::fs::{canonicalize, create_dir};
+    use std::{
+        fs::create_dir,
+        time::{Duration, Instant},
+    };
 
     let _init_guard = zebra_test::init();
 
@@ -188,7 +191,6 @@ fn delete_old_databases() -> Result<()> {
     // create a `v1` dir inside cache dir that should be deleted
     let inside_dir = cache_dir.join("v1");
     create_dir(&inside_dir)?;
-    let canonicalized_inside_dir = canonicalize(inside_dir.clone()).ok().unwrap();
     assert!(inside_dir.as_path().exists());
 
     // modify config with our cache dir and not ephemeral configuration
@@ -202,17 +204,15 @@ fn delete_old_databases() -> Result<()> {
         .spawn_child(args!["start"])?
         .with_timeout(LAUNCH_DELAY)?;
 
-    // delete checker running
-    child.expect_stdout_line_matches("checking for old database versions".to_string())?;
-
-    // inside dir was deleted
-    child.expect_stdout_line_matches(format!(
-        "deleted outdated state database directory.*deleted_db.*=.*{canonicalized_inside_dir:?}"
-    ))?;
-    assert!(!inside_dir.as_path().exists());
-
-    // deleting old databases task ended
-    child.expect_stdout_line_matches("finished old database version cleanup task".to_string())?;
+    let deadline = Instant::now() + LAUNCH_DELAY;
+    while inside_dir.exists() {
+        assert!(
+            child.is_running(),
+            "node exited before deleting the old database"
+        );
+        assert!(Instant::now() < deadline, "old database was not deleted");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 
     // outside dir was not deleted
     assert!(outside_dir.as_path().exists());

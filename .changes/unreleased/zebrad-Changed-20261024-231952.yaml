@@ -5,4 +5,5 @@ body: >-
   opening a writable target. Unavailable ranges, pruned targets, different-chain targets, and
   incompatible older-major targets are rejected without creating or changing the target.
   A target exactly one block behind now receives the remaining block rather than skipping it.
+  Target pruning is disabled during replay and comparison.
 time: 2026-10-24T23:19:52.697473536+02:00

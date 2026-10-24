@@ -77,11 +77,13 @@ pub(crate) fn validate_and_commit_non_finalized(
     Ok(())
 }
 
-/// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`].
+/// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`],
+/// waking the pruning worker after each durable commit.
 fn finalize_root_blocks(
     finalized_state: &mut FinalizedState,
     non_finalized_state: &mut NonFinalizedState,
     prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
+    pruning_wake: Option<&crossbeam_channel::Sender<()>>,
 ) {
     while non_finalized_state.should_finalize_root() {
         tracing::trace!("finalizing a block past the reorg or index entry limit");
@@ -98,6 +100,9 @@ fn finalize_root_blocks(
             )
             .1
             .into();
+        if let Some(wake) = pruning_wake {
+            let _ = wake.try_send(());
+        }
     }
 }
 
@@ -132,6 +137,7 @@ fn forget_evicted_blocks(
 /// Finalizes root blocks after a commit, then reports any forks that finalizing evicted, because
 /// [`NonFinalizedState::finalize`] re-inserts the remaining chains under the fork limits, and
 /// publishes the state if it changed.
+#[allow(clippy::too_many_arguments)]
 fn finalize_root_blocks_and_forget_evicted(
     finalized_state: &mut FinalizedState,
     non_finalized_state: &mut NonFinalizedState,
@@ -140,12 +146,14 @@ fn finalize_root_blocks_and_forget_evicted(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
+    pruning_wake: Option<&crossbeam_channel::Sender<()>>,
 ) {
     let root_height = non_finalized_state.root_height();
     finalize_root_blocks(
         finalized_state,
         non_finalized_state,
         prev_finalized_note_commitment_trees,
+        pruning_wake,
     );
 
     // Keep the old snapshot's roots visible until the database contains them.
@@ -244,6 +252,8 @@ struct WriteBlockWorkerTask {
     backup_dir_path: Option<PathBuf>,
     /// Peer-supplied note commitment tree roots for fast checkpoint sync.
     tree_roots_cache: Option<TreeRootsCache>,
+    /// Coalesces durable finalized-tip notifications for the pruning worker.
+    pruning_wake: Option<crossbeam_channel::Sender<()>>,
 }
 
 /// Finalized writer recovery, either a full commit failure or one replaceable body.
@@ -307,6 +317,7 @@ pub(super) struct BlockWriteSender {
 
 impl BlockWriteSender {
     /// Creates a new [`BlockWriteSender`] with the given receivers and states.
+    #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
         skip_all,
@@ -322,6 +333,7 @@ impl BlockWriteSender {
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
         tree_roots_cache: TreeRootsCache,
+        pruning_wake: Option<crossbeam_channel::Sender<()>>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<FinalizedWriteFeedback>,
@@ -367,6 +379,7 @@ impl BlockWriteSender {
                         non_finalized_state_sender,
                         backup_dir_path,
                         tree_roots_cache: Some(tree_roots_cache),
+                        pruning_wake,
                     }
                     .run()
                 })
@@ -397,10 +410,11 @@ enum CommitOutcome {
 }
 
 /// Commits a checkpoint-verified block to the finalized state, and reports the result to the
-/// state service and the block's sender.
+/// state service and the block's sender, waking the pruning worker after a durable commit.
 ///
 /// If `next` is the block after it, fast checkpoint sync can commit the block with its verified
 /// tree roots, without updating its note commitment trees.
+#[allow(clippy::too_many_arguments)]
 fn commit_checkpoint_verified(
     mut ordered_block: QueuedCheckpointVerified,
     next: Option<&CheckpointVerifiedBlock>,
@@ -409,6 +423,7 @@ fn commit_checkpoint_verified(
     fast_tree_sync: &mut FastTreeSyncWriter,
     chain_tip_sender: &mut ChainTipSender,
     invalid_block_reset_sender: &UnboundedSender<FinalizedWriteFeedback>,
+    pruning_wake: Option<&crossbeam_channel::Sender<()>>,
 ) -> CommitOutcome {
     // Roots prove effects, not a V5 body's authorizing data. Recover a malformed current body
     // before consuming it, including the first fast block; keep the final commit-boundary check.
@@ -507,6 +522,9 @@ fn commit_checkpoint_verified(
             *prev_finalized_note_commitment_trees = Some(note_commitment_trees);
             fast_tree_sync.committed(height, frozen_sizes);
             chain_tip_sender.set_finalized_tip(tip_block);
+            if let Some(wake) = pruning_wake {
+                let _ = wake.try_send(());
+            }
             Ok(hash)
         }
         Err(error) => {
@@ -650,6 +668,7 @@ impl WriteBlockWorkerTask {
             non_finalized_state_sender,
             backup_dir_path,
             tree_roots_cache,
+            pruning_wake,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -713,6 +732,7 @@ impl WriteBlockWorkerTask {
                     &mut fast_tree_sync,
                     chain_tip_sender,
                     invalid_block_reset_sender,
+                    pruning_wake.as_ref(),
                 ) {
                     CommitOutcome::Committed(Some(error)) => {
                         ordered_block = match replace_checkpoint_body(
@@ -746,6 +766,7 @@ impl WriteBlockWorkerTask {
                 &mut fast_tree_sync,
                 chain_tip_sender,
                 invalid_block_reset_sender,
+                pruning_wake.as_ref(),
             ) {
                 return;
             }
@@ -765,6 +786,7 @@ impl WriteBlockWorkerTask {
             finalized_state,
             non_finalized_state,
             &mut prev_finalized_note_commitment_trees,
+            pruning_wake.as_ref(),
         );
         if non_finalized_state.root_height() != restored_root {
             forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
@@ -972,6 +994,7 @@ impl WriteBlockWorkerTask {
                 chain_tip_sender,
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
+                pruning_wake.as_ref(),
             );
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",

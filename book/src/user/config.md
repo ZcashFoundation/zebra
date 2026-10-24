@@ -337,12 +337,14 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `ephemeral` | Boolean | `false` | Store the database in a temporary directory instead of `cache_dir`, and disable non-finalized-state backups. The temporary database is removed on successful cleanup; a crash can leave it behind. |
 | `should_backup_non_finalized_state` | Boolean | `true` | Back up recent blocks outside the finalized database so they can be restored after a restart. Disabled by `ephemeral`; otherwise updates occur no more frequently than every five seconds. |
 | `delete_old_database` | Boolean | `true` | Check for and delete obsolete state database versions. Setting `false` disables old-version cleanup, not migration of a compatible previous database. |
+| `prune_blocks_older_than` | Optional `u32` | Absent | Retain this many recent finalized block bodies and delete older transaction bodies; omission keeps an archive. The minimum is `10000` on Mainnet and Testnet, or `1001` on Regtest; zero is invalid. Genesis and non-finalized blocks are always retained. Deleted bodies are never restored, and enabling pruning stops advertising archive service. Existing archives must be moved to the pruned state directory while stopped before enabling it. |
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
 | `debug_validity_check_interval` | Optional duration string | Absent | Run additional periodic state-validity checks. Without it, normal format checks still run at startup and shutdown. |
 | `debug_skip_non_finalized_state_backup_task` | Boolean | `false` | Developer option: replace the periodic backup task with synchronous writes before non-finalized-state and chain-tip updates. Does not disable restoring backups or override `ephemeral`/backup disabling. |
 
 Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
-7.0.0. Non-finalized backups use
+7.0.0. Pruning nodes use `<cache_dir>/state-pruned/v29/<network-directory>`
+instead. Non-finalized backups use
 `<cache_dir>/non_finalized_state/<network-directory>`. Do not share a live state
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.
