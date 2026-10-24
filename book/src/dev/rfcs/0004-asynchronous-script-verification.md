@@ -1,3 +1,18 @@
+# Asynchronous script verification
+
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: [transaction verification](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/transaction.rs), the [script service](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/script.rs), and [pending UTXOs](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/pending_utxos.rs).
+
+- The lookup API uses [`Request::AwaitUtxo` and `Response::Utxo`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/request.rs).
+- Lookup neither enforces spendability nor guarantees valid-chain membership.
+- Block [coinbase spend checks](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/check/utxo.rs) return contextual-validation errors, not lookup timeouts.
+- The transaction verifier applies a 6-minute UTXO lookup timeout.
+- Pending requests share broadcast senders per outpoint, not locked oneshots.
+- Scripts run on Rayon through [`CachedFfiTransaction`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-script/src/lib.rs) and `libzcash_script`, not `zcash_consensus`.
+
+---
+
 - Start Date: 2020-08-10
 - Design PR: [ZcashFoundation/zebra#868](https://github.com/ZcashFoundation/zebra/pull/868)
 - Zebra Issue: [ZcashFoundation/zebra#964](https://github.com/ZcashFoundation/zebra/issues/964)
@@ -32,7 +47,7 @@ and in parallel on a thread pool.
 - lock script: the script that defines the conditions under which some UTXO can be spent.
   Stored in the [`transparent::Output::lock_script`][lock_script] field.
 - unlock script: a script satisfying the conditions of the lock script, allowing a UTXO to be spent.
-  Stored in the [`transparent::Input::PrevOut::lock_script`][lock_script] field.
+  Stored in the [`transparent::Input::PrevOut::unlock_script`][unlock_script] field.
 
 [transout]: https://docs.rs/zebra_chain/latest/zebra_chain/transparent/struct.Output.html
 [outpoint]: https://docs.rs/zebra_chain/latest/zebra_chain/transparent/struct.OutPoint.html
