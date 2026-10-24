@@ -58,6 +58,44 @@ fn mempool_storage_crud_exact_mainnet() {
 }
 
 #[test]
+fn mempool_storage_transactions_exact_matches_witnessed_id() {
+    let _init_guard = zebra_test::init();
+    let mut storage = Storage::new(&config::Config::default());
+    let unmined_tx = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .rev()
+        .find(|tx| matches!(tx.transaction.id, UnminedTxId::Witnessed(_)))
+        .expect("block test vectors contain a witnessed transaction");
+    let exact_id = unmined_tx.transaction.id;
+    let mut mismatched_id = exact_id;
+    mismatched_id
+        .auth_digest_mut()
+        .expect("witnessed transactions have an authorization digest")
+        .0[0] ^= 1;
+
+    assert_eq!(
+        storage.insert(unmined_tx.clone(), Vec::new(), None),
+        Ok(exact_id)
+    );
+    assert_eq!(
+        storage
+            .transactions_exact([exact_id].into())
+            .collect::<Vec<_>>(),
+        vec![&unmined_tx.transaction]
+    );
+    assert!(storage
+        .transactions_exact([mismatched_id].into())
+        .next()
+        .is_none());
+    assert_eq!(
+        storage
+            .transactions_exact([exact_id, mismatched_id].into())
+            .collect::<Vec<_>>(),
+        vec![&unmined_tx.transaction]
+    );
+}
+
+#[test]
 fn mempool_storage_basic() -> Result<()> {
     let _init_guard = zebra_test::init();
 
