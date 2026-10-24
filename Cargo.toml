@@ -397,8 +397,8 @@ reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf
 zcash_encoding = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
 zcash_primitives = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
 zcash_transparent = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
-pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "569f897edd5db401dafacca25d4760da533ad683" }
-halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "c61deee3528a3526d73660f32525ff41599fb5c1" }
-halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "c61deee3528a3526d73660f32525ff41599fb5c1" }
-halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "c61deee3528a3526d73660f32525ff41599fb5c1" }
+pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "8cf375255b07e486b3eeceaa2ec465ec79bb2086" }
+halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
+halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
+halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
 sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "993b786db2ef1b73df93ea8ecbe9237f3203c55e" }
