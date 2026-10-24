@@ -1,68 +1,86 @@
-# System Requirements
+# System requirements
 
-Zebra has the following hardware requirements.
+Size the host for initial synchronization and the services that share it, not
+only for an idle node at the chain tip. See
+[platform support](supported-platforms.md) for operating-system coverage.
 
-## Recommended Requirements
+## Resource use
 
-- 4 CPU cores
-- 16 GB RAM
-- 300 GB available disk space
-- 100 Mbps network connection, with 300 GB of uploads and downloads per month
+| Resource | Consumers | Capacity planning |
+| --- | --- | --- |
+| CPU | Proof and signature verification, transaction execution, database compaction, and RPC requests | Reserve capacity for synchronization and client traffic; see [CPU worker configuration](config.md#sync). |
+| RAM | Blocks awaiting verification, recent non-finalized chains, the mempool, proof parameters, and RocksDB caches and write buffers | Account for all processes and container memory limits. Reducing synchronization concurrency reduces the number of in-flight blocks; the mempool cost limit is not a process-wide memory limit. |
+| Disk | Blocks, transactions, state indexes, recent-state backups, and configured log files | Keep free space for chain growth, database compaction, and upgrades. Account separately for snapshots and other services. |
+| Network | Initial block download, new blocks and transactions, peer discovery, and responses to peer or RPC requests | Allow sustained outbound connectivity. Upload demand depends on the peers and clients served by the node. |
 
-## Minimum Hardware Requirements
+The [configuration reference](config.md) documents these controls. Monitor
+[metrics](metrics.md) and host resource usage while synchronizing and under the
+expected RPC load.
 
-- 2 CPU cores
-- 4 GB RAM
-- 300 GB available disk space
+## Reference deployment
 
-[Zebra has successfully run on an Orange Pi Zero 2W with a 512 GB microSD card
-without any issues.](https://x.com/Zerodartz/status/1811460885996798159)
+The Zcash Foundation's
+[node deployment](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml)
+and
+[integration-test](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-integration-tests-gcp.yml)
+use Google Compute Engine `c2d-standard-2` instances (2 vCPUs, 8 GB RAM) with a
+400 GB balanced persistent state disk. This is not a minimum or an RPC-load
+capacity guarantee.
 
-## Disk Requirements
+## Disk capacity
 
-Zebra uses around 300 GB for cached Mainnet data, and 10 GB for cached Testnet
-data. We expect disk usage to grow over time. Syncing from a
-[state snapshot](./snapshots.md) temporarily needs about twice that while the
-archive is extracted.
+The published Mainnet [state snapshot](snapshots.md) of 2026-10-23 reports a
+source-node height of 3,527,378 and an archive size of 273,763,413,895 bytes
+(255 GiB). The Testnet archive of the same day, at finalized height 4,531,081,
+is 12,221,184,309 bytes (11.4 GiB). These are zstd-compressed tar archive
+sizes, not measurements of the extracted databases. The snapshot index at
+<https://snapshots.zfnd.org/> lists current archive sizes. The database grows
+with every block.
 
-Zebra cleans up its database periodically, and also when you shut it down or
-restart it. Changes are committed using RocksDB database transactions. If you
-forcibly terminate Zebra, or it panics, any incomplete changes will be rolled
-back the next time it starts. So Zebra's state should always be valid, unless
-your OS or disk hardware is corrupting data.
+Store state on persistent storage configured with `[state] cache_dir`. Mainnet
+and Testnet have separate databases. Running both requires space for both.
+The `zebra.state.rocksdb.total_disk_size_bytes` metric measures the RocksDB
+table files, not all files on the filesystem. Check filesystem free space as
+well.
 
-## Network Requirements and Ports
+A [state snapshot](snapshots.md) needs space for the downloaded archive and
+the extracted database at the same time. Retaining an existing database during
+replacement needs additional space. Do not use the compressed archive size as
+the required capacity of the destination disk.
 
-Zebra uses the following inbound and outbound TCP ports:
+## zcashd-compat requirements
 
-- 8233 on Mainnet
-- 18233 on Testnet
+The [zcashd-compat mode](zcashd-compat.md) runs Zebra with a zcashd sidecar.
+Its [Linux preflight checks](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/zcashd_compat/preflight.rs#L33-L60)
+enforce these thresholds; they are not standalone Zebra benchmarks.
 
-If you configure Zebra with a specific
-[`listen_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.listen_addr),
-it will advertise this address to other nodes for inbound connections. Outbound
-connections are required to sync, inbound connections are optional but
-recommended. Zebra also needs access to the Zcash DNS seeders, via the OS DNS
-resolver (usually port 53).
+| Resource | Minimum | Recommended |
+| --- | --- | --- |
+| Logical CPUs available to the process | 4 | 8 |
+| Effective RAM | 16 GiB | 32 GiB |
+| Mainnet disk provisioning | 275 GiB for Zebra and 275 GiB for zcashd | 1 TiB combined |
+| Testnet / Regtest disk provisioning | 30 GiB for Zebra and 30 GiB for zcashd | 100 GiB combined |
 
-If Zebra runs in Docker, publish the P2P port with `-p 8233:8233` (Mainnet) or
-`-p 18233:18233` (Testnet) so other peers can connect to it. See the
-[P2P section of the Docker guide](./docker.md#p2p-networking) for details. If
-the node sits behind a firewall or NAT, open the P2P port and consider setting
-[`external_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.external_addr)
-to your public IP so peers can discover it.
+Effective RAM is the smaller of host RAM and the detected container memory
+limit. The disk check measures total filesystem capacity, not free space.
+Shared-filesystem minimums add: 550 GiB on Mainnet or 60 GiB on Testnet and
+Regtest. Each filesystem counts once toward the combined recommendation.
+Zebra checks the sidecar's disk only when it manages the sidecar or
+`[zcashd_compat] zcashd_datadir` identifies the external sidecar's data directory.
+A remote or otherwise unspecified sidecar needs separate capacity planning.
 
-Zebra makes outbound connections to peers on any port. But `zcashd` prefers
-peers on the default ports, so that it can't be used for DDoS attacks on other
-networks.
+A failed minimum check stops startup. Values below the recommendation produce
+warnings. The `zebrad start --unsafe-low-specs` option bypasses preflight
+failures; it does not reduce resource use or make an undersized host safe.
 
-### Typical Mainnet Network Usage
+## Network requirements and ports
 
-- Initial sync: 300 GB download. As already noted, we expect the initial
-  download to grow.
-- Ongoing updates: 10 MB - 10 GB upload and download per day, depending on
-  user-created transaction size and peer requests.
+Zebra needs outbound TCP connections to Zcash peers to synchronize. Default
+peer discovery also needs working DNS resolution. Inbound peer connections
+are optional for synchronization; enable them to let other nodes connect to
+Zebra.
 
-Zebra needs some peers which have a round-trip latency of 2 seconds or less. If
-this is a problem for you, please [open a
-ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+Configure the [P2P listener and advertised address](config.md#network), then
+permit its [port](run.md#ports) through the firewall and publish it when
+[running in Docker](docker.md#p2p-networking). Do not expose management
+endpoints merely to make peer-to-peer networking reachable.
