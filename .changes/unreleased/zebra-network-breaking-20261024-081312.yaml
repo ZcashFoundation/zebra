@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Added `MetaAddrChange::UpdateSelfConnection` and `MetaAddr::new_self_connection` to suppress self-connection dial targets. Excluded inbound addresses from `AddressBook::cacheable` and `AddressBook::reconnection_peers` ([#10622](https://github.com/ZcashFoundation/zebra/issues/10622)).
+time: 2026-10-24T08:13:12.322051-07:00

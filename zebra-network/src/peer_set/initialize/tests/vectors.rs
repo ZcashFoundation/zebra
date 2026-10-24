@@ -38,7 +38,7 @@ use crate::{
     address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
-    meta_addr::{MetaAddr, PeerAddrState},
+    meta_addr::MetaAddr,
     peer::{self, ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
         crawler_services,
@@ -1970,33 +1970,14 @@ async fn self_connections_should_fail() {
     // Wait until the crawler has tried at least one self-connection
     tokio::time::sleep(TEST_CRAWL_NEW_PEER_INTERVAL * 3).await;
 
-    // Check that the self-connection failed
-    let self_connection_status = {
-        let mut unlocked_address_book = address_book
-            .lock()
-            .expect("unexpected panic in address book");
-
-        let self_connection_status = unlocked_address_book
-            .get(real_self_listener.addr())
-            .expect("unexpected dropped listener address in address book");
-
-        std::mem::drop(unlocked_address_book);
-
-        self_connection_status
-    };
-
-    // Make sure we fetched from the address book correctly
+    // A nonce-reuse failure must remove the dial target from the address book.
+    let self_connection_status = address_book
+        .lock()
+        .expect("unexpected panic in address book")
+        .get(real_self_listener.addr());
     assert_eq!(
-        self_connection_status.addr(),
-        real_self_listener.addr(),
-        "wrong address fetched from address book"
-    );
-
-    // Make sure the self-connection failed
-    assert_eq!(
-        self_connection_status.last_connection_state,
-        PeerAddrState::Failed,
-        "self-connection should have failed"
+        self_connection_status, None,
+        "self address must be suppressed"
     );
 }
 
