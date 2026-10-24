@@ -245,6 +245,28 @@ This means that:
 If there is an upgrade failure, panic and tell the user to delete their cached state and re-launch
 Zebra.
 
+#### Historical body availability
+
+Before changing the format, migrations that require historical bodies must reject a database with
+an unavailable body prefix. New migrations require full history by default; only migrations that
+use retained data may opt out through `DiskFormatUpgrade::requires_full_history()`.
+Spending-index build-mode changes also require archive history.
+Intermediate version writes preserve the stored spending-index build metadata until conversion
+finishes, so an interrupted upgrade cannot mislabel an unchanged index layout.
+
+The pruning startup gate is `ZebraDb::ready_for_pruning()`. It remains false until migrations,
+spending-index conversion, and detailed format checks finish successfully. The earlier
+`finished_format_upgrades()` flag only controls write compatibility and must not enable deletion.
+Read-only instances and skipped or cancelled checks never open the pruning gate.
+
+Restart checks still search at most 100,000 blocks for observed transaction branch IDs. Missing
+history is not evidence of a valid branch. The deletion batch preserves the first matching witness,
+even if it is older than the requested retention window, and refuses deletion without one.
+Pruning remains test-only until its production startup and consumer protections are enabled.
+
+State copying inspects source availability and the target tip before opening a writable target.
+An unavailable source range requires an archive snapshot or resync; genesis remains copyable.
+
 #### Performance Constraints
 
 [performance]: #performance
