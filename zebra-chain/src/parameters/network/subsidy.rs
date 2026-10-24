@@ -1126,6 +1126,8 @@ pub fn founders_reward_address(net: &Network, height: Height) -> Option<transpar
 
 /// `FoundersReward(height)` as described in [§7.8].
 ///
+/// Fractional zatoshis are rounded down, including on custom Testnets.
+///
 /// [§7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
 pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // The founders reward is 20% of the block subsidy before the first halving, and 0 afterwards.
@@ -1135,7 +1137,7 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // Canopy, so we check if Canopy is active as well.
     if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
         scheduled_block_subsidy(height, net)
-            .map(|subsidy| subsidy.div_exact(5))
+            .and_then(|subsidy| (subsidy / 5).map_err(SubsidyError::from))
             .expect("block subsidy must be valid for founders rewards")
     } else {
         Amount::zero()
