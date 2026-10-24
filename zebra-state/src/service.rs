@@ -1409,6 +1409,7 @@ impl Service<Request> for StateService {
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
             | Request::Transaction(_)
+            | Request::KnownTransaction(_)
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
@@ -1600,6 +1601,10 @@ impl Service<ReadRequest> for ReadStateService {
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
                 read::mined_transaction(state.latest_best_chain(), &state.db, hash),
+            )),
+
+            ReadRequest::KnownTransaction(hash) => Ok(ReadResponse::KnownTransaction(
+                read::known_transaction(state.latest_best_chain(), &state.db, hash),
             )),
 
             ReadRequest::AnyChainTransaction(hash) => {
@@ -1971,10 +1976,9 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by `gettxout` RPC method.
-            ReadRequest::IsTransparentOutputSpent(outpoint) => {
-                let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
-                Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
-            }
+            ReadRequest::UnspentOutput(outpoint) => Ok(ReadResponse::UnspentOutput(
+                read::unspent_output(state.latest_best_chain(), &state.db, outpoint)?,
+            )),
         };
 
         timed_span.spawn_blocking(request_handler)

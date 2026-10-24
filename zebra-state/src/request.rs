@@ -956,6 +956,9 @@ pub enum Request {
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Returns [`Response::KnownTransaction`] for best-chain membership without reading the body.
+    KnownTransaction(transaction::Hash),
+
     /// Looks up a transaction by hash in any chain.
     ///
     /// Returns
@@ -1153,6 +1156,7 @@ impl Request {
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
+            Request::KnownTransaction(_) => "known_transaction",
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
@@ -1296,6 +1300,11 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Returns whether a transaction is in the best chain, without reading its body.
+    ///
+    /// Returns [`ReadResponse::KnownTransaction`]. A known pruned transaction is still mined.
+    KnownTransaction(transaction::Hash),
 
     /// Looks up a transaction by hash in any chain.
     ///
@@ -1664,9 +1673,10 @@ pub enum ReadRequest {
         known_chain_tips: HashSet<block::Hash>,
     },
 
-    /// Returns `true` if the transparent output is spent in the best chain,
-    /// or `false` if it is unspent.
-    IsTransparentOutputSpent(transparent::OutPoint),
+    /// Returns an unspent best-chain output and its metadata in [`ReadResponse::UnspentOutput`].
+    ///
+    /// The creating transaction version is unavailable when its body has been pruned.
+    UnspentOutput(transparent::OutPoint),
 }
 
 impl ReadRequest {
@@ -1685,6 +1695,7 @@ impl ReadRequest {
             ReadRequest::SpentOutputs(_) => "spent_outputs",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::KnownTransaction(_) => "known_transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
@@ -1718,7 +1729,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
-            ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::UnspentOutput(_) => "unspent_output",
         }
     }
 
@@ -1753,6 +1764,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
+            Request::KnownTransaction(tx_hash) => Ok(ReadRequest::KnownTransaction(tx_hash)),
             Request::AnyChainTransaction(tx_hash) => Ok(ReadRequest::AnyChainTransaction(tx_hash)),
             Request::UnspentBestChainUtxo(outpoint) => {
                 Ok(ReadRequest::UnspentBestChainUtxo(outpoint))

@@ -129,7 +129,7 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         })),
         BoxCloneService::new(service_fn(|request| async move {
             match request {
-                zs::Request::Transaction(_) => Ok(zs::Response::Transaction(None)),
+                zs::Request::KnownTransaction(_) => Ok(zs::Response::KnownTransaction(false)),
                 zs::Request::Tip => Ok(zs::Response::Tip(None)),
                 request => Err(format!("unexpected state request: {request:?}").into()),
             }
@@ -162,4 +162,34 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         ),
         "expected the pushed transaction failure to carry its peer, branch, and height, got {error:?}"
     );
+}
+
+/// A known transaction is rejected without downloading its unavailable body.
+#[tokio::test]
+async fn mined_transaction_needs_no_body() {
+    let _init_guard = zebra_test::init();
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("mainnet vectors contain a transaction")
+        .transaction;
+    let hash = transaction.id.mined_id();
+    let mut downloads = Downloads::new(
+        service_fn(|_| async { panic!("a mined transaction must not be downloaded") }),
+        service_fn(|_| async { panic!("a mined transaction must not be verified") }),
+        service_fn(move |request| async move {
+            assert_eq!(request, zs::Request::KnownTransaction(hash));
+            Ok::<_, BoxError>(zs::Response::KnownTransaction(true))
+        }),
+    );
+    downloads
+        .download_if_needed_and_verify(Gossip::Id(transaction.id), None, None)
+        .expect("the request can be queued");
+    let result = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+        .await
+        .expect("membership lookup must finish")
+        .expect("the download returns its result")
+        .expect("the task did not time out");
+    let error = result.expect_err("a mined transaction is reported as already in the state");
+    assert!(matches!(error.1, TransactionDownloadVerifyError::InState));
 }
