@@ -33,8 +33,10 @@
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
 //!
-//! Source availability and the target tip are inspected read-only before opening a writable
+//! Source availability and target history are inspected read-only before opening a writable
 //! target. A copy that needs unavailable history requires an archive source.
+//! Target pruning is disabled for replay and comparison, without changing the saved config.
+//! Pruned targets require an archive snapshot or a fresh cache directory.
 
 use std::{cmp::min, path::PathBuf};
 
@@ -70,8 +72,8 @@ pub struct CopyStateCmd {
     /// Path to a Zebra config.toml for the target state.
     /// Uses an ephemeral config by default.
     ///
-    /// Zebra only uses the state options from this config.
-    /// All other options are ignored.
+    /// Zebra only uses the state options from this config, with target pruning disabled.
+    /// All other options are ignored. Normal startup applies the saved retention setting.
     #[clap(
         long,
         short,
@@ -119,8 +121,11 @@ impl CopyStateCmd {
         &self,
         network: &Network,
         source_config: old_zs::Config,
-        target_config: new_zs::Config,
+        mut target_config: new_zs::Config,
     ) -> Result<(), BoxError> {
+        // Copying must preserve both replayed and pre-existing bodies through comparison.
+        target_config.prune_blocks_older_than = None;
+
         info!(
             ?source_config,
             "initializing source state service (old format)"
@@ -154,6 +159,24 @@ impl CopyStateCmd {
         } else {
             match new_zs::spawn_init_read_only(target_config.clone(), network).await? {
                 Ok((target_reader, _target_db, _target_sender)) => {
+                    let history = target_reader
+                        .clone()
+                        .oneshot(new_zs::ReadRequest::HistoryCapabilities)
+                        .await?;
+                    let new_zs::ReadResponse::HistoryCapabilities(history) = history else {
+                        return Err(format!(
+                            "unexpected target history capabilities response: {history:?}"
+                        )
+                        .into());
+                    };
+                    if history.is_pruned() {
+                        return Err(format!(
+                            "copy target has unavailable block history below {:?}; restore an \
+                             archive snapshot or copy into a separate cache directory",
+                            history.lowest_retained_height
+                        )
+                        .into());
+                    }
                     match target_reader.oneshot(new_zs::ReadRequest::Tip).await? {
                         new_zs::ReadResponse::Tip(tip) => tip,
                         response => {

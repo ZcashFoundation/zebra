@@ -26,6 +26,7 @@ use crate::common::{
 };
 
 mod nu7;
+mod pruning;
 
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]
