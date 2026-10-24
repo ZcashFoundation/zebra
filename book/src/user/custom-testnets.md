@@ -128,7 +128,7 @@ current on-disk height encoding supports only `2^24 - 1`.
 
 The Network Sustainability Mechanism (NSM) reserve is separate from issued
 supply. Zebra seeds it at NU7 and applies the
-[mining fee split](mining.md). Without NU7, no NSM reissuance
+[mining fee split](mining.md#nu7-mining-rules). Without NU7, no NSM reissuance
 height is calculated. Unless overridden, reissuance starts at the
 [ZIP 237](https://zips.z.cash/zip-0237) crossover, not automatically at NU7;
 accelerated schedules can have no crossover. An explicit
