@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    fmt,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -110,10 +111,14 @@ pub struct Config {
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
+    ///
+    /// Also accepts a comma-separated string, so environment variables can set it.
     pub initial_mainnet_peers: IndexSet<String>,
 
     /// A list of initial peers for the peerset when operating on
     /// testnet.
+    ///
+    /// Also accepts a comma-separated string, so environment variables can set it.
     pub initial_testnet_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
@@ -663,7 +668,9 @@ struct DConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     testnet_parameters: Option<DTestnetParameters>,
 
+    #[serde(deserialize_with = "deserialize_peer_list")]
     initial_mainnet_peers: IndexSet<String>,
+    #[serde(deserialize_with = "deserialize_peer_list")]
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
     peerset_initial_target_size: usize,
@@ -688,6 +695,47 @@ impl Default for DConfig {
             max_connections_per_ip: Some(config.max_connections_per_ip),
         }
     }
+}
+
+/// Deserializes a peer list from a sequence, or from a comma-separated string,
+/// because environment variables cannot express a TOML array.
+///
+/// Peer addresses never contain commas. Entries are trimmed and empty ones
+/// dropped, so padding and trailing commas are harmless.
+fn deserialize_peer_list<'de, D>(deserializer: D) -> Result<IndexSet<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct PeerListVisitor;
+
+    impl<'de> de::Visitor<'de> for PeerListVisitor {
+        type Value = IndexSet<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a list of peer addresses, or a comma-separated string of them")
+        }
+
+        fn visit_str<E>(self, peers: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(peers
+                .split(',')
+                .map(str::trim)
+                .filter(|peer| !peer.is_empty())
+                .map(String::from)
+                .collect())
+        }
+
+        fn visit_seq<A>(self, peers: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            IndexSet::deserialize(de::value::SeqAccessDeserializer::new(peers))
+        }
+    }
+
+    deserializer.deserialize_any(PeerListVisitor)
 }
 
 impl From<Arc<testnet::Parameters>> for DTestnetParameters {
@@ -802,6 +850,18 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
+        for (field_name, peers) in [
+            ("initial_mainnet_peers", &initial_mainnet_peers),
+            ("initial_testnet_peers", &initial_testnet_peers),
+        ] {
+            if let Some(peer) = peers.iter().find(|peer| !is_valid_peer_addr(peer)) {
+                return Err(de::Error::custom(format!(
+                    "invalid peer {peer:?} in {field_name}; Hint: peers must be an IPv4 address, \
+                     IPv6 address (with brackets), or DNS name, followed by a port"
+                )));
+            }
+        }
+
         let network = match (dnetwork, testnet_parameters) {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
@@ -883,6 +943,16 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         })
     }
+}
+
+/// Returns true if `peer` has the `host:port` shape that peer resolution accepts.
+///
+/// This doesn't resolve DNS names, so a well-formed name can still fail to resolve.
+fn is_valid_peer_addr(peer: &str) -> bool {
+    peer.parse::<SocketAddr>().is_ok()
+        || peer
+            .rsplit_once(':')
+            .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok())
 }
 
 /// Returns true for a public DNS seed hostname, regardless of case, trailing dot, or port.
