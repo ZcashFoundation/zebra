@@ -83,8 +83,8 @@ Before you start, merge any open sync pull request that changes `.github/`. A re
    that sets the `zebrad` version to a prerelease such as `X.Y.Z-alpha.N` or
    `X.Y.Z-beta.N`, and updates `Cargo.lock`. `X.Y.Z` must be above the latest
    `zebrad` release. Do not use the `rc` identifier: it marks a release
-   candidate from `main`, which deploys production. Later sync PRs can
-   conflict on that version: keep the higher one.
+   candidate from `main`. No prerelease publication deploys production.
+   Later sync PRs can conflict on that version: keep the higher one.
 2. Generate release notes from the pending change fragments without
    committing them. The notes include fragments pending on `next`, including
    those not yet released from `main`, so each pre-release repeats prior entries:
