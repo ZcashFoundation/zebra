@@ -1,7 +1,8 @@
 # Developer documentation
 
 These pages are for contributors; the [API reference](api.md) covers individual
-Rust APIs.
+Rust APIs. The site root documents the latest release; the book of the `main`
+branch is published under [`/main/`](https://zebra.zfnd.org/main/).
 
 - **Design:** [architecture](dev/overview.md) (crates, services, block and
   transaction flow), [mempool specification](dev/mempool-specification.md),

@@ -234,7 +234,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
   API comparisons cover every workspace library, including unpublished libraries and libraries
   added or removed between revisions; binary-only packages are skipped.
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
-- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc and publishes to Pages: the latest release's book at the root, `main`'s under `/main/`, and the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book under `/next/`
 - **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
 - **Docs Check** (`docs-check.yml`): Spell check, markdownlint, and a book build with an offline link and anchor check
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
