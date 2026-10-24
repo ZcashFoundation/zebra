@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_in_result)]
 
+mod auth_digest;
 mod preallocate;
 mod prop;
 mod vectors;
