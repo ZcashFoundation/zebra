@@ -635,10 +635,10 @@ where
                                 )),
                             )
                             .await,
-                            Ok(Ok(zs::ReadResponse::BlockHeader {
+                            Ok(Ok(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
                                 height: parent_height,
                                 ..
-                            })) if (parent_height + 1) != Some(block_height)
+                            })))) if (parent_height + 1) != Some(block_height)
                         ),
                         // There is no peer to score, so skip the state lookup.
                         None => false,
