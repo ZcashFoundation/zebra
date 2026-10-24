@@ -1,81 +1,185 @@
 # Tracing Zebra
 
-## Dynamic Tracing
+Zebra records structured events and spans through Rust's `tracing` library.
+Events are individual log records; spans attach context to an operation and
+its nested work. Zebra writes formatted logs to standard output unless a
+log file is configured. Optional exporters send this instrumentation to
+journald, Sentry, or an OpenTelemetry collector.
 
-Zebra supports dynamic tracing, configured using the config's
-[`TracingSection`][tracing_section] and an HTTP RPC endpoint.
+## Configuration
 
-Activate this feature using the `filter-reload` compile-time feature,
-and the [`filter`][filter] and `endpoint_addr` runtime config options.
+To write plain-text logs to a file:
 
-If the `endpoint_addr` is specified, `zebrad` will open an HTTP endpoint
-allowing dynamic runtime configuration of the tracing filter. For instance,
-if the config had `endpoint_addr = '127.0.0.1:3000'`, then
+```toml
+[tracing]
+filter = "info,zebra_network=warn"
+log_file = "/var/log/zebra/zebrad.log"
+use_color = false
+buffer_limit = 128000
+```
 
-- `curl -X GET localhost:3000/filter` retrieves the current filter string;
-- `curl -X POST localhost:3000/filter -d "zebrad=trace"` sets the current filter string.
+Create a writable log directory owned by the Zebra account. If Zebra runs
+with elevated permissions, prevent other users from modifying that directory
+or its parents. Zebra appends to the file; it does not configure log rotation.
+Set `use_color = false` for plain-text files: formatted-log color detection
+uses standard output, even when `log_file` redirects the logs.
 
-See the [`filter`][filter] documentation for more details.
+For progress-bar log paths, buffer limits, and color overrides, see the
+[configuration reference](config.md#tracing).
 
-## `journald` Logging
+## Filters and compiled log levels
 
-Zebra can send tracing spans and events to [systemd-journald][systemd_journald],
-on Linux distributions that use `systemd`.
+The filter uses [`tracing-subscriber` directives][filter-syntax]. A bare level
+sets the global threshold; `target=level` sets a threshold for a Rust target,
+usually a module path. Separate directives with commas. Levels are `error`,
+`warn`, `info`, `debug`, and `trace`; `off` disables a target.
 
-Activate `journald` logging using the `journald` compile-time feature,
-and the [`use_journald`][use_journald] runtime config option.
+For example, `warn,zebrad=info,zebra_network=debug` selects warnings globally,
+information from `zebrad`, and debug events from `zebra_network`. Directives
+can also select spans and their fields; see the syntax reference before using
+field filters.
+
+Override the configured filter with either command form:
+
+```sh
+zebrad -c zebrad.toml --filters 'info,zebra_network=debug'
+zebrad -c zebrad.toml start 'info,zebra_network=debug'
+```
+
+Use the top-level `--filters` option without an explicit subcommand. With
+`start`, use positional filter arguments instead: the current CLI does not
+forward the top-level option to an explicit `start` command. Positional
+arguments are joined with commas. An explicit filter takes precedence over
+the default selected by `-v`.
+
+The utility commands `generate` and `tip-height` use
+[fixed filters](config.md#tracing) and disable flamegraph collection.
+
+Default release builds compile out debug and trace instrumentation through
+`release_max_level_info`; neither `-v` nor runtime filters can restore it.
+Build from the repository with default features disabled to retain all levels:
+
+```sh
+cargo install --locked --path zebrad --no-default-features \
+  --features 'progress-bar,prometheus,sentry,opentelemetry'
+```
+
+For other compile-time ceilings, see [Cargo features](install.md#cargo-features).
+
+## Dynamic tracing
+
+Build with the `filter-reload` feature and configure a loopback listener:
+
+```toml
+[tracing]
+endpoint_addr = "127.0.0.1:3000"
+```
+
+Read or replace the running filter:
+
+```sh
+curl --fail http://127.0.0.1:3000/filter
+curl --fail --data 'info,zebra_network=debug' http://127.0.0.1:3000/filter
+```
+
+The server accepts `GET /filter` and `POST /filter`; the POST body is the new
+UTF-8 filter string. A reload changes the running subscriber, not the
+configuration file. The endpoint has no authentication. Keep it on loopback
+or a restricted management network.
+
+Filter reloading is disabled in builds using `tokio-console` with
+`tokio_unstable`, even if the HTTP endpoint is enabled. See
+[Tokio console](../dev/tokio-console.md).
+
+## Journald logging
+
+Build with the `journald` Cargo feature and set `[tracing] use_journald = true`
+on Linux systems running systemd. Zebra adds a journald subscriber for events
+and spans; formatted output to standard output or `log_file` remains enabled.
+Failure to initialize the journald subscriber fails tracing initialization.
+Setting the field without the Cargo feature logs a warning instead of
+activating journald.
 
 ## Flamegraphs
 
-Zebra can generate [flamegraphs] of tracing spans.
+A flamegraph visualizes time spent in nested tracing spans, not samples of
+every function on the CPU stack. Build with the `flamegraph` Cargo feature
+and set a writable output path:
 
-Activate flamegraphs using the `flamegraph` compile-time feature,
-and the [`flamegraph`][flamegraph] runtime config option.
+```toml
+[tracing]
+flamegraph = "/var/log/zebra/spans"
+```
 
-## OpenTelemetry Export
+Zebra records folded span stacks in `spans.folded` and generates `spans.svg`
+during its shutdown hook. An extension in the configured path is replaced by
+these extensions. An abrupt process termination can prevent SVG generation.
+Use a directory protected against modification by other users, and compile
+in the span levels needed for the investigation.
 
-Official Zebra release builds include OpenTelemetry support. Export is disabled
-until you configure an OpenTelemetry endpoint using the tracing config or the
-`OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
+## OpenTelemetry export
 
-## Sentry Production Monitoring
+[OpenTelemetry](https://opentelemetry.io/docs/concepts/signals/traces/)
+collects spans as traces for operation-level analysis. With the
+[`opentelemetry` feature](install.md#cargo-features), configure an endpoint:
 
-Official Zebra release builds include Sentry support. Sentry is only activated
-when the `SENTRY_DSN` environment variable is set.
+```toml
+[tracing]
+opentelemetry_endpoint = "http://127.0.0.1:4318"
+opentelemetry_service_name = "zebra"
+opentelemetry_sample_percent = 10
+```
 
-When Sentry is active, Zebra sends:
+Zebra exports batches using OTLP, the OpenTelemetry Protocol, over HTTP with
+binary Protocol Buffers encoding. It appends `/v1/traces` unless that suffix
+is already present. Use an OTLP HTTP receiver, not a gRPC endpoint. The
+[observability stack](metrics.md#observability-stack) supplies Jaeger as a
+receiver and trace viewer.
 
-- errors and panics as Sentry issues;
-- warnings, errors, and the once-a-minute sync progress logs as Sentry Logs,
-  including a log each time the best chain tip enters a different network upgrade;
-- release health sessions: each `zebrad` run is split into daily sessions, and
-  the last one ends as exited on a clean shutdown and as crashed on a panic or a
-  fatal error. Every session of a run has the same user ID, so Sentry's
-  crash-free users rate is the share of runs without a crash.
+Set `[tracing] opentelemetry_sample_percent` to an integer from 0 through 100:
+Zebra samples no traces at 0, all at 100, and uses trace-ID ratio sampling
+between them. See the [configuration reference](config.md#tracing) for
+environment fallbacks and their nonstandard integer-percentage syntax.
 
-Events and logs carry the `chain.network` tag, and once the node has a chain tip,
-`chain.height` and `chain.network_upgrade`.
+Sampling cannot recover instrumentation removed by compile-time level
+features or excluded by the tracing filter. Zebra continues without trace
+export if exporter initialization fails.
 
-You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
-attached to Sentry events. Zebra also tags events with the git SHA when
-available, preferring the runtime `GITHUB_SHA` (full commit SHA on GitHub
-Actions) and falling back to the build-baked `SHORT_SHA` or `VERGEN_GIT_SHA`.
-When it runs under GitHub Actions it reads standard `GITHUB_*` metadata plus
-the optional `CI_TEST_ID` runtime variable for CI context. If `github-slug-action` exports `GITHUB_REF_POINT_SLUG_URL`, Zebra
-uses that slugged branch or tag name for the `git.ref` tag, and CI workflows
-can pass `CI_PR_NUMBER` and `CI_TEST_ID` for additional correlation. These
-values are read at runtime, so container images do not need CI-specific build
-arguments, and the `ZEBRA_*` environment namespace remains reserved for Zebra
-configuration.
+## Sentry production monitoring
 
-Zebra names its Sentry release after its build version, which `zebrad --version`
-prints, for example `7.0.0-rc.0+git.6d1e414`. Set `SENTRY_RELEASE` to use a
-different name.
+[Sentry](https://sentry.io/) receives error reports, diagnostic logs, and
+release health sessions. With the [`sentry` feature](install.md#cargo-features),
+set `SENTRY_DSN` to a valid project ingestion address to enable reporting.
+Leave it unset to disable reporting.
 
-[tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
-[filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter
-[flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.flamegraph
-[flamegraphs]: http://www.brendangregg.com/flamegraphs.html
-[systemd_journald]: https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html
-[use_journald]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.use_journald
-[sentry]: https://sentry.io/welcome/
+With Sentry enabled, Zebra sends:
+
+- Error events as issues and Sentry Logs; warnings as Logs and breadcrumbs.
+  Breadcrumbs are contextual records attached to later issues.
+- Sync progress logs with a 60-second reporting interval, and a log when the
+  best chain tip changes network upgrade. Other information-level events become
+  breadcrumbs rather than standalone Logs. Runtime filters still apply.
+- Panics as fatal, unhandled exceptions, with the full panic report and source
+  location as context.
+- Release health sessions, rotated every 24 hours. Graceful shutdown ends a
+  session as exited; a panic, crash, or forced shutdown ends it as crashed.
+  Sessions share a random identifier per run, so crash-free users measures
+  runs, not people. A process killed before shutdown handling cannot send its
+  final session update.
+
+Events carry `chain.network` and, once the progress task observes a chain tip,
+`chain.height` and `chain.network_upgrade`. Logs carry the same information
+as attributes; the height is numeric for aggregation.
+
+| Environment variable | Effect |
+| --- | --- |
+| `SENTRY_ENVIRONMENT` | Sets the environment attached to reports and sessions. |
+| `SENTRY_RELEASE` | Overrides the release name; otherwise Zebra uses the build version printed by `zebrad --version`. |
+
+Review the destination and access controls before enabling reporting: error
+context and panic reports leave the node. For deployment metadata, see
+[GCP deployment operations](../dev/gcp-deployment-operations.md); for event
+selection, see the [Sentry integration][sentry-source].
+
+[filter-syntax]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+[sentry-source]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/sentry.rs
