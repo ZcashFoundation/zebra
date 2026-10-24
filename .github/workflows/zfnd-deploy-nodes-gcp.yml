@@ -116,9 +116,10 @@ on:
       - .github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
       - .github/workflows/zfnd-build-docker-image.yml
 
+  # Stable publication and prerelease promotion trigger released; prerelease publication does not.
   release:
     types:
-      - published
+      - released
 
 permissions:
   contents: read
@@ -126,16 +127,8 @@ permissions:
 jobs:
   # Resolve event-specific values once, then pass explicit deployment inputs to
   # the reusable deployment workflow.
-  #
-  # Pre-releases from `next` (any pre-release except a release candidate, which is cut from `main`) never deploy to production.
-  # They skip this job, and with it every build and deployment that `needs` it.
   set-matrix:
     name: Resolve event deployment inputs
-    if: >-
-      ${{
-        !(github.event_name == 'release' &&
-          contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc'))
-      }}
     runs-on: ubuntu-26.04
     outputs:
       networks: ${{ steps.set-matrix.outputs.networks }}

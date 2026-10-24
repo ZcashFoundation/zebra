@@ -16,7 +16,7 @@ See the [workflow inventory](https://github.com/ZcashFoundation/zebra/blob/main/
 | --- | --- | --- |
 | Matching push to `main` | `stage` | Mainnet and Testnet in all three zones |
 | Matching push to `next` | `next` | Mainnet and Testnet in all three zones |
-| Published `v`-prefixed stable release or release candidate | `prod` | Mainnet and Testnet in all three zones |
+| `release: released` with a tag starting with `v` | `prod` | Mainnet and Testnet in all three zones |
 | Manual dispatch | Selected `dev`, `next`, or `prod` | One selected network and zone |
 | Matching repository-owned PR | `dev` | Image build only; no node deployment |
 
@@ -27,11 +27,12 @@ the wrapper. These filters are independent of `.github/path-filters.yml`.
 A documentation-only push does not deploy nodes. Fork PRs skip the
 wrapper's image build.
 
-Published `v`-prefixed release candidates also select `prod`. Prereleases
-from `next` (any prerelease other than a release candidate) do not deploy
-production. Docker Hub publication belongs to release automation, not this
-deployment wrapper. See the [release process](release-process.md) before
-publishing a release or dispatching a production deployment.
+The `released` activity covers stable publication and promotion of a
+prerelease to a stable release. Prerelease publication does not trigger this
+workflow. Manual dispatch still uses the selected environment. Docker Hub
+publication belongs to release automation, not this deployment wrapper.
+See the [release process](release-process.md) before publishing a release
+or dispatching a production deployment.
 
 Deployment jobs use environment-scoped machine type, subnet, region, logging,
 and Sentry variables. Authentication uses the
@@ -46,7 +47,7 @@ The `GCP_PROJECT` variable comes from the selected GitHub environment.
 | Caller | Image name | Dockerfile target |
 | --- | --- | --- |
 | [`release-binaries.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/release-binaries.yml#L37-L51) | `zebra` | `runtime` |
-| [`zfnd-deploy-nodes-gcp.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml#L246-L254) | `zebrad` | `runtime` |
+| [`zfnd-deploy-nodes-gcp.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml#L239-L247) | `zebrad` | `runtime` |
 | [`zfnd-ci-integration-tests-gcp.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-ci-integration-tests-gcp.yml#L156-L166) | Value of `CI_IMAGE_NAME` | `tests` |
 
 Docker Hub publication requires `publish_to_dockerhub=true`. Only the
