@@ -38,8 +38,9 @@ pub struct TransparentTransfers {
     /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
     /// but it might in future. So Zebra does it anyway.
     ///
-    /// Outputs are shared with the chain index and retained snapshots.
-    created_utxos: BTreeMap<OutputLocation, Arc<transparent::OrderedUtxo>>,
+    /// Outputs are shared with the chain index and retained snapshots. Per-height maps also
+    /// share index entries, so appending a height only copies the height directory.
+    created_utxos: BTreeMap<Height, Arc<BTreeMap<OutputLocation, Arc<transparent::OrderedUtxo>>>>,
 
     /// The partial list of UTXOs spent by a transparent address.
     ///
@@ -81,9 +82,12 @@ impl
         let transaction_location = transaction_location(created_utxo);
         let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
 
-        let previous_entry = self
+        let height_outputs = self
             .created_utxos
-            .insert(output_location, created_utxo.clone());
+            .entry(transaction_location.height)
+            .or_default();
+        let previous_entry =
+            Arc::make_mut(height_outputs).insert(output_location, created_utxo.clone());
         assert_eq!(
             previous_entry, None,
             "unexpected created output: duplicate update or duplicate UTXO",
@@ -111,9 +115,23 @@ impl
         let transaction_location = transaction_location(created_utxo);
         let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
 
-        let removed_entry = self.created_utxos.remove(&output_location);
+        let height_outputs = self
+            .created_utxos
+            .get_mut(&transaction_location.height)
+            .expect("created output height exists because the block was previously applied");
+        // Drop a complete bucket without copying it solely to remove its last entry.
+        let output_was_removed =
+            if height_outputs.len() == 1 && height_outputs.contains_key(&output_location) {
+                self.created_utxos
+                    .remove(&transaction_location.height)
+                    .is_some()
+            } else {
+                Arc::make_mut(height_outputs)
+                    .remove(&output_location)
+                    .is_some()
+            };
         assert!(
-            removed_entry.is_some(),
+            output_was_removed,
             "unexpected revert of created output: duplicate update or duplicate UTXO",
         );
 
@@ -232,9 +250,8 @@ impl TransparentTransfers {
     /// bounded, so the sum saturates rather than overflowing, matching the finalized path. See
     /// #10556.
     pub fn received(&self) -> u64 {
-        self.created_utxos
-            .values()
-            .map(|utxo| u64::from(utxo.utxo.output.value()))
+        self.created_utxos()
+            .map(|(_, output)| u64::from(output.value()))
             .fold(0, u64::saturating_add)
     }
 
@@ -282,7 +299,8 @@ impl TransparentTransfers {
     #[allow(dead_code)]
     pub fn created_utxos(&self) -> impl Iterator<Item = (&OutputLocation, &transparent::Output)> {
         self.created_utxos
-            .iter()
+            .values()
+            .flat_map(|outputs| outputs.iter())
             .map(|(location, utxo)| (location, &utxo.utxo.output))
     }
 

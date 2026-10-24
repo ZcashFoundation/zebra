@@ -232,39 +232,144 @@ fn large_transfer_chain(
     Ok((chain, blocks, addresses, value))
 }
 
-/// Run with `RUST_LOG=info` and `--ignored --nocapture`; fixture setup is excluded from timings.
+/// Opt in with `ZEBRA_STATE_APPEND_BENCH=1` and run alone with
+/// `--ignored --nocapture --test-threads=1`; fixture setup is excluded from timings.
 #[test]
 #[ignore = "microbenchmark"]
+#[allow(
+    clippy::print_stdout,
+    reason = "emit machine-readable benchmark samples"
+)]
 fn transparent_chain_push_microbenchmark() -> Result<()> {
+    use crate::service::read::tests::spent_outputs::count_allocations;
     use std::{hint::black_box, time::Instant};
+    use zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
     use zebra_chain::serialization::ZcashSerialize;
 
-    let _init_guard = zebra_test::init();
-    let destinations: Vec<_> = (0..9_000).map(|index| index % 2).collect();
-    let (chain, blocks, _, _) = large_transfer_chain(&[&destinations])?;
-    let block = &blocks[0];
-    let mut samples = Vec::new();
-    for iteration in 0..25 {
-        let chain = chain.clone();
-        let block = block.clone();
-        let start = Instant::now();
-        let pushed = black_box(chain.push(block)?);
-        let elapsed = start.elapsed().as_secs_f64() * 1_000.0;
-        if iteration >= 5 {
-            samples.push(elapsed);
-        }
-        drop(pushed);
+    if std::env::var("ZEBRA_STATE_APPEND_BENCH").as_deref() != Ok("1") {
+        println!("Skipping append benchmark; set ZEBRA_STATE_APPEND_BENCH=1 to run it.");
+        return Ok(());
     }
-    samples.sort_by(f64::total_cmp);
-    tracing::info!(
-        transactions = block.block.transactions.len(),
-        bytes = block.block.zcash_serialized_size(),
-        min_ms = samples[0],
-        median_ms = (samples[9] + samples[10]) / 2.0,
-        max_ms = samples[19],
-        ?samples,
-        "transparent chain push microbenchmark",
-    );
+
+    let _init_guard = zebra_test::init();
+    for (history_blocks, history_outputs, new_outputs) in [
+        (0, 0, 1),
+        (1, 1, 1),
+        (10, 1, 1),
+        (100, 1, 1),
+        (1, 9_000, 1),
+        (100, 90, 1),
+        (0, 0, 9_000),
+    ] {
+        let history: Vec<_> = (0..history_outputs).map(|index| index % 2).collect();
+        let destinations: Vec<_> = (0..new_outputs).map(|index| index % 2).collect();
+        let block_destinations: Vec<_> = std::iter::repeat_n(history.as_slice(), history_blocks)
+            .chain(std::iter::once(destinations.as_slice()))
+            .collect();
+        let (mut chain, blocks, _, _) = large_transfer_chain(&block_destinations)?;
+        for block in &blocks[..history_blocks] {
+            chain = chain.push(block.clone())?;
+        }
+        let block = &blocks[history_blocks];
+        let mut samples = Vec::new();
+        for iteration in 0..25 {
+            let chain = chain.clone();
+            let block = block.clone();
+            let start = Instant::now();
+            let pushed = black_box(chain.push(block)?);
+            let elapsed = start.elapsed().as_secs_f64() * 1_000.0;
+            if iteration >= 5 {
+                samples.push(elapsed);
+            }
+            drop(pushed);
+        }
+        samples.sort_by(f64::total_cmp);
+        tracing::info!(
+            history_blocks,
+            history_outputs,
+            transactions = block.block.transactions.len(),
+            bytes = block.block.zcash_serialized_size(),
+            min_ms = samples[0],
+            median_ms = (samples[9] + samples[10]) / 2.0,
+            max_ms = samples[19],
+            ?samples,
+            "transparent chain push microbenchmark",
+        );
+    }
+
+    let window = usize::try_from(MAX_BLOCK_REORG_HEIGHT)?;
+    const WARMUP: usize = 10;
+    const SAMPLES: usize = 100;
+    for outputs_per_height in [1, 50] {
+        // Concentrate every output at one address throughout the full non-finalized window.
+        let destinations = vec![1; outputs_per_height];
+        let block_destinations = vec![destinations.as_slice(); window + WARMUP + SAMPLES];
+        let (mut chain, blocks, _, _) = large_transfer_chain(&block_destinations)?;
+        for block in &blocks[..window] {
+            chain = chain.push(block.clone())?;
+        }
+        let mut samples = Vec::with_capacity(SAMPLES);
+        for (iteration, block) in blocks[window..].iter().enumerate() {
+            // Keep the old reader alive across both append and finalization to force copy-on-write.
+            let retained = chain.clone();
+            let timed_block = block.clone();
+            let start = Instant::now();
+            chain = black_box(chain.push(timed_block)?);
+            let append_ns = start.elapsed().as_nanos();
+            let start = Instant::now();
+            let finalized = black_box(chain.pop_root());
+            let pop_ns = start.elapsed().as_nanos();
+
+            // Count separately so atomic accounting does not inflate the timed operations.
+            let counted_chain = retained.clone();
+            let counted_block = block.clone();
+            let (counted_chain, append_allocations) =
+                count_allocations(|| counted_chain.push(counted_block));
+            let mut counted_chain = counted_chain?;
+            let (counted_finalized, pop_allocations) =
+                count_allocations(|| counted_chain.pop_root());
+            assert_eq!(finalized.0.hash, blocks[iteration].hash);
+            assert_eq!(counted_finalized.0.hash, finalized.0.hash);
+            assert_eq!(retained.blocks.len(), window);
+            assert_eq!(chain.blocks.len(), window);
+            assert!(counted_chain.eq_internal_state(&chain));
+            if iteration >= WARMUP {
+                samples.push((append_ns, pop_ns, append_allocations, pop_allocations));
+            }
+        }
+        // Emit raw samples too, so the runner can aggregate percentiles across alternating runs.
+        for (sample, (append_ns, pop_ns, append_allocations, pop_allocations)) in
+            samples.iter().enumerate()
+        {
+            println!(
+                "APPEND_SAMPLE shape=window{window}_outputs{outputs_per_height} sample={sample} \
+                 append_ns={append_ns} pop_ns={pop_ns} \
+                 append_allocations={append_allocations} pop_allocations={pop_allocations}"
+            );
+        }
+        let mut append_times: Vec<_> = samples.iter().map(|sample| sample.0).collect();
+        let mut pop_times: Vec<_> = samples.iter().map(|sample| sample.1).collect();
+        let mut append_counts: Vec<_> = samples.iter().map(|sample| sample.2).collect();
+        let mut pop_counts: Vec<_> = samples.iter().map(|sample| sample.3).collect();
+        append_times.sort_unstable();
+        pop_times.sort_unstable();
+        append_counts.sort_unstable();
+        pop_counts.sort_unstable();
+        println!(
+            "APPEND_BENCH shape=window{window}_outputs{outputs_per_height} samples={SAMPLES} \
+             append_median_ns={} append_p90_ns={} pop_median_ns={} pop_p90_ns={} \
+             append_allocations_median={} append_allocations_p90={} \
+             pop_allocations_median={} pop_allocations_p90={}",
+            (append_times[49] + append_times[50]) / 2,
+            append_times[89],
+            (pop_times[49] + pop_times[50]) / 2,
+            pop_times[89],
+            (append_counts[49] + append_counts[50]) / 2,
+            append_counts[89],
+            (pop_counts[49] + pop_counts[50]) / 2,
+            pop_counts[89],
+        );
+    }
     Ok(())
 }
 

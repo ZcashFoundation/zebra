@@ -5,12 +5,21 @@ use zebra_chain::{
     transparent::{Output, Script},
 };
 
+/// Keep the flat created-output map as an independent reconstruction oracle.
+#[derive(Default)]
+struct LegacyTransfers {
+    balance: Amount<NegativeAllowed>,
+    tx_ids: MultiSet<transaction::Hash>,
+    created_utxos: BTreeMap<OutputLocation, Arc<transparent::OrderedUtxo>>,
+    spent_utxos: BTreeSet<OutputLocation>,
+}
+
 /// Replay the pre-optimization non-tree indexes, including the allocating transparent accessors.
 /// The caller also compares complete chain snapshots after tip rollback and reapplication.
 pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Chain) {
     let mut created = HashMap::new();
     let mut spent = HashMap::new();
-    let mut addresses: HashMap<transparent::Address, TransparentTransfers> = HashMap::new();
+    let mut addresses: HashMap<transparent::Address, LegacyTransfers> = HashMap::new();
     let mut locations = HashMap::new();
     let mut heights = HashMap::new();
     let mut sprout = HashMap::new();
@@ -105,14 +114,29 @@ pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Cha
     );
     assert_eq!(chain.spent_utxos, spent);
     assert_eq!(chain.tx_loc_by_hash, locations);
-    assert_eq!(
-        chain
-            .partial_transparent_transfers
-            .iter()
-            .map(|(key, value)| (*key, value.clone()))
-            .collect::<HashMap<_, _>>(),
-        addresses
-    );
+    assert_eq!(chain.partial_transparent_transfers.len(), addresses.len());
+    for (address, legacy) in &addresses {
+        let current = chain.partial_transparent_transfers.get(address).unwrap();
+        assert_eq!(current.balance(), legacy.balance);
+        assert_eq!(current.tx_ids, legacy.tx_ids);
+        assert_eq!(current.spent_utxos(), &legacy.spent_utxos);
+        assert_eq!(
+            current.created_utxos().collect::<Vec<_>>(),
+            legacy
+                .created_utxos
+                .iter()
+                .map(|(location, utxo)| (location, &utxo.utxo.output))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            current.received(),
+            legacy
+                .created_utxos
+                .values()
+                .map(|utxo| u64::from(utxo.utxo.output.value()))
+                .fold(0, u64::saturating_add)
+        );
+    }
     assert_eq!(chain.height_by_hash, heights);
     assert_eq!(chain.sprout_nullifiers, sprout);
     assert_eq!(chain.sapling_nullifiers, sapling);
@@ -127,9 +151,39 @@ pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Cha
                 .partial_transparent_transfers
                 .get(&address)
                 .unwrap()
-                .created_utxos[&location];
+                .created_utxos[&location.height()][&location];
             assert!(Arc::ptr_eq(utxo, indexed));
         }
+    }
+}
+
+#[test]
+fn reverting_shared_singleton_height_does_not_allocate() {
+    use crate::service::read::tests::spent_outputs::measure;
+
+    for position in [RevertPosition::Root, RevertPosition::Tip] {
+        let outpoint = transparent::OutPoint {
+            hash: transaction::Hash([0; 32]),
+            index: 0,
+        };
+        let utxo = Arc::new(transparent::OrderedUtxo::new(
+            Output::new(1u64.try_into().unwrap(), Script::new(&[])),
+            Height(1),
+            0,
+        ));
+        let mut transfers = TransparentTransfers::default();
+        transfers
+            .update_chain_tip_with(&(&outpoint, &utxo))
+            .unwrap();
+        let retained = transfers.clone();
+        let ((), heap) = measure(|| transfers.revert_chain_with(&(&outpoint, &utxo), position));
+        assert_eq!(
+            heap.total, 0,
+            "removing a shared singleton must not copy it"
+        );
+        assert!(transfers.is_empty());
+        assert_eq!(retained.created_utxos().count(), 1);
+        assert_eq!(retained.received(), 1);
     }
 }
 
@@ -138,7 +192,13 @@ pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Cha
 fn received_saturates_past_u64_max() {
     let max_money = Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid amount");
     let output = Output::new(max_money, Script::new(&[]));
-    let utxo = Arc::new(transparent::OrderedUtxo::new(output, Height(0), 0));
+    let utxos = [0, 1].map(|height| {
+        Arc::new(transparent::OrderedUtxo::new(
+            output.clone(),
+            Height(height),
+            0,
+        ))
+    });
     let utxo_count = 8786;
     assert!(
         u128::try_from(utxo_count).unwrap() * u128::try_from(MAX_MONEY).unwrap()
@@ -146,8 +206,10 @@ fn received_saturates_past_u64_max() {
     );
     let mut transfers = TransparentTransfers::default();
     for output_index in 0..utxo_count {
-        transfers.created_utxos.insert(
-            OutputLocation::from_usize(Height(0), 0, output_index),
+        let utxo = &utxos[output_index % 2];
+        let height = utxo.utxo.height;
+        Arc::make_mut(transfers.created_utxos.entry(height).or_default()).insert(
+            OutputLocation::from_usize(height, 0, output_index),
             utxo.clone(),
         );
     }

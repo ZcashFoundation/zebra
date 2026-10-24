@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Share earlier created-output history when appending a non-finalized block to an address index ([#12002](https://github.com/ZcashFoundation/zebra/issues/12002)).
+time: 2026-10-24T07:09:44.929216954+02:00
