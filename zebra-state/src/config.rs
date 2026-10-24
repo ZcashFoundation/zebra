@@ -15,9 +15,12 @@ use tracing::Span;
 use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    constants::{
+        DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, PRUNED_STATE_DATABASE_KIND,
+        STATE_DATABASE_KIND,
+    },
     service::finalized_state::restorable_db_versions,
-    state_database_format_version_in_code, BoxError,
+    state_database_format_version_in_code, BoxError, StateInitError,
 };
 
 /// Configuration for the state service.
@@ -57,9 +60,9 @@ pub struct Config {
     ///
     /// # Implementation Details
     ///
-    /// Each state format version and network has a separate state.
-    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
-    /// underneath the `cache_dir` path, where `N` is the state format version.
+    /// Each state kind, format version and network has a separate state.
+    /// Archives use `state/vN/<network>` and pruning-enabled databases use
+    /// `state-pruned/vN/<network>`, underneath `cache_dir`.
     ///
     /// When Zebra's state format changes, it creates a new state subdirectory for that version,
     /// and re-syncs from genesis.
@@ -81,6 +84,24 @@ pub struct Config {
     ///
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
+
+    /// The number of recent finalized block bodies to retain, or `None` for archive operation.
+    ///
+    /// Defaults to `None`. The minimum is 10,000 on Mainnet and Testnet, or
+    /// [`MAX_BLOCK_REORG_HEIGHT`] + 1 on Regtest. Zero is invalid.
+    ///
+    /// Retention is measured from the durable finalized tip; non-finalized blocks and genesis
+    /// are always retained. Only historical transaction bodies are deleted, not validation state.
+    /// Increasing retention affects future pruning only and never restores deleted bodies.
+    ///
+    /// Existing archives require an explicit stopped-node move into `state-pruned` before
+    /// enabling pruning; startup refuses to move them automatically. New pruning state starts
+    /// isolated. Disabling pruning keeps that directory and succeeds only while all bodies remain.
+    /// After deletion, restore an archive snapshot or fully resync in a separate cache directory.
+    /// Normal RocksDB compaction reclaims space eventually, not immediately after deletion.
+    ///
+    /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
+    pub prune_blocks_older_than: Option<u32>,
 
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
     ///
@@ -135,6 +156,25 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 }
 
 impl Config {
+    /// Rejects retention windows that cannot safely serve this network.
+    pub(crate) fn validate_pruning(&self, network: &Network) -> Result<(), StateInitError> {
+        let Some(configured) = self.prune_blocks_older_than else {
+            return Ok(());
+        };
+        let minimum = if network.is_regtest() {
+            MAX_BLOCK_REORG_HEIGHT + 1
+        } else {
+            10_000
+        };
+        if configured < minimum {
+            return Err(StateInitError::InvalidPruningRetention {
+                configured,
+                minimum,
+            });
+        }
+        Ok(())
+    }
+
     /// Returns the path for the database, based on the kind, major version and network.
     /// Each incompatible database format or network gets its own unique path.
     pub fn db_path(
@@ -155,6 +195,57 @@ impl Config {
                 .join(major_version)
                 .join(net_dir)
         }
+    }
+
+    /// Returns the existing state database kind, or the configured kind for a new database.
+    ///
+    /// Archives and pruning-enabled state share one format version and upgrade sequence.
+    /// Existing `state-pruned` databases remain selected when pruning is disabled, so startup
+    /// checks their body availability rather than silently creating a fresh archive.
+    /// Secondary readers must use this kind with [`Self::db_path`] and
+    /// [`state_database_format_version_in_code`], not hard-code `state`.
+    ///
+    /// Returns an error on inaccessible paths or coexisting archive and pruned databases.
+    /// This lookup never creates, moves, or opens a database.
+    pub fn state_database_kind(&self, network: &Network) -> Result<&'static str, StateInitError> {
+        self.state_database_kind_for_version(state_database_format_version_in_code().major, network)
+    }
+
+    pub(crate) fn state_database_kind_for_version(
+        &self,
+        major_version: u64,
+        network: &Network,
+    ) -> Result<&'static str, StateInitError> {
+        if !self.ephemeral {
+            let mut archive = false;
+            let mut pruned = false;
+            // Include the previous major so the next ordinary upgrade reuses the same kind.
+            for version in [major_version, major_version.saturating_sub(1)] {
+                for (kind, exists) in [
+                    (STATE_DATABASE_KIND, &mut archive),
+                    (PRUNED_STATE_DATABASE_KIND, &mut pruned),
+                ] {
+                    let path = self.db_path(kind, version, network);
+                    *exists |=
+                        path.try_exists()
+                            .map_err(|source| StateInitError::DatabaseAccess {
+                                path,
+                                source: source.into(),
+                            })?;
+                }
+            }
+            match (archive, pruned) {
+                (true, true) => return Err(StateInitError::ConflictingStateDirectories),
+                (true, false) => return Ok(STATE_DATABASE_KIND),
+                (false, true) => return Ok(PRUNED_STATE_DATABASE_KIND),
+                (false, false) => {}
+            }
+        }
+        Ok(if self.prune_blocks_older_than.is_some() {
+            PRUNED_STATE_DATABASE_KIND
+        } else {
+            STATE_DATABASE_KIND
+        })
     }
 
     /// Returns the path for the non-finalized state backup directory, based on the network.
@@ -200,6 +291,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            prune_blocks_older_than: None,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
@@ -217,12 +309,18 @@ impl Default for Config {
 ///
 /// See `check_and_delete_old_databases()` for details.
 pub fn check_and_delete_old_state_databases(config: &Config, network: &Network) -> JoinHandle<()> {
-    check_and_delete_old_databases(
-        config,
-        STATE_DATABASE_KIND,
-        state_database_format_version_in_code().major,
-        network,
-    )
+    let config = config.clone();
+    let network = network.clone();
+    spawn_blocking(move || {
+        for kind in [STATE_DATABASE_KIND, PRUNED_STATE_DATABASE_KIND] {
+            delete_old_databases(
+                config.clone(),
+                kind.to_owned(),
+                state_database_format_version_in_code().major,
+                &network,
+            );
+        }
+    })
 }
 
 /// Spawns a task that checks if there are old database folders,
@@ -405,7 +503,7 @@ pub fn state_database_format_version_on_disk(
 ) -> Result<Option<Version>, BoxError> {
     database_format_version_on_disk(
         config,
-        STATE_DATABASE_KIND,
+        config.state_database_kind(network)?,
         state_database_format_version_in_code().major,
         network,
     )
@@ -513,7 +611,7 @@ pub(crate) mod hidden {
     ) -> Result<(), BoxError> {
         write_database_format_version_to_disk(
             config,
-            STATE_DATABASE_KIND,
+            config.state_database_kind(network)?,
             state_database_format_version_in_code().major,
             changed_version,
             network,

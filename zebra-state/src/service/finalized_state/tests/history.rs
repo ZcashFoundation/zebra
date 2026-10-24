@@ -14,9 +14,9 @@ use super::super::{
     STATE_COLUMN_FAMILIES_IN_CODE,
 };
 use crate::{
-    constants::STATE_DATABASE_KIND, init_read_only, state_database_format_version_in_code,
-    CheckpointVerifiedBlock, Config, HistoryCapabilities, ReadRequest, ReadResponse,
-    StateInitError,
+    constants::{PRUNED_STATE_DATABASE_KIND, STATE_DATABASE_KIND},
+    init_read_only, state_database_format_version_in_code, CheckpointVerifiedBlock, Config,
+    HistoryCapabilities, ReadRequest, ReadResponse, StateInitError,
 };
 
 fn open(config: &Config, read_only: bool) -> Result<FinalizedState, StateInitError> {
@@ -27,7 +27,7 @@ fn populated(config: &Config) -> FinalizedState {
     let mut state = open(config, false).unwrap();
     state
         .db
-        .update_format_version_on_disk(&state_database_format_version_in_code())
+        .update_format_version_on_disk(&state.db.format_version_in_code())
         .unwrap();
     for (_, bytes) in zebra_test::vectors::MAINNET_BLOCKS.range(0..=3) {
         let block = bytes.zcash_deserialize_into::<Arc<Block>>().unwrap();
@@ -200,13 +200,130 @@ fn secondary_transactions_distinguish_torn_views_from_pruned_history() {
 }
 
 #[test]
-fn pruning_without_a_restart_witness_is_refused() {
+fn pruning_without_a_restart_witness_waits_without_mutation() {
     let _init_guard = zebra_test::init();
-    let state = populated(&Config::ephemeral());
+    let state = populated(&Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    });
     state.db.mark_ready_for_pruning();
     let mut batch = DiskWriteBatch::new();
-    assert!(batch.prepare_history_pruning(&state.db, Height(2)).is_err());
+    assert_eq!(
+        batch
+            .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+            .unwrap(),
+        None
+    );
     assert_eq!(batch, DiskWriteBatch::new());
+    assert!(state.db.block(Height(1).into()).unwrap().is_some());
+}
+
+#[test]
+fn invalid_pruning_retention_does_not_create_a_cache_directory() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().join("invalid-pruning"),
+        prune_blocks_older_than: Some(9_999),
+        ..Config::default()
+    };
+    for read_only in [false, true] {
+        let low_level = DiskDb::new(
+            &config,
+            STATE_DATABASE_KIND,
+            &state_database_format_version_in_code(),
+            &Network::Mainnet,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            read_only,
+        );
+        assert!(matches!(
+            low_level,
+            Err(StateInitError::InvalidPruningRetention { .. })
+        ));
+        assert!(!config.cache_dir.exists());
+        assert!(matches!(
+            open(&config, read_only),
+            Err(StateInitError::InvalidPruningRetention { .. })
+        ));
+        assert!(!config.cache_dir.exists());
+    }
+}
+
+#[test]
+fn pruning_stages_at_most_one_hundred_contiguous_heights() {
+    let _init_guard = zebra_test::init();
+    let state = populated_with_witness(&Config::ephemeral(), Height(350), Height(351));
+    state.db.mark_ready_for_pruning();
+    let mut previous = Height(1);
+    for expected in [Height(101), Height(201), Height(301), Height(350)] {
+        let mut batch = DiskWriteBatch::new();
+        assert_eq!(
+            batch
+                .prepare_history_pruning(&state.db, Height(351), &mut Default::default())
+                .unwrap(),
+            Some(expected)
+        );
+        assert!(state.db.block(previous.into()).unwrap().is_some());
+        state.db.write(batch).unwrap();
+        assert_eq!(
+            state
+                .db
+                .history_capabilities()
+                .unwrap()
+                .lowest_retained_height,
+            expected
+        );
+        for height in previous.0..expected.0 {
+            let height = Height(height);
+            assert_eq!(
+                state.db.block(height.into()).unwrap_err(),
+                crate::BlockReadError::BlockBodyUnavailable { height }
+            );
+            assert!(state.db.hash(height).is_some());
+            assert!(!state
+                .db
+                .transaction_hashes_for_block(height.into())
+                .unwrap()
+                .is_empty());
+        }
+        for retained in [Height(0), expected, Height(351)] {
+            assert!(state.db.block(retained.into()).unwrap().is_some());
+        }
+        previous = expected;
+    }
+    let mut waiting = DiskWriteBatch::new();
+    assert_eq!(
+        waiting
+            .prepare_history_pruning(&state.db, Height(351), &mut Default::default())
+            .unwrap(),
+        None
+    );
+    assert_eq!(waiting, DiskWriteBatch::new());
+}
+
+#[test]
+fn pruning_restart_check_errors_leave_the_batch_unchanged() {
+    let _init_guard = zebra_test::init();
+    let state = populated_with_witness(&Config::ephemeral(), Height(3), Height(4));
+    state.db.mark_ready_for_pruning();
+    let mut damage = DiskWriteBatch::new();
+    damage.zs_delete(
+        &state.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(4)),
+    );
+    state.db.write(damage).unwrap();
+
+    let mut batch = DiskWriteBatch::new();
+    assert!(batch
+        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .is_err());
+    assert_eq!(batch, DiskWriteBatch::new());
+    assert_eq!(
+        state.db.history_capabilities().unwrap(),
+        HistoryCapabilities::default()
+    );
     assert!(state.db.block(Height(1).into()).unwrap().is_some());
 }
 
@@ -214,16 +331,24 @@ fn pruning_without_a_restart_witness_is_refused() {
 fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
-    let config = Config {
+    let mut config = Config {
         cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
         ..Config::default()
     };
-    let state = populated(&config);
+    let state = populated_with_witness(&config, Height(3), Height(4));
+    let network = state.db.network();
+    state.db.mark_ready_for_pruning();
     let before = state.db.snapshot();
     let tx_cf = state.db.cf_handle("tx_by_loc").unwrap();
     let first_deleted = TransactionLocation::min_for_height(Height(1)).as_bytes();
     let mut batch = DiskWriteBatch::new();
-    delete_body_prefix(&mut batch, &state.db, Height(2));
+    assert_eq!(
+        batch
+            .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+            .unwrap(),
+        Some(Height(2))
+    );
     assert_eq!(
         state.db.history_capabilities().unwrap(),
         HistoryCapabilities::default()
@@ -266,24 +391,46 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     drop(after);
     drop(before);
 
-    for invalid_floor in [Height(0), Height(1), Height(2), Height(4), Height::MAX] {
+    for invalid_floor in [Height(0), Height(1), Height(2), Height(5), Height::MAX] {
         let mut invalid = DiskWriteBatch::new();
         assert!(invalid
-            .prepare_history_pruning(&state.db, invalid_floor)
+            .prepare_history_pruning(&state.db, invalid_floor, &mut Default::default())
             .is_err());
         assert_eq!(invalid, DiskWriteBatch::new());
     }
+    drop(state);
+
+    let reopen = |config: &Config, read_only| {
+        FinalizedState::new_with_debug(config, &network, true, read_only).unwrap()
+    };
+    config.prune_blocks_older_than = Some(10_000);
+    let state = reopen(&config, false);
+    assert_eq!(
+        state
+            .db
+            .history_capabilities()
+            .unwrap()
+            .lowest_retained_height,
+        Height(2)
+    );
+    state.db.mark_ready_for_pruning();
     let mut batch = DiskWriteBatch::new();
-    delete_body_prefix(&mut batch, &state.db, Height(3));
+    assert_eq!(
+        batch
+            .prepare_history_pruning(&state.db, Height(3), &mut Default::default())
+            .unwrap(),
+        Some(Height(3))
+    );
     state.db.write(batch).unwrap();
     drop(state);
 
-    let state = open(&config, true).unwrap();
+    config.prune_blocks_older_than = Some(20_000);
+    let state = reopen(&config, false);
     let history = state.db.history_capabilities().unwrap();
     assert!(history.is_pruned());
     assert_eq!(history.lowest_retained_height, Height(3));
     let tx_cf = state.db.cf_handle("tx_by_loc").unwrap();
-    for height in 0..=3 {
+    for height in 0..=4 {
         let height = Height(height);
         let retained = state
             .db
@@ -374,6 +521,186 @@ fn missing_body_prefix_is_rejected_by_every_writable_database_entry_point() {
     );
 }
 
+#[test]
+fn pruned_kind_disabled_refuses_archive_writes_but_routes_secondary_readers() {
+    let _guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
+        ..Config::default()
+    };
+    let state = populated(&config);
+    let tip = state.db.tip();
+    let pruned_path = state.db.path().to_path_buf();
+    let mut batch = DiskWriteBatch::new();
+    delete_body_prefix(&mut batch, &state.db, Height(2));
+    state.db.write(batch).unwrap();
+    drop(state);
+    config.prune_blocks_older_than = None;
+    let version = state_database_format_version_in_code();
+    assert_eq!(
+        config.state_database_kind(&network).unwrap(),
+        PRUNED_STATE_DATABASE_KIND
+    );
+    assert_eq!(
+        crate::state_database_format_version_on_disk(&config, &network).unwrap(),
+        Some(version.clone())
+    );
+    for skip_checks in [false, true] {
+        let result = FinalizedState::new_with_debug(&config, &network, skip_checks, false);
+        assert!(matches!(
+            result,
+            Err(StateInitError::PrunedDatabase { path, .. }) if path == pruned_path
+        ));
+        assert!(!config
+            .db_path(STATE_DATABASE_KIND, version.major, &network)
+            .exists());
+    }
+    let reader = open(&config, true).unwrap();
+    assert_eq!(reader.db.path(), pruned_path);
+    assert_eq!(reader.db.tip(), tip);
+    assert_eq!(
+        reader
+            .db
+            .history_capabilities()
+            .unwrap()
+            .lowest_retained_height,
+        Height(2)
+    );
+}
+
+#[test]
+fn coexisting_state_kinds_never_choose_or_overwrite_either_database() {
+    let _guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let archive = populated(&config);
+    let archive_path = archive.db.path().to_path_buf();
+    drop(archive);
+    let major = state_database_format_version_in_code().major;
+    let pruned_path = config.db_path(PRUNED_STATE_DATABASE_KIND, major, &network);
+    std::fs::create_dir_all(&pruned_path).unwrap();
+    std::fs::write(pruned_path.join("operator-data"), b"untouched").unwrap();
+    for retention in [None, Some(10_000)] {
+        config.prune_blocks_older_than = retention;
+        for read_only in [false, true] {
+            assert!(matches!(
+                open(&config, read_only),
+                Err(StateInitError::ConflictingStateDirectories)
+            ));
+        }
+        assert!(crate::state_database_format_version_on_disk(&config, &network).is_err());
+        assert!(archive_path.join("CURRENT").exists());
+        assert_eq!(
+            std::fs::read(pruned_path.join("operator-data")).unwrap(),
+            b"untouched"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn state_kind_existence_errors_fail_closed_before_archive_activation() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let archive = populated(&config);
+    let archive_path = archive.db.path().to_path_buf();
+    drop(archive);
+    // A real filesystem lookup failure, independent of uid/permission-test privileges.
+    std::os::unix::fs::symlink("state-pruned", cache.path().join("state-pruned")).unwrap();
+    for retention in [None, Some(10_000)] {
+        config.prune_blocks_older_than = retention;
+        for read_only in [false, true] {
+            assert!(matches!(
+                open(&config, read_only),
+                Err(StateInitError::DatabaseAccess { .. })
+            ));
+        }
+        assert!(config.state_database_kind(&Network::Mainnet).is_err());
+        assert!(archive_path.join("CURRENT").exists());
+    }
+}
+
+#[tokio::test]
+async fn pruned_database_startup_reports_archive_recovery_message() {
+    let _guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let cache = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            prune_blocks_older_than: Some(10_000),
+            ..Config::default()
+        };
+        let state = populated(&config);
+        let mut batch = DiskWriteBatch::new();
+        delete_body_prefix(&mut batch, &state.db, Height(2));
+        state.db.write(batch).unwrap();
+        drop(state);
+        config.prune_blocks_older_than = None;
+        let expected = StateInitError::PrunedDatabase {
+            path: config.db_path(
+                PRUNED_STATE_DATABASE_KIND,
+                state_database_format_version_in_code().major,
+                &Network::Mainnet,
+            ),
+            lowest_retained_height: Height(2),
+        }
+        .to_string();
+
+        let error = tokio::spawn(async move {
+            crate::service::StateService::new(config, &Network::Mainnet, Height(0), 1).await;
+        })
+        .await
+        .expect_err("archive startup must refuse pruned state");
+        let panic = error.into_panic();
+        assert_eq!(panic.downcast_ref::<String>().unwrap(), &expected);
+    })
+    .await
+    .unwrap();
+}
+
+#[test]
+fn complete_pruned_kind_can_disable_pruning_without_moving_or_losing_state() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
+        ..Config::default()
+    };
+    let state = populated(&config);
+    let tip = state.db.tip();
+    drop(state);
+    config.prune_blocks_older_than = None;
+    for read_only in [false, true] {
+        let state = open(&config, read_only).unwrap();
+        assert_eq!(
+            state.db.format_version_in_code(),
+            state_database_format_version_in_code()
+        );
+        assert_eq!(state.db.db_kind(), PRUNED_STATE_DATABASE_KIND);
+        assert_eq!(state.db.tip(), tip);
+        assert!(!state.db.history_capabilities().unwrap().is_pruned());
+        assert!(!config
+            .db_path(
+                STATE_DATABASE_KIND,
+                state_database_format_version_in_code().major,
+                &Network::Mainnet
+            )
+            .exists());
+    }
+}
+
 #[tokio::test]
 async fn read_only_capability_requests_do_not_mutate_history() {
     let _init_guard = zebra_test::init();
@@ -381,6 +708,7 @@ async fn read_only_capability_requests_do_not_mutate_history() {
         let cache = tempfile::tempdir().unwrap();
         let config = Config {
             cache_dir: cache.path().to_path_buf(),
+            prune_blocks_older_than: Some(10_000),
             ..Config::default()
         };
         let state = populated(&config);
@@ -411,6 +739,11 @@ async fn read_only_capability_requests_do_not_mutate_history() {
             ReadResponse::HistoryCapabilities(expected)
         );
         let mut batch = DiskWriteBatch::new();
+        assert!(!secondary.ready_for_pruning());
+        assert!(batch
+            .prepare_history_pruning(&secondary, Height(3), &mut Default::default())
+            .is_err());
+        assert_eq!(batch, DiskWriteBatch::new());
         delete_body_prefix(&mut batch, &secondary, Height(3));
         assert!(
             secondary.write(batch).is_err(),
@@ -499,6 +832,60 @@ fn invalid_retained_suffix_is_not_reported_as_archive_or_pruned() {
 }
 
 #[test]
+fn pruned_index_mode_is_checked_before_returning_a_writable_database() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
+        ..Config::default()
+    };
+    let state = populated(&config);
+    let mut version = state.db.format_version_in_code();
+    version.build = if cfg!(feature = "indexer") {
+        semver::BuildMetadata::EMPTY
+    } else {
+        semver::BuildMetadata::new("indexer").unwrap()
+    };
+    state.db.update_format_version_on_disk(&version).unwrap();
+    let mut batch = DiskWriteBatch::new();
+    delete_body_prefix(&mut batch, &state.db, Height(2));
+    state.db.write(batch).unwrap();
+    let tip = state.db.tip();
+    let block_info = state.db.block_info(Height(1).into());
+    drop(state);
+
+    let error = DiskDb::new(
+        &config,
+        PRUNED_STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &Network::Mainnet,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .expect_err("a pruned database cannot change its spending-index mode");
+    assert!(error.to_string().contains("spending-index mode"));
+    let error = open(&config, false)
+        .expect_err("disabling background format checks must not bypass the open-time preflight");
+    assert!(error.to_string().contains("spending-index mode"));
+
+    let reader = open(&config, true).unwrap();
+    assert_eq!(reader.db.format_version_on_disk().unwrap(), Some(version));
+    assert_eq!(reader.db.tip(), tip);
+    assert_eq!(reader.db.block_info(Height(1).into()), block_info);
+    assert_eq!(
+        reader
+            .db
+            .history_capabilities()
+            .unwrap()
+            .lowest_retained_height,
+        Height(2)
+    );
+}
+
+#[test]
 fn history_migrations_and_index_mode_changes_fail_before_mutation() {
     use super::super::disk_format::upgrade::DbFormatChange;
 
@@ -549,6 +936,68 @@ fn history_migrations_and_index_mode_changes_fail_before_mutation() {
 }
 
 #[test]
+fn shutdown_checks_cannot_enable_pruning_after_cancelled_index_conversion() {
+    use super::super::disk_format::upgrade::{CancelFormatChange, DbFormatChange};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&Config {
+        cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
+        ..Config::default()
+    });
+    let running_version = state.db.format_version_in_code();
+    let mut disk_version = running_version.clone();
+    disk_version.build = if cfg!(feature = "indexer") {
+        semver::BuildMetadata::EMPTY
+    } else {
+        semver::BuildMetadata::new("indexer").unwrap()
+    };
+    state
+        .db
+        .update_format_version_on_disk(&disk_version)
+        .unwrap();
+    let startup = DbFormatChange::open_database(&running_version, Some(disk_version.clone()));
+    let (cancel, cancelled) = crossbeam_channel::bounded(1);
+    cancel.send(CancelFormatChange).unwrap();
+    assert_eq!(
+        startup.run_format_change_or_check(&state.db, Some(Height(3)), &cancelled),
+        Err(CancelFormatChange)
+    );
+    assert!(!state.db.ready_for_pruning());
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap(),
+        Some(disk_version.clone())
+    );
+
+    // Shutdown checks the new blocks without completing startup's spending-index conversion.
+    let (_keep_open, never_cancelled) = crossbeam_channel::bounded(1);
+    DbFormatChange::check_new_blocks(&state.db)
+        .run_format_change_or_check(&state.db, None, &never_cancelled)
+        .unwrap();
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap(),
+        Some(disk_version)
+    );
+    assert!(!state.db.ready_for_pruning());
+    let mut batch = DiskWriteBatch::new();
+    assert!(batch
+        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .is_err());
+    assert_eq!(batch, DiskWriteBatch::new());
+    assert!(state.db.block(Height(1).into()).unwrap().is_some());
+
+    startup
+        .run_format_change_or_check(&state.db, Some(Height(3)), &never_cancelled)
+        .unwrap();
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap(),
+        Some(running_version)
+    );
+    assert!(state.db.ready_for_pruning());
+}
+
+#[test]
 fn pruning_readiness_waits_for_migrations_and_uncancelled_checks() {
     use super::super::disk_format::upgrade::{CancelFormatChange, DbFormatChange};
 
@@ -581,15 +1030,17 @@ fn pruning_readiness_waits_for_migrations_and_uncancelled_checks() {
     assert!(state.db.ready_for_pruning());
 }
 
-#[test]
-fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
+fn populated_with_witness(
+    config: &Config,
+    witness_height: Height,
+    tip_height: Height,
+) -> FinalizedState {
     use zebra_chain::{
         parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
         transaction::{LockTime, Transaction},
         transparent::Input,
     };
 
-    let _init_guard = zebra_test::init();
     let network = Network::new_regtest(zebra_chain::parameters::testnet::RegtestParameters {
         activation_heights: ConfiguredActivationHeights {
             nu5: Some(1),
@@ -597,18 +1048,15 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
         },
         ..Default::default()
     });
-    let cache = tempfile::tempdir().unwrap();
     let config = Config {
-        cache_dir: cache.path().to_path_buf(),
-        ..Config::default()
+        prune_blocks_older_than: Some(10_000),
+        ..config.clone()
     };
     let state = FinalizedState::new_with_debug(&config, &network, true, false).unwrap();
     state
         .db
-        .update_format_version_on_disk(&state_database_format_version_in_code())
+        .update_format_version_on_disk(&state.db.format_version_in_code())
         .unwrap();
-    let witness_height = Height(3);
-    let tip_height = Height(witness_height.0 + 15_000);
     let mut header: zebra_chain::block::Header = zebra_test::vectors::DUMMY_HEADER
         .as_slice()
         .zcash_deserialize_into()
@@ -655,17 +1103,66 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
         header.previous_block_hash = hash;
     }
     state.db.write(batch).unwrap();
+    state
+}
+
+#[test]
+fn pruning_waits_after_a_long_branchless_suffix() {
+    let _init_guard = zebra_test::init();
+    let witness_height = Height(3);
+    let suffix_length = u32::try_from(crate::constants::MAX_LEGACY_CHAIN_BLOCKS).unwrap() + 1;
+    let state = populated_with_witness(
+        &Config::ephemeral(),
+        witness_height,
+        Height(witness_height.0 + suffix_length),
+    );
+    state.db.mark_ready_for_pruning();
+    let mut witness = Default::default();
+    for _ in 0..2 {
+        let mut batch = DiskWriteBatch::new();
+        assert_eq!(
+            batch
+                .prepare_history_pruning(&state.db, Height(101), &mut witness)
+                .unwrap(),
+            None
+        );
+        assert_eq!(batch, DiskWriteBatch::new());
+    }
+    assert_eq!(
+        state.db.history_capabilities().unwrap(),
+        HistoryCapabilities::default()
+    );
+    assert!(state.db.block(witness_height.into()).unwrap().is_some());
+}
+
+#[test]
+fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
+    use zebra_chain::parameters::NetworkUpgrade;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let witness_height = Height(3);
+    let tip_height = Height(witness_height.0 + 15_000);
+    let state = populated_with_witness(&config, witness_height, tip_height);
+    let network = state.db.network();
 
     // The fixture writes block indexes directly; readiness is tested separately above.
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(5_004))
+        .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     state.db.mark_ready_for_pruning();
-    batch
-        .prepare_history_pruning(&state.db, Height(5_004))
-        .unwrap();
+    assert_eq!(
+        batch
+            .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+            .unwrap(),
+        Some(witness_height)
+    );
     state.db.write(batch).unwrap();
     assert_eq!(
         state
@@ -675,6 +1172,15 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
             .lowest_retained_height,
         witness_height
     );
+    let mut waiting = DiskWriteBatch::new();
+    assert_eq!(
+        waiting
+            .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+            .unwrap(),
+        None
+    );
+    assert_eq!(waiting, DiskWriteBatch::new());
+    assert!(state.db.block(witness_height.into()).unwrap().is_some());
     drop(state);
 
     let reopened = FinalizedState::new_with_debug(&config, &network, true, true).unwrap();
@@ -774,4 +1280,274 @@ fn recent_address_checks_reject_an_unavailable_required_window() {
     let (_sender, receiver) = crossbeam_channel::bounded(1);
     let error = Upgrade.validate(&state.db, &receiver).unwrap().unwrap_err();
     assert!(error.contains("require unavailable block history"));
+}
+
+#[test]
+fn external_readers_follow_activation_without_moving_the_archive_themselves() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let archive = populated(&config);
+    let tip = archive.db.tip();
+    let archive_path = archive.db.path().to_path_buf();
+    drop(archive);
+    config.prune_blocks_older_than = Some(10_000);
+    let reader = open(&config, true).unwrap();
+    assert_eq!(reader.db.path(), archive_path);
+    assert_eq!(reader.db.tip(), tip);
+    assert_eq!(
+        config.state_database_kind(&Network::Mainnet).unwrap(),
+        STATE_DATABASE_KIND
+    );
+    drop(reader);
+    assert!(matches!(
+        open(&config, false),
+        Err(StateInitError::PruningRequiresIsolatedState { .. })
+    ));
+    let version = state_database_format_version_in_code();
+    let isolated_path =
+        config.db_path(PRUNED_STATE_DATABASE_KIND, version.major, &Network::Mainnet);
+    assert!(!isolated_path.exists());
+    std::fs::create_dir_all(isolated_path.parent().unwrap()).unwrap();
+    std::fs::rename(&archive_path, &isolated_path).unwrap();
+    let writer = open(&config, false).unwrap();
+    let pruned_path = writer.db.path().to_path_buf();
+    assert_eq!(writer.db.db_kind(), PRUNED_STATE_DATABASE_KIND);
+    assert_eq!(writer.db.tip(), tip);
+    assert!(!archive_path.exists());
+    let kind = config.state_database_kind(&Network::Mainnet).unwrap();
+    let version = state_database_format_version_in_code();
+    assert_eq!(
+        config.db_path(kind, version.major, &Network::Mainnet),
+        pruned_path
+    );
+    crate::write_state_database_format_version_to_disk(&config, &version, &Network::Mainnet)
+        .unwrap();
+    let reader = open(&config, true).unwrap();
+    assert_eq!(reader.db.path(), pruned_path);
+    assert_eq!(reader.db.tip(), tip);
+    assert_eq!(reader.db.format_version_on_disk().unwrap(), Some(version));
+}
+
+#[test]
+fn live_archive_rejects_pruning_activation_without_moving_its_database() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let state = populated(&config);
+    let archive_path = state.db.path().to_path_buf();
+    let tip = state.db.tip();
+    let version = state_database_format_version_in_code();
+    let pruned_path = config.db_path(PRUNED_STATE_DATABASE_KIND, version.major, &Network::Mainnet);
+    let pruning_config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..config.clone()
+    };
+    assert!(matches!(
+        open(&pruning_config, false),
+        Err(StateInitError::PruningRequiresIsolatedState { .. })
+    ));
+    assert!(archive_path.join("CURRENT").exists());
+    assert!(!pruned_path.exists());
+    assert_eq!(state.db.tip(), tip);
+
+    // The rejected activation must leave the original primary usable.
+    let location = TransactionLocation::min_for_height(Height(3));
+    let cf = state.db.cf_handle("tx_by_loc").unwrap();
+    let body = state
+        .db
+        .get_pinned_cf(&cf, location.as_bytes())
+        .unwrap()
+        .unwrap();
+    state
+        .db
+        .put_cf(&cf, location.as_bytes(), body.as_ref())
+        .unwrap();
+    assert!(state.db.block(Height(3).into()).unwrap().is_some());
+    drop(body);
+    drop(state);
+    let restarted = open(&config, false).unwrap();
+    assert_eq!(restarted.db.path(), archive_path);
+    assert_eq!(restarted.db.tip(), tip);
+}
+
+#[test]
+fn pruning_activation_refuses_archives_before_any_previous_major_reuse() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let version = state_database_format_version_in_code();
+    let mut previous = version.clone();
+    previous.major -= 1;
+    let primary = DiskDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &previous,
+        &Network::Mainnet,
+        [],
+        false,
+    )
+    .unwrap();
+    let previous_path = primary.path().to_path_buf();
+    config.prune_blocks_older_than = Some(10_000);
+    assert!(matches!(
+        open(&config, false),
+        Err(StateInitError::PruningRequiresIsolatedState { .. })
+    ));
+    assert!(previous_path.join("CURRENT").exists());
+    assert!(!config
+        .db_path(STATE_DATABASE_KIND, version.major, &Network::Mainnet)
+        .exists());
+    assert!(!config
+        .db_path(PRUNED_STATE_DATABASE_KIND, version.major, &Network::Mainnet)
+        .exists());
+}
+
+#[tokio::test]
+async fn archive_major_reuse_accepts_missing_and_legacy_version_metadata() {
+    use crate::service::finalized_state::zebra_db::chain::{BLOCK_INFO, CHAIN_VALUE_POOLS};
+
+    let _guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let version = state_database_format_version_in_code();
+    for legacy_version in [None, Some("0.0")] {
+        let cache = tempfile::tempdir().unwrap();
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            ..Config::default()
+        };
+        let archive = populated(&config);
+        let tip = archive.db.tip();
+        let current_path = archive.db.path().to_path_buf();
+        let pools = archive.db.finalized_value_pool();
+        archive
+            .db
+            .put_cf(
+                &archive.db.cf_handle(CHAIN_VALUE_POOLS).unwrap(),
+                [],
+                &pools.to_bytes()[..48],
+            )
+            .unwrap();
+        let block_info: Vec<_> = (0..=3)
+            .map(|height| {
+                (
+                    Height(height),
+                    archive.db.block_info(Height(height).into()).unwrap(),
+                )
+            })
+            .collect();
+        for (height, info) in &block_info {
+            let mut legacy = [0; 52];
+            legacy[..48].copy_from_slice(&info.value_pools().to_bytes()[..48]);
+            legacy[48..].copy_from_slice(&info.size().to_le_bytes());
+            archive
+                .db
+                .put_cf(
+                    &archive.db.cf_handle(BLOCK_INFO).unwrap(),
+                    height.as_bytes(),
+                    legacy,
+                )
+                .unwrap();
+        }
+        drop(archive);
+        let previous_path = config.db_path(STATE_DATABASE_KIND, version.major - 1, &network);
+        std::fs::create_dir_all(previous_path.parent().unwrap()).unwrap();
+        std::fs::rename(&current_path, &previous_path).unwrap();
+        let version_path = previous_path.join("version");
+        if let Some(legacy_version) = legacy_version {
+            std::fs::write(&version_path, legacy_version).unwrap();
+        } else {
+            std::fs::remove_file(&version_path).unwrap();
+        }
+
+        // Exercise a real writable initialization with nonempty state and normal format checks.
+        let mut state = FinalizedState::new(&config, &network).unwrap();
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !state.db.ready_for_pruning() {
+                state.db.check_for_panics();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(state.db.path(), current_path);
+        assert!(!previous_path.exists());
+        assert_eq!(state.db.tip(), tip);
+        assert_eq!(
+            state.db.format_version_on_disk().unwrap(),
+            Some(version.clone())
+        );
+        assert_eq!(state.db.finalized_value_pool(), pools);
+        for (height, info) in block_info {
+            assert_eq!(state.db.block_info(height.into()), Some(info));
+            assert_eq!(
+                state
+                    .db
+                    .get_pinned_cf(&state.db.cf_handle(BLOCK_INFO).unwrap(), height.as_bytes())
+                    .unwrap()
+                    .unwrap()
+                    .len(),
+                52
+            );
+        }
+        for height in 0..=3 {
+            assert!(state.db.block(Height(height).into()).unwrap().is_some());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn inaccessible_pruned_kind_directory_does_not_activate_or_hide_an_archive() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        prune_blocks_older_than: Some(10_000),
+        ..Config::default()
+    };
+    let archive_config = Config {
+        prune_blocks_older_than: None,
+        ..config.clone()
+    };
+    let archive = populated(&archive_config);
+    let archive_path = archive.db.path().to_path_buf();
+    drop(archive);
+    let pruned_kind = cache.path().join(PRUNED_STATE_DATABASE_KIND);
+    std::fs::create_dir(&pruned_kind).unwrap();
+    let permissions = std::fs::metadata(&pruned_kind).unwrap().permissions();
+    std::fs::set_permissions(&pruned_kind, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let permission_check = std::fs::read_dir(&pruned_kind);
+    let result = open(&config, false);
+    std::fs::set_permissions(&pruned_kind, permissions).unwrap();
+    // Privileged processes can bypass discretionary permissions; the symlink-loop case is
+    // independent of that privilege and still covers a real filesystem lookup failure.
+    if permission_check.is_ok() {
+        return;
+    }
+    let StateInitError::DatabaseAccess { source, .. } = result.unwrap_err() else {
+        panic!("an inaccessible pruning directory must propagate its lookup error");
+    };
+    assert_eq!(
+        source.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    assert!(archive_path.join("CURRENT").exists());
+    assert!(!pruned_kind
+        .join(format!(
+            "v{}",
+            state_database_format_version_in_code().major
+        ))
+        .exists());
 }

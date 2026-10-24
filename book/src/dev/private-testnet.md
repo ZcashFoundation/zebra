@@ -30,18 +30,21 @@ below uses `Nu7Private` and `[0, 1, 0, 7]`, giving `nu7private-00010007`. Under
 | `state/vN/testnet` | `state/vN/nu7private-00010007` |
 | `non_finalized_state/testnet` | `non_finalized_state/nu7private-00010007` |
 
-Use the actual database version `N` supported by the test binary. The NU7/NSM
-database uses `v29`. Prepare the public snapshot with a v29-compatible writer
-before forking: its registered upgrade automatically moves compatible v28 state
-into `state/v29` when no v29 database exists, without a public Testnet resync.
-Legacy records remain readable with a zero NSM balance; new writes use the wider
-layout. Stop Zebra again before copying the upgraded snapshot, and keep the
-snapshot and any copied non-finalized blocks below the private activation.
+Use the actual database version `N` supported by the test binary. Current builds
+use `v29` for both archive and pruned state. Its registered upgrade moves compatible
+v28 archives into `state/v29` without a public Testnet resync. Prepare a complete
+archive with pruning disabled before forking. Legacy records remain readable with
+a zero NSM balance; new writes retain the wider NSM layout. Stop Zebra again before
+copying, and keep the snapshot and copied non-finalized blocks below the private activation.
 
-Retain an untouched v28 backup before upgrading if rollback is needed.
-`state.delete_old_database = false` does not preserve the directory that the
-upgrade moves. Manually renaming or symlinking versioned directories is not a
-substitute for the supported upgrade. Upgrade direct database readers, including
+Retain an untouched archive backup outside the managed cache before upgrading if
+rollback is needed. Disabling old-database cleanup does not prevent the upgrade move.
+Pruning an existing archive requires a separate stopped-node move from
+`state/v29/<network>` to an absent `state-pruned/v29/<network>` destination before enabling it.
+Startup refuses to perform that activation automatically. Never restore a pruned snapshot into
+the archive kind or merge
+destinations; this procedure requires a complete archive, not a pruned source.
+Upgrade direct database readers, including
 Zallet and Zaino backends, with the writer as described in
 [State Database Upgrades](state-db-upgrades.md#upgrading-the-state-database).
 

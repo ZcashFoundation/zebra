@@ -70,6 +70,7 @@ pub mod check;
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
+mod pruning;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -238,12 +239,18 @@ pub struct ReadStateService {
     ///
     /// Used to check for panics when writing blocks.
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
+
+    /// Shares fatal worker checks; the writable state stops this task before closing the database.
+    pruning_task: Option<Arc<pruning::PruningTask>>,
 }
 
 impl Drop for StateService {
     fn drop(&mut self) {
         // The state service owns the state, tasks, and channels,
         // so dropping it should shut down everything.
+        if let Some(task) = &self.read_service.pruning_task {
+            task.stop();
+        }
 
         // Close the channels (non-blocking)
         // This makes the block write thread exit the next time it checks the channels.
@@ -270,6 +277,7 @@ impl Drop for ReadStateService {
     fn drop(&mut self) {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
+        drop(self.pruning_task.take());
 
         // TODO: move this into a try_shutdown() method
         if let Some(block_write_task) = self.block_write_task.take() {
@@ -349,12 +357,7 @@ impl StateService {
                     &network,
                     debug_skip_format_upgrades,
                     false,
-                )
-                .expect(
-                    "opening the read-write finalized state database failed; check that the \
-                     state cache directory is writable and not locked by another Zebra instance, \
-                     and that there is free disk space",
-                );
+                )?;
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
@@ -363,10 +366,11 @@ impl StateService {
                     .tip_block()
                     .expect("the finalized tip must have a complete stored body");
 
-                (finalized_state, finalized_tip, timer)
+                Ok((finalized_state, finalized_tip, timer))
             })
             .await
             .expect("failed to join blocking task")
+            .unwrap_or_else(|error: StateInitError| panic!("{error}"))
         };
 
         // # Correctness
@@ -423,6 +427,10 @@ impl StateService {
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
+        let (pruning_wake, pruning_receiver) = config
+            .prune_blocks_older_than
+            .map(|_| crossbeam_channel::bounded(1))
+            .unzip();
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -435,9 +443,10 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
+            pruning_wake,
         );
 
-        let read_service = ReadStateService::new(
+        let mut read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
@@ -456,7 +465,7 @@ impl StateService {
                 .await
                 .expect("failed to join blocking task");
 
-        let state = Self {
+        let mut state = Self {
             network: network.clone(),
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
@@ -510,6 +519,12 @@ impl StateService {
 
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
+
+        if let (Some(retention), Some(wake)) = (config.prune_blocks_older_than, pruning_receiver) {
+            let task = pruning::PruningTask::spawn(read_service.db.clone(), retention, wake);
+            state.read_service.pruning_task = Some(task.clone());
+            read_service.pruning_task = Some(task);
+        }
 
         // Spawn a background task to periodically export RocksDB metrics to Prometheus
         let db_for_metrics = read_service.db.clone();
@@ -1054,6 +1069,7 @@ impl ReadStateService {
             db: finalized_state.db.clone(),
             non_finalized_state_receiver,
             block_write_task,
+            pruning_task: None,
         };
 
         tracing::debug!("created new read-only state service");
@@ -1465,6 +1481,9 @@ impl Service<ReadRequest> for ReadStateService {
             }
         }
 
+        if let Some(task) = &self.pruning_task {
+            task.check_for_panics();
+        }
         self.db.check_for_panics();
 
         Poll::Ready(Ok(()))

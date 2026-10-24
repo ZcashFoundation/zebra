@@ -1,0 +1,23 @@
+project: zebrad
+kind: Added
+body: >-
+  Added opt-in historical block-body pruning with `state.prune_blocks_older_than`; archives
+  remain the default in `state/v29` and retain rollback compatibility with Zebra 7.0.0.
+  Existing archives require an explicit stopped-node move into an absent `state-pruned/v29`
+  directory before enabling pruning. Stop every writer and direct reader and keep a separate
+  archive backup first; startup never performs this activation move. New pruning caches start
+  isolated directly, using the same format version and upgrade sequence.
+  Inaccessible or coexisting archive/pruned paths fail without fallback or overwrite.
+  Disabling pruning keeps the isolated directory if all bodies remain; after deletion, restore
+  an archive snapshot or fully resync in a separate cache.
+  Retention counts finalized bodies, keeps genesis, and requires at least 10,000 bodies on
+  Mainnet/Testnet or 1,001 on Regtest. Increasing retention affects future deletion only.
+  Normal compaction reclaims disk space without an immediate reduction guarantee.
+  Enabling pruning immediately stops advertising archive service and rejects zcashd sidecars.
+  Unavailable bodies return `notfound`; block inventory stops at missing history while headers
+  remain available. Pruning retains a restart witness and waits without deleting bodies when
+  a bounded search finds none; valid branchless suffixes do not stop the running node.
+  Monitor the retained floor, deleted heights, and batch latency through
+  `state.pruning.retained.height`, `state.pruning.deleted.height.count`, and
+  `state.pruning.batch.duration_seconds`.
+time: 2026-10-25T01:27:48.892073814+02:00
