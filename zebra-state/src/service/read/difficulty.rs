@@ -209,14 +209,23 @@ pub(crate) fn mining_candidate_chain_info(
     let mut sapling = read::tree::sapling_tree(chain, db, tip_hash.into())?;
     let mut orchard = read::tree::orchard_tree(chain, db, tip_hash.into())?;
     let mut ironwood = read::tree::ironwood_tree(chain, db, tip_hash.into())?;
-    for commitment in block.sapling_note_commitments() {
-        Arc::make_mut(&mut sapling).append(commitment).ok()?;
+    let commitments: Vec<_> = block.sapling_note_commitments().collect();
+    if !commitments.is_empty() {
+        Arc::make_mut(&mut sapling)
+            .append_batch(&commitments)
+            .ok()?;
     }
-    for commitment in block.orchard_note_commitments() {
-        Arc::make_mut(&mut orchard).append(commitment).ok()?;
+    let commitments: Vec<_> = block.orchard_note_commitments().collect();
+    if !commitments.is_empty() {
+        Arc::make_mut(&mut orchard)
+            .append_batch(&commitments)
+            .ok()?;
     }
-    for commitment in block.ironwood_note_commitments() {
-        Arc::make_mut(&mut ironwood).append(commitment).ok()?;
+    let commitments: Vec<_> = block.ironwood_note_commitments().collect();
+    if !commitments.is_empty() {
+        Arc::make_mut(&mut ironwood)
+            .append_batch(&commitments)
+            .ok()?;
     }
     let sapling_root = sapling.root();
     if let block::Commitment::FinalSaplingRoot(root) = block.commitment(network).ok()? {
