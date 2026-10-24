@@ -33,8 +33,8 @@ on PRs and merge groups, while retaining required status reporting.
 Pushes to `main` bypass filtering and set worker-selection outputs to `true`.
 
 The filter keys include `lint`, `hadolint`, `shellcheck`, `api_diff`,
-`unit_tests`, `test_crates`, `test_docker`, `book`, `coverage`, and
-`docs_check`. Edit the shared file rather than duplicating these globs in a
+`unit_tests`, `test_crates`, `test_docker`, `book`, `book_links`, `coverage`,
+and `docs_check`. Edit the shared file rather than duplicating these globs in a
 new job. Each filter includes the shared file itself. GCP integration and
 node-deployment workflows instead have their own event and path filters;
 changing the shared file does not automatically run those workflows.
@@ -54,6 +54,16 @@ Add gated workers to the aggregator's `needs` and legitimate skips to
 `allowed-skips`; retain `merge_group`. Require a new context only after a
 workflow produces it. The crate matrix discovers workspace crates with
 `cargo tree`; new crates need no matrix entry.
+
+### Documentation
+
+The [Docs Check workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs-check.yml)
+runs on PRs and merge groups that change Markdown or the book: `spell-check`
+(codespell) and `markdown-lint` (markdownlint) under the `docs_check` filter,
+and `book-links` under the `book_links` filter, which builds the book and
+checks its internal links and anchors offline. It is not a required
+context. External links are checked weekly by the
+[Advisory Checks workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/advisory.yml).
 
 ### Runners and build caches
 
