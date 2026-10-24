@@ -209,9 +209,8 @@ tags, and fills missing external state. It repairs configured mutable metadata
 or prerelease channels.
 
 If automation remains unavailable, obtain maintainer authorization to use the
-[legacy checklist][legacy-checklist]. Its direct-changelog and channel-promotion
-instructions do not override current Changie and immutable-channel requirements.
-Never run manual publication concurrently with the controller.
+[legacy checklist][legacy-checklist]. Never run manual publication concurrently
+with the controller.
 
 ### Withdraw a bad release
 
