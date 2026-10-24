@@ -1,5 +1,17 @@
 # Parallel Verification
 
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: the [router](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/router.rs), [block verifier](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/block.rs), [checkpoint verifier](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint.rs), and [contextual checks](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/check.rs).
+
+- The router is `BlockVerifierRouter`; it uses `SemanticBlockVerifier`.
+- The router accepts [`Request::Commit` or `Request::CheckProposal`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/block/request.rs), not a bare block.
+- The verifiers commit blocks to state; the router does not.
+- The block verifier sends `CommitSemanticallyVerifiedBlock` requests.
+- The checkpoint verifier sends `CommitCheckpointVerifiedBlock` requests.
+
+---
+
 - Feature Name: parallel_verification
 - Start Date: 2020-07-27
 - Design PR: [ZcashFoundation/zebra#763](https://github.com/ZcashFoundation/zebra/pull/763)

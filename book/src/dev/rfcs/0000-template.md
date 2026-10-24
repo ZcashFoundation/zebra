@@ -1,7 +1,13 @@
+# RFC template
+
+Status (Zebra 7.0.0): **Superseded**.
+
+Current location: the [ADR template](https://github.com/ZcashFoundation/zebra/blob/main/docs/decisions/template.md) and [decision log](https://github.com/ZcashFoundation/zebra/blob/main/docs/decisions/README.md).
+
 - Feature Name: (fill me in with a unique ident, `my_awesome_feature`)
 - Start Date: (fill me in with today's date, YYYY-MM-DD)
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/0000)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
+- Design PR: (fill me in with the design pull request)
+- Zebra Issue: (fill me in with the tracking issue)
 
 # Summary
 
@@ -54,7 +60,7 @@ The section should return to the examples given in the previous section, and exp
 
 If this design is based on Zcash consensus rules, quote them, and link to the Zcash spec or ZIP:
 <https://zips.z.cash/protocol/nu5.pdf#contents>
-<https://zips.z.cash/#nu5-zips>
+<https://zips.z.cash/zip-0252>
 
 If this design changes network behaviour, quote and link to the Bitcoin network reference or wiki:
 <https://developer.bitcoin.org/reference/p2p_networking.html>
