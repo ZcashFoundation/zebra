@@ -1,113 +1,179 @@
-# Profiling and Benchmarking Zebra
+# Profiling and benchmarking Zebra
 
-Let's have a look at how we can inspect and evaluate Zebra's performance.
+Record the commit, Rust toolchain, Cargo features, configuration, network,
+height range, and machine. Keep them fixed except for the change measured.
 
 ## Profiling
 
-To profile Zebra, you can use the [samply](https://github.com/mstange/samply)
-profiler. Once you have it installed, you can run:
+The [samply] sampling profiler records native call stacks. Zebra defines a
+`profiling` Cargo profile in [`.cargo/config.toml`][cargo-config]; it inherits
+release optimizations and enables debug information for workspace crates.
+Release-profile package overrides disable debug information for dependencies.
 
-```bash
-cargo build --profile profiling
-sudo samply record ./target/profiling/zebrad
+Install the profiler and build from the repository root:
+
+```sh
+cargo install --locked samply
+cargo build --locked -p zebrad --profile profiling --bin zebrad
+samply record ./target/profiling/zebrad --config zebrad.toml start
 ```
 
-You can then press `Ctrl+c`, and the profiler will instruct you to navigate your
-web browser to <http://127.0.0.1:3000> where you can snoop around the call stack
-to see where Zebra loafs around the most.
+Stop the workload with `Ctrl+C` after collecting the intended interval.
+Samply opens the profile in the Firefox Profiler interface and serves local
+symbol information. Profiles remain local unless uploaded through the
+profiler. On Linux, samply needs permission to use performance events; follow
+its [platform setup instructions][samply] rather than running the node as
+root.
+
+Use the [Tokio console](tokio-console.md#setup) for async polling and wake activity.
+
+### Tracing flamegraphs
+
+Zebra's `flamegraph` feature records time in tracing spans, which are named
+instrumented operations. It does not sample every native function. Build
+without compile-time log-level restrictions when collecting detailed spans:
+
+```sh
+cargo build --locked -p zebrad --release --no-default-features \
+  --features flamegraph --bin zebrad
+```
+
+Add the output path and the required target filters to the node's profiling
+configuration:
+
+```toml
+[tracing]
+flamegraph = "zebra-profile"
+filter = "info,zebrad=trace,zebra_consensus=trace,zebra_state=trace"
+```
+
+Run that binary with the configuration file:
+
+```sh
+./target/release/zebrad --config zebrad-profile.toml start
+```
+
+The [flamegraph layer] records folded tracing stacks in
+`zebra-profile.folded`. During normal component shutdown, Zebra flushes the
+folded data and generates `zebra-profile.svg`. Any extension supplied in the
+configuration is replaced with `.folded` and `.svg`. A forced termination can
+prevent the SVG from being generated. The output directory must already exist
+and be writable.
+
+Trace-level logging and span collection add work to the process. Use the same
+instrumentation when comparing profiles, and use uninstrumented benchmark
+runs for the performance claim.
 
 ## Benchmarking
 
-To benchmark Zebra consistently, you'll need to suppress unpredictable latency
-fluctuations coming from the network. You can do that by running two Zebra
-instances on your localhost: one that is synced up to the block height of your
-interest, and one that will connect only to the first instance.
+Zebra has [Criterion] benchmarks in `zebra-chain/benches/` and
+`zebra-consensus/benches/`. Run an individual target from the workspace root:
 
-To spin up the synced instance, you can run
+| Crate | Target | Operation | Command |
+| --- | --- | --- | --- |
+| `zebra-chain` | `block` | Block serialization and deserialization | `cargo bench --locked -p zebra-chain --bench block --features bench` |
+| `zebra-chain` | `transaction` | Transaction serialization and deserialization | `cargo bench --locked -p zebra-chain --bench transaction` |
+| `zebra-chain` | `redpallas` | Batched and individual RedPallas signature verification | `cargo bench --locked -p zebra-chain --bench redpallas` |
+| `zebra-consensus` | `groth16` | Sprout Groth16 proof verification | `cargo bench --locked -p zebra-consensus --bench groth16` |
+| `zebra-consensus` | `halo2` | Orchard Halo2 proof verification | `cargo bench --locked -p zebra-consensus --bench halo2` |
+| `zebra-consensus` | `sapling` | Sapling proof and signature verification | `cargo bench --locked -p zebra-consensus --bench sapling` |
 
-```bash
-cargo run --release -- --config /path/to/zebrad-synced.toml
+The transaction target uses version 1 through 5 vectors; the Halo2 target uses
+pre-NU6.2 Orchard vectors and its verifying key. Add representative inputs for
+paths these benchmarks omit.
+
+To compare two revisions locally, save a Criterion baseline before changing
+the source:
+
+```sh
+cargo bench --locked -p zebra-chain --bench transaction -- --save-baseline before
 ```
 
-with `/path/to/zebrad-synced.toml` pointing to the config below
+After switching to the proposed revision, rerun with the same build settings
+and target directory:
+
+```sh
+cargo bench --locked -p zebra-chain --bench transaction -- --save-baseline after
+cargo install --locked critcmp
+critcmp before after
+```
+
+Keep other CPU- and I/O-intensive jobs off the benchmark host during the
+measurement. Repeat comparisons that are close to run-to-run variation;
+report the workload and measured uncertainty rather than only a percentage.
+
+### CI comparisons and dashboard
+
+Dispatch the [benchmark workflow] to update the [benchmark dashboard], or
+apply the `run-benchmarks` pull request label for a base/head comparison.
+See [benchmark CI](continuous-integration.md#benchmarks) for triggers, target
+registration, and result handling. Confirm small differences on a controlled
+host.
+
+### Local synchronization workload
+
+Measure a second node downloading from a synchronized source node to reduce
+public-peer variability. Initial peer lists are seeds, not allowlists; enforce
+isolation outside Zebra to restrict connections to the source. Disabling the
+peer cache and delaying crawls do not prevent peer requests when the peer set
+is busy.
+
+Give the source its own persistent state directory. Replace the example path
+with the synchronized Mainnet cache:
 
 ```toml
-# Config for a synced Zebra instance in a network-suppressed setup.
-
 [network]
-cache_dir = true
-max_connections_per_ip = 1000
 network = "Mainnet"
+listen_addr = "127.0.0.1:8233"
 
 [state]
-# cache_dir = "/path/to/.cache/zebra-synced"
-delete_old_database = true
-ephemeral = false
-
-[sync]
-checkpoint_verify_concurrency_limit = 1000
-parallel_cpu_threads = 0
+cache_dir = "/path/to/synced-mainnet-cache"
 ```
 
-This config makes Zebra, among other things, accept quick reconnections from the
-same IP, which will be localhost. Without this setup, Zebra would quickly start
-treating localhost as a bad peer, and refuse subsequent reconnections, not
-knowing that they come from separate instances.
+Build the binary and start the source outside the timed interval:
 
-To spin up the second instance, first compile the version you want to benchmark:
-
-```bash
-cargo build --release
+```sh
+cargo build --locked --release -p zebrad --bin zebrad
+./target/release/zebrad --config zebrad-source.toml start
 ```
 
-and run
-
-```bash
-time ./target/release/zebrad --config /path/to/zebrad-isolated.toml
-```
-
-with `path/to/zebrad-isolated.toml` pointing to the config below
+Use a separate configuration for the measured node:
 
 ```toml
-# Config for an isolated Zebra instance in a network-suppressed setup.
-
 [network]
+network = "Mainnet"
 listen_addr = "127.0.0.1:8234"
+initial_mainnet_peers = ["127.0.0.1:8233"]
 cache_dir = false
+peerset_initial_target_size = 1
 crawl_new_peer_interval = "10d"
 
-initial_mainnet_peers = [
-    "127.0.0.1:8233",
-]
-
-initial_testnet_peers = [
-    "127.0.0.1:8233",
-]
-
-max_connections_per_ip = 1
-network = "Mainnet"
-peerset_initial_target_size = 1
-
 [state]
-# cache_dir = "/path/to/.cache/zebra-isolated"
-delete_old_database = true
 ephemeral = true
 debug_stop_at_height = 10_000
 ```
 
-This config makes Zebra:
+The measured node uses a temporary database, flushing and removing it when
+finalized state reaches height 10,000. A crash can leave temporary files.
+The height-triggered exit bypasses tracing shutdown and SVG generation.
+Time the process directly:
 
-1. connect only to the synced instance via localhost;
-2. use an ephemeral state, so you can run the benchmark again;
-3. stop at height 10_000.
+```sh
+time ./target/release/zebrad --config zebrad-measured.toml start
+```
 
-Note that:
+Use distinct ports and state directories. Keep the source running with the
+required blocks and wait for the measured process to exit between runs.
+Operating-system and source-node caches survive database recreation; record
+whether measurements use warm or cold caches.
 
-- You can adjust both configs to your liking.
-- You can repeat the `time` command as many times as you need.
-- You can use the two-instance setup for profiling as well.
-- You will likely need to rebuild Zebra for each change you want to benchmark.
-  To speed the build process up, you can link RocksDB dynamically, as described
-  in the section on [building Zebra][building-zebra].
+The 10,000-block workload measures checkpoint synchronization. To measure full
+verification, set `[consensus] checkpoint_sync = false` and stop above the
+[mandatory checkpoint coverage](zebra-checkpoints.md#checkpoint-coverage-and-spacing).
 
-[building-zebra]: https://zebra.zfnd.org/user/install.html#building-zebra
+[samply]: https://github.com/mstange/samply
+[cargo-config]: https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml
+[flamegraph layer]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/tracing/flame.rs
+[Criterion]: https://github.com/bheisler/criterion.rs
+[benchmark workflow]: https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/benchmarks.yml
+[benchmark dashboard]: https://zebra.zfnd.org/dev/bench/
