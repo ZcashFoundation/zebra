@@ -20,6 +20,9 @@
 //!
 //! - Endpoints are unauthenticated by design. Bind to internal network interfaces,
 //!   and restrict exposure using network policy, firewall rules, and service configuration.
+//! - Each connection serves one request. The server drops connections past its connection and
+//!   request limits, and closes connections that don't send their request headers in time. A
+//!   client that can reach the endpoint can still use up those limits and make probes fail.
 //! - The server does not access or return private data. It only summarises coarse node state.
 //!
 //! Configuration and examples
@@ -46,9 +49,9 @@ use hyper::{
     body::Incoming, http::response::Builder as ResponseBuilder, Method, Request, Response,
     StatusCode,
 };
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{
-    sync::watch,
+    sync::{watch, Semaphore},
     task::JoinHandle,
     time::{self, MissedTickBehavior},
 };
@@ -64,9 +67,17 @@ const PEER_METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const METHOD_NOT_ALLOWED_MSG: &str = "method not allowed";
 const NOT_FOUND_MSG: &str = "not found";
 
-/// The maximum number of requests that will be handled in a given time interval before requests are dropped.
+/// The maximum number of requests that will be handled in a given time interval before requests are
+/// dropped. Each connection serves one request, so this also limits new connections.
 const MAX_RECENT_REQUESTS: usize = 10_000;
 const RECENT_REQUEST_INTERVAL: Duration = Duration::from_secs(5);
+
+/// The maximum number of connections served at once. Connections past it are dropped, so the
+/// endpoint can't use up the file descriptors the node needs for peers and the database.
+const MAX_CONNECTIONS: usize = 32;
+
+/// How long a client has to send its request headers before the server closes the connection.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 struct HealthCtx<SyncStatus>
@@ -329,6 +340,7 @@ async fn run_health_server<SyncStatus>(
 {
     let mut num_recent_requests: usize = 0;
     let mut last_request_count_reset_time = Instant::now();
+    let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     // Dedicated accept loop to keep request handling small and predictable; we
     // still spawn per-connection tasks but share the context clone.
@@ -336,6 +348,11 @@ async fn run_health_server<SyncStatus>(
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
+                // Drop the connection if too many connections are open.
+                let Ok(permit) = connections.clone().try_acquire_owned() else {
+                    continue;
+                };
+
                 if !allow_request(
                     &mut num_recent_requests,
                     &mut last_request_count_reset_time,
@@ -351,7 +368,16 @@ async fn run_health_server<SyncStatus>(
                     hyper::service::service_fn(move |req| handle_request(req, svc_ctx.clone()));
 
                 tokio::spawn(async move {
-                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                    // Serving one request per connection makes the request limit count requests.
+                    let result = http1::Builder::new()
+                        .keep_alive(false)
+                        .timer(TokioTimer::new())
+                        .header_read_timeout(HEADER_READ_TIMEOUT)
+                        .serve_connection(io, service)
+                        .await;
+                    drop(permit);
+
+                    if let Err(err) = result {
                         debug!(?err, "health server connection closed with error");
                     }
                 });
