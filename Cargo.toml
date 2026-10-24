@@ -409,6 +409,7 @@ unwrap_in_result = "warn"
 result_large_err = "allow"
 
 [patch.crates-io]
-halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "954e7e5a259eea8a8ce1d8ecce6f5425e670748c" }
-halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "954e7e5a259eea8a8ce1d8ecce6f5425e670748c" }
-halo2_poseidon = { git = "https://github.com/zcash/halo2", rev = "954e7e5a259eea8a8ce1d8ecce6f5425e670748c" }
+pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "3407048e1b268d6d05a0f6f29f44f9f87e864bd1" }
+halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "ad44368697bd1bbfaa8e7bb7eb58454e69850803" }
+halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "ad44368697bd1bbfaa8e7bb7eb58454e69850803" }
+halo2_poseidon = { git = "https://github.com/zcash/halo2", rev = "ad44368697bd1bbfaa8e7bb7eb58454e69850803" }
