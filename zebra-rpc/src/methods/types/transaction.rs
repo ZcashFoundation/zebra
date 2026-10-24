@@ -814,7 +814,9 @@ pub struct OutputObject {
     value: f64,
     #[serde(rename = "scriptPubKey")]
     script_pub_key: ScriptPubKey,
-    version: u32,
+    /// The creating transaction's version, or `None` when its body has been pruned.
+    #[getter(copy)]
+    version: Option<u32>,
     coinbase: bool,
 }
 impl OutputObject {
@@ -822,7 +824,7 @@ impl OutputObject {
         output: &zebra_chain::transparent::Output,
         best_block: String,
         confirmations: u32,
-        version: u32,
+        version: Option<u32>,
         coinbase: bool,
         network: &Network,
     ) -> Self {

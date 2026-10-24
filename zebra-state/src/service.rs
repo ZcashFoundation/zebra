@@ -1900,6 +1900,10 @@ impl Service<ReadRequest> for ReadStateService {
                 read::mined_transaction(state.latest_best_chain(), &state.db, hash),
             )),
 
+            ReadRequest::KnownTransaction(hash) => Ok(ReadResponse::KnownTransaction(
+                read::known_transaction(state.latest_best_chain(), &state.db, hash),
+            )),
+
             ReadRequest::AnyChainTransaction(hash) => {
                 Ok(ReadResponse::AnyChainTransaction(read::any_transaction(
                     state.latest_non_finalized_state().chain_iter(),
@@ -2278,10 +2282,9 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by `gettxout` RPC method.
-            ReadRequest::IsTransparentOutputSpent(outpoint) => {
-                let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
-                Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
-            }
+            ReadRequest::UnspentOutput(outpoint) => Ok(ReadResponse::UnspentOutput(
+                read::unspent_output(state.latest_best_chain(), &state.db, outpoint)?,
+            )),
         };
 
         timed_span.spawn_blocking(move || {

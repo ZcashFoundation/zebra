@@ -416,6 +416,30 @@ impl ZebraDb {
             .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
     }
 
+    /// Reads only the version header of a retained transaction body.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn transaction_version(&self, hash: transaction::Hash) -> Option<u32> {
+        struct Version(u32);
+        impl FromDisk for Version {
+            fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+                let header = bytes.as_ref()[..4]
+                    .try_into()
+                    .expect("stored transaction headers contain four bytes");
+                // The high bit signals the Overwinter format, not the version number.
+                Self(u32::from_le_bytes(header) & 0x7fff_ffff)
+            }
+        }
+
+        let location = self.transaction_location(hash)?;
+        let transactions = self
+            .db
+            .cf_handle("tx_by_loc")
+            .expect("transaction column exists");
+        self.db
+            .zs_get::<_, _, Version>(&transactions, &location)
+            .map(|version| version.0)
+    }
+
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
     #[allow(clippy::unwrap_in_result)]
     pub fn transactions_by_height(

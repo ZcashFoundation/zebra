@@ -298,6 +298,19 @@ impl From<AnyTx> for Arc<Transaction> {
     }
 }
 
+/// An unspent output and RPC metadata from one best-chain view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputWithMetadata {
+    /// The output, creation height, and coinbase flag.
+    pub utxo: transparent::Utxo,
+    /// The creating transaction's version, or `None` if its body is unavailable.
+    pub transaction_version: Option<u32>,
+    /// The number of confirmations at the captured tip.
+    pub confirmations: u32,
+    /// The best-chain tip used to compute confirmations and check spentness.
+    pub best_chain_tip_hash: block::Hash,
+}
+
 /// Information about a transaction in the best chain
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MinedTx {
@@ -584,6 +597,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<MinedTx>),
 
+    /// Response to [`ReadRequest::KnownTransaction`], independent of body availability.
+    KnownTransaction(bool),
+
     /// Response to [`Request::Transaction`] with the specified transaction.
     AnyChainTransaction(Option<AnyTx>),
 
@@ -699,8 +715,8 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
     NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 
-    /// Response to [`ReadRequest::IsTransparentOutputSpent`]
-    IsTransparentOutputSpent(bool),
+    /// Response to [`ReadRequest::UnspentOutput`], or `None` for a spent or unknown output.
+    UnspentOutput(Option<OutputWithMetadata>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -813,7 +829,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ValidBestTipHeader
             | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
-            | ReadResponse::IsTransparentOutputSpent(_)
+            | ReadResponse::KnownTransaction(_)
+            | ReadResponse::UnspentOutput(_)
             | ReadResponse::ForkPoint(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }

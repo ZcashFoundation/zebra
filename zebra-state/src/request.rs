@@ -1624,6 +1624,11 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Returns whether a transaction is in the best chain, without reading its body.
+    ///
+    /// Returns [`ReadResponse::KnownTransaction`]. A known pruned transaction is still mined.
+    KnownTransaction(transaction::Hash),
+
     /// Looks up a transaction by hash in any chain.
     ///
     /// Returns
@@ -1991,9 +1996,10 @@ pub enum ReadRequest {
         known_chain_tips: HashSet<block::Hash>,
     },
 
-    /// Returns `true` if the transparent output is spent in the best chain,
-    /// or `false` if it is unspent.
-    IsTransparentOutputSpent(transparent::OutPoint),
+    /// Returns an unspent best-chain output and its metadata in [`ReadResponse::UnspentOutput`].
+    ///
+    /// The creating transaction version is unavailable when its body has been pruned.
+    UnspentOutput(transparent::OutPoint),
 }
 
 impl ReadRequest {
@@ -2012,6 +2018,7 @@ impl ReadRequest {
             ReadRequest::SpentOutputs(_) => "spent_outputs",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::KnownTransaction(_) => "known_transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
@@ -2050,7 +2057,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
-            ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::UnspentOutput(_) => "unspent_output",
         }
     }
 
