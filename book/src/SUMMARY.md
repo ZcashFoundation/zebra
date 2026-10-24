@@ -51,6 +51,7 @@
     - [GCP deployment operations](dev/gcp-deployment-operations.md)
     - [The `next` branch](dev/next-branch.md)
   - [Versioning and releases](dev/release-process.md)
+    - [Audits](dev/audit.md)
   - [Changelog guidelines](dev/changelog-guidelines.md)
   - [Labels and issue types](dev/labels.md)
   - [Zebra crates](dev/crate-owners.md)
