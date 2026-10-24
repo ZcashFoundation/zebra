@@ -34,6 +34,7 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -108,6 +109,13 @@ pub struct Config {
     /// The network to connect to.
     pub network: Network,
 
+    /// Runtime service capabilities advertised to peers.
+    ///
+    /// Defaults to archive service. At startup, zebrad sets this from the node's storage mode.
+    /// This field is not serialized or read from configuration files.
+    #[serde(skip)]
+    pub local_services: PeerServices,
+
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
     pub initial_mainnet_peers: IndexSet<String>,
@@ -173,7 +181,8 @@ pub struct Config {
     /// The initial target size for the peer set.
     ///
     /// Also used to limit the number of inbound and outbound connections made by Zebra,
-    /// and the size of the cached peer list.
+    /// the outbound connections to peers that don't serve historic blocks, and the size of the
+    /// cached peer list.
     ///
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
@@ -586,6 +595,7 @@ impl Default for Config {
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
             network: Network::Mainnet,
+            local_services: PeerServices::NODE_NETWORK,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             cache_dir: CacheDir::default(),
@@ -753,6 +763,7 @@ impl From<Config> for DConfig {
             listen_addr,
             external_addr,
             network,
+            local_services: _,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -888,6 +899,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
+            local_services: PeerServices::NODE_NETWORK,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,

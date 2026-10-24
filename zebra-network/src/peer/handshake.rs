@@ -463,7 +463,7 @@ where
 
     /// Provide the services this node advertises to other peers.  Optional.
     ///
-    /// If this is unset, the node will advertise itself as a client.
+    /// If this is unset, the configured local service capabilities are used.
     pub fn with_advertised_services(mut self, services: PeerServices) -> Self {
         self.our_services = Some(services);
         self
@@ -530,7 +530,7 @@ where
         });
         let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
-        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
+        let our_services = self.our_services.unwrap_or(config.local_services);
         let relay = self.relay.unwrap_or(false);
         let network = config.network.clone();
         let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, &network);
@@ -583,12 +583,15 @@ where
 /// We split `Handshake` into its components before calling this function, to avoid infectious
 /// `Sync` bounds on the returned future.
 ///
+/// Outbound connections to non-serving peers claim a non-serving slot from `connection_tracker`.
+///
 /// Returns the [`VersionMessage`] sent by the remote peer, and the [`Version`] negotiated with the
 /// remote peer, inside a [`ConnectionInfo`] struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
+    connection_tracker: &mut ConnectionTracker,
     config: Config,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
     user_agent: String,
@@ -810,12 +813,15 @@ where
     // sync (#11061). This mirrors Bitcoin Core, which requires block-serving peers during
     // initial block download.
     //
-    // At or near the network tip the requirement is dropped, because non-serving peers (like
-    // pruned nodes) can still serve recent blocks and transactions. Inbound and isolated
+    // At or near the network tip, non-serving peers (like pruned nodes) can still serve recent
+    // blocks and transactions, so they can fill up to `peerset_initial_target_size` outbound
+    // slots. The other outbound slots stay reserved for serving peers, so a node that falls
+    // behind still has peers that can send it the missing blocks. Inbound and isolated
     // connections are always exempt, so light clients can still connect to us.
-    if is_syncing
-        && matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
+    if matches!(connected_addr, OutboundDirect { .. } | OutboundProxy { .. })
         && !remote.services.contains(PeerServices::NODE_NETWORK)
+        && (is_syncing
+            || !connection_tracker.try_mark_non_serving(config.peerset_initial_target_size))
     {
         debug!(
             remote_ip = ?their_addr,
@@ -997,6 +1003,7 @@ where
             let connection_info = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
+                &mut connection_tracker,
                 config,
                 nonces,
                 user_agent,
@@ -1045,7 +1052,8 @@ where
 
                     // Rejected non-serving peers are reported by the crawler's `report_failed`
                     // without their services, so they get the standard failure backoff and can
-                    // be dialed again once the node is near the network tip (#11061).
+                    // be dialed again once the node is near the network tip and a non-serving
+                    // outbound slot is free (#11061).
                     return Err(err);
                 }
             };

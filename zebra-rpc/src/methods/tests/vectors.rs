@@ -6147,6 +6147,47 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
     )
 }
 
+/// RPC service bits match the archive or pruned capabilities advertised to peers.
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_getnetworkinfo_reports_advertised_services() {
+    use zebra_network::types::PeerServices;
+
+    let _init_guard = zebra_test::init();
+    for (services, expected) in [
+        (PeerServices::NODE_NETWORK, "0000000000000001"),
+        (PeerServices::empty(), "0000000000000000"),
+    ] {
+        let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
+            ([127, 0, 0, 1], Mainnet.default_port()).into(),
+            services,
+            &Mainnet,
+            zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
+            tracing::Span::none(),
+        )));
+        let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            address_book,
+            log_rx,
+            None,
+        );
+        assert_eq!(
+            rpc.get_network_info().await.unwrap().local_services,
+            expected,
+        );
+    }
+}
+
 /// A contended address book must not prevent other RPC runtime tasks from progressing.
 #[tokio::test(flavor = "current_thread")]
 async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
@@ -6156,6 +6197,7 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
 
     let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
         ([127, 0, 0, 1], Mainnet.default_port()).into(),
+        zebra_network::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
         tracing::Span::none(),

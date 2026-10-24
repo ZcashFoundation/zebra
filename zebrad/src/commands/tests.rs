@@ -45,3 +45,109 @@ fn args_with_subcommand_pass_through() {
         assert_eq!(matches!(args.cmd(), ZebradCmd::Start(_)), should_be_start,);
     }
 }
+
+/// Startup policy, local advertisements, and RPC service reporting agree for both history modes.
+#[tokio::test(flavor = "current_thread")]
+async fn pruned_network_services_preserve_independent_capabilities() {
+    use std::sync::{Arc, Mutex};
+    use tower::buffer::Buffer;
+    use zebra_chain::{block::Height, chain_sync_status::MockSyncStatus, chain_tip::NoChainTip};
+    use zebra_network::{types::PeerServices, AddressBook, AddressBookPeers};
+    use zebra_node_services::BoxError;
+    use zebra_rpc::methods::{RpcImpl, RpcServer};
+    use zebra_state::HistoryCapabilities;
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+
+    for independent_services in [
+        PeerServices::empty(),
+        PeerServices::from_bits_retain(1 << 63),
+    ] {
+        let mut config = crate::config::ZebradConfig::default();
+        config.network.local_services |= independent_services;
+
+        for (case, lowest_retained_height, expected) in [
+            ("archive", Height(0), PeerServices::NODE_NETWORK),
+            ("pruned history", Height(10_000), PeerServices::empty()),
+        ] {
+            let services = super::StartCmd::network_services(
+                &config,
+                HistoryCapabilities {
+                    lowest_retained_height,
+                },
+            )
+            .unwrap();
+            let expected = expected | independent_services;
+            assert_eq!(services, expected, "{case}");
+
+            let network = config.network.network.clone();
+            let address_book = AddressBook::new(
+                ([127, 0, 0, 1], network.default_port()).into(),
+                services,
+                &network,
+                zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
+                tracing::Span::none(),
+            );
+            let advertised = address_book
+                .local_listener_meta_addr(chrono::Utc::now())
+                .services()
+                .expect("local listener advertisements include their services");
+            assert_eq!(advertised, expected, "{case}");
+            assert_eq!(address_book.local_services(), advertised, "{case}");
+
+            let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
+            let (rpc, rpc_tx_queue) = RpcImpl::new(
+                network,
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC service reporting test",
+                Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+                Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+                Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+                MockService::build().for_unit_tests(),
+                MockSyncStatus::default(),
+                NoChainTip,
+                Arc::new(Mutex::new(address_book)),
+                log_rx,
+                None,
+            );
+            let response =
+                tokio::time::timeout(std::time::Duration::from_secs(5), rpc.get_network_info())
+                    .await
+                    .expect("the test owns the uncontended address book")
+                    .expect("network info reads only the address book");
+            assert_eq!(
+                response.local_services,
+                format!("{advertised:016x}"),
+                "{case}"
+            );
+            rpc_tx_queue.abort();
+        }
+    }
+}
+
+#[test]
+fn pruned_history_rejects_both_sidecar_modes() {
+    use zebra_chain::block::Height;
+    use zebra_state::HistoryCapabilities;
+
+    let mut config = crate::config::ZebradConfig::default();
+    config.zcashd_compat.enabled = true;
+    for managed in [false, true] {
+        config.zcashd_compat.manage_zcashd = managed;
+        super::StartCmd::network_services(&config, HistoryCapabilities::default())
+            .expect("archive nodes can serve sidecars");
+        let error = super::StartCmd::network_services(
+            &config,
+            HistoryCapabilities {
+                lowest_retained_height: Height(10_000),
+            },
+        )
+        .expect_err("sidecars require complete block history");
+        assert!(error
+            .to_string()
+            .contains("zcashd-compat requires an archive node"));
+    }
+}

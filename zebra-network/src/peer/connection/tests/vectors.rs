@@ -557,6 +557,54 @@ async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
     assert!(connection_task.await.unwrap_err().is_cancelled());
 }
 
+#[tokio::test]
+async fn getdata_caps_block_hashes_before_inbound_dispatch() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, _client_tx, mut inbound, mut outbound, error_slot) = new_test_connection();
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+    let hashes: Vec<_> = (0..2 * crate::constants::GETDATA_MAX_BLOCK_COUNT)
+        .map(|index| block::Hash([u8::try_from(index).unwrap(); 32]))
+        .collect();
+    let mut items = vec![
+        InventoryHash::Tx(zebra_chain::transaction::Hash([255; 32]));
+        crate::constants::GETDATA_MAX_BLOCK_COUNT
+    ];
+    items.extend(hashes.iter().copied().map(InventoryHash::Block));
+    peer_tx.send(Ok(Message::GetData(items))).await.unwrap();
+    let expected: HashSet<_> = hashes
+        .into_iter()
+        .take(crate::constants::GETDATA_MAX_BLOCK_COUNT)
+        .collect();
+    inbound
+        .expect_request(Request::BlocksByHash(expected.clone()))
+        .await
+        .respond(Response::Blocks(
+            expected
+                .iter()
+                .copied()
+                .map(InventoryResponse::Missing)
+                .collect(),
+        ));
+    let Message::NotFound(missing) = tokio::time::timeout(Duration::from_secs(1), outbound.next())
+        .await
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("missing blocks must return notfound");
+    };
+    assert_eq!(
+        missing
+            .into_iter()
+            .map(|item| item.block_hash().unwrap())
+            .collect::<HashSet<_>>(),
+        expected,
+    );
+    assert!(error_slot.try_get_error().is_none());
+    connection_task.abort();
+    assert!(connection_task.await.unwrap_err().is_cancelled());
+}
+
 /// An empty `getblocks` result sends nothing, so peers can't take it for an empty mempool reply,
 /// while a nonempty result is still sent as an inventory.
 #[tokio::test(start_paused = true)]

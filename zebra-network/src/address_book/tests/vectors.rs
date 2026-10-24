@@ -28,6 +28,7 @@ use crate::{
 fn address_book_empty() {
     let address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -53,6 +54,39 @@ fn gossiped_change(
     MetaAddr::new_gossiped_meta_addr(addr, services, untrusted_last_seen)
         .new_gossiped_change()
         .expect("gossiped MetaAddr should produce a NewGossiped change")
+}
+
+#[test]
+fn pruned_listener_survives_gossip_and_is_a_connection_candidate() {
+    let now = Utc::now();
+    let sender = AddressBook::new(
+        "127.0.0.1:8233".parse().unwrap(),
+        PeerServices::empty(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    let listener = sender.sanitized(now).pop().unwrap();
+    let listener_addr = listener.addr;
+    let mut receiver = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        PeerServices::NODE_NETWORK,
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    assert!(receiver
+        .update(listener.new_gossiped_change().unwrap())
+        .is_some());
+    let candidate = receiver
+        .reconnection_peers(Instant::now(), now)
+        .next()
+        .unwrap();
+    assert_eq!(candidate.addr, listener_addr);
+    assert_eq!(candidate.services, Some(PeerServices::empty()));
+    let relayed = receiver.sanitized(now).pop().unwrap();
+    assert_eq!(relayed.addr, listener_addr);
+    assert_eq!(relayed.services, Some(PeerServices::empty()));
 }
 
 // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
@@ -106,8 +140,13 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
     let other_port_same_ip: crate::PeerSocketAddr = "127.0.0.1:8234".parse().unwrap();
     let unrelated_addr: crate::PeerSocketAddr = "127.0.0.2:8233".parse().unwrap();
 
-    let mut address_book =
-        AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
+        &Mainnet,
+        2,
+        Span::current(),
+    );
 
     // Seed two entries on the soon-to-be-banned IP plus an unrelated entry,
     // so the ban path's `by_addr` cleanup loop has visible work to do.
@@ -320,6 +359,7 @@ fn address_book_insert_canonicalizes_key_and_value() {
 
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -466,8 +506,13 @@ fn ban_removes_every_entry_for_the_banned_ip() {
 
     // `max_connections_per_ip` is above one, so `reconnection_peers` does not skip the second
     // entry on the banned IP for being a duplicate IP.
-    let mut address_book =
-        AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+    let mut address_book = AddressBook::new(
+        "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
+        &Mainnet,
+        2,
+        Span::current(),
+    );
 
     // `MetaAddr`'s `Ord` sorts more recently gossiped addresses first, so these last seen times
     // place the unrelated IP between the two entries for the banned IP.
@@ -531,6 +576,7 @@ fn ban_removes_every_entry_for_the_banned_ip() {
 fn ipv6_rotation_within_one_64_cannot_evade_a_ban() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -580,6 +626,7 @@ fn ipv6_rotation_within_one_64_cannot_evade_a_ban() {
 fn ipv4_ban_does_not_affect_neighbouring_addresses() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -631,6 +678,7 @@ fn only_a_threshold_misbehavior_score_bans_the_peer_group() {
     ] {
         let mut address_book = AddressBook::new(
             "0.0.0.0:0".parse().unwrap(),
+            crate::types::PeerServices::NODE_NETWORK,
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             Span::current(),
@@ -666,6 +714,7 @@ fn only_a_threshold_misbehavior_score_bans_the_peer_group() {
 fn misbehavior_score_is_reported_per_group() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -712,6 +761,7 @@ fn misbehavior_score_is_reported_per_group() {
 async fn bans_expire_after_the_ban_duration() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -773,6 +823,7 @@ async fn bans_expire_after_the_ban_duration() {
 async fn applying_a_ban_prunes_lapsed_bans() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
@@ -825,6 +876,7 @@ async fn applying_a_ban_prunes_lapsed_bans() {
 async fn a_lapsed_group_can_be_banned_again() {
     let mut address_book = AddressBook::new(
         "0.0.0.0:0".parse().unwrap(),
+        crate::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
