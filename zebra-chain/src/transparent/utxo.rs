@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::{
     block::{self, Block, Height},
-    transaction::{self, Transaction},
+    transaction::{self, compat, Transaction},
     transparent,
 };
 
@@ -212,7 +212,15 @@ pub fn new_ordered_outputs_with_height(
     height: Height,
     transaction_hashes: &[transaction::Hash],
 ) -> HashMap<transparent::OutPoint, OrderedUtxo> {
-    let mut new_ordered_outputs = HashMap::new();
+    // Reserve only for paired transactions, using their decoded output counts.
+    let output_count = block
+        .transactions
+        .iter()
+        .take(transaction_hashes.len())
+        .filter_map(|transaction| transaction.transparent_bundle())
+        .map(|bundle| bundle.vout.len())
+        .sum();
+    let mut new_ordered_outputs = HashMap::with_capacity(output_count);
 
     for (tx_index_in_block, (transaction, hash)) in block
         .transactions
@@ -220,7 +228,7 @@ pub fn new_ordered_outputs_with_height(
         .zip(transaction_hashes.iter().cloned())
         .enumerate()
     {
-        new_ordered_outputs.extend(new_transaction_ordered_outputs(
+        new_ordered_outputs.extend(transaction_ordered_outputs(
             transaction,
             hash,
             tx_index_in_block,
@@ -235,28 +243,41 @@ pub fn new_ordered_outputs_with_height(
 /// its precomputed transaction hash, the transaction's index in its block,
 /// and the block's height.
 ///
-/// This function is only for use in this module, and in tests.
+/// This is a test-only function.
+#[cfg(any(test, feature = "proptest-impl"))]
 pub fn new_transaction_ordered_outputs(
     transaction: &Transaction,
     hash: transaction::Hash,
     tx_index_in_block: usize,
     height: block::Height,
 ) -> HashMap<transparent::OutPoint, OrderedUtxo> {
-    let mut new_ordered_outputs = HashMap::new();
+    transaction_ordered_outputs(transaction, hash, tx_index_in_block, height).collect()
+}
 
-    for (output_index_in_transaction, output) in transaction.outputs().iter().cloned().enumerate() {
-        let output_index_in_transaction = output_index_in_transaction
-            .try_into()
-            .expect("unexpectedly large number of outputs");
+/// Convert each native output once, retaining its transaction and output indexes.
+fn transaction_ordered_outputs(
+    transaction: &Transaction,
+    hash: transaction::Hash,
+    tx_index_in_block: usize,
+    height: block::Height,
+) -> impl ExactSizeIterator<Item = (transparent::OutPoint, OrderedUtxo)> + '_ {
+    transaction
+        .transparent_bundle()
+        .map(|bundle| bundle.vout.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(move |(output_index_in_transaction, output)| {
+            let output_index_in_transaction = output_index_in_transaction
+                .try_into()
+                .expect("unexpectedly large number of outputs");
 
-        new_ordered_outputs.insert(
-            transparent::OutPoint {
-                hash,
-                index: output_index_in_transaction,
-            },
-            OrderedUtxo::new(output, height, tx_index_in_block),
-        );
-    }
-
-    new_ordered_outputs
+            (
+                transparent::OutPoint {
+                    hash,
+                    index: output_index_in_transaction,
+                },
+                OrderedUtxo::new(compat::txout_to_output(output), height, tx_index_in_block),
+            )
+        })
 }
