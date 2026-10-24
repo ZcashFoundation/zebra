@@ -27,12 +27,17 @@ use rlimit::increase_nofile_limit;
 
 use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
-use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
+use zebra_chain::{
+    block::Height, parameters::Network, primitives::byte_array::increment_big_endian,
+};
 
 use crate::{
     database_format_version_on_disk,
-    service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    write_database_format_version_to_disk, Config, StateInitError,
+    service::finalized_state::disk_format::{
+        block::TRANSACTION_LOCATION_DISK_BYTES, FromDisk, IntoDisk, TransactionIndex,
+        TransactionLocation,
+    },
+    write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, StateInitError,
 };
 
 use super::zebra_db::transparent::{
@@ -1120,6 +1125,15 @@ impl DiskDb {
                     cached_size: Arc::new(AtomicU64::new(0)),
                 };
 
+                // Guard the lowest writable entry point before launching migrations or checks.
+                let history = db.history_capabilities()?;
+                if !read_only && history.is_pruned() {
+                    return Err(StateInitError::PrunedDatabase {
+                        path,
+                        lowest_retained_height: history.lowest_retained_height,
+                    });
+                }
+
                 db.assert_default_cf_is_empty();
                 let (size, complete) = db.measure_size();
                 if complete {
@@ -1190,6 +1204,49 @@ impl DiskDb {
     #[allow(dead_code)]
     fn inner(&self) -> &Arc<DB> {
         &self.db
+    }
+
+    /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
+    pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
+        let invalid = |source: BoxError| StateInitError::HistoryRead {
+            path: self.path().to_path_buf(),
+            source,
+        };
+        let Some(index) = self.cf_handle("hash_by_tx_loc") else {
+            return Ok(HistoryCapabilities::default());
+        };
+        let first = TransactionLocation::min_for_height(Height(1)).as_bytes();
+        if self
+            .db
+            .get_pinned_cf(&index, first)
+            .map_err(|error| invalid(error.into()))?
+            .is_none()
+        {
+            return Ok(HistoryCapabilities::default());
+        }
+        let transactions = self
+            .cf_handle("tx_by_loc")
+            .ok_or_else(|| invalid("indexed blocks have no transaction column family".into()))?;
+        let mut bodies = self.db.raw_iterator_cf(&transactions);
+        bodies.seek(first);
+        bodies.status().map_err(|error| invalid(error.into()))?;
+        let location = bodies
+            .key()
+            .filter(|key| key.len() == TRANSACTION_LOCATION_DISK_BYTES)
+            .map(TransactionLocation::from_bytes)
+            .ok_or_else(|| invalid("indexed blocks have no valid retained body suffix".into()))?;
+        if location.index != TransactionIndex::MIN {
+            return Err(invalid(
+                "the first retained body is missing its coinbase".into(),
+            ));
+        }
+        Ok(HistoryCapabilities {
+            lowest_retained_height: if location.height == Height(1) {
+                Height::MIN
+            } else {
+                location.height
+            },
+        })
     }
 
     /// Returns the column family handle for `cf_name`.

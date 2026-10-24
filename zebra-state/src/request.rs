@@ -1519,6 +1519,11 @@ pub enum ReadRequest {
     /// it every 30 seconds; read-only services measure it on demand.
     UsageInfo,
 
+    /// Returns stored body availability in [`ReadResponse::HistoryCapabilities`].
+    ///
+    /// The retained suffix describes actual storage, not a configured retention target.
+    HistoryCapabilities,
+
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
     Tip,
@@ -1996,6 +2001,7 @@ impl ReadRequest {
     pub fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::UsageInfo => "usage_info",
+            ReadRequest::HistoryCapabilities => "history_capabilities",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::BlockInfo(_) => "block_info",
