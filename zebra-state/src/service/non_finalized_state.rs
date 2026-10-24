@@ -594,7 +594,11 @@ impl NonFinalizedState {
     ///
     /// `new_chain` should start as a clone of the parent chain fork,
     /// or the finalized tip.
-    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
+    #[tracing::instrument(
+        level = "debug",
+        skip(self, finalized_state, new_chain, prepared),
+        fields(height = ?prepared.height, hash = %prepared.hash)
+    )]
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
@@ -681,7 +685,10 @@ impl NonFinalizedState {
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
     #[allow(clippy::unwrap_in_result)]
-    #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
+    #[tracing::instrument(
+        skip(new_chain, contextual, sprout_final_treestates),
+        fields(height = ?contextual.height, hash = %contextual.hash)
+    )]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
