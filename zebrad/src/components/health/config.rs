@@ -22,7 +22,7 @@ pub struct Config {
     ///
     /// If `false`, `/ready` always returns 200 on regtest and testnets.
     pub enforce_on_test_networks: bool,
-    /// Maximum age of the last committed block before readiness fails.
+    /// Maximum time since the observed best-chain height last exceeded its previous maximum.
     #[serde(with = "humantime_serde")]
     pub ready_max_tip_age: Duration,
 }

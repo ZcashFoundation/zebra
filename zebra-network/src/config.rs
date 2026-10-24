@@ -929,7 +929,7 @@ impl<'de> Deserialize<'de> for Config {
             Err(_) => match listen_addr.parse::<IpAddr>() {
                 Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
                 Err(err) => Err(de::Error::custom(format!(
-                    "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                    "{err}; Hint: use an IPv4 or IPv6 address; the port is optional (bracket IPv6 with a port)"
                 ))),
             },
         }?;
@@ -940,7 +940,7 @@ impl<'de> Deserialize<'de> for Config {
                 Err(_) => match address.parse::<IpAddr>() {
                     Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),
                     Err(err) => Err(de::Error::custom(format!(
-                        "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                        "{err}; Hint: use an IPv4 or IPv6 address; the port is optional (bracket IPv6 with a port)"
                     ))),
                 },
             }?
