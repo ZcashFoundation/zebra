@@ -1,6 +1,13 @@
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs, io,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use color_eyre::eyre::Result;
+use tracing::Dispatch;
+use tracing_subscriber::fmt::MakeWriter;
 
 use zebra_chain::{
     block::Height,
@@ -21,6 +28,51 @@ use crate::common::{
     config::{default_test_config, testdir},
     launch::ZebradTestDirExt,
 };
+
+/// Copied from the tests in `zebrad/src/components/zcashd_compat/datadir.rs`.
+#[derive(Clone)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+struct CapturedLogWriter(Arc<Mutex<Vec<u8>>>);
+
+impl io::Write for CapturedLogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("log buffer lock should not be poisoned"))?
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'writer> MakeWriter<'writer> for CapturedLogs {
+    type Writer = CapturedLogWriter;
+
+    fn make_writer(&'writer self) -> Self::Writer {
+        CapturedLogWriter(Arc::clone(&self.0))
+    }
+}
+
+fn capture_logs(function: impl FnOnce()) -> String {
+    let logs = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(CapturedLogs(Arc::clone(&logs)))
+        .with_ansi(false)
+        .without_time()
+        .finish();
+
+    tracing::dispatcher::with_default(&Dispatch::new(subscriber), function);
+
+    let logs = logs
+        .lock()
+        .expect("log buffer lock should not be poisoned")
+        .clone();
+    String::from_utf8(logs).expect("logs should be valid UTF-8")
+}
 
 /// Check that the end of support code is called at least once.
 #[test]
@@ -74,29 +126,22 @@ fn end_of_support_panic() {
 
 /// Test that the `end_of_support` function is working as expected.
 #[test]
-#[tracing_test::traced_test]
 fn end_of_support_function() {
     // One day before the warn range opens
     let no_warn =
         end_of_support::estimated_height_after_release(&Network::Mainnet, EOS_WARN_AFTER - 1);
 
-    end_of_support::check(no_warn, &Network::Mainnet);
-    assert!(logs_contain(
-        "Checking if Zebra release is inside support range ..."
-    ));
-    assert!(logs_contain("Zebra release is supported"));
+    let logs = capture_logs(|| end_of_support::check(no_warn, &Network::Mainnet));
+    assert!(logs.contains("Checking if Zebra release is inside support range ..."));
+    assert!(logs.contains("Zebra release is supported"));
 
     // One day into the warn range
     let warn =
         end_of_support::estimated_height_after_release(&Network::Mainnet, EOS_WARN_AFTER + 1);
 
-    end_of_support::check(warn, &Network::Mainnet);
-    assert!(logs_contain(
-        "Checking if Zebra release is inside support range ..."
-    ));
-    assert!(logs_contain(
-        "Your Zebra release is too old and it will stop running at block"
-    ));
+    let logs = capture_logs(|| end_of_support::check(warn, &Network::Mainnet));
+    assert!(logs.contains("Checking if Zebra release is inside support range ..."));
+    assert!(logs.contains("Your Zebra release is too old and it will stop running at block"));
 
     // Panic is tested in `end_of_support_panic`
 }
@@ -175,7 +220,6 @@ fn end_of_support_height_follows_nu7_target_spacing() {
 
 /// Test that we are never in end of support warning or panic.
 #[test]
-#[tracing_test::traced_test]
 fn end_of_support_date() {
     // Get the list of checkpoints.
     let list = Network::Mainnet.checkpoint_list();
@@ -183,35 +227,33 @@ fn end_of_support_date() {
     // Get the last one we have and use it as tip.
     let higher_checkpoint = list.max_height();
 
-    end_of_support::check(higher_checkpoint, &Network::Mainnet);
-    assert!(logs_contain(
-        "Checking if Zebra release is inside support range ..."
-    ));
-    assert!(!logs_contain(
-        "Your Zebra release is too old and it will stop running in"
-    ));
+    let logs = capture_logs(|| end_of_support::check(higher_checkpoint, &Network::Mainnet));
+    assert!(logs.contains("Checking if Zebra release is inside support range ..."));
+    assert!(!logs.contains("Your Zebra release is too old and it will stop running in"));
 }
 
 /// Check that the end of support task is working.
-#[tokio::test]
-#[tracing_test::traced_test]
-async fn end_of_support_task() -> Result<()> {
+#[test]
+fn end_of_support_task() {
+    // The runtime is current-thread, so `block_on` polls the task on
+    // this thread, where the subscriber set by `capture_logs` sees
+    // its logs.
+    let (runtime, _init_guard) = zebra_test::init_async();
+
     let (latest_chain_tip, latest_chain_tip_sender) = MockChainTip::new();
     latest_chain_tip_sender.send_best_tip_height(Height(10));
 
     let eos_future = end_of_support::start(Network::Mainnet, latest_chain_tip);
 
-    tokio::time::timeout(Duration::from_secs(15), eos_future)
-        .await
-        .expect_err(
-            "end of support task unexpectedly exited: it should keep running until Zebra exits",
-        );
+    let logs = capture_logs(|| {
+        runtime
+            .block_on(async { tokio::time::timeout(Duration::from_secs(15), eos_future).await })
+            .expect_err(
+                "end of support task unexpectedly exited: it should keep running until Zebra exits",
+            );
+    });
 
-    assert!(logs_contain(
-        "Checking if Zebra release is inside support range ..."
-    ));
+    assert!(logs.contains("Checking if Zebra release is inside support range ..."));
 
-    assert!(logs_contain("Zebra release is supported"));
-
-    Ok(())
+    assert!(logs.contains("Zebra release is supported"));
 }
