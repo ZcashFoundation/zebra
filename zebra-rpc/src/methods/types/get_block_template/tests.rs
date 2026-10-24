@@ -207,8 +207,7 @@ fn template_reports_selected_transaction_dependencies() {
 
 /// Tests that coinbase transactions can be generated.
 ///
-/// This test needs to be run with the `--release` flag so that it runs for ~ 30 seconds instead of
-/// ~ 90.
+/// The shielded outputs need proofs, so this test needs to be run with the `--release` flag.
 #[test]
 #[ignore]
 fn coinbase() -> anyhow::Result<()> {
@@ -254,13 +253,20 @@ fn coinbase() -> anyhow::Result<()> {
         for nu in NetworkUpgrade::iter().filter(|nu| nu >= &NetworkUpgrade::Sapling) {
             if let Some(height) = nu.activation_height(&net) {
                 for addr_type in MinerAddressType::iter() {
+                    let addr = Address::decode(&net, default_miner_address(net.kind(), &addr_type))
+                        .ok_or(anyhow!("hard-coded addr must be valid"))?;
+
+                    // Build expensive shielded proofs on Mainnet at every upgrade. Keep transparent
+                    // coinbases on every network to cover their subsidy, funding-stream, and
+                    // lockbox rules.
+                    if addr_type != MinerAddressType::Transparent && net.is_a_test_network() {
+                        continue;
+                    }
+
                     TransactionTemplate::new_coinbase_with_parent_pools(
                         &net,
                         height,
-                        &MinerParams::from(
-                            Address::decode(&net, default_miner_address(net.kind(), &addr_type))
-                                .ok_or(anyhow!("hard-coded addr must be valid"))?,
-                        ),
+                        &MinerParams::from(addr),
                         Amount::zero(),
                         Some(Amount::zero()),
                     )?
