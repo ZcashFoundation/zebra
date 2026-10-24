@@ -1,87 +1,132 @@
 # Running Zallet with Zebra
 
-[Zallet](https://github.com/zcash/wallet) is the `zcashd` wallet replacement.
-From the release after 0.1.0-beta.3, its only chain backend is `zebra`, which
-gets all of its chain data from a `zebrad` running on the same machine. This
-page covers what that requires on the Zebra side. Zallet's own configuration is
-documented in Zallet's [wallet setup guide](https://zcash.github.io/zallet/guide/setup.html).
-
-Zallet does not use Zebra's lightwalletd-compatible gRPC server
-(`lightwalletd_listen_addr`). That server is for light clients; see
-[Serving light clients directly from Zebra](lightwalletd.md#experimental-serving-light-clients-directly-from-zebra).
-
-## What Zallet needs from `zebrad`
-
-Zallet uses three connections to `zebrad` at the same time. It needs all three.
-
-1. **Read-only access to `zebrad`'s state database.** Zallet opens `zebrad`'s
-   cache directory directly and reads finalized blocks, transactions, note
-   commitment trees, and UTXOs from it. This is why Zallet must run on the
-   same machine as `zebrad`. Zallet also reads the spending-transaction index,
-   which `zebrad` only writes when it is built with the `indexer` feature.
-2. **The indexer gRPC service**, which Zallet uses to follow the non-finalized
-   part of the chain: it subscribes to tip changes and non-finalized blocks,
-   and fetches any blocks it is missing.
-3. **JSON-RPC**, which Zallet uses only for the mempool and for submitting
-   transactions: `getrawmempool`, `getrawtransaction`, `getblockchaininfo`, and
-   `sendrawtransaction`.
-
-## Configuring `zebrad`
-
-Build `zebrad` with the `indexer` feature:
-
-```sh
-cargo install --features="default-release-binaries indexer" --locked --git https://github.com/ZcashFoundation/zebra zebrad
-```
-
-Zebra's release binaries and published Docker images do not include this
-feature. To build a Docker image with it, pass
-`--build-arg FEATURES="default-release-binaries indexer"`; see
-[Building with Custom Features](docker.md#building-with-custom-features).
-
-Then enable the JSON-RPC and indexer endpoints in `zebrad.toml`:
-
-```toml
-[rpc]
-listen_addr = '127.0.0.1:8232'
-indexer_listen_addr = '127.0.0.1:8230'
-```
-
-JSON-RPC cookie authentication is on by default. Point Zallet's
-`validator_cookie_path` at the cookie file, which is in `zebrad`'s cache
-directory. The indexer gRPC service has no authentication, so keep it on a
-loopback address.
-
-In Zallet's config, `[indexer] validator_address` points at `listen_addr`,
-`[indexer.read_state_service] grpc_address` points at `indexer_listen_addr`, and
-`zebra_state_path` points at `zebrad`'s cache directory.
+[Zallet](https://github.com/zcash/zallet) provides wallet functions; Zebra
+validates the chain and serves node RPCs. Use the
+[API migration guide](zcashd-api-migration-guide.md) to route calls and Zallet's
+[setup guide](https://zcash.github.io/zallet/guide/setup.html) to initialize the
+wallet, encryption, and wallet RPC server.
 
 ## Keep the versions in step
 
-Zallet reads `zebrad`'s database through the `zebra-state` crate, so it can only
-read the database format that its `zebra-state` version understands. Zallet
-0.1.0-beta.3 reads format 28, which Zebra 6.x writes. Zebra 7.0.0-rc.0 writes
-format 29, so Zallet 0.1.0-beta.3 cannot read its state. Check Zallet's release
-notes for the Zebra versions a given release supports before upgrading either
-one.
+Zallet 0.1.0-beta.3 is the latest release. Its `zebra` backend reads Zebra's
+database directly and requires format **28**
+([backend changelog](https://github.com/zcash/zallet/blob/v0.1.0-beta.3/backends/zebra/CHANGELOG.md));
+Zebra 7.0.0 writes format **29**. No released `zebra` backend supports it.
+Do not deploy the direct-reader configuration below until a compatible
+backend is released. If its required format is absent, startup fails with
+`no zebra-state v… database found`; changing endpoints does not fix it.
 
-If the formats do not match, Zallet fails at startup with a
-`no zebra-state v… database found` error.
+The beta.3 `zaino` backend is unaffected when
+`[indexer.read_state_service]` is absent: it
+[fetches chain data over JSON-RPC](https://github.com/zcash/zallet/blob/v0.1.0-beta.3/backends/zaino/src/chain.rs#L203-L233)
+without reading Zebra's database.
 
-## Known issues
+Check the backend's release notes and `zebra-state` dependency before
+[upgrading Zebra](upgrading.md). Zallet opens state read-only and cannot
+upgrade it. Do not rename or symlink a versioned directory to bypass the
+compatibility check.
 
-- A `zebrad` built without the `indexer` feature still serves the indexer gRPC
-  service, and Zallet still starts against it. Zallet then reads an empty
-  spending-transaction index instead of failing
-  ([#11155](https://github.com/ZcashFoundation/zebra/issues/11155)). A `zebrad`
-  built without `indexer` also deletes an existing index when it starts. If
-  that happens, restart `zebrad` with an `indexer` build, which rebuilds the
-  index from the existing state.
-- With the `indexer` feature, `zebrad` checks the spending-transaction index on
-  every restart, which uses a lot of CPU
-  ([#11090](https://github.com/ZcashFoundation/zebra/issues/11090)).
-- Zallet cannot use a `zebrad` on another machine. Zallet's maintainers plan to
-  propose a backend that reaches a remote `zebrad` over JSON-RPC and the
-  indexer gRPC service
-  ([zcash/wallet#899](https://github.com/zcash/zallet/issues/899)); it does not
-  exist yet.
+## What Zallet needs from Zebra
+
+The `zebra` backend runs on Linux and needs three interfaces simultaneously:
+
+| Interface | Purpose | Requirement |
+| --- | --- | --- |
+| Read-only state database access | Reads finalized blocks, transactions, shielded trees, unspent outputs, and spending-transaction indexes. | Run on the same host, with a compatible `zebra-state` version and access to Zebra's persistent state cache. |
+| Indexer gRPC | Follows tip changes and non-finalized blocks, and fetches missing blocks. | Set `[rpc] indexer_listen_addr`; keep the endpoint private. |
+| JSON-RPC | Calls [`getrawmempool`, `getrawtransaction`, `sendrawtransaction`, and `getblockchaininfo`](https://github.com/zcash/zallet/blob/v0.1.0-beta.3/backends/zebra/src/chain/rpc.rs) for mempool access, transactions, and the network-upgrade table. | Set `[rpc] listen_addr` and give Zallet the authentication cookie. |
+
+The backend does not connect to Zebra's wallet-facing
+`[rpc] lightwalletd_listen_addr` service. That endpoint implements a different
+protocol for [light wallets](lightwalletd.md).
+
+## Configuring Zebra
+
+For a compatible direct-reader backend, build Zebra with the
+[`indexer` feature](install.md#cargo-features):
+
+```sh
+cargo install --locked --version 7.0.0 --features indexer zebrad
+```
+
+For a [custom Docker build](docker.md#building-with-custom-features), pass
+`--build-arg FEATURES="default-release-binaries indexer"`.
+
+Set the state path and both endpoints in `zebrad.toml`. Choose directories
+that Zebra can write and Zallet can access:
+
+```toml
+[state]
+cache_dir = "/srv/zebra/state"
+
+[rpc]
+listen_addr = "127.0.0.1:8232"
+indexer_listen_addr = "127.0.0.1:8230"
+cookie_dir = "/srv/zebra/rpc"
+enable_cookie_auth = true
+```
+
+Start Zebra with that configuration:
+
+```sh
+zebrad -c zebrad.toml start
+```
+
+Give Zallet read access to `/srv/zebra/rpc/.cookie` without making the
+[credential](rpc.md#authentication) public. Keep indexer gRPC on loopback:
+it has no authentication or TLS, and JSON-RPC authentication does not protect
+it. Port 8230 is an example, not a default.
+
+## Configuring Zallet
+
+Set these fields in the Zallet configuration produced by its setup procedure.
+The root `backend` key belongs before the first TOML section.
+
+```toml
+backend = "zebra"
+
+[consensus]
+network = "main"
+
+[indexer]
+validator_address = "127.0.0.1:8232"
+validator_cookie_path = "/srv/zebra/rpc/.cookie"
+
+[indexer.read_state_service]
+grpc_address = "127.0.0.1:8230"
+zebra_state_path = "/srv/zebra/state"
+```
+
+The `[indexer] validator_address` field is a host and port, without an
+`http://` prefix. The `[indexer] validator_cookie_path` field selects cookie
+authentication; the backend reads the file again for each request, so it
+picks up a new credential after Zebra restarts. Do not substitute static
+`validator_user` and `validator_password` values for Zebra's generated cookie.
+
+The `[indexer.read_state_service] zebra_state_path` field points to the cache
+root configured by Zebra's `[state] cache_dir`, not to a network-specific
+versioned subdirectory. Use an absolute path to avoid resolving a relative
+path against Zallet's data directory. Match Zallet's consensus network to
+Zebra's network.
+
+Zallet's wallet RPC listener is separate from both of these backend
+connections. Assign it a different port; applications that need wallet
+methods must connect to Zallet, not to Zebra.
+
+## Index availability and restart behavior
+
+Zebra starts `[rpc] indexer_listen_addr` even without the `indexer` feature.
+A read-only consumer then receives empty results for missing indexes rather
+than an initialization error
+([#11155](https://github.com/ZcashFoundation/zebra/issues/11155)).
+
+Keep the `indexer` feature enabled on the Zebra process that writes the state.
+Starting a non-indexer build against an indexed database removes the
+spending-transaction indexes. Restarting an indexer build rebuilds them from
+the existing chain state; a wallet reader does not perform that rebuild.
+Wait for Zebra's `finished checking/adding indexes for spending tx ids` log
+before relying on the indexes.
+
+Every indexed startup checks or builds these indexes, scanning existing blocks
+even without a format change. Allow for the resulting CPU load when scheduling
+restarts ([#11090](https://github.com/ZcashFoundation/zebra/issues/11090)).
