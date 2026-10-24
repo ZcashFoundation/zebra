@@ -27,6 +27,7 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+mod decoded_size;
 mod early_relay;
 mod mempool_reuse;
 mod nu7;
@@ -1878,6 +1879,10 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>) {
                 decoded.matched.as_ref().map(|(_, size)| *size),
                 cached.then(|| solved.zcash_serialized_size()),
             );
+            assert_eq!(
+                decoded.consumed_size,
+                (!cached).then(|| solved.zcash_serialized_size()),
+            );
             if cached {
                 match replacement {
                     Some(0) => verifier.proposals.send_modify(VecDeque::clear),
@@ -1902,6 +1907,7 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>) {
             }
             let reuse = cached && !matches!(replacement, Some(0 | 1));
             let identity_computations = verifier.proposal_key_computations.load(Ordering::SeqCst);
+            let size_serializations = verifier.block_size_serializations.load(Ordering::SeqCst);
             calls.store(if reuse { usize::MAX } else { 0 }, Ordering::SeqCst);
             let (committed, mut commits) = tokio::sync::mpsc::channel(1);
             let (validated, validation) = watch::channel(None);
@@ -1920,6 +1926,11 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>) {
                 verifier.proposal_key_computations.load(Ordering::SeqCst) - identity_computations,
                 usize::from(!cached || replacement == Some(2)),
                 "exact live matches skip identity hashing; populated-cache fallbacks do not",
+            );
+            assert_eq!(
+                verifier.block_size_serializations.load(Ordering::SeqCst) - size_serializations,
+                usize::from(cached && matches!(replacement, Some(0 | 1))),
+                "ordinary decoder evidence skips size serialization, not stale prepared handles",
             );
             if !reuse {
                 assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
