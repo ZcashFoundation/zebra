@@ -122,9 +122,9 @@ fn forget_evicted_blocks(
     !evicted.is_empty()
 }
 
-/// Finalizes root blocks after a commit, then reports and publishes any forks that finalizing
-/// evicted, because [`NonFinalizedState::finalize`] re-inserts the remaining chains under the
-/// fork limits.
+/// Finalizes root blocks after a commit, then reports any forks that finalizing evicted, because
+/// [`NonFinalizedState::finalize`] re-inserts the remaining chains under the fork limits, and
+/// publishes the state if it changed.
 fn finalize_root_blocks_and_forget_evicted(
     finalized_state: &mut FinalizedState,
     non_finalized_state: &mut NonFinalizedState,
@@ -134,13 +134,17 @@ fn finalize_root_blocks_and_forget_evicted(
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
 ) {
+    let root_height = non_finalized_state.root_height();
     finalize_root_blocks(
         finalized_state,
         non_finalized_state,
         prev_finalized_note_commitment_trees,
     );
 
-    if forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender) {
+    // Keep the old snapshot's roots visible until the database contains them.
+    if forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender)
+        || non_finalized_state.root_height() != root_height
+    {
         update_latest_chain_channels(
             non_finalized_state,
             &finalized_state.db,
@@ -622,10 +626,6 @@ impl WriteBlockWorkerTask {
                 result
             };
 
-            // TODO: fix the test timing bugs that require the result to be sent
-            //       after `update_latest_chain_channels()`,
-            //       and send the result on rsp_tx here
-
             if let Err(ref error) = result {
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
@@ -687,18 +687,21 @@ impl WriteBlockWorkerTask {
             let _ =
                 non_finalized_rejected_sender.send(NonFinalizedWriteOutcome::Committed(child_hash));
 
+            drop(_context_update);
+
             // Ownership stays in this writer even if the caller dropped its response future.
             // Notify side-chain commits too, using the committed block rather than the best tip.
             if let Some(permit) = committed_permit {
                 permit.send((child_hash, child_height));
             }
 
-            // Update the caller with the result.
+            // Acknowledge published state, not completion of older blocks' retention writes.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
             drop(replaced_snapshot);
 
+            // Finish retention before receiving another block; finalization errors remain fatal.
             let phase_start = Instant::now();
-            let root_height = non_finalized_state.root_height();
+            let context_update = early_relay.updating_context();
             finalize_root_blocks_and_forget_evicted(
                 finalized_state,
                 non_finalized_state,
@@ -708,17 +711,12 @@ impl WriteBlockWorkerTask {
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
             );
+            drop(context_update);
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",
                 "phase" => "finalization"
             )
             .record(phase_start.elapsed().as_secs_f64());
-            // Keep authentication excluded until pruning removes obsolete forks and roots from
-            // the read snapshot.
-            if non_finalized_state.root_height() != root_height {
-                let _ = non_finalized_state_sender.send(non_finalized_state.clone());
-            }
-            drop(_context_update);
 
             // Update the metrics if semantic and contextual validation passes
             //
