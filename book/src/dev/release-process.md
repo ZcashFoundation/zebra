@@ -170,7 +170,10 @@ For downstream jobs, see [continuous delivery](continuous-delivery.md); for
 artifacts and signatures, see [binary verification](../user/install.md#pre-built-binaries).
 
 Confirm publication, binary distribution, and production health before
-announcing success.
+announcing success. Then run the
+[Book workflow](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml)
+manually, so the site root documents the new release without waiting for the
+next push to `main`; if `BOOK_ROOT_REF` is set, delete it first.
 
 ### If release readiness fails
 
