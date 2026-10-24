@@ -333,8 +333,7 @@ fuzz_target!(|data: &[u8]| {
                 let mut out_buf = BytesMut::new();
                 let _ = codec_addr.encode(out_msg, &mut out_buf);
             }));
-            // Also exercise Testnet path — sanitize() branches on
-            // last_known_info_is_valid_for_outbound(network).
+            // Also exercise the Testnet path: sanitize() is network-dependent.
             let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 for a in addrs {
                     let _ = a.sanitize(default_testnet());

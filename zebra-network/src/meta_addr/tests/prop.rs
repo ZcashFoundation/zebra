@@ -37,25 +37,23 @@ proptest! {
     /// Make sure that the sanitize function reduces time and state metadata
     /// leaks for valid addresses.
     ///
-    /// Make sure that the sanitize function skips invalid IP addresses, ports,
-    /// and client services.
+    /// Make sure that the sanitize function skips invalid IP addresses and ports.
     #[test]
     fn sanitize_avoids_leaks(addr in MetaAddr::arbitrary()) {
         let _init_guard = zebra_test::init();
 
         if let Some(sanitized) = addr.sanitize(&Mainnet) {
             // check that all sanitized addresses are valid for outbound
-            prop_assert!(sanitized.last_known_info_is_valid_for_outbound(&Mainnet));
+            prop_assert!(sanitized.address_is_valid_for_outbound(&Mainnet));
             // also check the address, port, and services individually
             prop_assert!(!sanitized.addr.ip().is_unspecified());
             prop_assert_ne!(sanitized.addr.port(), 0);
             prop_assert!(!sanitized.is_inbound());
 
-            if let Some(services) = sanitized.services {
-                prop_assert!(services.contains(PeerServices::NODE_NETWORK));
-            } else {
-                prop_assert!(false, "sanitized services must be Some(PeerServices) and contain NODE_NETWORK");
-            }
+            prop_assert_eq!(
+                sanitized.services,
+                Some(addr.services.unwrap_or(PeerServices::NODE_NETWORK)),
+            );
 
             check::sanitize_avoids_leaks(&addr, &sanitized);
         }
@@ -234,8 +232,6 @@ proptest! {
 
             // Ignore the same addresses that the address book ignores
             let expected_result = if !expected_result.address_is_valid_for_outbound(&Mainnet)
-                || ( !expected_result.last_known_info_is_valid_for_outbound(&Mainnet)
-                      && expected_result.last_connection_state.is_never_attempted())
             {
                None
             } else {
@@ -327,7 +323,7 @@ proptest! {
 
         // Only put valid addresses in the address book.
         // This means some tests will start with an empty address book.
-        let addrs = if addr.last_known_info_is_valid_for_outbound(&Mainnet) {
+        let addrs = if addr.address_is_valid_for_outbound(&Mainnet) {
             Some(addr.clone())
         } else {
             None
@@ -378,7 +374,7 @@ proptest! {
                         LIVE_PEER_INTERVALS,
                         overall_test_time,
                         peer_change_interval,
-                        addr.last_known_info_is_valid_for_outbound(&Mainnet),
+                        addr.address_is_valid_for_outbound(&Mainnet),
                     );
                 }
 

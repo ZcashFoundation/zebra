@@ -1,0 +1,10 @@
+project: zebrad
+kind: Changed
+body: >-
+  Alternate listener addresses learned during handshakes are kept with their advertised
+  capabilities instead of dropping non-serving listeners. The `getnetworkinfo` response
+  reports this node's advertised services in `localservices`. Pruned listeners remain discoverable
+  through gossip, but candidates that may serve archive history are dialed first and non-serving
+  peers fill at most `peerset_initial_target_size` outbound connections, keeping the other slots
+  for serving peers. Oversized block requests are capped before entering the inbound service queue.
+time: 2026-10-25T00:55:27.185483328+02:00
