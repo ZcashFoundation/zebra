@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Halo2 proof batches flush at 128 actions instead of 64, so large Orchard blocks need fewer final batch evaluations ([#11951](https://github.com/ZcashFoundation/zebra/issues/11951)).
+time: 2026-10-23T17:46:19,043440595+02:00
