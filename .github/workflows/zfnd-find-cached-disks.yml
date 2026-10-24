@@ -82,6 +82,10 @@ jobs:
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
+          # Must match `zfnd-deploy-integration-tests-gcp.yml`, which names the disks: the action
+          # trims trailing dashes after this cut, so a different length can change the first 12
+          # characters that both workflows keep.
+          slug-maxlength: 23
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
