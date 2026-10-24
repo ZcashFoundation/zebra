@@ -57,6 +57,7 @@ Zebra release builds include several features by default:
 Additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options) that require explicit enabling:
 
 - `internal-miner` for [Regtest internal mining](https://zebra.zfnd.org/user/regtest.html)
+- `zmq` for [ZMQ block notifications](mining.md#zmq-block-notifications), implemented in Rust
 
 You can combine multiple features by listing them as parameters of the
 `--features` flag:
