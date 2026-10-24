@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `GetBlockchainInfoResponse::prune_height()` to report the lowest retained historical block body when the state is pruned.
+time: 2026-11-05T06:44:20.927810478+01:00
