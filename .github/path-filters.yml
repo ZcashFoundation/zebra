@@ -42,6 +42,10 @@ unit_tests:
   - "**/Cargo.toml"
   - "**/Cargo.lock"
   - ".config/nextest.toml"
+  # Pages that tests compare with the code.
+  - "book/src/README.md"
+  - "book/src/user/config.md"
+  - "book/src/user/rpc.md"
   - ".github/workflows/tests-unit.yml"
   - ".github/actions/setup-zebra-build/**"
   - ".github/scripts/apt-install.sh"
