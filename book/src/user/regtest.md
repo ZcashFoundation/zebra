@@ -67,9 +67,10 @@ NU5 = 1
 
 Follow the [activation and inheritance rules](custom-testnets.md#activation-heights).
 Keep Canopy at height 1 for a chain mined entirely by Zebra: it cannot
-construct pre-Canopy templates. Regtest's reduced
-[parameter validation](custom-testnets.md#checkpoints) does not guarantee that
-a loaded configuration produces valid blocks.
+construct pre-Canopy templates. Regtest validates funding addresses and
+lockbox disbursements during configuration loading, as on custom Testnets.
+Its reduced [checkpoint validation](custom-testnets.md#checkpoints) does not
+guarantee that a loaded configuration produces valid blocks.
 
 ## Using RPC methods directly
 

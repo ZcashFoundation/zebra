@@ -302,6 +302,11 @@ Each supplied recipient has these fields:
 | `numerator` | `u64` | Required | Share of the block subsidy over a fixed denominator of `100`. |
 | `addresses` | Optional array of strings | Absent; empty address sequence | Transparent funding addresses in period order. Deferred recipients do not require addresses. Non-deferred recipients use P2PKH or P2SH addresses, not `tex` addresses. |
 
+On Testnet and Regtest, Zebra rejects invalid ranges, missing defaults,
+numerator totals above `100`, and malformed addresses during loading.
+Non-deferred recipients need Testnet addresses covering every address period.
+Extension can repeat a nonempty list but cannot fill a required empty list.
+
 The three public Testnet groups are, in order:
 
 | Height range, end exclusive | Receiver shares | Address defaults |
@@ -318,6 +323,9 @@ Each `lockbox_disbursements` element has these fields:
 | --- | --- | --- | --- |
 | `address` | String | Required | Transparent address receiving the specified one-time disbursement. |
 | `amount` | Integer amount | Required | Output value in zatoshis, from `0` through `2100000000000000`. |
+
+Zebra validates lockbox addresses during loading. The sum of all disbursements
+must not exceed `2100000000000000` zatoshis.
 
 The default Testnet list contains ten identical outputs, each paying
 `787500000000` zatoshis to `t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8`.
