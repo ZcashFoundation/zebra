@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `UnspentOutput` and `OutputWithMetadata` for UTXO metadata without historical bodies, plus `KnownTransaction` read and write-service queries for best-chain membership.
+time: 2026-11-05T06:44:00.821584136+01:00
