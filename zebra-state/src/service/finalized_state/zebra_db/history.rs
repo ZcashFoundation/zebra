@@ -1,7 +1,7 @@
 //! Availability of historical block bodies.
 
 #[cfg(test)]
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, parameters::NetworkUpgrade};
 
 use crate::{HistoryCapabilities, StateInitError};
 
@@ -30,6 +30,7 @@ impl DiskWriteBatch {
     ///
     /// The caller must be the sole pruning owner and commit this batch before preparing another.
     /// Current block writes may continue concurrently. Genesis and the finalized tip are retained.
+    /// The startup checks must be complete, and deletion is capped at the restart witness.
     /// No production caller may use this until pruning startup and consumer protections are
     /// enabled.
     pub(crate) fn prepare_history_pruning(
@@ -37,6 +38,11 @@ impl DiskWriteBatch {
         db: &ZebraDb,
         lowest_retained_height: Height,
     ) -> Result<(), BoxError> {
+        if !db.ready_for_pruning() {
+            return Err(
+                "history-dependent migrations and checks must finish before pruning".into(),
+            );
+        }
         let previous = db
             .history_capabilities()?
             .lowest_retained_height
@@ -49,6 +55,24 @@ impl DiskWriteBatch {
             .is_none_or(|tip| lowest_retained_height > tip)
         {
             return Err("retained-body floor must not exceed the finalized tip".into());
+        }
+        let network = db.network();
+        let activation = NetworkUpgrade::Nu5
+            .activation_height(&network)
+            .ok_or("pruning requires a network with NU5 activated")?;
+        let ancestors = crate::service::block_iter::known_chain_ancestor_iter::<
+            zebra_chain::block::Block,
+        >(None, db, db.finalized_tip_hash().into());
+        let witness = crate::service::check::legacy_chain(
+            activation,
+            ancestors,
+            &network,
+            crate::constants::MAX_LEGACY_CHAIN_BLOCKS,
+        )?
+        .ok_or("pruning requires a retained transaction branch ID for restart checks")?;
+        let lowest_retained_height = lowest_retained_height.min(witness);
+        if lowest_retained_height <= previous {
+            return Err("pruning would delete the restart witness".into());
         }
         let transactions = db
             .db

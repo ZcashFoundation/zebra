@@ -97,10 +97,28 @@ async fn state_propagates_incomplete_block_body_errors() {
         );
         let error =
             super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10).unwrap_err();
-        assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        assert!(error.to_string().contains("cannot prove"));
+        assert!(error
+            .to_string()
+            .contains("restore an archive snapshot or resync"));
     })
     .await
     .unwrap();
+}
+
+#[test]
+fn legacy_chain_rejects_exhausted_history() {
+    let block = zebra_test::vectors::MAINNET_BLOCKS[&1]
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let error = super::check::legacy_chain(
+        Height(0),
+        std::iter::once(Ok(block)),
+        &Network::Mainnet,
+        100_000,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("cannot prove"));
 }
 
 async fn test_populated_state_responds_correctly(
@@ -649,12 +667,15 @@ proptest! {
     /// Test blocks that are less than the NU5 activation height.
     #[test]
     fn some_block_less_than_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, _, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
+        let nu_activation_height = NetworkUpgrade::Nu5
+            .activation_height(&network)
+            .expect("test networks activate NU5 after Canopy");
         let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
-        prop_assert_eq!(response, Ok(()));
+        prop_assert_eq!(response, Ok(None));
     }
 
     /// Test the maximum amount of blocks to check before chain is declared to be legacy.
@@ -669,6 +690,7 @@ proptest! {
             .expect("chain contains valid blocks");
 
         let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+            .map(|_| ())
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -709,7 +731,7 @@ proptest! {
             chain.clone().into_iter().rev().map(Ok),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
-        ).map_err(|error| error.to_string());
+        ).map(|_| ()).map_err(|error| error.to_string());
 
         prop_assert_eq!(
             response,
@@ -726,6 +748,7 @@ proptest! {
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
         let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+            .map(|_| ())
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
