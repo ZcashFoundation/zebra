@@ -1,0 +1,128 @@
+# Monthly dependency trains: two rolling `cargo update` PRs, regenerated on the 1st.
+#
+# Train A moves every crate except the consensus-sensitive set, Train B moves only
+# that set. Each train force-updates its own branch, so there is one open PR per
+# train at any time. An approved PR is left alone so the push never dismisses the
+# review. See book/src/dev/dependency-trains.md and issue #9630.
+name: Dependency Trains
+
+on:
+  schedule:
+    # 06:00 UTC on the first of every month; the conductor merges once CI is green.
+    - cron: '0 6 1 * *'
+
+  workflow_dispatch:
+    inputs:
+      train:
+        description: Which train to run
+        type: choice
+        options: [a, b, both]
+        default: both
+
+permissions: {}
+
+# Runs never overlap: both trains rewrite the same branches and lockfile.
+concurrency:
+  group: dependency-trains
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Dependency train ${{ matrix.train }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `inputs` is empty on a schedule, so the cron runs both trains.
+        train: ${{ fromJSON(inputs.train == 'a' && '["a"]' || inputs.train == 'b' && '["b"]' || '["a", "b"]') }}
+    env:
+      TRAIN: ${{ matrix.train }}
+      TRAIN_BRANCH: deps/train-${{ matrix.train }}
+    steps:
+      - name: Generate release app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # Skip-amend-when-approved: a push would dismiss the approval, so an approved
+      # train waits for its merge instead of being regenerated.
+      - name: Check whether the open train PR is already approved
+        id: hold
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          decision="$(gh pr list --repo "$REPO" --head "$TRAIN_BRANCH" --base main --state open \
+            --json number,reviewDecision --jq '.[0] | "\(.number) \(.reviewDecision)"')"
+          if [ "${decision#* }" = "APPROVED" ]; then
+            echo "PR #${decision% *} from ${TRAIN_BRANCH} is approved; leaving it alone so the approval stands."
+            echo "hold=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No approved PR from ${TRAIN_BRANCH} (found: '${decision:-none}'); regenerating the train."
+            echo "hold=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        if: steps.hold.outputs.hold != 'true'
+        with:
+          persist-credentials: false
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        if: steps.hold.outputs.hold != 'true'
+        with:
+          toolchain: 1.91.0
+          # `cargo update` builds nothing, so a cache here only consumes quota.
+          cache: false
+
+      - name: Build the train
+        id: build
+        if: steps.hold.outputs.hold != 'true'
+        run: |
+          python3 .github/scripts/dependency-train.py "$TRAIN" --body-out "${RUNNER_TEMP}/train-body.md"
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock is unchanged; no PR to open or update."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- Cargo.lock
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the Train A PR
+        if: steps.hold.outputs.hold != 'true' && steps.build.outputs.has_changes == 'true' && matrix.train == 'a'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 #v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ${{ env.TRAIN_BRANCH }}
+          base: main
+          delete-branch: false
+          add-paths: |
+            Cargo.lock
+            .changes/unreleased/*.yaml
+          title: "chore(deps): dependency train A (${{ steps.build.outputs.date }})"
+          body-path: ${{ runner.temp }}/train-body.md
+          commit-message: "chore(deps): dependency train A (${{ steps.build.outputs.date }})"
+
+      - name: Open or update the Train B PR
+        if: steps.hold.outputs.hold != 'true' && steps.build.outputs.has_changes == 'true' && matrix.train == 'b'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 #v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ${{ env.TRAIN_BRANCH }}
+          base: main
+          delete-branch: false
+          add-paths: |
+            Cargo.lock
+            .changes/unreleased/*.yaml
+          title: "chore(deps): consensus dependency train B (${{ steps.build.outputs.date }})"
+          body-path: ${{ runner.temp }}/train-body.md
+          commit-message: "chore(deps): consensus dependency train B (${{ steps.build.outputs.date }})"

@@ -1,44 +1,8 @@
 version: 2
-# No labels on dependency PRs: the changelog gate reads the PR title.
+# Cargo dependencies are not updated by dependabot: the monthly dependency trains
+# in .github/workflows/dependency-trains.yml run `cargo update` instead, see
+# book/src/dev/dependency-trains.md. Dependabot security alerts stay on.
 updates:
-  # Rust section
-  - package-ecosystem: cargo
-    directory: '/'
-    # Update only the lockfile. We shouldn't update Cargo.toml unless it's for
-    # a security issue, or if we need a new feature of the dependency.
-    versioning-strategy: lockfile-only
-    # serde, clap, and other dependencies sometimes have multiple updates in a week
-    schedule:
-      interval: monthly
-      timezone: America/New_York
-    # Limit dependabot to 1 PR per reviewer
-    open-pull-requests-limit: 6
-    # Lockfile-only updates do not release packages, so keep them outside release-plz's release types.
-    commit-message:
-      prefix: "chore"
-      include: "scope"
-    labels: []
-    groups:
-        ecc:
-          patterns:
-            # deliberately include zcash_script (even though it is maintained by ZF)
-            - "zcash_*"
-            - "orchard"
-            - "halo2*"
-            - "incrementalmerkletree"
-            - "bridgetree"
-            - "equihash"
-        prod:
-          dependency-type: "production"
-          exclude-patterns:
-            - "zcash_*"
-            - "orchard"
-            - "halo2*"
-            - "incrementalmerkletree"
-            - "bridgetree"
-            - "equihash"
-        dev:
-          dependency-type: "development"
   # Devops section
   - package-ecosystem: github-actions
     directory: '/'
@@ -52,7 +16,8 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
-    labels: []
+    # Dependabot ignores an empty list and invents its own labels, so name the real one.
+    labels: ["devops"]
     groups:
       devops:
         patterns:
