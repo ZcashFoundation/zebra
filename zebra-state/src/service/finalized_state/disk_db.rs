@@ -1411,7 +1411,9 @@ impl DiskDb {
 
     /// Tries to reuse an existing database of the same kind after a major upgrade.
     ///
-    /// If the current version is restorable, moves its previous major to the current path.
+    /// If the current db version belongs to `restorable_db_versions`, renames the immediately
+    /// preceding major version's database of the same kind to the current path, preserving its
+    /// recorded version so the required upgrades can run. Does not merge existing databases.
     ///
     /// In `read_only` mode, returns the candidate's stored version without modifying either path.
     /// The caller must check that its records and directory version permit read-only reuse.

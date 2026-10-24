@@ -225,11 +225,13 @@ impl VerifiedSet {
     /// Removes a transaction with probability in direct proportion to its
     /// [eviction weight](VerifiedUnminedTx::eviction_weight), as per [ZIP-401].
     ///
+    /// Each transaction's eviction weight is its cost plus a 40,000 penalty when it pays less
+    /// than the ZIP-317 conventional fee, which depends on its logical-action count.
+    ///
     /// # Note
     ///
-    /// Collecting and calculating weights is O(n). But in practice n is limited
-    /// to 20,000 (mempooltxcostlimit/min(cost)), so the actual cost shouldn't
-    /// be too bad.
+    /// Collecting and calculating weights is O(n). The default cost limit of 80,000,000 and
+    /// minimum transaction cost of 10,000 bound the mempool to 8,000 transactions.
     ///
     /// This function is equivalent to `EvictTransaction` in [ZIP-401].
     ///
