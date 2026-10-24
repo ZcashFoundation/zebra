@@ -156,6 +156,7 @@ fn mining_candidate_matches_committed_block() {
             .unwrap();
         let (mut finalized, non_finalized, candidate) =
             mining_candidate_parent_state(&parent, candidate);
+        let parent_trees = finalized.db.note_commitment_trees_for_tip();
         let orchard_root = finalized.db.note_commitment_trees_for_tip().orchard.root();
         let has_orchard = candidate.orchard_note_commitments().next().is_some();
         assert_eq!(
@@ -166,6 +167,7 @@ fn mining_candidate_matches_committed_block() {
         let early =
             mining_candidate_chain_info(&non_finalized, &finalized.db, &network, candidate.clone())
                 .expect("the real block body extends the seeded parent");
+        assert_eq!(finalized.db.note_commitment_trees_for_tip(), parent_trees);
         assert_eq!(
             read::best_tip(&non_finalized, &finalized.db),
             Some((parent.coinbase_height().unwrap(), parent.hash())),
@@ -240,6 +242,147 @@ fn mining_candidate_matches_committed_block() {
         );
         // This is the child header commitment before NU5, and its history component from NU5.
         assert_eq!(early.chain_history_root, committed.chain_history_root);
+    }
+}
+
+/// Batched speculative updates preserve scalar roots, capacity rejection, and parent snapshots.
+#[test]
+fn mining_candidate_batch_trees_match_scalar_updates() {
+    use proptest::{strategy::Strategy, strategy::ValueTree, test_runner::TestRunner};
+    use zebra_chain::{
+        parallel::tree::NoteCommitmentTrees,
+        primitives::zcash_history::BlockCommitmentTreeRoots,
+        sapling::tree::legacy::{
+            LegacyFrontier, LegacyLeaf, LegacyNonEmptyFrontier, LegacyPosition,
+        },
+        subtree::TRACKED_SUBTREE_HEIGHT,
+        transaction::Transaction,
+        transparent::Input,
+        LedgerState,
+    };
+
+    use crate::{service::finalized_state::DiskWriteBatch, tests::FakeChainHelper};
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu6_3.activation_height(&network).unwrap();
+    let mut parent = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let coinbase = &mut Arc::make_mut(&mut parent).transactions[0];
+    let mut inputs = coinbase.inputs();
+    let Input::Coinbase { height: h, .. } = &mut inputs[0] else {
+        panic!("the block vector starts with a coinbase");
+    };
+    *h = height;
+    *coinbase = Arc::new(coinbase.as_ref().clone().with_transparent_inputs(inputs));
+    let mut candidate = parent.make_fake_child();
+    // Keep the real Sapling/Orchard bodies and add a structurally valid Ironwood bundle.
+    // This checks contextual tree updates, not the generated transaction's proofs.
+    Arc::make_mut(&mut candidate)
+        .transactions
+        .extend(parent.transactions.iter().skip(1).cloned());
+    let mut ledger = LedgerState::default();
+    ledger.height = height;
+    let ironwood_tx = Transaction::v6_strategy(ledger)
+        .prop_filter("two Ironwood commitments exercise partial overflow", |tx| {
+            tx.ironwood_note_commitments().count() == 2
+        })
+        .new_tree(&mut TestRunner::deterministic())
+        .unwrap()
+        .current();
+    Arc::make_mut(&mut candidate)
+        .transactions
+        .push(Arc::new(ironwood_tx));
+    let merkle_root = candidate.transactions.iter().collect();
+    Arc::make_mut(&mut Arc::make_mut(&mut candidate).header).merkle_root = merkle_root;
+    let (finalized, non_finalized, candidate) = mining_candidate_parent_state(&parent, candidate);
+    let db = &finalized.db;
+    let counts = [
+        candidate.sapling_note_commitments().count(),
+        candidate.orchard_note_commitments().count(),
+        candidate.ironwood_note_commitments().count(),
+    ];
+    assert!(counts.iter().all(|count| *count > 1));
+
+    for (pool, count) in counts.into_iter().enumerate() {
+        let capacity = 1u64 << 32;
+        for size in [
+            0,
+            (1 << TRACKED_SUBTREE_HEIGHT) - 1,
+            capacity - u64::try_from(count).unwrap(),
+            capacity - 1,
+            capacity,
+        ] {
+            let mut trees = NoteCommitmentTrees::default();
+            if size > 0 {
+                // Encode a valid synthetic frontier without appending billions of notes.
+                // Both tree types use this legacy shape and accept zero field elements.
+                let position = usize::try_from(size - 1).unwrap();
+                let right = position & 1 == 1;
+                let frontier = LegacyFrontier::<[u8; 32], 32> {
+                    frontier: Some(LegacyNonEmptyFrontier {
+                        position: LegacyPosition(position),
+                        leaf: if right {
+                            LegacyLeaf::Right([0; 32], [0; 32])
+                        } else {
+                            LegacyLeaf::Left([0; 32])
+                        },
+                        ommers: vec![
+                            [0; 32];
+                            usize::try_from(position.count_ones()).unwrap()
+                                - usize::from(right)
+                        ],
+                    }),
+                };
+                let bytes = bincode::serialize(&(frontier, None::<[u8; 32]>)).unwrap();
+                match pool {
+                    0 => trees.sapling = Arc::new(bincode::deserialize(&bytes).unwrap()),
+                    1 => trees.orchard = Arc::new(bincode::deserialize(&bytes).unwrap()),
+                    _ => trees.ironwood = Arc::new(bincode::deserialize(&bytes).unwrap()),
+                }
+            }
+            let mut batch = DiskWriteBatch::new();
+            batch.create_sapling_tree(db, &height, &trees.sapling);
+            batch.create_orchard_tree(db, &height, &trees.orchard);
+            batch.create_ironwood_tree(db, &height, &trees.ironwood);
+            db.write_batch(batch).unwrap();
+            let snapshot = trees.clone();
+            let sapling_result = candidate
+                .sapling_note_commitments()
+                .try_for_each(|cm| Arc::make_mut(&mut trees.sapling).append(cm));
+            let orchard_result = candidate
+                .orchard_note_commitments()
+                .try_for_each(|cm| Arc::make_mut(&mut trees.orchard).append(cm));
+            let ironwood_result = candidate
+                .ironwood_note_commitments()
+                .try_for_each(|cm| Arc::make_mut(&mut trees.ironwood).append(cm));
+            let fits = sapling_result.is_ok() && orchard_result.is_ok() && ironwood_result.is_ok();
+            assert_eq!(fits, size <= capacity - u64::try_from(count).unwrap());
+
+            let early =
+                mining_candidate_chain_info(&non_finalized, db, &network, candidate.clone());
+            assert_eq!(early.is_some(), fits, "pool {pool}, size {size}");
+            if let Some(early) = early {
+                let mut history = db.history_tree();
+                Arc::make_mut(&mut history)
+                    .push(
+                        &network,
+                        candidate.clone(),
+                        BlockCommitmentTreeRoots {
+                            sapling: &trees.sapling.root(),
+                            orchard: &trees.orchard.root(),
+                            ironwood: &trees.ironwood.root(),
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(early.chain_history_root, history.hash());
+            }
+            let retained = db.note_commitment_trees_for_tip();
+            retained.sapling.assert_frontier_eq(&snapshot.sapling);
+            retained.orchard.assert_frontier_eq(&snapshot.orchard);
+            retained.ironwood.assert_frontier_eq(&snapshot.ironwood);
+        }
     }
 }
 
