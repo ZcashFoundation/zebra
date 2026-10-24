@@ -945,6 +945,8 @@ impl StateService {
             }
         }
 
+        let mut ready = None;
+
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
         // it with the newer request. A block hash does not identify its authorizing data, so
@@ -987,12 +989,16 @@ impl StateService {
         }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        self.non_finalized_state_queued_blocks.queue((
-            semantically_verified,
-            rsp_tx,
-            contextual,
-            notifications,
-        ));
+        let queued = (semantically_verified, rsp_tx, contextual, notifications);
+        if self.block_write_sender.finalized.is_none()
+            && self.block_write_sender.non_finalized.is_some()
+            && self.can_fork_chain_at(&parent_hash)
+        {
+            // Immediately dispatched blocks need only the sent-hash indexes.
+            ready = Some(queued);
+        } else {
+            self.non_finalized_state_queued_blocks.queue(queued);
+        }
 
         // We've finished sending checkpoint verified blocks when:
         // - we've sent the verified block for the last checkpoint, and
@@ -1013,17 +1019,16 @@ impl StateService {
                 }
             }
             // Send blocks from non-finalized queue
-            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
+            self.send_ready_non_finalized(self.finalized_block_write_last_sent_hash, None);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if !self.can_fork_chain_at(&parent_hash) {
-            tracing::trace!("unready to verify, returning early");
-        } else if self.block_write_sender.finalized.is_none() {
-            // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
-            self.send_ready_non_finalized_queued(parent_hash);
+        } else if self.block_write_sender.finalized.is_none()
+            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
+        {
+            self.send_ready_non_finalized(parent_hash, ready);
 
             let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
                 "Finalized state must have at least one block before committing non-finalized state",
@@ -1034,6 +1039,8 @@ impl StateService {
 
             self.non_finalized_block_write_sent_hashes
                 .prune_by_height(finalized_tip_height);
+        } else {
+            tracing::trace!("unready to verify, returning early");
         }
 
         // Limit the queue after sending the blocks that are ready, so it can't fail them.
@@ -1113,10 +1120,16 @@ impl StateService {
         queued_height >= self.full_verifier_utxo_lookahead
     }
 
-    /// Sends queued blocks starting from `new_parent` in parent-before-child order
-    /// to the block write task for validation and commit.
-    #[tracing::instrument(level = "debug", skip(self, new_parent))]
-    fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
+    /// Sends an optional ready child and queued descendants of `new_parent` to the writer, in
+    /// parent-before-child order.
+    ///
+    /// Both admission paths share sent-hash accounting and writer shutdown handling.
+    #[tracing::instrument(level = "debug", skip(self, new_parent, ready))]
+    fn send_ready_non_finalized(
+        &mut self,
+        new_parent: block::Hash,
+        mut ready: Option<QueuedSemanticallyVerified>,
+    ) {
         use tokio::sync::mpsc::error::SendError;
         if let Some(non_finalized_block_write_sender) = &self.block_write_sender.non_finalized {
             let mut new_parents: Vec<block::Hash> = vec![new_parent];
@@ -1126,7 +1139,7 @@ impl StateService {
                     .non_finalized_state_queued_blocks
                     .dequeue_children(parent_hash);
 
-                for queued_child in queued_children {
+                for queued_child in ready.take().into_iter().chain(queued_children) {
                     let (SemanticallyVerifiedBlock { hash, .. }, _, _, _) = queued_child;
 
                     self.non_finalized_block_write_sent_hashes
@@ -1292,7 +1305,7 @@ impl StateService {
             )
         };
         let read_service = if let Some(utxo) = known {
-            self.pending_utxos.respond(&outpoint, utxo);
+            self.pending_utxos.respond(&outpoint, || utxo);
             None
         } else {
             Some(self.read_service.clone())
