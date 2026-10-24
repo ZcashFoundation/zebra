@@ -1,3 +1,17 @@
+# Inventory tracking
+
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: the [inventory registry](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/peer_set/inventory_registry.rs) and [peer set](https://github.com/ZcashFoundation/zebra/tree/main/zebra-network/src/peer_set).
+
+- The registry tracks available/missing inventory and failed requests.
+- Bounded `IndexMap`/`IndexSet` collections replace the proposed maps.
+- Limits are 1,000 hashes per map and 70 peers per hash.
+- Changes use `InventoryStatus<(AtLeastOne<InventoryHash>, PeerSocketAddr)>`.
+- The [rotation interval](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs) is 53 seconds, not 75; missed ticks delay rather than replay.
+
+---
+
 - Feature Name: `inventory_tracking`
 - Start Date: 2020-08-25
 - Design PR: [ZcashFoundation/zebra#952](https://github.com/ZcashFoundation/zebra/pull/952)
