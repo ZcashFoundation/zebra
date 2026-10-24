@@ -88,7 +88,7 @@ derive-getters = "0.5"
 derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "5.0.0"
-equihash = "0.3"
+equihash = "0.3.1"
 ff = "0.14"
 futures = "0.3.32"
 futures-core = "0.3.31"
@@ -410,5 +410,10 @@ result_large_err = "allow"
 
 [patch.crates-io]
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "c443b2bbb063f6e21acf721eb53f671b88816477" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", rev = "50cd69a35dd2b342891ae8d1e9f41ef1afd50f9e" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", rev = "50cd69a35dd2b342891ae8d1e9f41ef1afd50f9e" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", rev = "50cd69a35dd2b342891ae8d1e9f41ef1afd50f9e" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", rev = "50cd69a35dd2b342891ae8d1e9f41ef1afd50f9e" }
+equihash = { git = "https://github.com/zcash/librustzcash", rev = "50cd69a35dd2b342891ae8d1e9f41ef1afd50f9e" }
 pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "f16b2cb5b492223296bf5642bda17ab366aa1955" }
 sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "a88967c97e49ad11e6e674f58849622073393ba9" }
