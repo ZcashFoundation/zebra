@@ -65,6 +65,18 @@ checks its internal links and anchors offline. It is not a required
 context. External links are checked weekly by the
 [Advisory Checks workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/advisory.yml).
 
+The [Book workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/book.yml)
+publishes <https://zebra.zfnd.org/> on every push to `main`, on manual runs,
+and after the Book (next) workflow completes through its `workflow_run`
+trigger. The site root is the book of the latest release, so operators read
+the documentation of the version they can install; the book of `main` is
+under `/main/`, and the internal rustdoc of `main` under `/internal/`.
+The newest available Book (next) artifact is included under `/next/`.
+A new release reaches the root on the next run. To publish another ref at
+the root, for example `main` when a documentation fix should not wait for a
+release, set the `BOOK_ROOT_REF` repository variable; delete it to return
+to the latest release.
+
 ### Runners and build caches
 
 Linux unit tests use Rust 1.97.0, `cargo nextest` with the `ci` profile,
