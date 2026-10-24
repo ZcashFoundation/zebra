@@ -1497,6 +1497,10 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
 
+            ReadRequest::HistoryCapabilities => Ok(ReadResponse::HistoryCapabilities(
+                state.db.history_capabilities()?,
+            )),
+
             // Used by the StateService.
             ReadRequest::Tip => Ok(ReadResponse::Tip(read::tip(
                 state.latest_best_chain(),
