@@ -21,6 +21,9 @@ use crate::{
     state_database_format_version_in_code, BoxError,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
 /// are not written to logs by types that derive `Debug`.
 ///
@@ -171,6 +174,14 @@ pub struct Config {
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database password.
     pub elasticsearch_password: RedactedString,
+
+    #[cfg(feature = "elasticsearch")]
+    /// Skip TLS certificate validation when connecting to Elasticsearch.
+    ///
+    /// Defaults to `false`, so the server certificate is validated. Set to `true` only for a
+    /// trusted local cluster with a self-signed certificate: it exposes the connection, including
+    /// authentication credentials, to interception.
+    pub elasticsearch_skip_cert_validation: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -240,6 +251,18 @@ impl Config {
             ..Config::default()
         }
     }
+
+    /// Returns how the Elasticsearch server certificate is validated.
+    #[cfg(feature = "elasticsearch")]
+    pub(crate) fn elasticsearch_cert_validation(
+        &self,
+    ) -> elasticsearch::cert::CertificateValidation {
+        if self.elasticsearch_skip_cert_validation {
+            elasticsearch::cert::CertificateValidation::None
+        } else {
+            elasticsearch::cert::CertificateValidation::Default
+        }
+    }
 }
 
 impl Default for Config {
@@ -258,6 +281,8 @@ impl Default for Config {
             elasticsearch_username: "elastic".to_string(),
             #[cfg(feature = "elasticsearch")]
             elasticsearch_password: RedactedString::default(),
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_skip_cert_validation: false,
         }
     }
 }
@@ -599,29 +624,5 @@ pub(crate) mod hidden {
         )??;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redacted_string_hides_contents_from_debug() {
-        let secret = RedactedString::from("hunter2");
-
-        assert_eq!(format!("{secret:?}"), "[REDACTED]");
-        assert_eq!(secret.as_str(), "hunter2");
-    }
-
-    #[cfg(feature = "elasticsearch")]
-    #[test]
-    fn config_debug_does_not_contain_elasticsearch_password() {
-        let config = Config {
-            elasticsearch_password: RedactedString::from("hunter2"),
-            ..Config::default()
-        };
-
-        assert!(!format!("{config:?}").contains("hunter2"));
     }
 }
