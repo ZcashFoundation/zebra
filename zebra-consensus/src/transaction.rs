@@ -1105,10 +1105,15 @@ fn verify_v4_transaction(
     verify_v4_transaction_network_upgrade(tx, nu)?;
 
     let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+    if tx.sprout_bundle().is_none() && sapling_bundle.is_none() {
+        return verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction);
+    }
 
     let sighash = cached_ffi_transaction
         .sighasher()
         .sighash(HashType::ALL, None);
+    #[cfg(test)]
+    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
@@ -1208,10 +1213,15 @@ fn verify_v5_transaction(
 
     let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
     let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+    if sapling_bundle.is_none() && orchard_bundle.is_none() {
+        return verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction);
+    }
 
     let sighash = cached_ffi_transaction
         .sighasher()
         .sighash(HashType::ALL, None);
+    #[cfg(test)]
+    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
@@ -1280,10 +1290,15 @@ fn verify_v6_transaction(
     let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
     let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
     let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
+    if sapling_bundle.is_none() && orchard_bundle.is_none() && ironwood_bundle.is_none() {
+        return verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction);
+    }
 
     let sighash = cached_ffi_transaction
         .sighasher()
         .sighash(HashType::ALL, None);
+    #[cfg(test)]
+    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
 
     // The Ironwood bundle reuses the Orchard Action proof system and the NU6.3 circuit key, so
     // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
