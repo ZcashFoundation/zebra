@@ -44,6 +44,8 @@
 //!  * Block Notify Task
 //!    * if the user has configured a `notify.block_notify_command`, runs that command
 //!      whenever the best chain tip changes (Zebra's equivalent of zcashd's `-blocknotify`)
+//!  * ZMQ Hashblock Task
+//!    * publishes synced best-tip hashes when `notify.zmqpubhashblock` is configured
 //!  * Progress Task
 //!    * logs progress towards the chain tip
 //!
@@ -271,6 +273,13 @@ impl StartCmd {
         check_tcp_slow_start_after_idle();
 
         let config = APPLICATION.config();
+        config.notify.validate()?;
+        #[cfg(feature = "zmq")]
+        let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
+            Some(notify::zmq::bind(endpoint).await?)
+        } else {
+            None
+        };
         let is_regtest = config.network.network.is_regtest();
 
         let config = if is_regtest {
@@ -674,6 +683,22 @@ impl StartCmd {
                 tokio::spawn(std::future::pending().in_current_span())
             };
 
+        let zmq_task_handle: tokio::task::JoinHandle<Result<(), Report>> = {
+            #[cfg(feature = "zmq")]
+            {
+                if let Some(socket) = zmq_socket {
+                    tokio::spawn(
+                        notify::zmq::run(socket, sync_status.clone(), chain_tip_change.clone())
+                            .in_current_span(),
+                    )
+                } else {
+                    tokio::spawn(std::future::pending().in_current_span())
+                }
+            }
+            #[cfg(not(feature = "zmq"))]
+            tokio::spawn(std::future::pending().in_current_span())
+        };
+
         info!("spawning mempool queue checker task");
         let mempool_queue_checker_task_handle =
             mempool::QueueChecker::spawn(mempool.clone(), mempool_transaction_verified);
@@ -788,6 +813,7 @@ impl StartCmd {
         pin!(syncer_task_handle);
         pin!(block_gossip_task_handle);
         pin!(block_notify_task_handle);
+        pin!(zmq_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
@@ -863,6 +889,10 @@ impl StartCmd {
                     .expect("unexpected panic in the block notify task")
                     .map(|_| info!("block notify task exited"))
                     .map_err(|e| eyre!(e)),
+
+                zmq_result = &mut zmq_task_handle => zmq_result
+                    .expect("unexpected panic in the ZMQ hashblock task")
+                    .map(|_| info!("ZMQ hashblock task exited")),
 
                 mempool_crawl_result = &mut mempool_crawler_task_handle => mempool_crawl_result
                     .expect("unexpected panic in the mempool crawler")
@@ -958,6 +988,7 @@ impl StartCmd {
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();
+        zmq_task_handle.abort();
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
