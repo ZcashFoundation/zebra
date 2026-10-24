@@ -42,6 +42,7 @@ use crate::{
     block::{PreparedBlockCache, Request, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
+    primitives::halo2,
     transaction, BoxError, Config,
 };
 
@@ -278,7 +279,7 @@ where
 /// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, mempool transaction verifier,
-/// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
+/// a [`BackgroundTaskHandles`] with the state checkpoint and Halo2 key preload tasks,
 /// the maximum configured checkpoint verification height, and the shared prepared-block decoder.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
@@ -293,6 +294,9 @@ where
 /// Mempool state queries use `read_state_service` directly, without the state writer's buffer.
 /// The optional `block_mempool` channel enables reuse of same-epoch verified transactions.
 /// Both mempool handles must refer to the mempool using this network and these verifiers.
+///
+/// Key construction runs on a blocking worker without delaying initialization. Requests arriving
+/// before it finishes can still wait for their era's key. The keys retain roughly 2 MiB of heap.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -309,12 +313,59 @@ where
 pub async fn init<S, ReadState, Mempool>(
     config: Config,
     network: &Network,
+    state_service: S,
+    read_state_service: ReadState,
+    mempool: oneshot::Receiver<Mempool>,
+    block_mempool: Option<
+        oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    >,
+) -> (
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<
+        BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
+        transaction::MempoolRequest,
+    >,
+    BackgroundTaskHandles,
+    Height,
+    PreparedBlockCache,
+)
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
+{
+    init_with_preload_handle(
+        config,
+        network,
+        state_service,
+        read_state_service,
+        mempool,
+        block_mempool,
+        halo2::spawn_key_preload(),
+    )
+    .await
+}
+
+/// Initializes verifier services with the caller's key preload task.
+async fn init_with_preload_handle<S, ReadState, Mempool>(
+    config: Config,
+    network: &Network,
     mut state_service: S,
     read_state_service: ReadState,
     mempool: oneshot::Receiver<Mempool>,
     block_mempool: Option<
         oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     >,
+    halo2_key_preload_handle: JoinHandle<()>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -470,6 +521,7 @@ where
 
     let task_handles = BackgroundTaskHandles {
         state_checkpoint_verify_handle,
+        halo2_key_preload_handle,
     };
 
     (
@@ -504,9 +556,14 @@ pub struct BackgroundTaskHandles {
     /// A handle to the state checkpoint verify task.
     /// Finishes when all the checkpoints are verified, or when the state tip is reached.
     pub state_checkpoint_verify_handle: JoinHandle<()>,
+
+    /// A handle to background construction of the existing Halo2 verifying keys.
+    /// Finishes after initializing the NU6.3 key, then both historical keys.
+    /// Once started, this blocking task cannot be aborted.
+    pub halo2_key_preload_handle: JoinHandle<()>,
 }
 
-/// Calls [`init`] with a closed mempool setup channel for conciseness in tests.
+/// Initializes test verifiers with a closed mempool channel, leaving Halo2 keys lazy.
 ///
 /// See [`init`] for more details.
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -534,7 +591,7 @@ where
         + 'static,
     ReadState::Future: Send + 'static,
 {
-    init(
+    init_with_preload_handle(
         config.clone(),
         network,
         state_service.clone(),
@@ -544,6 +601,7 @@ where
         >()
         .1,
         None,
+        tokio::spawn(std::future::ready(())),
     )
     .await
 }

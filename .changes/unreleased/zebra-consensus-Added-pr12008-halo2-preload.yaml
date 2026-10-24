@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added `BackgroundTaskHandles::halo2_key_preload_handle` to track background construction of all three Halo2 verifying keys without delaying verifier initialization ([#12008](https://github.com/ZcashFoundation/zebra/pull/12008)).
+time: 2026-11-05T06:33:38.292402262+01:00
