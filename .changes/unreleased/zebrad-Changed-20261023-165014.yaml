@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Experimental compact relay requests high-bandwidth announcements from at most three opted-in peers, preferring recent first block announcers independently of outbound relay preferences.
+time: 2026-10-23T16:50:14.332582982+02:00

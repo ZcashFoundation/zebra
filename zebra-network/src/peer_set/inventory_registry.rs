@@ -4,18 +4,19 @@
 
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use futures::{FutureExt, Stream, StreamExt};
 use indexmap::{IndexMap, IndexSet};
 use tokio::{
-    sync::broadcast,
+    sync::{broadcast, watch, Semaphore},
     time::{self, Instant},
 };
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream, IntervalStream};
 
-use zebra_chain::serialization::AtLeastOne;
+use zebra_chain::{block, serialization::AtLeastOne};
 
 use crate::{
     constants::INVENTORY_ROTATION_INTERVAL,
@@ -98,6 +99,13 @@ pub struct InventoryRegistry {
     /// Map tracking inventory statuses from the previous interval period.
     prev: IndexMap<InventoryHash, IndexMap<PeerSocketAddr, InventoryMarker>>,
 
+    /// Block announcements in the current interval, capped by [`MAX_INV_PER_MAP`].
+    /// Missing statuses must not erase first-announcer history.
+    announced_current: IndexSet<block::Hash>,
+
+    /// Block announcements in the previous interval, with the same cap.
+    announced_prev: IndexSet<block::Hash>,
+
     /// Map tracking peers that failed to return inventory in the current interval period.
     ///
     /// A failure is a completed peer error or response timeout, not caller cancellation or a
@@ -122,6 +130,11 @@ pub struct InventoryRegistry {
 
     /// Interval tracking when we should next rotate our maps.
     interval: IntervalStream,
+
+    /// Connected opted-in peers, ordered by their most recent first block announcement.
+    compact_sources: IndexMap<PeerSocketAddr, watch::Sender<Option<Arc<Semaphore>>>>,
+    /// A demoted connection releases its slot only after writing its low-bandwidth request.
+    compact_receive_slots: Arc<Semaphore>,
 }
 
 impl std::fmt::Debug for InventoryRegistry {
@@ -228,10 +241,44 @@ impl InventoryRegistry {
         Self {
             current: Default::default(),
             prev: Default::default(),
+            announced_current: IndexSet::new(),
+            announced_prev: IndexSet::new(),
             failed_current: Default::default(),
             failed_prev: Default::default(),
             inv_stream: BroadcastStream::new(inv_stream).boxed(),
             interval: IntervalStream::new(interval),
+            compact_sources: IndexMap::new(),
+            compact_receive_slots: Arc::new(Semaphore::new(3)),
+        }
+    }
+
+    /// Register a bilaterally opted-in connection as a potential compact receive source.
+    pub(super) fn add_compact_source(
+        &mut self,
+        peer: PeerSocketAddr,
+        preference: watch::Sender<Option<Arc<Semaphore>>>,
+    ) {
+        self.compact_sources.insert(peer, preference);
+    }
+
+    /// Release disconnected sources and select the three most recent first announcers.
+    pub(super) fn select_compact_sources(&mut self, connected: impl Fn(&PeerSocketAddr) -> bool) {
+        self.compact_sources.retain(|peer, preference| {
+            let retain = connected(peer) && !preference.is_closed();
+            if !retain {
+                preference.send_replace(None);
+            }
+            retain
+        });
+        for (index, preference) in self.compact_sources.values().enumerate() {
+            preference.send_if_modified(|slots| {
+                let selected = index < 3;
+                if slots.is_some() == selected {
+                    return false;
+                }
+                *slots = selected.then(|| self.compact_receive_slots.clone());
+                true
+            });
         }
     }
 
@@ -436,6 +483,21 @@ impl InventoryRegistry {
                 "unexpected inventory type: {inv:?} from peer: {addr:?}",
             );
 
+            if let Block(hash) = inv {
+                if new_status.is_available() {
+                    let first =
+                        self.announced_current.insert(hash) && !self.announced_prev.contains(&hash);
+                    if first {
+                        if let Some(index) = self.compact_sources.get_index_of(&addr) {
+                            self.compact_sources.move_index(index, 0);
+                        }
+                    }
+                    if self.announced_current.len() > MAX_INV_PER_MAP {
+                        self.announced_current.shift_remove_index(0);
+                    }
+                }
+            }
+
             let hash_peers = self.current.entry(inv).or_default();
 
             // # Security
@@ -495,6 +557,7 @@ impl InventoryRegistry {
     /// HashMap
     fn rotate(&mut self) {
         self.prev = std::mem::take(&mut self.current);
+        self.announced_prev = std::mem::take(&mut self.announced_current);
         self.failed_prev = std::mem::take(&mut self.failed_current);
     }
 }

@@ -51,6 +51,9 @@ pub struct Client {
     /// Sends block adverts without waiting for an outstanding request's response.
     pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<crate::peer_set::BlockAdvert>,
 
+    /// Receives high-bandwidth compacts only while selected by the peer set.
+    pub(crate) compact_receive_tx: tokio::sync::watch::Sender<Option<Arc<tokio::sync::Semaphore>>>,
+
     /// Used to register missing inventory in client [`Response`]s,
     /// so that the peer set can route retries to other clients.
     pub(crate) inv_collector: broadcast::Sender<InventoryChange>,

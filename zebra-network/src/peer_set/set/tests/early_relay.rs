@@ -76,7 +76,7 @@ async fn zakura_bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
                 assert_eq!(
                     remote.next().await.unwrap().unwrap(),
                     Message::SendCompact {
-                        high_bandwidth: true,
+                        high_bandwidth: false,
                         version: 1
                     },
                 );
@@ -90,6 +90,15 @@ async fn zakura_bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
                 .with_block_gossip_peer_ips(vec![addr.ip()])
                 .build();
             peer_set.ready().await.unwrap();
+            if early_relay {
+                assert_eq!(
+                    remote.next().await.unwrap().unwrap(),
+                    Message::SendCompact {
+                        high_bandwidth: true,
+                        version: 1
+                    },
+                );
+            }
             let mut advertiser = peer_set.block_advertiser();
             let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
             let hash = block.hash();
@@ -175,4 +184,126 @@ async fn zakura_bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
     })
     .await
     .expect("service-bit negotiation and relay must complete within the test deadline");
+}
+
+/// Selection follows first announcements, while source replacement never overlaps four requests.
+#[tokio::test]
+async fn compact_receive_sources_prefer_first_announcers_and_release_disconnections() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(10), async {
+        let mut discovered = Vec::new();
+        let mut connections = Vec::new();
+        let mut messages = Vec::new();
+        let mut preferences = Vec::new();
+        let mut harnesses = Vec::new();
+        let addrs: Vec<PeerSocketAddr> = (1..=5)
+            .map(|ip| SocketAddr::from(([127, 0, 0, ip], 8233)).into())
+            .collect();
+        for addr in &addrs {
+            let (client, harness, connection, wire) = real_advert_peer_with_authorization(
+                CURRENT_NETWORK_PROTOCOL_VERSION,
+                true,
+                MinimumPeerVersion::new(NoChainTip, &Network::Mainnet),
+                watch::channel(crate::BanList::default()).1,
+            );
+            preferences.push(client.compact_receive_tx.clone());
+            discovered.push(Ok::<_, BoxError>(Change::Insert(*addr, client.into())));
+            connections.push(connection);
+            messages.push(wire);
+            harnesses.push(harness);
+        }
+        let (mut peer_set, mut guard) = PeerSetBuilder::new()
+            .with_discover(stream::iter(discovered).chain(stream::pending()))
+            .with_minimum_peer_version(MinimumPeerVersion::new(NoChainTip, &Network::Mainnet))
+            .build();
+        peer_set.ready().await.unwrap();
+        let mut tasks: Vec<_> = connections
+            .into_iter()
+            .map(|connection| Some(tokio::spawn(connection)))
+            .collect();
+        for (index, wire) in messages.iter_mut().enumerate() {
+            assert_eq!(
+                wire.next().await,
+                Some(Message::SendCompact {
+                    high_bandwidth: index < 3,
+                    version: 1,
+                })
+            );
+        }
+        let collector = guard.inventory_sender().as_ref().unwrap().clone();
+        for (source, hash, expected) in [
+            (4, 10, [true, true, false, false, true]),
+            // A later announcement of the same block cannot win the source slot.
+            (3, 10, [true, true, false, false, true]),
+            (1, 11, [true, true, false, false, true]),
+            (3, 12, [false, true, false, true, true]),
+        ] {
+            crate::peer::register_inventory_status(
+                Ok(Message::Inv(vec![InventoryHash::Block(block::Hash(
+                    [hash; 32],
+                ))])),
+                ConnectedAddr::new_inbound_direct(addrs[source]),
+                true,
+                collector.clone(),
+            )
+            .await
+            .unwrap();
+            peer_set.ready().await.unwrap();
+            assert_eq!(
+                preferences
+                    .iter()
+                    .map(|preference| preference.borrow().is_some())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            let replacement = match (source, hash) {
+                (4, 10) => Some((2, 4)),
+                (3, 12) => Some((0, 3)),
+                _ => None,
+            };
+            if let Some((demoted, promoted)) = replacement {
+                // A full transport keeps the old permit until its low-bandwidth write completes.
+                assert!(messages[promoted].try_recv().is_err());
+                assert_eq!(
+                    messages[demoted].next().await,
+                    Some(Message::SendCompact {
+                        high_bandwidth: false,
+                        version: 1,
+                    })
+                );
+                assert_eq!(
+                    messages[promoted].next().await,
+                    Some(Message::SendCompact {
+                        high_bandwidth: true,
+                        version: 1,
+                    })
+                );
+            }
+        }
+        let disconnected = tasks[4].take().unwrap();
+        disconnected.abort();
+        assert!(disconnected.await.unwrap_err().is_cancelled());
+        peer_set.remove(&addrs[4]);
+        peer_set.ready().await.unwrap();
+        assert_eq!(
+            messages[0].next().await,
+            Some(Message::SendCompact {
+                high_bandwidth: true,
+                version: 1,
+            })
+        );
+        assert_eq!(
+            preferences
+                .iter()
+                .filter(|preference| preference.borrow().is_some())
+                .count(),
+            3
+        );
+        for task in tasks.into_iter().flatten() {
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+        }
+    })
+    .await
+    .expect("source selection and replacement complete within the test deadline");
 }

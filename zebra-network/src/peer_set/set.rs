@@ -981,6 +981,10 @@ where
                         self.serving_peer_keys.remove(&key);
                     }
                     self.inventory_registry.clear_peer_failures(key);
+                    if svc.connection_info().early_block_relay {
+                        self.inventory_registry
+                            .add_compact_source(key, svc.compact_receive_tx.clone());
+                    }
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
@@ -2246,6 +2250,10 @@ where
         self.drain_inv_failures(&mut peer_cx);
 
         let ready_peers = self.poll_peers(&mut peer_cx)?;
+        let advert_peers = self.block_advert_senders.borrow();
+        self.inventory_registry
+            .select_compact_sources(|peer| advert_peers.contains_key(peer));
+        drop(advert_peers);
 
         self.prune_disconnected_sidecar_keys();
         Self::retain_connected_keys(

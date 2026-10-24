@@ -87,6 +87,7 @@ fn new_test_connection<A>() -> (
         (
             client_rx,
             block_advert_rx,
+            tokio::sync::watch::channel(Some(Arc::new(tokio::sync::Semaphore::new(3)))).1,
             crate::peer::MinimumPeerVersion::new(
                 zebra_chain::chain_tip::NoChainTip,
                 &zebra_chain::parameters::Network::Mainnet,
