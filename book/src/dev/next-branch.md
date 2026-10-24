@@ -78,8 +78,8 @@ crates. Release candidates are cut from `main` instead.
 1. Merge a `chore(release): set zebrad version to <version>` PR into `next`
    that sets the `zebrad` version to a prerelease such as `X.Y.Z-alpha.N` or
    `X.Y.Z-beta.N`, and updates `Cargo.lock`. Do not use the `rc` identifier:
-   it marks a release candidate from `main`, which deploys production. Later
-   sync PRs can conflict on that version: keep the higher one.
+   it marks a release candidate from `main`. No prerelease publication deploys
+   production. Later sync PRs can conflict on that version: keep the higher one.
 2. Generate release notes from the pending change fragments without
    committing them:
 
