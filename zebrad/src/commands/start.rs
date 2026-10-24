@@ -258,6 +258,15 @@ impl StartCmd {
         false
     }
 
+    /// Keeps Zebra running after key preload succeeds, but propagates a failed startup task.
+    pub(super) fn halo2_key_preload_should_exit(
+        result: Result<(), tokio::task::JoinError>,
+    ) -> bool {
+        result.expect("Halo2 verifying key construction must succeed");
+        info!("finished Halo2 verifying key preload");
+        false
+    }
+
     async fn start(&self) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
@@ -790,10 +799,14 @@ impl StartCmd {
         // startup tasks
         let BackgroundTaskHandles {
             mut state_checkpoint_verify_handle,
+            mut halo2_key_preload_handle,
         } = consensus_task_handles;
 
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
+
+        let halo2_key_preload_handle_fused = (&mut halo2_key_preload_handle).fuse();
+        pin!(halo2_key_preload_handle_fused);
 
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
@@ -888,6 +901,12 @@ impl StartCmd {
                     Ok(())
                 }
 
+                halo2_key_preload_result = &mut halo2_key_preload_handle_fused => {
+                    exit_when_task_finishes =
+                        Self::halo2_key_preload_should_exit(halo2_key_preload_result);
+                    Ok(())
+                }
+
                 // And the old databases task should finish while Zebra is running.
                 old_databases_result = &mut old_databases_task_handle_fused => {
                     old_databases_result
@@ -979,6 +998,8 @@ impl StartCmd {
 
         // startup tasks
         state_checkpoint_verify_handle.abort();
+        // This only cancels queued work; an already running blocking task finishes at shutdown.
+        halo2_key_preload_handle.abort();
         old_databases_task_handle.abort();
 
         info!(

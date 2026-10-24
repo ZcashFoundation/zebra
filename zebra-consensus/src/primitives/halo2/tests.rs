@@ -46,6 +46,10 @@ use super::{
     VERIFYING_KEY_PRE_NU6_2,
 };
 
+/// Records actual static-key construction threads, not preload calls or proof-cache hits.
+pub(crate) static KEY_BUILDS: std::sync::Mutex<Vec<std::thread::ThreadId>> =
+    std::sync::Mutex::new(Vec::new());
+
 /// The `verifier` label the test caches report their metrics under.
 ///
 /// Test caches use their own label so their counts never land in the series the production
@@ -128,22 +132,26 @@ fn one_action_bundles_keep_the_existing_fallback_fanout_bound() {
 /// that selecting the wrong era's key causes a hard verification failure. If the verifier ever
 /// "fails open" (e.g. validates everything against a single key, like the rejected zcashd WIP
 /// shortcut), the wrong-key assertion below would fail.
-#[test]
-fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
-    let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+#[tokio::test]
+async fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let preload = super::spawn_key_preload();
+        let verification = tokio::task::spawn_blocking(|| {
+            let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
 
-    // Correct era key: the historical proof must verify, so pre-NU6.2 history still re-syncs.
-    assert!(
-        Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2),
-        "a real pre-NU6.2 Orchard proof must verify under the pre-NU6.2 (insecure) key"
-    );
+            // A request racing preload must share the historical key's lazy initializer.
+            assert!(Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2));
+            assert!(!Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_NU6_2));
+        });
 
-    // Wrong era key: the same proof must be rejected. This is the not-fail-open guarantee.
-    assert!(
-        !Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_NU6_2),
-        "a pre-NU6.2 Orchard proof must be REJECTED by the post-NU6.2 (fixed) key; \
-         verifying it would mean the era selection is fail-open"
-    );
+        preload.await.expect("key preload must succeed");
+        verification
+            .await
+            .expect("historical verification must succeed");
+        assert_eq!(KEY_BUILDS.lock().unwrap().len(), 3);
+    })
+    .await
+    .expect("preload and racing verification must finish");
 }
 
 /// The Orchard verifier routing selects the correct key by block era (network upgrade).

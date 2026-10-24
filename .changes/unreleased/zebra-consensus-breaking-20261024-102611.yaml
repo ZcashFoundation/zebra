@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Added `BackgroundTaskHandles::halo2_key_preload_handle` for background construction of all three Halo2 verifying keys; callers constructing or exhaustively destructuring the struct must handle the new field ([#12007](https://github.com/ZcashFoundation/zebra/issues/12007)).
+time: 2026-10-24T10:26:11.369219648+02:00

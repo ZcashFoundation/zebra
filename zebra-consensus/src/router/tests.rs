@@ -30,6 +30,92 @@ use super::*;
 /// high system load.
 const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 
+/// Initialization returns while preload is queued, and its handle covers all three key builds.
+#[test]
+fn init_preloads_halo2_keys_without_waiting() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            let (release, blocked) = std::sync::mpsc::channel();
+            let (started, ready) = oneshot::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(120)).unwrap();
+            });
+            ready.await.unwrap();
+
+            let state = tower::service_fn(|request| async move {
+                Ok::<_, BoxError>(match request {
+                    zs::Request::Tip => zs::Response::Tip(None),
+                    zs::Request::BestChainBlockHash(_) => zs::Response::BlockHash(None),
+                    _ => panic!("unexpected state request during initialization"),
+                })
+            });
+            let read_state = tower::service_fn(|_: zs::ReadRequest| async {
+                Err::<zs::ReadResponse, BoxError>("unexpected read during initialization".into())
+            });
+            let (_test_router, _test_transaction, test_handles, _, _) =
+                init_test(Config::default(), &Network::Mainnet, state, read_state).await;
+            tokio::time::timeout(
+                Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+                test_handles.halo2_key_preload_handle,
+            )
+            .await
+            .expect("test initialization must leave keys lazy while the blocking worker is busy")
+            .unwrap();
+            test_handles.state_checkpoint_verify_handle.await.unwrap();
+
+            let (_router, _transaction, handles, _, _) = tokio::time::timeout(
+                Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+                init(
+                    Config::default(),
+                    &Network::Mainnet,
+                    state,
+                    read_state,
+                    oneshot::channel::<
+                        Buffer<
+                            BoxService<mempool::Request, mempool::Response, BoxError>,
+                            mempool::Request,
+                        >,
+                    >()
+                    .1,
+                    None,
+                ),
+            )
+            .await
+            .expect("router initialization must not await queued key construction");
+
+            assert!(
+                !handles.halo2_key_preload_handle.is_finished(),
+                "initialization must return before the blocking worker is available"
+            );
+            assert!(
+                !halo2::tests::KEY_BUILDS
+                    .lock()
+                    .unwrap()
+                    .contains(&std::thread::current().id()),
+                "key construction must not run on the async caller"
+            );
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            handles.halo2_key_preload_handle.await.unwrap();
+            handles.state_checkpoint_verify_handle.await.unwrap();
+            assert_eq!(
+                halo2::tests::KEY_BUILDS.lock().unwrap().len(),
+                3,
+                "preload must construct every era key without a verification request"
+            );
+        })
+        .await
+    });
+    runtime.shutdown_timeout(Duration::from_secs(5));
+    result.expect("initialization must not wait for key preload");
+}
+
 /// Generate a block with no transactions (not even a coinbase transaction).
 ///
 /// The generated block should fail validation.
