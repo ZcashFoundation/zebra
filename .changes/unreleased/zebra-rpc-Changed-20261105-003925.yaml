@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Report peer-advertised services in `getnetworkinfo` using `AddressBookPeers::local_services`; address books that do not track services report none.
+time: 2026-11-05T00:39:25.154207236+01:00

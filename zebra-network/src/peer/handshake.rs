@@ -464,7 +464,7 @@ where
 
     /// Provide the services this node advertises to other peers.  Optional.
     ///
-    /// If this is unset, the node will advertise itself as a client.
+    /// If this is unset, the configured local service capabilities are used.
     pub fn with_advertised_services(mut self, services: PeerServices) -> Self {
         self.our_services = Some(services);
         self
@@ -531,7 +531,7 @@ where
         });
         let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
-        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
+        let our_services = self.our_services.unwrap_or(config.local_services);
         let relay = self.relay.unwrap_or(false);
         let network = config.network.clone();
         let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, &network);
