@@ -1103,6 +1103,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         false,
         "/Zebra:2.1.0/".to_string(),
         zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+        fake_tip_height,
     )
     .into_new_meta_addr(Instant::now(), DateTime32::now())]);
 

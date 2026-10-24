@@ -124,6 +124,17 @@ pub struct AddressBookCall {
     rsp_tx: Option<oneshot::Sender<AddressBookResponse>>,
 }
 
+#[cfg(test)]
+impl AddressBookCall {
+    /// Extracts a fire-and-forget peer change for tests.
+    pub(crate) fn into_change(self) -> Option<MetaAddrChange> {
+        match self.request {
+            AddressBookRequest::Change(change) => Some(change),
+            _ => None,
+        }
+    }
+}
+
 /// A cheap cloneable handle that sends fire-and-forget [`MetaAddrChange`]
 /// events to the address book updater task.
 ///
