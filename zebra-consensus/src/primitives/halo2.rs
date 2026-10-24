@@ -37,7 +37,7 @@ use super::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Adjusted batch size for halo2 batches.
 ///
@@ -117,7 +117,7 @@ lazy_static::lazy_static! {
     /// MUST be retained to re-verify pre-NU6.2 history on resync. It must never be used to verify
     /// post-NU6.2 bundles.
     pub static ref VERIFYING_KEY_PRE_NU6_2: ItemVerifyingKey =
-        ItemVerifyingKey::build(OrchardCircuitVersion::InsecurePreNu6_2);
+        build_verifying_key(OrchardCircuitVersion::InsecurePreNu6_2);
 
     /// The Orchard Action verifying key for the **NU6.2-until-NU6.3** (fixed) circuit.
     ///
@@ -126,7 +126,7 @@ lazy_static::lazy_static! {
     /// circuit and only verify under this key. At NU6.3 the Orchard pool moves to
     /// [`VERIFYING_KEY_NU6_3_ONWARD`]. See [`VERIFYING_KEY_PRE_NU6_2`] for the era split.
     pub static ref VERIFYING_KEY_NU6_2: ItemVerifyingKey =
-        ItemVerifyingKey::build(OrchardCircuitVersion::FixedPostNu6_2);
+        build_verifying_key(OrchardCircuitVersion::FixedPostNu6_2);
 
     /// The Orchard Action verifying key for the **NU6.3-onward** circuit.
     ///
@@ -135,7 +135,27 @@ lazy_static::lazy_static! {
     /// Every Orchard Action mined from NU6.3 onward commits to this circuit and only verifies under
     /// this key: v5 Orchard bundles at NU6.3, v6 Orchard bundles, and Ironwood bundles.
     pub static ref VERIFYING_KEY_NU6_3_ONWARD: ItemVerifyingKey =
-        ItemVerifyingKey::build(OrchardCircuitVersion::PostNu6_3);
+        build_verifying_key(OrchardCircuitVersion::PostNu6_3);
+}
+
+/// Builds an era key, recording construction in tests.
+fn build_verifying_key(version: OrchardCircuitVersion) -> ItemVerifyingKey {
+    let key = ItemVerifyingKey::build(version);
+    #[cfg(test)]
+    tests::KEY_BUILDS
+        .lock()
+        .expect("key construction record must not be poisoned")
+        .push(std::thread::current().id());
+    key
+}
+
+/// Initializes the existing era keys off the async workers, prioritizing the current circuit.
+pub(crate) fn spawn_key_preload() -> JoinHandle<()> {
+    tokio::task::spawn_blocking(|| {
+        lazy_static::initialize(&VERIFYING_KEY_NU6_3_ONWARD);
+        lazy_static::initialize(&VERIFYING_KEY_NU6_2);
+        lazy_static::initialize(&VERIFYING_KEY_PRE_NU6_2);
+    })
 }
 
 /// A Halo2 verification item, used as the request type of the service.
