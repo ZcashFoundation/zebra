@@ -36,9 +36,11 @@ non-finalized chain tip. On a read failure it logs an error rather than printing
 a height; check for numeric output, not only its exit status.
 
 The `copy-state` command is an expert diagnostic tool, not a snapshot download
-or full revalidation command. Use a distinct target cache directory. Without
-`--target-config-path`, it uses temporary state that is deleted on a successful
-exit. The `--max-source-height HEIGHT` option limits the copy.
+or full revalidation command. Use a distinct target cache directory. With
+`--target-config-path`, `ZEBRA_TARGET_` environment variables override target
+settings without changing the source. Without that option, the command ignores
+target overrides and uses temporary state that is deleted on a successful exit.
+The `--max-source-height HEIGHT` option limits the copy.
 
 ## Configuration and network
 
