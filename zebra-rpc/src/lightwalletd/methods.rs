@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
 };
 
-use futures::{future::OptionFuture, Stream};
+use futures::{future::OptionFuture, Stream, StreamExt};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tower::util::ServiceExt;
@@ -19,7 +19,7 @@ use zebra_chain::{
     transaction, transparent,
 };
 use zebra_node_services::mempool::{self, MempoolService};
-use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
+use zebra_state::{BlockReadError, HashOrHeight, ReadRequest, ReadResponse, ReadState};
 
 use crate::methods::{
     trees::GetTreestateResponse, GetAddressBalanceRequest, GetAddressTxIdsRequest,
@@ -178,11 +178,7 @@ where
             }
             Ok(ReadResponse::AnyChainTransaction(None)) => None,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-            Err(error) => {
-                return Err(Status::internal(format!(
-                    "failed to read transaction: {error}"
-                )));
-            }
+            Err(error) => return Err(body_read_error_to_status(error, "transaction")),
         };
 
         let mempool_response = self
@@ -648,9 +644,7 @@ async fn compact_block<ReadStateService: ReadState>(
         Ok(ReadResponse::Block(Some(block))) => block,
         Ok(ReadResponse::Block(None)) => return Err(Status::not_found("block not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => {
-            return Err(Status::internal(format!("failed to read block: {error}")));
-        }
+        Err(error) => return Err(body_read_error_to_status(error, "block")),
     };
 
     let hash = block.hash();
@@ -770,8 +764,7 @@ fn block_range_stream<ReadStateService: ReadState>(
     let start = range_height(block_range.start, "start block")?;
     let end = range_height(block_range.end, "end block")?;
 
-    let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-    let response_stream = ReceiverStream::new(response_receiver);
+    let (response_sender, terminal_sender, response_stream) = response_channel();
 
     tokio::spawn(async move {
         let heights: Box<dyn Iterator<Item = u32> + Send> = if start <= end {
@@ -789,9 +782,16 @@ fn block_range_stream<ReadStateService: ReadState>(
                 nullifiers_only,
             )
             .await;
-            let is_err = response.is_err();
-
-            if !send_bounded(&response_sender, response).await || is_err {
+            let response = match response {
+                Ok(response) => response,
+                Err(status) => {
+                    let _ = terminal_sender.send(status);
+                    return;
+                }
+            };
+            if !send_bounded(&response_sender, Ok(response)).await {
+                let _ =
+                    terminal_sender.send(Status::deadline_exceeded("stream consumer timed out"));
                 return;
             }
         }
@@ -840,8 +840,7 @@ where
         .await
         .map_err(rpc_arg_error_to_status)?;
 
-    let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
-    let response_stream = ReceiverStream::new(response_receiver);
+    let (response_sender, terminal_sender, response_stream) = response_channel();
 
     tokio::spawn(async move {
         for txid in txids {
@@ -851,9 +850,16 @@ where
                     "transaction ids must be valid hex strings",
                 )),
             };
-            let is_err = response.is_err();
-
-            if !send_bounded(&response_sender, response).await || is_err {
+            let response = match response {
+                Ok(response) => response,
+                Err(status) => {
+                    let _ = terminal_sender.send(status);
+                    return;
+                }
+            };
+            if !send_bounded(&response_sender, Ok(response)).await {
+                let _ =
+                    terminal_sender.send(Status::deadline_exceeded("stream consumer timed out"));
                 return;
             }
         }
@@ -878,9 +884,7 @@ async fn raw_transaction_by_txid<ReadStateService: ReadState>(
         }),
         Ok(ReadResponse::Transaction(None)) => Err(Status::not_found("transaction not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => Err(Status::internal(format!(
-            "failed to read transaction: {error}"
-        ))),
+        Err(error) => Err(body_read_error_to_status(error, "transaction")),
     }
 }
 
@@ -1087,6 +1091,24 @@ fn excluded_txids(txids: &[transaction::Hash], exclude: &[Vec<u8>]) -> HashSet<t
         .collect()
 }
 
+/// Keeps a terminal error outside the bounded data queue, without parking a producer on a
+/// backpressured client. Buffered data is delivered before the terminal error.
+pub(super) fn response_channel<T: Send + 'static>() -> (
+    tokio::sync::mpsc::Sender<Result<T, Status>>,
+    tokio::sync::oneshot::Sender<Status>,
+    ResponseStream<T>,
+) {
+    let (sender, receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
+    let (terminal_sender, terminal_receiver) = tokio::sync::oneshot::channel();
+    let terminal = futures::stream::once(async { terminal_receiver.await.ok().map(Err) })
+        .filter_map(futures::future::ready);
+    (
+        sender,
+        terminal_sender,
+        Box::pin(ReceiverStream::new(receiver).chain(terminal)),
+    )
+}
+
 /// Sends `item` to a response stream, returning false if the client disconnected or
 /// stopped reading.
 ///
@@ -1143,6 +1165,19 @@ fn treestate_to_proto(network: &Network, treestate: GetTreestateResponse) -> Tre
             .as_ref()
             .map(|ironwood| final_state_hex(ironwood.commitments().final_state()))
             .unwrap_or_default(),
+    }
+}
+
+/// Reports known pruned bodies with their unavailable height, preserving other read failures.
+fn body_read_error_to_status(error: tower::BoxError, object: &str) -> Status {
+    match error.downcast_ref::<BlockReadError>() {
+        Some(BlockReadError::BlockBodyUnavailable { height }) => {
+            Status::failed_precondition(format!(
+                "{object} not available at height {} (pruned data)",
+                height.0
+            ))
+        }
+        _ => Status::internal(format!("failed to read {object}: {error}")),
     }
 }
 
