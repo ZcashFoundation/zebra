@@ -179,6 +179,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # Remove these exceptions with the git patches once supporting crates are released.
 allow-git = [
     "https://github.com/ZcashFoundation/reddsa",
+    "https://github.com/upbqdn/librustzcash",
     "https://github.com/upbqdn/pasta_curves",
     "https://github.com/upbqdn/halo2",
     "https://github.com/upbqdn/sinsemilla",

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce transaction parsing and serialization overhead by reading and writing transparent scripts and Orchard/Ironwood proofs in bulk.
+time: 2026-10-24T15:06:29.79910516+02:00
