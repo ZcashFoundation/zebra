@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: The example Prometheus latency alerts and the Grafana RPC latency and checkpoint panels now query metrics Zebra exports, and the slow-handshake alert fires above two seconds, below the three-second handshake timeout. Removed the error-rate alert and the errors dashboard, which queried metrics Zebra does not export.
+time: 2026-10-24T16:55:44.468565143+02:00
