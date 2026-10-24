@@ -105,7 +105,7 @@ provides four methods:
 | `GetBlock` | Returns a best-chain block by hash or height. |
 
 Indexers use these streams alongside read-only access to Zebra's finalized
-state database. Build with the [`indexer` feature](install.md)
+state database. Build with the [`indexer` feature](install.md#cargo-features)
 for consumers that require the spending-transaction index, including
 [Zallet's Zebra backend](zallet.md). The listener does not require this feature:
 successful startup does not establish that the index exists.
@@ -147,7 +147,7 @@ this is not a guarantee that every failure matches `zcashd` byte for byte.
 
 ## Methods
 
-Zebra 7.0.0 registers the following 41 JSON-RPC method names. The
+Zebra registers the following 41 JSON-RPC method names. The
 [RPC trait and implementation](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/methods.rs)
 define their parameters and results. The `rpc.discover` method returns an
 OpenRPC 1.3.2 document with machine-readable method and type schemas.
@@ -189,7 +189,7 @@ The mempool holds verified transactions that have not yet been mined.
 | `getrawmempool` | Returns mempool transaction IDs, or transaction metadata with verbose output. |
 | `getrawtransaction` | Returns a transaction as hexadecimal data or a structured response, optionally restricted to a block. |
 | `sendrawtransaction` | Submits a signed transaction to the mempool and returns its transaction ID; `allowhighfees` is accepted but ignored. |
-| `getstandardfee` | Returns the recommended fee per logical action in zatoshis, with `version: 0`. For the next block on Mainnet, reports 5,000 before height 3,590,000 and 1,000 from that height; test networks report 1,000 at every height. |
+| `getstandardfee` | Returns the recommended fee per logical action in zatoshis, with `version: 0`. For the next block, reports 5,000 before height 3,590,000 on Mainnet or 4,465,026 on public Testnet, and 1,000 from that height; Regtest and custom testnets report 1,000 from height 1. |
 
 ### Transparent address index
 
@@ -207,7 +207,7 @@ See [Mining](mining.md) for configuration and block-template use.
 | --- | --- |
 | `getblocktemplate` | Takes an optional request object; returns a mining template, supports long polling, or validates a proposed block. |
 | `submitblock` | Validates and submits a hexadecimal block; an optional work-ID object is ignored. Returns `null`, `"duplicate"`, or `"rejected"`, or an RPC error. See the [mining guide](mining.md) for result caveats. |
-| `getmininginfo` | Takes no parameters; returns tip height, block size and non-coinbase transaction count when available, network name, and estimated network solution rate. |
+| `getmininginfo` | Takes no parameters; returns tip height, block size and non-coinbase transaction count when available, network difficulty, network name, and estimated network solution rate. |
 | `getblocksubsidy` | Returns miner subsidy, funding-stream and lockbox allocations excluding transaction fees at an optional height (default: tip); reserve-dependent future rewards require the preceding block. |
 | `getnetworksolps` | Estimates network solutions per second with optional block count and height (defaults: 120 blocks, tip). A nonpositive count selects the [difficulty averaging window](https://zips.z.cash/zip-0218) at the effective query height: 17 blocks before NU7, 102 from NU7. |
 | `getnetworkhashps` | Deprecated alias for `getnetworksolps`. |
