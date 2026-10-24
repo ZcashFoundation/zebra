@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: State-service startup reports initialization failures and their recovery instructions instead of a generic writable-directory, lock, or free-space hint ([#12092](https://github.com/ZcashFoundation/zebra/pull/12092)).
+time: 2026-11-13T00:51:07.584445551+01:00

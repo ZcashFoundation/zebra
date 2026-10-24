@@ -496,8 +496,9 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
             .map_err(|err| eyre!(err))?
             .expect("persistent node must create a database version");
         assert_eq!(
-            version.major, 29,
-            "the ordinary node must use the v29 database"
+            version.major,
+            zebra_state::state_database_format_version_in_code().major,
+            "the ordinary node must use the current database format"
         );
 
         // Reopen the actual node's state, including its synchronous non-finalized backup.

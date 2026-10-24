@@ -1,0 +1,16 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Added `Config::prune_blocks_older_than` for opt-in finalized-body pruning; struct literals must
+  supply it or use `Config::default()`. Invalid retention returns
+  `StateInitError::InvalidPruningRetention`; opening pruned state with a different spending-index
+  mode returns `StateInitError::PrunedIndexModeMismatch` before writes are allowed.
+  Archives remain in `state/v29`. Existing archives must be moved explicitly
+  into `state-pruned/v29` with all writers/readers stopped before enabling pruning;
+  otherwise startup returns `StateInitError::PruningRequiresIsolatedState` without moving state.
+  New pruning caches start isolated. Both kinds share one format version and upgrade list.
+  Direct readers must resolve `Config::state_database_kind()` before constructing paths.
+  Inaccessible or coexisting archive/pruned paths fail rather than select a fallback.
+  Disabling pruning keeps the selected directory and permits writes only if no bodies were deleted;
+  after deletion, restore an archive snapshot or resync in a separate cache.
+time: 2026-10-24T21:56:39.657594727+02:00

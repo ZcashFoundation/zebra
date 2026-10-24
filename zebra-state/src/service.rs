@@ -87,6 +87,7 @@ pub(crate) mod fast_tree_sync;
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
+mod pruning;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -229,6 +230,8 @@ pub(crate) struct StateService {
     wanted_tree_roots: watch::Receiver<WantedTreeRoots>,
     rejected_tree_roots: std::sync::mpsc::Receiver<std::net::SocketAddr>,
     pending_rejected_tree_roots: Option<std::net::SocketAddr>,
+    /// Owns the pruning worker, which must stop before the database shuts down.
+    pruning_task: Option<pruning::PruningTask>,
 
     // Metrics
     //
@@ -300,6 +303,9 @@ impl Drop for StateService {
     fn drop(&mut self) {
         // The state service owns the state, tasks, and channels,
         // so dropping it should shut down everything.
+        if let Some(task) = &mut self.pruning_task {
+            task.stop();
+        }
         if let Some((shutdown_sender, metrics_thread)) = self.metrics_exporter.take() {
             drop(shutdown_sender);
             if let Err(thread_panic) = metrics_thread.join() {
@@ -334,7 +340,6 @@ impl Drop for ReadStateService {
     fn drop(&mut self) {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
-
         // TODO: move this into a try_shutdown() method
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Some(block_write_task_handle) = Arc::into_inner(block_write_task) {
@@ -413,12 +418,7 @@ impl StateService {
                     &network,
                     debug_skip_format_upgrades,
                     false,
-                )
-                .expect(
-                    "opening the read-write finalized state database failed; check that the \
-                     state cache directory is writable and not locked by another Zebra instance, \
-                     and that there is free disk space",
-                );
+                )?;
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
@@ -427,10 +427,11 @@ impl StateService {
                     .tip_block()
                     .expect("the finalized tip must have a complete stored body");
 
-                (finalized_state, finalized_tip, timer)
+                Ok((finalized_state, finalized_tip, timer))
             })
             .await
             .expect("failed to join blocking task")
+            .unwrap_or_else(|error: StateInitError| panic!("{error}"))
         };
 
         // # Correctness
@@ -506,6 +507,10 @@ impl StateService {
         );
         let (tree_roots_sender, wanted_tree_roots, rejected_tree_roots) =
             tree_roots_cache.channels();
+        let (pruning_wake, pruning_receiver) = config
+            .prune_blocks_older_than
+            .map(|_| crossbeam_channel::bounded(1))
+            .unzip();
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -519,6 +524,7 @@ impl StateService {
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
             tree_roots_cache,
+            pruning_wake,
         );
 
         let read_service = ReadStateService::new(
@@ -556,6 +562,7 @@ impl StateService {
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
+            pruning_task: None,
             metrics_exporter: None,
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
@@ -604,6 +611,14 @@ impl StateService {
 
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
+
+        if let (Some(retention), Some(wake)) = (config.prune_blocks_older_than, pruning_receiver) {
+            state.pruning_task = Some(pruning::PruningTask::spawn(
+                read_service.db.clone(),
+                retention,
+                wake,
+            ));
+        }
 
         // RocksDB property reads are blocking, so export metrics on a dedicated thread.
         let (shutdown_sender, shutdown_receiver) = mpsc::channel();
@@ -1465,6 +1480,9 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
+        if let Some(task) = &mut self.pruning_task {
+            task.check_for_panics();
+        }
 
         // Prune outdated UTXO requests
         let now = Instant::now();

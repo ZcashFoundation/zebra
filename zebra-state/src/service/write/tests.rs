@@ -110,6 +110,7 @@ async fn write_worker_survives_rejected_root_invalidation() {
         false,
         None,
         no_fast_tree_sync(),
+        None,
     );
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -184,6 +185,7 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
         false,
         None,
         no_fast_tree_sync(),
+        None,
     );
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -331,6 +333,7 @@ fn forks_evicted_by_finalizing_are_reported_and_published() {
         &mut tip_sender,
         &state_sender,
         None,
+        None,
     );
 
     assert!(finalized.db.finalized_tip_height() > Some(Height(0)));
@@ -425,6 +428,7 @@ fn commit_response_precedes_the_replaced_snapshot_drop() {
         non_finalized_state_sender,
         backup_dir_path: None,
         tree_roots_cache: Some(no_fast_tree_sync()),
+        pruning_wake: None,
     };
     worker.run();
 
@@ -501,6 +505,7 @@ fn finalizing_does_not_report_ancestors_of_retained_forks() {
         &rejected_sender,
         &mut tip_sender,
         &state_sender,
+        None,
         None,
     );
 
@@ -595,6 +600,7 @@ fn precious_response_follows_tip_and_snapshot_publication() {
         non_finalized_state_sender,
         backup_dir_path: None,
         tree_roots_cache: Some(no_fast_tree_sync()),
+        pruning_wake: None,
     };
     worker.run();
     assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), second.hash());
@@ -669,6 +675,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         non_finalized_state_sender,
         backup_dir_path: None,
         tree_roots_cache: Some(no_fast_tree_sync()),
+        pruning_wake: None,
     };
     tracing::subscriber::with_default(
         CloseStateOnError {
@@ -952,6 +959,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         non_finalized_state_sender,
         backup_dir_path: None,
         tree_roots_cache: Some(no_fast_tree_sync()),
+        pruning_wake: None,
     };
     // Observe the synchronous batch write even when release builds compile out trace events.
     let recorder = FinalizedWriteRecorder(Arc::new(AtFinalizedWrite {
@@ -996,4 +1004,53 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         }
         assert!(retained.any_chain_contains(&observation.root.hash()));
     }
+}
+
+/// Durable checkpoint commits coalesce pruning wakes without blocking the writer.
+#[tokio::test]
+async fn checkpoint_commits_coalesce_pruning_notifications() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let finalized = FinalizedState::new(&Config::ephemeral(), &network).unwrap();
+        let db = finalized.db.clone();
+        let state = NonFinalizedState::new(&network);
+        let (tip_sender, latest, _change) = ChainTipSender::new(None, &network);
+        let (state_sender, _snapshot) = watch::channel(state.clone());
+        let (wake, notifications) = crossbeam_channel::bounded(1);
+        let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+            finalized,
+            state,
+            tip_sender,
+            state_sender,
+            true,
+            None,
+            no_fast_tree_sync(),
+            Some(wake),
+        );
+        for (_, bytes) in zebra_test::vectors::MAINNET_BLOCKS.range(0..=1) {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            sender
+                .finalized
+                .as_ref()
+                .unwrap()
+                .send((block.clone().into(), rsp_tx, None))
+                .unwrap();
+            assert_eq!(rsp_rx.await.unwrap().unwrap(), block.hash());
+        }
+        drop(sender);
+        tokio::task::spawn_blocking(move || {
+            Arc::try_unwrap(worker.unwrap()).unwrap().join().unwrap();
+        })
+        .await
+        .unwrap();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(db.finalized_tip_height(), Some(Height(1)));
+        assert_eq!(latest.best_tip_height(), Some(Height(1)));
+    })
+    .await
+    .unwrap();
 }

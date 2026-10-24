@@ -145,9 +145,9 @@ fn ephemeral_database_reads_back_its_format_version() {
     db.shutdown(true);
 }
 
-/// A pre-NU7 v28 cache is reused without rewriting legacy records, then accepts new v29 blocks.
+/// Archives keep their format and path; opt-in pruning isolates compatible legacy records.
 #[tokio::test]
-async fn v28_cache_is_reused_with_legacy_value_pools() {
+async fn v29_cache_is_reused_with_legacy_value_pools() {
     use std::{sync::Arc, time::Duration};
 
     use semver::Version;
@@ -159,7 +159,9 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
 
     use crate::{
         config::check_and_delete_old_state_databases,
-        constants::STATE_DATABASE_KIND,
+        constants::{
+            state_database_format_version_in_code, PRUNED_STATE_DATABASE_KIND, STATE_DATABASE_KIND,
+        },
         service::finalized_state::{
             zebra_db::chain::{BLOCK_INFO, CHAIN_VALUE_POOLS},
             FinalizedState, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
@@ -175,7 +177,7 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         delete_old_database: true,
         ..Config::default()
     };
-    let old_version = Version::new(28, 0, 0);
+    let old_version = Version::new(29, 0, 0);
     let old_path = config.db_path(STATE_DATABASE_KIND, old_version.major, &network);
     let mut state = FinalizedState {
         db: ZebraDb::new(
@@ -198,7 +200,7 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         .unwrap();
     state.db.mark_finished_format_upgrades();
 
-    // Commit real blocks to a persistent v28 database, then encode its pool records at v28 widths.
+    // Commit real blocks to a v29 database, retaining its backwards-compatible v28 pool records.
     let legacy_block_info = |info: &BlockInfo| {
         let mut bytes = [0; 52];
         bytes[..48].copy_from_slice(&info.value_pools().to_bytes()[..48]);
@@ -215,7 +217,7 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
             .commit_finalized_direct(
                 CheckpointVerifiedBlock::from(block).into(),
                 None,
-                "v28 cache reuse test",
+                "archive cache reuse test",
             )
             .unwrap();
         let info = state.db.block_info(height.into()).unwrap();
@@ -238,6 +240,16 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         )
         .unwrap();
     assert!(!expected_pools.transparent_amount().is_zero());
+
+    let mut batch = crate::DiskWriteBatch::new();
+    let error = batch
+        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "body deletion requires the state-pruned database kind"
+    );
+    assert_eq!(batch, crate::DiskWriteBatch::new());
     drop(state);
 
     // Startup cleanup must not remove the cache before the upgrader has a chance to reuse it.
@@ -250,14 +262,14 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
     .unwrap();
     assert!(
         old_path.exists(),
-        "cleanup must protect a reusable v28 cache"
+        "cleanup must protect a reusable v29 cache"
     );
 
-    // Disabling cleanup is not a rollback backup: startup moves the v28 directory to v29.
+    // Archive startup must preserve ordinary rollback without moving the directory.
     config.delete_old_database = false;
     let mut state = FinalizedState::new(&config, &network).unwrap();
     timeout(Duration::from_secs(30), async {
-        while !state.db.finished_format_upgrades() {
+        while !state.db.ready_for_pruning() {
             state.db.check_for_panics();
             sleep(Duration::from_millis(10)).await;
         }
@@ -265,13 +277,13 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
     .await
     .unwrap();
     assert_eq!(
-        state.db.format_version_on_disk().unwrap().unwrap().major,
-        29,
+        state.db.format_version_on_disk().unwrap(),
+        Some(state_database_format_version_in_code())
     );
-    assert!(
-        !old_path.exists(),
-        "reuse moves rather than backs up the cache"
-    );
+    assert_eq!(state.db.path(), old_path);
+    assert!(!config
+        .db_path(PRUNED_STATE_DATABASE_KIND, old_version.major, &network)
+        .exists());
     assert_eq!(state.db.finalized_tip_height(), Some(Height(1)));
     assert_eq!(state.db.finalized_tip_hash(), expected_tip_hash);
     assert_eq!(state.db.finalized_value_pool(), expected_pools);
@@ -303,7 +315,7 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         .commit_finalized_direct(
             CheckpointVerifiedBlock::from(next_block).into(),
             None,
-            "v29 cache reuse test",
+            "upgraded archive cache reuse test",
         )
         .unwrap();
     assert_eq!(state.db.finalized_tip_hash(), next_hash);
@@ -316,6 +328,87 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
         assert_eq!(raw.len(), width);
     }
+    let expected_blocks: Vec<_> = (0..=2)
+        .map(|height| state.db.block(Height(height).into()).unwrap().unwrap())
+        .collect();
+    drop(state);
+    let archive_reader = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &old_version,
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        true,
+    )
+    .unwrap();
+    assert_eq!(archive_reader.path(), old_path);
+    assert_eq!(archive_reader.finalized_tip_hash(), next_hash);
+    for (height, expected) in (0..=2).zip(expected_blocks) {
+        assert_eq!(
+            archive_reader.block(Height(height).into()).unwrap(),
+            Some(expected)
+        );
+    }
+    drop(archive_reader);
+
+    // Existing archives require an explicit stopped-node activation before any body deletion.
+    config.prune_blocks_older_than = Some(10_000);
+    assert!(matches!(
+        FinalizedState::new_with_debug(&config, &network, true, false),
+        Err(crate::StateInitError::PruningRequiresIsolatedState { .. })
+    ));
+    assert!(old_path.exists());
+    let pruned_path = config.db_path(PRUNED_STATE_DATABASE_KIND, old_version.major, &network);
+    assert!(!pruned_path.exists());
+    std::fs::create_dir_all(pruned_path.parent().unwrap()).unwrap();
+    std::fs::rename(&old_path, &pruned_path).unwrap();
+    let state = FinalizedState::new_with_debug(&config, &network, true, false).unwrap();
+    assert_eq!(
+        state.db.format_version_in_code(),
+        state_database_format_version_in_code()
+    );
+    assert_eq!(state.db.db_kind(), PRUNED_STATE_DATABASE_KIND);
+    assert_eq!(
+        state.db.path(),
+        config.db_path(PRUNED_STATE_DATABASE_KIND, old_version.major, &network)
+    );
+    assert!(!old_path.exists());
+    assert_eq!(state.db.finalized_tip_hash(), next_hash);
+    assert!(!state.db.history_capabilities().unwrap().is_pruned());
+    let mut batch = crate::DiskWriteBatch::new();
+    let error = batch
+        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("checks must finish before pruning"));
+    assert_eq!(batch, crate::DiskWriteBatch::new());
+    drop(state);
+
+    let mut state = FinalizedState::new(&config, &network).unwrap();
+    timeout(Duration::from_secs(30), async {
+        while !state.db.ready_for_pruning() {
+            state.db.check_for_panics();
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap(),
+        Some(state_database_format_version_in_code())
+    );
+    assert_eq!(state.db.finalized_tip_hash(), next_hash);
+    assert!(!state.db.history_capabilities().unwrap().is_pruned());
+    drop(state);
+    config.prune_blocks_older_than = None;
+    let reader = FinalizedState::new_with_debug(&config, &network, true, true).unwrap();
+    assert_eq!(reader.db.db_kind(), PRUNED_STATE_DATABASE_KIND);
+    assert_eq!(reader.db.finalized_tip_hash(), next_hash);
+    assert!(!old_path.exists());
 }
 
 /// Check that the sprout tree database serialization format has not changed.

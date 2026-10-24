@@ -74,7 +74,7 @@ async fn halo2_key_preload_panic_exits_zebra() {
     super::start::StartCmd::halo2_key_preload_should_exit(result);
 }
 
-/// Startup policy, local advertisements, and RPC service reporting agree for both history modes.
+/// Startup policy, local advertisements, and RPC service reporting agree for every pruning state.
 #[tokio::test(flavor = "current_thread")]
 async fn pruned_network_services_preserve_independent_capabilities() {
     use std::sync::{Arc, Mutex};
@@ -95,18 +95,33 @@ async fn pruned_network_services_preserve_independent_capabilities() {
         let mut config = crate::config::ZebradConfig::default();
         config.network.local_services |= independent_services;
 
-        for (case, lowest_retained_height, expected) in [
+        for (case, retention, lowest_retained_height, expected) in [
             (
                 "archive",
+                None,
                 Height(0),
                 PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS,
             ),
             (
                 "pruned history",
+                None,
+                Height(10_000),
+                PeerServices::NODE_TREE_ROOTS,
+            ),
+            (
+                "pruning configured before deletion",
+                Some(10_000),
+                Height(0),
+                PeerServices::NODE_TREE_ROOTS,
+            ),
+            (
+                "pruning configured after deletion",
+                Some(10_000),
                 Height(10_000),
                 PeerServices::NODE_TREE_ROOTS,
             ),
         ] {
+            config.state.prune_blocks_older_than = retention;
             let services = super::StartCmd::network_services(
                 &config,
                 HistoryCapabilities {
@@ -173,17 +188,48 @@ fn pruned_history_rejects_both_sidecar_modes() {
     config.zcashd_compat.enabled = true;
     for managed in [false, true] {
         config.zcashd_compat.manage_zcashd = managed;
+        config.state.prune_blocks_older_than = None;
         super::StartCmd::network_services(&config, HistoryCapabilities::default())
             .expect("archive nodes can serve sidecars");
-        let error = super::StartCmd::network_services(
-            &config,
-            HistoryCapabilities {
-                lowest_retained_height: Height(10_000),
-            },
-        )
-        .expect_err("sidecars require complete block history");
-        assert!(error
-            .to_string()
-            .contains("zcashd-compat requires an archive node"));
+        for (retention, lowest_retained_height) in [
+            (None, Height(10_000)),
+            (Some(10_000), Height(0)),
+            (Some(10_000), Height(10_000)),
+        ] {
+            config.state.prune_blocks_older_than = retention;
+            let error = super::StartCmd::network_services(
+                &config,
+                HistoryCapabilities {
+                    lowest_retained_height,
+                },
+            )
+            .expect_err("sidecars require complete block history and pruning disabled");
+            assert!(error
+                .to_string()
+                .contains("zcashd-compat requires an archive node"));
+        }
     }
+}
+
+#[test]
+fn pruning_config_defaults_and_round_trips() {
+    let config: crate::config::ZebradConfig = toml::from_str("").unwrap();
+    assert_eq!(config.state.prune_blocks_older_than, None);
+
+    for retention in [None, Some(10_000), Some(u32::MAX)] {
+        let mut config = config.clone();
+        config.state.prune_blocks_older_than = retention;
+        let value = toml::Value::try_from(&config).unwrap();
+        assert_eq!(
+            value["state"].get("prune_blocks_older_than").is_some(),
+            retention.is_some(),
+        );
+        let encoded = toml::to_string(&value).unwrap();
+        let decoded: crate::config::ZebradConfig = toml::from_str(&encoded).unwrap();
+        assert_eq!(decoded, config);
+    }
+
+    let config: crate::config::ZebradConfig =
+        toml::from_str("[state]\nprune_blocks_older_than = 10000\n").unwrap();
+    assert_eq!(config.state.prune_blocks_older_than, Some(10_000));
 }

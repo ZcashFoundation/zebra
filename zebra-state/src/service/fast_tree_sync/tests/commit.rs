@@ -789,6 +789,7 @@ async fn valid_proof_recovers_only_the_forged_successor_through_state_routing() 
             true,
             None,
             cache,
+            None,
         );
         let read_service = ReadStateService::new(
             &finalized,
@@ -819,6 +820,7 @@ async fn valid_proof_recovers_only_the_forged_successor_through_state_routing() 
             wanted_tree_roots,
             rejected_tree_roots,
             pending_rejected_tree_roots: None,
+            pruning_task: None,
             max_finalized_queue_height: f64::NAN,
             metrics_exporter: None,
         };
