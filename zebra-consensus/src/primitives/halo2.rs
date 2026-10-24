@@ -49,11 +49,15 @@ mod tests;
 /// size reduces those for large Orchard blocks; 256 measured slower.
 const HALO2_MAX_BATCH_SIZE: usize = 2 * super::MAX_BATCH_SIZE;
 
-/// The type of verification results.
-type VerifyResult = bool;
+/// Per-item preparation errors and the shared proof/signature verification result.
+#[derive(Debug)]
+struct BatchResult {
+    checks: Vec<Result<(), orchard::bundle::BatchError>>,
+    valid: bool,
+}
 
 /// The type of the batch sender channel.
-type Sender = watch::Sender<Option<VerifyResult>>;
+type Sender = watch::Sender<Option<BatchResult>>;
 
 /// The type of a prepared verifying key.
 /// This is the key used to verify individual items.
@@ -468,10 +472,8 @@ pub struct Verifier {
     /// The verifying key that every batch and fallback from this verifier uses.
     vk: &'static ItemVerifyingKey,
 
-    /// The synchronous Halo2 batch validator.
-    ///
-    /// Borrows `vk` (which is `'static`), so the validator is `BatchValidator<'static>`.
-    batch: BatchValidator<'static>,
+    /// Bundles awaiting preparation and validation on a blocking worker.
+    batch: Vec<Item>,
 
     /// A channel for broadcasting the result of a batch to the futures for each batch item.
     ///
@@ -486,50 +488,55 @@ impl Verifier {
         let (tx, _) = watch::channel(None);
         Self {
             vk,
-            batch: BatchValidator::new(vk),
+            batch: Vec::new(),
             tx,
         }
     }
 
-    /// Returns the batch verifier and channel sender,
-    /// replacing the batch and channel with new empty ones.
-    fn take(&mut self) -> (BatchValidator<'static>, Sender) {
-        // Use a new verifier and channel for each batch.
-        let batch = mem::replace(&mut self.batch, BatchValidator::new(self.vk));
+    /// Returns the pending items and channel sender, replacing both with empty ones.
+    fn take(&mut self) -> (Vec<Item>, Sender) {
+        let batch = mem::take(&mut self.batch);
         let (tx, _) = watch::channel(None);
         let tx = mem::replace(&mut self.tx, tx);
 
         (batch, tx)
     }
 
-    /// Synchronously process the batch (the verifying key is held by the batch), and send the
-    /// result using the channel sender. This function blocks until the batch is completed.
-    fn verify(batch: BatchValidator<'static>, tx: Sender) {
-        let result = batch.validate(rand::rng());
-        let _ = tx.send(Some(result));
+    /// Prepares and validates one bounded batch, entirely off the asynchronous workers.
+    fn validate(items: Vec<Item>, vk: &ItemVerifyingKey) -> BatchResult {
+        let mut batch = BatchValidator::new(vk);
+        // Unsupported restrictions reject only that item, without adding it to the batch.
+        let checks = items.into_iter().map(|item| batch.queue(item)).collect();
+        let valid = batch.validate(rand::rng());
+        BatchResult { checks, valid }
     }
 
     /// Flush the batch using a thread pool, sending the result via the channel.
     /// This returns immediately, usually before the batch is completed.
     fn flush_blocking(&mut self) {
         let (batch, tx) = self.take();
+        let vk = self.vk;
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
         // We don't care about execution order here, because this method is only called on drop.
-        tokio::task::block_in_place(|| rayon::spawn_fifo(move || Self::verify(batch, tx)));
+        tokio::task::block_in_place(|| {
+            rayon::spawn_fifo(move || {
+                let _ = tx.send(Some(Self::validate(batch, vk)));
+            })
+        });
     }
 
     /// Flush the batch using a thread pool, returning the result via the channel. This function
     /// returns a future that becomes ready when the batch is completed.
-    async fn flush_spawning(batch: BatchValidator<'static>, tx: Sender) {
+    async fn flush_spawning(batch: Vec<Item>, tx: Sender, vk: &'static ItemVerifyingKey) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         let start = std::time::Instant::now();
-        let result = spawn_fifo(move || batch.validate(rand::rng())).await;
+        let result = spawn_fifo(move || Self::validate(batch, vk)).await;
         let duration = start.elapsed().as_secs_f64();
 
         let result_label = match &result {
-            Ok(true) => "success",
+            Ok(result) if result.valid => "success",
             _ => "failure",
         };
         metrics::histogram!(
@@ -576,34 +583,26 @@ impl Service<BatchControl<Item>> for Verifier {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
-                match self.batch.queue(item) {
-                    Ok(()) => {}
-                    // Reject the item on its own without poisoning the rest of the batch. In
-                    // particular `BatchError::RestrictionUnsupportedByKey` should not be reachable
-                    // (it fires only for a bundle with `cross_address_enabled = false` on a key
-                    // that does not support the restriction; `VERIFIER_NU6_3_ONWARD`'s key supports
-                    // it, and the pre-NU6.3 verifiers only ever see v5-format bundles, which always
-                    // report `cross_address_enabled = true`), but failing closed per-item is
-                    // strictly safer than panicking this shared, long-lived verifier service if a
-                    // future routing change or `#[non_exhaustive]` variant ever reaches here.
-                    Err(other) => {
-                        return Box::pin(async move {
-                            metrics::counter!("proofs.halo2.invalid").increment(1);
-                            Err(format!("could not validate halo2 proof: {other}").into())
-                        });
-                    }
-                }
+                let index = self.batch.len();
+                self.batch.push(item);
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
                     match rx.changed().await {
                         Ok(()) => {
                             // We use a new channel for each batch,
                             // so we always get the correct batch result here.
-                            let is_valid = *rx
-                                .borrow()
+                            let result = rx.borrow();
+                            let result = result
                                 .as_ref()
                                 .ok_or("threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?")?;
+                            if let Err(error) = &result.checks[index] {
+                                metrics::counter!("proofs.halo2.invalid").increment(1);
+                                return Err(
+                                    format!("could not validate halo2 proof: {error}").into()
+                                );
+                            }
 
+                            let is_valid = result.valid;
                             if is_valid {
                                 tracing::trace!(?is_valid, "verified halo2 proof");
                                 metrics::counter!("proofs.halo2.verified").increment(1);
@@ -624,7 +623,7 @@ impl Service<BatchControl<Item>> for Verifier {
 
                 let (batch, tx) = self.take();
 
-                Box::pin(Self::flush_spawning(batch, tx).map(|()| Ok(())))
+                Box::pin(Self::flush_spawning(batch, tx, self.vk).map(|()| Ok(())))
             }
         }
     }

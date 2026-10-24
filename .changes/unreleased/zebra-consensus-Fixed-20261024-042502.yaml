@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Prepare Orchard verification batches in bounded blocking flush jobs instead of on async admission workers ([#11987](https://github.com/ZcashFoundation/zebra/issues/11987)).
+time: 2026-10-24T04:25:02.952627198+02:00
