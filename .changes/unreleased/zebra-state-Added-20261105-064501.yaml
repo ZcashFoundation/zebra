@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `Config::prune_blocks_older_than` and `Config::state_database_format_version()` for bounded opt-in finalized-body pruning with archive-compatible format selection.
+time: 2026-11-05T06:45:01.13088193+01:00

@@ -117,3 +117,28 @@ fn empty_upgrade_records_the_running_spending_index_layout() {
         Some(running_version)
     );
 }
+
+#[test]
+fn archive_upgrade_stops_before_pruning_format() {
+    let _guard = zebra_test::init();
+    let (_cache, state) = state();
+    let running_version = state.db.format_version_in_code();
+    assert_eq!(running_version.major, 29);
+    let mut disk_version = running_version.clone();
+    disk_version.major = 28;
+    state
+        .db
+        .update_format_version_on_disk(&disk_version)
+        .unwrap();
+    let change = DbFormatChange::open_database(&running_version, Some(disk_version));
+    let (_sender, receiver) = bounded(1);
+
+    // A nonempty tip takes the registered-upgrade path, rather than the empty-state shortcut.
+    change
+        .apply_format_upgrade(&state.db, Some(Height(3)), &receiver)
+        .unwrap();
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap(),
+        Some(running_version)
+    );
+}

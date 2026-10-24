@@ -16,10 +16,7 @@ use semver::{BuildMetadata, Version};
 
 use tokio::sync::watch;
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_state::{
-    constants::LOCK_FILE_ERROR, state_database_format_version_in_code,
-    state_database_format_version_on_disk,
-};
+use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_on_disk};
 
 use crate::{
     commands::EntryPoint,
@@ -312,10 +309,13 @@ impl Application for ZebradApp {
             ("version", build_version().to_string()),
             // config
             ("Zcash network", config.network.network.to_string()),
-            // code constant
+            // Selected format, including pruning isolation for an existing v30 directory.
             (
                 "running state version",
-                state_database_format_version_in_code().to_string(),
+                config
+                    .state
+                    .state_database_format_version(&config.network.network)
+                    .to_string(),
             ),
             // state disk file, doesn't open database
             ("initial disk state version", disk_db_version),

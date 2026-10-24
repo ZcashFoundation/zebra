@@ -127,17 +127,46 @@ pub enum StateInitError {
     )]
     ReadOnlyEphemeralConflict,
 
-    /// A body prefix is unavailable, but this writable entry point requires archive state.
+    /// The configured retention window is below the network's safe minimum.
     #[error(
-        "cannot open pruned state at {path:?} for archive writes: bodies below \
+        "invalid state.prune_blocks_older_than value {configured}: minimum is {minimum}. \
+         Omit this setting for archive operation"
+    )]
+    InvalidPruningRetention {
+        /// The requested number of retained finalized block bodies.
+        configured: u32,
+        /// The minimum number of retained finalized block bodies for this network.
+        minimum: u32,
+    },
+
+    /// A body prefix is unavailable, but pruning is disabled for this writable state.
+    #[error(
+        "cannot open pruned state at {path:?} with pruning disabled: bodies below \
          {lowest_retained_height:?} are unavailable except genesis. \
-         Restore an archive snapshot or fully resync in a separate cache directory"
+         Enable state.prune_blocks_older_than, or restore an archive snapshot or fully resync \
+         in a separate cache directory"
     )]
     PrunedDatabase {
         /// The database with unavailable historical bodies.
         path: PathBuf,
         /// The lowest height of the complete retained suffix.
         lowest_retained_height: block::Height,
+    },
+
+    /// A pruned database cannot reconstruct indexes for a different build's spending-index mode.
+    #[error(
+        "cannot open pruned state at {path:?}: changing spending-index mode from \
+         indexer={disk_indexer} to indexer={running_indexer} requires unavailable block history. \
+         Use a build with the existing indexer mode, or restore an archive snapshot or fully resync \
+         in a separate cache directory"
+    )]
+    PrunedIndexModeMismatch {
+        /// The database whose spending-index layout cannot be converted.
+        path: PathBuf,
+        /// Whether the stored state includes spending indexes.
+        disk_indexer: bool,
+        /// Whether this build writes spending indexes.
+        running_indexer: bool,
     },
 
     /// Historical body availability could not be read or its retained suffix was invalid.

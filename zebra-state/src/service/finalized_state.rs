@@ -36,7 +36,7 @@ use zebra_db::{
 };
 
 use crate::{
-    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    constants::STATE_DATABASE_KIND,
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, ChainTipBlock, QueuedCheckpointVerified},
@@ -64,6 +64,7 @@ pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
     MAX_ON_DISK_HEIGHT,
 };
+pub(crate) use zebra_db::history::PruningWitness;
 pub use zebra_db::ZebraDb;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -168,7 +169,7 @@ impl FinalizedState {
         let db = ZebraDb::new(
             config,
             STATE_DATABASE_KIND,
-            &state_database_format_version_in_code(),
+            &config.state_database_format_version(network),
             network,
             debug_skip_format_upgrades,
             STATE_COLUMN_FAMILIES_IN_CODE

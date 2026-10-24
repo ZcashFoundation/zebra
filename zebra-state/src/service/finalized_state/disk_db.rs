@@ -37,7 +37,7 @@ use crate::{
         block::TRANSACTION_LOCATION_DISK_BYTES, FromDisk, IntoDisk, TransactionIndex,
         TransactionLocation,
     },
-    write_database_format_version_to_disk, Config, HistoryCapabilities, StateInitError,
+    Config, HistoryCapabilities, StateInitError,
 };
 
 use super::zebra_db::transparent::{
@@ -1005,6 +1005,7 @@ impl DiskDb {
     /// # Errors
     ///
     /// - In read-only mode, if the cache directory is missing or unreadable.
+    /// - If pruning retention is invalid or an archive writer opens pruned history.
     ///
     /// # Panics
     ///
@@ -1018,6 +1019,8 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<DiskDb, StateInitError> {
+        config.validate_pruning(network)?;
+
         // `ephemeral` and `read_only` describe mutually-exclusive modes: an ephemeral
         // database is a read-write primary this process owns and deletes on drop, while
         // a read-only secondary follows another process's primary and must never delete
@@ -1088,11 +1091,37 @@ impl DiskDb {
 
                 // Guard the lowest writable entry point before launching migrations or checks.
                 let history = db.history_capabilities()?;
-                if !read_only && history.is_pruned() {
+                if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned() {
                     return Err(StateInitError::PrunedDatabase {
                         path,
                         lowest_retained_height: history.lowest_retained_height,
                     });
+                }
+                if !read_only && history.is_pruned() {
+                    // Hold the writer lock while checking, before any caller can commit a block.
+                    let invalid_version = |source| StateInitError::HistoryRead {
+                        path: path.clone(),
+                        source,
+                    };
+                    let disk_version = database_format_version_on_disk(
+                        config,
+                        db_kind,
+                        format_version_in_code.major,
+                        network,
+                    )
+                    .map_err(invalid_version)?
+                    .ok_or_else(|| {
+                        invalid_version("pruned state requires a stored format version".into())
+                    })?;
+                    let disk_indexer = disk_version.build.contains("indexer");
+                    let running_indexer = cfg!(feature = "indexer");
+                    if disk_indexer != running_indexer {
+                        return Err(StateInitError::PrunedIndexModeMismatch {
+                            path,
+                            disk_indexer,
+                            running_indexer,
+                        });
+                    }
                 }
 
                 db.assert_default_cf_is_empty();
@@ -1327,21 +1356,10 @@ impl DiskDb {
                     Ok(()) => {
                         info!("moved state cache from {old_path:?} to {new_path:?}");
 
-                        let mut disk_version =
+                        let disk_version =
                             database_format_version_on_disk(config, db_kind, major_db_ver, network)
                                 .expect("unable to read database format version file")
                                 .expect("unable to parse database format version");
-
-                        disk_version.major = old_major_db_ver;
-
-                        write_database_format_version_to_disk(
-                            config,
-                            db_kind,
-                            major_db_ver,
-                            &disk_version,
-                            network,
-                        )
-                        .expect("unable to write database format version file to disk");
 
                         // Get the parent of the old path, e.g. `state/v25/` and delete it if it is
                         // empty.

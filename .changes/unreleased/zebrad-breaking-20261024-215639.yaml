@@ -1,0 +1,12 @@
+project: zebrad
+kind: breaking
+body: >-
+  Added opt-in block-body pruning in state format v30. Archive nodes stay in v29 and can return to
+  7.0.0 without moving their state directory. Enabling pruning moves compatible v29 state to v30
+  without a resync, before deleting any bodies. Keep a separate archive backup before pruning:
+  older binaries cannot use the v30 directory, and disabling old-database cleanup does not prevent
+  the move. After deletion, returning to archive operation requires an archive snapshot or full
+  resync. An existing v30 state takes precedence over v29, including when pruning is disabled.
+  Startup reports the specific initialization failure and its recovery instructions instead of
+  a generic writable-directory, lock, or free-space hint.
+time: 2026-10-24T21:56:39.657595187+02:00

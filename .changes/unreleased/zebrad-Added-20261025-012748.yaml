@@ -1,0 +1,12 @@
+project: zebrad
+kind: Added
+body: >-
+  Added opt-in historical block-body pruning with `state.prune_blocks_older_than`; archive remains
+  the default. Retention counts finalized bodies, keeps genesis, and requires at least 10,000 bodies
+  on Mainnet/Testnet or 1,001 on Regtest. Increasing retention only affects future deletion; normal
+  compaction reclaims disk space without an immediate reduction guarantee.
+  Enabling pruning immediately stops advertising archive service and rejects zcashd sidecars,
+  even before the first deletion.
+  Pruning retains a restart witness and waits without deleting bodies when a bounded search finds
+  none; valid branchless suffixes do not stop the running node.
+time: 2026-10-25T01:27:48.892073814+02:00
