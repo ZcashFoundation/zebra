@@ -1105,7 +1105,9 @@ where
     )
     .map_err(de::Error::custom)?
     {
-        params_builder = params_builder.with_funding_streams(funding_streams);
+        params_builder = params_builder
+            .try_with_funding_streams(funding_streams)
+            .map_err(de::Error::custom)?;
     }
 
     if let Some(lockbox_disbursements) = lockbox_disbursements {

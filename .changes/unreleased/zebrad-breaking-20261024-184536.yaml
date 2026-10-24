@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'Invalid `[network.testnet_parameters]` funding streams and lockbox disbursements now fail configuration loading with an error, instead of panicking at startup or in subsidy RPCs. A Regtest node whose funding streams have too few addresses, which previously started and panicked only when a subsidy was computed, no longer starts; add the missing addresses or set `extend_funding_stream_addresses_as_required = true`.'
+time: 2026-10-24T18:45:36.508361422+02:00
