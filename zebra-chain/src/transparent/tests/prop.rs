@@ -7,9 +7,10 @@ use zcash_transparent::{
 use zebra_test::prelude::*;
 
 use crate::{
-    amount::{Amount, MAX_MONEY},
+    amount::{Amount, NonNegative, MAX_MONEY},
     block,
     fmt::SummaryDebug,
+    parameters::Network,
     serialization::{ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN},
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     LedgerState,
@@ -99,6 +100,27 @@ proptest! {
             }
         }
     }
+
+    #[test]
+    fn output_address_matches_solver_without_allocating(
+        bytes in prop::collection::vec(any::<u8>(), 0..1024),
+        hash in any::<[u8; 20]>(),
+        value in any::<Amount<NonNegative>>(),
+    ) {
+        let _init_guard = zebra_test::init();
+        let scripts = [
+            Script::new(&bytes),
+            ZcashScript::from(TransparentAddress::PublicKeyHash(hash).script()).into(),
+            ZcashScript::from(TransparentAddress::ScriptHash(hash).script()).into(),
+        ];
+        for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
+            for value in [value, Amount::new(0), Amount::new(MAX_MONEY)] {
+                for script in &scripts {
+                    super::assert_output_address(&Output::new(value, script.clone()), &network);
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -111,5 +133,8 @@ fn output_conversion_preserves_oversized_script_panic() {
 
     assert!(std::panic::catch_unwind(|| serialized_txout(&output)).is_err());
     assert!(std::panic::catch_unwind(|| TxOut::try_from(&output)).is_err());
+    for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
+        assert!(std::panic::catch_unwind(|| output.address(&network)).is_err());
+    }
     assert!(std::panic::catch_unwind(|| TxOut::try_from(output)).is_err());
 }
