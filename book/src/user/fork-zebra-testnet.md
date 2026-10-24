@@ -1,180 +1,245 @@
 # Forking the Zcash Testnet with Zebra
 
-> **Note:** This tutorial uses s-nomp for mining, which has known compatibility issues with NU5+.
-> For current mining solutions, see [Mining Zcash with Zebra](mining.md). You may need to adapt
-> this guide to use alternative mining pool software.
+A private fork reuses a public Testnet prefix, then applies different consensus
+rules without connecting to public peers. Zebra can configure the activation
+heights of implemented upgrades; adding a new consensus rule still requires a
+modified implementation. Changing a network name or branch identifier alone
+does not implement an upgrade.
 
-The Zcash blockchain community consistently explores upgrades to the Zcash protocol, introducing new features to the consensus layer. This tutorial guides teams or individuals through forking the Zcash Testnet locally using Zebra, enabling testing of custom functionalities in a private testnet environment.
+Use [Regtest](regtest.md) instead when the test does not require public history.
+For a coordinated multi-implementation test, also follow
+[Private Testnet testing](../dev/private-testnet.md).
 
-As of writing, the current network upgrade on the Zcash Testnet is `Nu5`. While a future upgrade (`Nu6`) activation height will be known later, for this tutorial, we aim to activate after `Nu5`, allowing us to observe our code crossing the network upgrade and continuing isolated.
+## Choose the shared prefix
 
-To achieve this, we'll use [Zebra](https://github.com/ZcashFoundation/zebra) as the node, [s-nomp](https://github.com/ZcashFoundation/s-nomp) as the mining pool, and [nheqminer](https://github.com/ZcashFoundation/nheqminer) as the Equihash miner.
+Choose the first height at which the private rules differ, called the fork
+height. Keep the genesis block and all consensus parameters through the
+preceding block compatible with public Testnet. Retain historical activation
+heights, subsidy and funding schedules, and lockbox disbursements. No copied
+block may be at or beyond the first incompatible height.
 
-**Note:** This tutorial aims to remain generally valid after `Nu6`, with adjustments to the network upgrade name and block heights.
+The example replays NU7 at height 4,200,000 using public Testnet blocks through
+4,199,999, before
+[public NU7 activation](../index.html#networks-and-network-upgrades). For a
+different cutoff, update the state, checkpoints, and activation table
+together. NU7 requires a
+height divisible by three under [ZIP 259](https://zips.z.cash/zip-0259).
 
-# Requirements
+Record the prefix's final height and block hash and share them with every
+participant. A different hash at the same height means the participants are
+not starting from the same chain.
 
-- A modified Zebra version capable of syncing up to our chosen activation height, including the changes from the [code changes step](#code-changes).
-- Mining tools:
-  - s-nomp pool
-  - nheqminer
+## Prepare public state
 
-You may have two Zebra versions: one for syncing up to the activation height and another (preferably built on top of the first one) with the network upgrade and additional functionality.
-
-**Note:** For mining setup please see [How to mine with Zebra on testnet](https://zebra.zfnd.org/user/mining-testnet-s-nomp.html)
-
-## Sync the Testnet to a Block after `Nu5` Activation
-
-Select a height for the new network upgrade after `Nu5`. In the Zcash public testnet, `Nu5` activation height is `1_842_420`, and at the time of writing, the testnet was at around block `2_598_958`. To avoid dealing with checkpoints, choose a block that is not only after `Nu5` but also in the future. In this tutorial, we chose block `2_599_958`, which is 1000 blocks ahead of the current testnet tip.
-
-Clone Zebra, create a config file, and use `state.debug_stop_at_height` to halt the Zebra sync after reaching our chosen network upgrade block height (`2_599_958`):
-
-The relevant parts of the config file are:
+Use a dedicated public Testnet configuration, for example `public-testnet.toml`:
 
 ```toml
 [network]
-listen_addr = "0.0.0.0:18233"
 network = "Testnet"
 
 [state]
-debug_stop_at_height = 2599958
-cache_dir = "/home/user/.cache/zebra"
+cache_dir = "/srv/zebra-public"
+delete_old_database = false
 ```
 
-Generate a Zebra config file:
+Start Zebra and synchronize until the chosen prefix is finalized:
 
-```bash
-zebrad generate -o myconf.toml
+```sh
+zebrad -c public-testnet.toml start
 ```
 
-Start Zebra with the modified config:
+Stop Zebra and other processes accessing this state before preparing the copy.
+Keep an untouched backup. The paths in this procedure must be writable by the
+Zebra user and must not contain another test's state.
 
-```bash
-zebrad -c myconf.toml start
-```
+Prepare the snapshot with a compatible writer; follow [Upgrading](upgrading.md)
+before copying. Do not rename version directories to bypass an upgrade.
 
-Wait for the sync to complete (this may take up to 24 hours, depending on testnet conditions), resulting in a state up to the desired block in `~/cache/zebra`.
+### Copy a bounded prefix
 
-## Code changes
+The expert `copy-state` command copies finalized blocks through a specified
+source height into another database. It does not read the source's
+non-finalized backup. It uses the source network for both databases; only
+`[state]` options from its target configuration take effect. It does not
+convert public Testnet state directly into a custom network namespace or
+verify a new consensus implementation.
 
-We need to add the network upgrade variant to the `zcash_primitives` crate and Zebra.
-
-### librustzcash / zcash_primitives
-
-Add the new network upgrade variant and a branch id among some changes needed for the library to compile. Here are some examples:
-
-- Sample internal commit: [Unclean test code](https://github.com/zcash/librustzcash/commit/76d81db22fb4c52302f81c9b3e1d98fb6b71188c)
-- Public PR adding Nu6 behind a feature: [librustzcash PR #1048](https://github.com/zcash/librustzcash/pull/1048)
-
-After the changes, check that the library can be built with `cargo build --release`.
-
-## Zebra
-
-Here we are making changes to create an isolated network version of Zebra. In addition to your own changes, this Zebra version needs to have the following:
-
-- Add a `Nu6` variant to the `NetworkUpgrade` enum located in `zebra-chain/src/parameters/network_upgrade.rs`.
-- Add consensus branch id, a random non-repeated string. We used `00000006` in our tests when writing this tutorial.
-- Point to the modified `zcash_primitives` in `zebra-chain/Cargo.toml`. In my case, I had to replace the dependency line with something like:
-
-  ```toml
-  zcash_primitives = { git = "https://github.com/oxarbitrage/librustzcash", branch = "nu6-test", features = ["transparent-inputs"] }
-  ```
-
-- Make fixes needed to compile.
-- Ignore how far we are from the tip in get block template: `zebra-rpc/src/methods/types/get_block_template.rs`
-
-Unclean test commit for Zebra: [Zebra commit](https://github.com/ZcashFoundation/zebra/commit/d05af154c897d4820999fcb968b7b62d10b26aa8)
-
-Make sure you can build the `zebrad` binary after the changes with `cargo build --release`
-
-## Configuration for isolated network
-
-Now that you have a synced state and a modified Zebra version, it's time to run your isolated network. Relevant parts of the configuration file:
-
-Relevant parts of the configuration file:
+Save `prefix-target.toml` with a new, persistent destination:
 
 ```toml
-[mempool]
-debug_enable_at_height = 0
-max_datacarrier_bytes = 83
+[state]
+cache_dir = "/srv/zebra-fork-prefix"
+delete_old_database = false
+```
+
+Copy the example prefix:
+
+```sh
+zebrad -c public-testnet.toml copy-state \
+  --max-source-height 4199999 \
+  --target-config-path prefix-target.toml
+```
+
+The height is inclusive. The command stops at the source's finalized tip if
+it is lower than the requested height, so check the resulting prefix rather
+than assuming it reached the cutoff:
+
+```sh
+zebrad tip-height --network Testnet --cache-dir /srv/zebra-fork-prefix
+```
+
+For this example the result must be `4199999`. The copy log also reports
+`final_target_tip`, including its hash; compare that hash across participants.
+The command commits copied blocks as checkpoint-verified blocks, rebuilding
+state under the source network. It is not a replacement for verifying the
+source chain.
+
+The prefix is stored at `/srv/zebra-fork-prefix/state/v29/testnet`. Copy it
+into an empty private namespace:
+
+```sh
+mkdir -p /srv/zebra-nu7-private/state/v29
+test ! -e /srv/zebra-nu7-private/state/v29/nu7private-00010007 && \
+  cp -a /srv/zebra-fork-prefix/state/v29/testnet \
+    /srv/zebra-nu7-private/state/v29/nu7private-00010007
+```
+
+This bounded copy finalizes every copied block, so it does not need a public
+non-finalized backup. Never add a backup containing public blocks beyond the
+cutoff.
+
+### Copy an already bounded snapshot
+
+If the stopped source already ends below divergence, an offline directory
+copy avoids replaying every block. Copy its finalized database and its matching
+`non_finalized_state/testnet` directory, when present, into empty destinations
+with the private namespace:
+
+| Source below the public cache root | Destination below the private cache root |
+| --- | --- |
+| `state/v29/testnet` | `state/v29/nu7private-00010007` |
+| `non_finalized_state/testnet` | `non_finalized_state/nu7private-00010007` |
+
+A non-finalized backup preserves recent blocks that are not yet in the
+finalized database. It can lag the live tip, so verify the restored tip before
+testing. Do not recover missing prefix blocks by reconnecting the private
+network to public seeds. Obtain a complete agreed prefix before isolation.
+Never copy a public peer cache into the private namespace or copy private state
+back into public Testnet.
+
+## Prepare private checkpoints
+
+The [checkpoint coverage rules](custom-testnets.md#checkpoints) require this
+prefix to reach at least height 1,028,499. A checkpoint at or after divergence
+would require the private chain to match the public block it replaces.
+
+From the Zebra source checkout, extract only checkpoints below the example
+fork height:
+
+```sh
+awk '$1 < 4200000' \
+  zebra-chain/src/parameters/checkpoint/test-checkpoints.txt \
+  > /srv/zebra-nu7-private/checkpoints.txt
+```
+
+Share the exact file with all participants. Do not use `checkpoints = true`:
+a later Zebra release could bundle public checkpoints beyond the cutoff.
+
+## Configure the isolated network
+
+Save the following as `private-testnet.toml`:
+
+```toml
+[network]
+network = "Testnet"
+listen_addr = "127.0.0.1:18233"
+initial_testnet_peers = []
+cache_dir = false
+
+[network.testnet_parameters]
+network_name = "Nu7Private"
+network_magic = [0, 1, 0, 7]
+checkpoints = "/srv/zebra-nu7-private/checkpoints.txt"
+initial_nsm_value_balance = 55_768_414_957
+
+[network.testnet_parameters.activation_heights]
+BeforeOverwinter = 1
+Overwinter = 207_500
+Sapling = 280_000
+Blossom = 584_000
+Heartwood = 903_800
+Canopy = 1_028_500
+NU5 = 1_842_420
+NU6 = 2_976_000
+"NU6.1" = 3_536_500
+"NU6.2" = 4_052_000
+"NU6.3" = 4_134_000
+NU7 = 4_200_000
 
 [mining]
-miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
+miner_address = "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
 
-[network]
-cache_dir = false
-initial_testnet_peers = [
-  "dnsseed.testnet.z.cash:18233",
-  "seeder.testnet.zec.rocks:18233",
-  "testnet.seeder.zfnd.org:18233",
-]
-listen_addr = "0.0.0.0:18233"
-network = "Testnet"
+[mempool]
+debug_enable_at_height = 0
 
 [rpc]
-listen_addr = "0.0.0.0:18232"
+listen_addr = "127.0.0.1:18232"
+cookie_dir = "/srv/zebra-nu7-private/rpc"
 
 [state]
-cache_dir = "/home/oxarbitrage/.cache/zebra"
+cache_dir = "/srv/zebra-nu7-private"
+delete_old_database = false
 ```
 
-- `debug_enable_at_height= 0` enables the mempool independently of the tip height.
-- The `[mining]` section is necessary for mining blocks, and the rpc endpoint `rpc.listen_addr` too.
-- `initial_testnet_peers` is needed as Zebra starts behind the fork block, approximately 100 blocks behind, so it needs to receive those blocks again. This is necessary until the new fork passes more than 100 blocks after the fork height. At that point, this network can be isolated, and initial_testnet_peers can be set to `[]`.
-- Ensure your `state.cache_dir` is the same as when you saved state in step 1.
+The [custom namespace](custom-testnets.md#peer-isolation-and-storage) is
+`nu7private-00010007`, not the public `testnet` directory.
+The explicit [NSM seed](config.md#network) preserves
+the public history after changing network magic.
 
-Start the chain with:
+For multiple hosts, bind P2P to a private interface and replace
+`initial_testnet_peers = []` with participant addresses and ports. Use the same
+magic and consensus settings everywhere, with the
+[peer isolation rules](custom-testnets.md#peer-isolation-and-storage).
 
-```bash
-zebrad -c myconf.toml start
+The `[mempool] debug_enable_at_height = 0` setting enables the mempool on the
+old copied tip, not mining. RPC remains authenticated and bound to loopback.
+
+## Mine and inspect the fork
+
+Start the private node:
+
+```sh
+zebrad -c private-testnet.toml start
 ```
 
-Start s-nomp:
+Confirm the restored tip and connected peers before producing blocks:
 
-```bash
-npm start
+```sh
+curl --silent --show-error \
+  --user "$(cat /srv/zebra-nu7-private/rpc/.cookie)" \
+  --header 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"getblockchaininfo","params":[]}' \
+  http://127.0.0.1:18232/
+
+curl --silent --show-error \
+  --user "$(cat /srv/zebra-nu7-private/rpc/.cookie)" \
+  --header 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":2,"method":"getpeerinfo","params":[]}' \
+  http://127.0.0.1:18232/
 ```
 
-Start the miner:
+The sample retains proof of work. Use a [mining pool](mining.md) or the
+[experimental internal miner](regtest.md#using-zebras-internal-miner).
+Meet the [mining synchronization requirement](mining.md#running-zebra) before
+requesting templates; an old Testnet tip alone does not fail that check.
 
-```bash
-nheqminer -l 127.0.0.1:1234 -u tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh.worker1 -t 1
-```
+For tests excluding proof of work, set
+`[network.testnet_parameters] disable_pow = true` on every participant and use
+the [generation RPCs](regtest.md#using-rpc-methods-directly). This does not
+test difficulty or Equihash validation.
 
-## Confirm Forked Chain
-
-After Zebra retrieves blocks up to your activation height from the network, the network upgrade will change, and no more valid blocks could be received from outside.
-
-After a while, in s-nomp, you should see submitted blocks from time to time after the fork height.
-
-```text
-...
-[Pool]        [zcash_testnet] (Thread 1) Block notification via RPC after block submission
-[Pool]        [zcash_testnet] (Thread 1) Submitted Block using submitblock successfully to daemon instance(s)
-[Pool]        [zcash_testnet] (Thread 1) Block found: ... by tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh.worker1
-[Pool]        [zcash_testnet] (Thread 1) Block notification
-...
-```
-
-You'll also see this in Zebra:
-
-```text
-...
-INFO zebra_rpc::methods::get_block_template_rpcs: submit block accepted block_hash=block::Hash("...") block_height="..."
-INFO zebra_rpc::methods::get_block_template_rpcs: submit block accepted block_hash=block::Hash("...") block_height="..."
-...
-```
-
-Ignore messages in Zebra related to how far you are from the tip or network/system clock issues, etc.
-
-Check that you are in the right branch with the curl command:
-
-```bash
-curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblockchaininfo", "params": [] }' -H 'Content-type: application/json' http://127.0.0.1:18232/ | jq
-```
-
-In the result, verify the tip of the chain is after your activation height for `Nu6` and that you are in branch `00000006` as expected.
-
-## Final words
-
-Next steps depend on your use case. You might want to submit transactions with new fields, accept those transactions as part of new blocks in the forked chain, or observe changes at activation without sending transactions. Further actions are not covered in this tutorial.
+After activation, compare the height and best-block hash across nodes. Inspect
+the upgrade status and consensus branch in `getblockchaininfo`, then test the
+new rules with transactions and blocks. Use the implemented upgrade's branch
+identifier, not an arbitrary replacement. For NU7, the identifier is
+`0x77190ad9`, specified in [ZIP 259](https://zips.z.cash/zip-0259).
