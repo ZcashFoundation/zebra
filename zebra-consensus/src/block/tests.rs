@@ -1730,11 +1730,11 @@ async fn verified_proposal() -> (
 
 #[tokio::test(flavor = "multi_thread")]
 async fn exact_proposal_commits_without_transaction_verification() {
-    check_proposal_commits(true, None).await;
+    check_proposal_commits(true, None, false).await;
 }
 
 /// Exercise production transaction and state verification for ordinary and mined cache paths.
-async fn check_proposal_commits(mined: bool, replacement: Option<usize>) {
+async fn check_proposal_commits(mined: bool, replacement: Option<usize>, peer: bool) {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1906,15 +1906,22 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>) {
                 );
             }
             let reuse = cached && !matches!(replacement, Some(0 | 1));
+            if !cached {
+                assert!(!verifier.proposals.borrow().is_empty());
+            }
             let identity_computations = verifier.proposal_key_computations.load(Ordering::SeqCst);
             let size_serializations = verifier.block_size_serializations.load(Ordering::SeqCst);
             calls.store(if reuse { usize::MAX } else { 0 }, Ordering::SeqCst);
             let (committed, mut commits) = tokio::sync::mpsc::channel(1);
             let (validated, validation) = watch::channel(None);
-            let request = Request::CommitDecoded(
-                decoded,
-                mined.then(|| zs::MinedBlockNotifications::new(committed, validated)),
-            );
+            let request = if peer {
+                Request::Commit(solved.clone())
+            } else {
+                Request::CommitDecoded(
+                    decoded,
+                    mined.then(|| zs::MinedBlockNotifications::new(committed, validated)),
+                )
+            };
             assert_eq!(request, request.clone());
             assert!(!request.is_proposal());
             assert_eq!(request.block(), solved);
@@ -1924,13 +1931,13 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>) {
             );
             assert_eq!(
                 verifier.proposal_key_computations.load(Ordering::SeqCst) - identity_computations,
-                usize::from(!cached || replacement == Some(2)),
-                "exact live matches skip identity hashing; populated-cache fallbacks do not",
+                usize::from(cached && (peer || replacement == Some(2))),
+                "only matching headers without live decoder evidence require identity hashing",
             );
             assert_eq!(
                 verifier.block_size_serializations.load(Ordering::SeqCst) - size_serializations,
-                usize::from(cached && matches!(replacement, Some(0 | 1))),
-                "ordinary decoder evidence skips size serialization, not stale prepared handles",
+                usize::from((!cached && peer) || (cached && matches!(replacement, Some(0 | 1))),),
+                "peer misses and stale prepared handles still require size serialization",
             );
             if !reuse {
                 assert_eq!(calls.load(Ordering::SeqCst), solved.transactions.len());
@@ -2046,14 +2053,20 @@ async fn cached_proposal_announces_candidate_until_commit_finishes() {
 /// A reused decode hands off exact identity without another body serialization and hash.
 #[tokio::test(flavor = "multi_thread")]
 async fn prepared_decode_skips_proposal_identity_computation() {
-    check_proposal_commits(false, None).await;
+    check_proposal_commits(false, None, false).await;
+}
+
+/// Header mismatches skip identity hashing, not transaction, contextual, or peer size checks.
+#[tokio::test(flavor = "multi_thread")]
+async fn proposal_header_mismatch_skips_identity_computation() {
+    check_proposal_commits(false, None, true).await;
 }
 
 /// Evicted and foreign handles cannot bypass the receiving verifier's cache lookup.
 #[tokio::test(flavor = "multi_thread")]
 async fn prepared_decode_stale_handles_fall_back() {
     for replacement in 0..3 {
-        check_proposal_commits(false, Some(replacement)).await;
+        check_proposal_commits(false, Some(replacement), false).await;
     }
 }
 
