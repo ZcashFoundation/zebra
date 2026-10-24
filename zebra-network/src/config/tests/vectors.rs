@@ -341,6 +341,42 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
     );
 }
 
+#[test]
+fn regtest_rejects_fixed_parameter_overrides() {
+    let _init_guard = zebra_test::init();
+    let canonical: Config = toml::from_str("network = 'Regtest'").unwrap();
+    let restored: Config = toml::from_str(&toml::to_string(&canonical).unwrap()).unwrap();
+    assert_eq!(canonical, restored);
+
+    for (field, value) in [
+        ("disable_pow", "false"),
+        ("network_magic", "[0, 1, 2, 3]"),
+        ("genesis_hash", "'invalid'"),
+        (
+            "genesis_hash",
+            "'0000000000000000000000000000000000000000000000000000000000000000'",
+        ),
+        ("slow_start_interval", "1"),
+        ("target_difficulty_limit", "'invalid'"),
+        ("target_difficulty_limit", "'1'"),
+        ("pre_blossom_halving_interval", "145"),
+        ("temporary_orchard_disabling_soft_fork_height", "1"),
+    ] {
+        for prefix in [
+            "network = 'Regtest'\n[testnet_parameters]",
+            "[network.params]",
+        ] {
+            let config = format!("{prefix}\n{field} = {value}\n");
+            let error = toml::from_str::<Config>(&config)
+                .expect_err("Regtest must reject overrides of fixed parameters");
+            assert!(
+                error.to_string().contains(field),
+                "unexpected error: {error}"
+            );
+        }
+    }
+}
+
 /// Coalesced upgrades must not acquire earlier Regtest defaults after serialization.
 #[test]
 fn coincident_regtest_upgrades_preserve_activation_on_roundtrip() {
@@ -627,13 +663,13 @@ fn legacy_public_testnet_overrides_require_migration() {
 
 #[test]
 fn empty_funding_ranges_allow_address_auto_extension() {
-    for network in ["Testnet", "Regtest"] {
+    for (network, network_magic) in [("Testnet", [0; 4]), ("Regtest", magics::REGTEST.0)] {
         let config: Config = toml::from_str(&format!(
             "network = '{network}'\n\
              initial_testnet_peers = []\n\
              [testnet_parameters]\n\
              checkpoints = {}\n\
-             network_magic = [0, 0, 0, 0]\n\
+             network_magic = {network_magic:?}\n\
              extend_funding_stream_addresses_as_required = true\n\
              funding_streams = [\
                {{ height_range = {{ start = 0, end = 0 }}, recipients = [{{ receiver = 'ECC', numerator = 7, addresses = [] }}] }},\
@@ -664,7 +700,7 @@ fn empty_funding_ranges_allow_address_auto_extension() {
 fn empty_funding_streams_reject_legacy_declarations() {
     let _init_guard = zebra_test::init();
 
-    for network in ["Testnet", "Regtest"] {
+    for (network, network_magic) in [("Testnet", [0; 4]), ("Regtest", magics::REGTEST.0)] {
         let checkpoints = network == "Testnet";
         for legacy_field in ["pre_nu6_funding_streams", "post_nu6_funding_streams"] {
             let config = format!(
@@ -672,7 +708,7 @@ fn empty_funding_streams_reject_legacy_declarations() {
                  initial_testnet_peers = []\n\
                  [testnet_parameters]\n\
                  checkpoints = {checkpoints}\n\
-                 network_magic = [0, 0, 0, 0]\n\
+                 network_magic = {network_magic:?}\n\
                  funding_streams = []\n\
                  {legacy_field} = {{ height_range = {{ start = 1, end = 2 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n"
             );
@@ -698,14 +734,14 @@ fn empty_funding_streams_reject_legacy_declarations() {
 fn legacy_funding_streams_combine_with_disjoint_nonempty_lists() {
     let _init_guard = zebra_test::init();
 
-    for network in ["Testnet", "Regtest"] {
+    for (network, network_magic) in [("Testnet", [0; 4]), ("Regtest", magics::REGTEST.0)] {
         let checkpoints = network == "Testnet";
         let config: Config = toml::from_str(&format!(
             "network = '{network}'\n\
              initial_testnet_peers = []\n\
              [testnet_parameters]\n\
              checkpoints = {checkpoints}\n\
-             network_magic = [0, 0, 0, 0]\n\
+             network_magic = {network_magic:?}\n\
              pre_nu6_funding_streams = {{ height_range = {{ start = 1, end = 4 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n\
              post_nu6_funding_streams = {{ height_range = {{ start = 4, end = 5 }}, recipients = [{{ receiver = 'Deferred', numerator = 2 }}] }}\n\
              funding_streams = [{{ height_range = {{ start = 5, end = 6 }}, recipients = [{{ receiver = 'Deferred', numerator = 3 }}] }}]\n"
