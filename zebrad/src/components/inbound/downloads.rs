@@ -119,10 +119,14 @@ where
     )
     .await
     {
-        Ok(Ok(zs::Response::BlockHeader {
+        Ok(Ok(zs::Response::BlockHeader(Some(zs::BlockHeader {
             height: parent_height,
             ..
-        })) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
+        }))))
+            if (parent_height + 1) != Some(block_height) =>
+        {
+            Some(advertiser_addr)
+        }
         // Parent unknown, height consistent with it, or the lookup failed or timed out: there is no
         // proof of misbehavior, so the peer is not scored.
         _ => None,

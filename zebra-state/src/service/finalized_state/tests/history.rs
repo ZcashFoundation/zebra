@@ -60,6 +60,153 @@ fn delete_body_prefix(batch: &mut DiskWriteBatch, db: &ZebraDb, end: Height) {
 }
 
 #[test]
+fn known_transaction_bodies_are_pruned_only_below_the_actual_floor() {
+    use crate::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    for height in [Height(1), Height(2)] {
+        let state = populated(&Config::ephemeral());
+        let block = state.db.block(height.into()).unwrap().unwrap();
+        let tx = &block.transactions[0];
+        let retained = state.db.block(Height(3).into()).unwrap().unwrap();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &state.db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        state.db.write_batch(batch).unwrap();
+
+        let expected = if height == Height(1) {
+            BlockReadError::BlockBodyUnavailable { height }
+        } else {
+            BlockReadError::CorruptBlock { height }
+        };
+        assert_eq!(state.db.transaction(tx.hash()).unwrap_err(), expected);
+        for query in [height.into(), block.hash().into()] {
+            assert_eq!(state.db.block(query).unwrap_err(), expected);
+            assert_eq!(state.db.block_and_size(query).unwrap_err(), expected);
+            assert!(state.db.block_header(query).is_some());
+            assert_eq!(
+                state.db.transaction_hashes_for_block(query).unwrap()[0],
+                tx.hash()
+            );
+        }
+        assert!(state
+            .db
+            .transaction(zebra_chain::transaction::Hash([0xff; 32]))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            state
+                .db
+                .transaction(retained.transactions[0].hash())
+                .unwrap()
+                .unwrap()
+                .0,
+            retained.transactions[0]
+        );
+    }
+}
+
+#[test]
+fn secondary_transactions_distinguish_torn_views_from_pruned_history() {
+    use crate::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let primary = populated(&config);
+    let blocks: Vec<_> = (1..=3)
+        .map(|height| primary.db.block(Height(height).into()).unwrap().unwrap())
+        .collect();
+    primary.db.flush().unwrap();
+    let secondary = open(&config, true).unwrap();
+
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(
+        &primary.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(2)),
+    );
+    primary.db.write_batch(batch).unwrap();
+    primary.db.flush().unwrap();
+    secondary.db.try_catch_up_with_primary().unwrap();
+    assert!(secondary
+        .db
+        .transaction(blocks[1].transactions[0].hash())
+        .unwrap()
+        .is_none());
+    assert!(secondary.db.block(Height(2).into()).unwrap().is_none());
+    assert_eq!(
+        secondary.db.history_capabilities().unwrap(),
+        HistoryCapabilities::default()
+    );
+
+    let mut batch = DiskWriteBatch::new();
+    delete_body_prefix(&mut batch, &primary.db, Height(3));
+    primary.db.write_batch(batch).unwrap();
+    primary.db.flush().unwrap();
+    secondary.db.try_catch_up_with_primary().unwrap();
+    assert_eq!(
+        secondary
+            .db
+            .history_capabilities()
+            .unwrap()
+            .lowest_retained_height,
+        Height(3)
+    );
+    for block in &blocks[..2] {
+        let height = block.coinbase_height().unwrap();
+        let expected = BlockReadError::BlockBodyUnavailable { height };
+        assert_eq!(
+            secondary
+                .db
+                .transaction(block.transactions[0].hash())
+                .unwrap_err(),
+            expected
+        );
+        assert_eq!(secondary.db.block(height.into()).unwrap_err(), expected);
+        assert_eq!(
+            secondary.db.block_and_size(height.into()).unwrap_err(),
+            expected
+        );
+    }
+    assert!(secondary
+        .db
+        .transaction(blocks[2].transactions[0].hash())
+        .unwrap()
+        .is_some());
+    assert!(secondary
+        .db
+        .transaction(zebra_chain::transaction::Hash([0xff; 32]))
+        .unwrap()
+        .is_none());
+
+    // An invalid suffix is not evidence of pruning, including during secondary catch-up.
+    let mut batch = DiskWriteBatch::new();
+    delete_body_prefix(&mut batch, &primary.db, Height(4));
+    primary.db.write_batch(batch).unwrap();
+    primary.db.flush().unwrap();
+    secondary.db.try_catch_up_with_primary().unwrap();
+    assert!(secondary.db.history_capabilities().is_err());
+    assert!(secondary
+        .db
+        .transaction(blocks[2].transactions[0].hash())
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        primary
+            .db
+            .transaction(blocks[2].transactions[0].hash())
+            .unwrap_err(),
+        BlockReadError::CorruptBlock { height: Height(3) }
+    );
+}
+
+#[test]
 fn pruning_without_a_restart_witness_is_refused() {
     let _init_guard = zebra_test::init();
     let state = populated(&Config::ephemeral());

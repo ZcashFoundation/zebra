@@ -1868,36 +1868,46 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::BlockHeader(hash_or_height) => {
                 let best_chain = state.latest_best_chain();
 
-                let height = hash_or_height
-                    .height_or_else(|hash| {
-                        read::find::height_by_hash(best_chain.clone(), &state.db, hash)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+                let Some(height) = hash_or_height.height_or_else(|hash| {
+                    read::find::height_by_hash(best_chain.clone(), &state.db, hash)
+                }) else {
+                    return Ok(ReadResponse::BlockHeader(None));
+                };
 
-                let hash = hash_or_height
-                    .hash_or_else(|height| {
-                        read::find::hash_by_height(best_chain.clone(), &state.db, height)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+                let Some(hash) = hash_or_height.hash_or_else(|height| {
+                    read::find::hash_by_height(best_chain.clone(), &state.db, height)
+                }) else {
+                    return Ok(ReadResponse::BlockHeader(None));
+                };
+
+                let header = read::block_header(best_chain.as_ref(), &state.db, hash.into())
+                    .ok_or(crate::BlockReadError::CorruptBlock { height })?;
 
                 let next_height = height.next()?;
-                let next_block_hash =
-                    read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
+                let next_block_hash = best_chain
+                    .as_ref()
+                    .and_then(|chain| chain.block(next_height.into()))
+                    .filter(|next| next.block.header.previous_block_hash == hash)
+                    .map(|next| next.hash)
+                    .or_else(|| {
+                        state
+                            .db
+                            .block_header(next_height.into())
+                            .filter(|next| next.previous_block_hash == hash)
+                            .map(|next| next.hash())
+                    });
 
-                let header = read::block_header(best_chain, &state.db, height.into())
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                Ok(ReadResponse::BlockHeader {
+                Ok(ReadResponse::BlockHeader(Some(crate::BlockHeader {
                     header,
                     hash,
                     height,
                     next_block_hash,
-                })
+                })))
             }
 
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
-                read::mined_transaction(state.latest_best_chain(), &state.db, hash),
+                read::mined_transaction(state.latest_best_chain(), &state.db, hash)?,
             )),
 
             ReadRequest::KnownTransaction(hash) => Ok(ReadResponse::KnownTransaction(
@@ -1909,7 +1919,7 @@ impl Service<ReadRequest> for ReadStateService {
                     state.latest_non_finalized_state().chain_iter(),
                     &state.db,
                     hash,
-                )))
+                )?))
             }
 
             // Used by the getblock (verbose) RPC.

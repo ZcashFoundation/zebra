@@ -19,7 +19,7 @@ use zebra_chain::{
     transaction, transparent,
 };
 use zebra_node_services::mempool::{self, MempoolService};
-use zebra_state::{HashOrHeight, ReadRequest, ReadResponse, ReadState};
+use zebra_state::{BlockReadError, HashOrHeight, ReadRequest, ReadResponse, ReadState};
 
 use crate::methods::{
     trees::GetTreestateResponse, GetAddressBalanceRequest, GetAddressTxIdsRequest,
@@ -178,11 +178,7 @@ where
             }
             Ok(ReadResponse::AnyChainTransaction(None)) => None,
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-            Err(error) => {
-                return Err(Status::internal(format!(
-                    "failed to read transaction: {error}"
-                )));
-            }
+            Err(error) => return Err(body_read_error_to_status(error, "transaction")),
         };
 
         let mempool_response = self
@@ -648,9 +644,7 @@ async fn compact_block<ReadStateService: ReadState>(
         Ok(ReadResponse::Block(Some(block))) => block,
         Ok(ReadResponse::Block(None)) => return Err(Status::not_found("block not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => {
-            return Err(Status::internal(format!("failed to read block: {error}")));
-        }
+        Err(error) => return Err(body_read_error_to_status(error, "block")),
     };
 
     let hash = block.hash();
@@ -878,9 +872,7 @@ async fn raw_transaction_by_txid<ReadStateService: ReadState>(
         }),
         Ok(ReadResponse::Transaction(None)) => Err(Status::not_found("transaction not found")),
         Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-        Err(error) => Err(Status::internal(format!(
-            "failed to read transaction: {error}"
-        ))),
+        Err(error) => Err(body_read_error_to_status(error, "transaction")),
     }
 }
 
@@ -1143,6 +1135,19 @@ fn treestate_to_proto(network: &Network, treestate: GetTreestateResponse) -> Tre
             .as_ref()
             .map(|ironwood| final_state_hex(ironwood.commitments().final_state()))
             .unwrap_or_default(),
+    }
+}
+
+/// Reports known pruned bodies with their unavailable height, preserving other read failures.
+fn body_read_error_to_status(error: tower::BoxError, object: &str) -> Status {
+    match error.downcast_ref::<BlockReadError>() {
+        Some(BlockReadError::BlockBodyUnavailable { height }) => {
+            Status::failed_precondition(format!(
+                "{object} not available at height {} (pruned data)",
+                height.0
+            ))
+        }
+        _ => Status::internal(format!("failed to read {object}: {error}")),
     }
 }
 

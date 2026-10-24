@@ -266,6 +266,11 @@ fn complete_body_test_db(config: &Config) -> (ZebraDb, Arc<Block>) {
             location,
             tx.hash(),
         );
+        batch.zs_insert(
+            &db.cf_handle("tx_loc_by_hash").unwrap(),
+            tx.hash(),
+            location,
+        );
     }
     db.write_batch(batch).unwrap();
     (db, block)
@@ -279,7 +284,7 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
     let (db, block) = complete_body_test_db(&Config::ephemeral());
     let height = block.coinbase_height().unwrap();
     let txs = db.cf_handle("tx_by_loc").unwrap();
-    let expected = BlockReadError::BlockBodyUnavailable { height };
+    let expected = BlockReadError::CorruptBlock { height };
 
     for query in [
         HashOrHeight::Height(height.next().unwrap()),
@@ -289,6 +294,10 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
         assert!(db.raw_block(query).unwrap().is_none());
         assert!(db.block_and_size(query).unwrap().is_none());
     }
+    assert!(db
+        .transaction(zebra_chain::transaction::Hash([0xff; 32]))
+        .unwrap()
+        .is_none());
 
     // Include a missing tail: checking only that the remaining rows are contiguous is insufficient.
     for missing in [None, Some(0), Some(1), Some(block.transactions.len() - 1)] {
@@ -311,6 +320,18 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
             assert!(db.block_header(query).is_some());
         }
     }
+    let mut batch = DiskWriteBatch::new();
+    for (index, tx) in block.transactions.iter().enumerate() {
+        batch.zs_insert(&txs, TransactionLocation::from_usize(height, index), tx);
+    }
+    db.write_batch(batch).unwrap();
+    for (index, tx) in block.transactions.iter().enumerate() {
+        assert_eq!(db.transaction(tx.hash()).unwrap().unwrap().0, tx.clone());
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete(&txs, TransactionLocation::from_usize(height, index));
+        db.write_batch(batch).unwrap();
+        assert_eq!(db.transaction(tx.hash()).unwrap_err(), expected);
+    }
 
     let mut batch = DiskWriteBatch::new();
     batch.zs_delete(&db.cf_handle("block_header_by_height").unwrap(), height);
@@ -324,6 +345,10 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
             BlockReadError::CorruptBlock { height }
         );
     }
+    assert_eq!(
+        db.transaction(block.transactions[0].hash()).unwrap_err(),
+        expected
+    );
 }
 
 #[test]
@@ -337,7 +362,7 @@ fn concurrent_block_body_deletion_never_returns_partial_data() {
     let height = block.coinbase_height().unwrap();
     let expected_size = block.zcash_serialized_size();
     let barrier = Barrier::new(2);
-    let unavailable = BlockReadError::BlockBodyUnavailable { height };
+    let unavailable = BlockReadError::CorruptBlock { height };
 
     std::thread::scope(|scope| {
         scope.spawn(|| {
@@ -417,6 +442,14 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
     .unwrap();
     assert_eq!(secondary.block(height.into()).unwrap(), Some(block.clone()));
     assert_eq!(
+        secondary
+            .transaction(block.transactions[0].hash())
+            .unwrap()
+            .unwrap()
+            .0,
+        block.transactions[0]
+    );
+    assert_eq!(
         secondary.block_and_size(height.into()).unwrap(),
         Some((block.clone(), block.zcash_serialized_size()))
     );
@@ -469,6 +502,18 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
             assert!(secondary.block(query).unwrap().is_none());
             assert!(secondary.raw_block(query).unwrap().is_none());
             assert!(secondary.block_and_size(query).unwrap().is_none());
+        }
+        if lagging_column <= 2 {
+            let tx = if lagging_column == 2 {
+                block.transactions.last().unwrap()
+            } else {
+                &block.transactions[0]
+            };
+            assert!(secondary.transaction(tx.hash()).unwrap().is_none());
+            assert_eq!(
+                primary.transaction(tx.hash()).unwrap_err(),
+                crate::BlockReadError::CorruptBlock { height }
+            );
         }
     }
     primary.write_batch(complete_batch()).unwrap();

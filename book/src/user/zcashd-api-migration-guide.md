@@ -32,6 +32,27 @@ This page describes Zebra 7.0.0-rc.0 and Zallet 0.1.0-beta.3. Zallet releases af
 84 of the 135 methods (62%) have a working path today: the method itself, or a
 replacement that does the same job.
 
+### Pruned history
+
+For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
+(`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`, matching zcashd.
+Verbosity 3 also fails if a spent output's parent transaction is unavailable, even when the
+requested block is retained. Historical verbosity 1 remains available with complete transaction IDs.
+
+For `getrawtransaction`, a known transaction whose body is unavailable returns `-32603` and
+`"Transaction not available (pruned data)"`, with or without a block hash. Unknown transactions
+still return `-5`. Mempool and retained transactions remain available.
+
+The `getblockchaininfo` response reports actual availability: `pruned` is true when a historical
+body prefix is missing, and `pruneheight` is the start of the complete retained suffix. Genesis
+remains available below that floor. An archive reports `pruned: false` and omits `pruneheight`.
+These fields describe stored data, not a configured retention target.
+
+Historical headers, transaction IDs, address balances and UTXOs, treestates, and subtrees remain
+available from retained indexes. The [gRPC history contract](../api.md#historical-data-availability)
+uses an explicit status rather than silently ending a stream when bodies are unavailable.
+These contracts do not enable transaction-body deletion or add a pruning configuration option.
+
 ### Pruned output versions
 
 For `gettxout`, Zebra returns `"version": null` when the unspent output exists but its creating
