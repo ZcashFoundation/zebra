@@ -27,6 +27,8 @@ const MIN_TEMPLATE_BYTES: usize = 500;
 /// Process entry point for `block-template-to-proposal`
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 fn main() -> Result<()> {
+    zebra_chain::diagnostic::check_pasta_cpu_features().map_err(color_eyre::eyre::Report::msg)?;
+
     // initialise
     init_tracing();
     color_eyre::install()?;

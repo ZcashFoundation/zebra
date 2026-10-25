@@ -148,6 +148,8 @@ where
 #[tokio::main]
 #[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
 async fn main() -> Result<()> {
+    zebra_chain::diagnostic::check_pasta_cpu_features().map_err(color_eyre::eyre::Report::msg)?;
+
     eprintln!("zebra-checkpoints launched");
 
     // initialise
