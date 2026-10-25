@@ -74,19 +74,22 @@ Starting at the configured deployment height, mining templates and
 block's reserve. `getblocksubsidy` rejects a future reissuance height whose parent
 block is not yet in the best chain.
 
-Ordinary builds use database format v30.0.0. The registered upgrade moves compatible
-v29 archives into `state/v30` when no v30 database exists, without resyncing.
+Archive operation keeps database format v29/29.0.0 when pruning is disabled and no v30
+database exists. Enabling pruning selects v30/30.0.0 and moves compatible v29 state into
+`state/v30` before deletion, without resyncing. Existing v30 state is selected first,
+even with pruning disabled; separate v29 and v30 directories are never merged.
 The NSM record layout is unchanged: legacy 48-byte value-pool and 52-byte block-info
 records remain readable with a zero NSM balance; new writes use 56 and 60 bytes.
 
-Before upgrading, stop Zebra and direct database readers and retain a v29 archive
-backup for rollback. Disabling `state.delete_old_database` does not preserve the
-directory that the upgrade moves. Upgrade direct database readers, including
-Zallet's Zebra backend and Zaino's Zebra read-state backend, together with the
-node: their `zebra-state` dependency must support v30 and unavailable historical
-bodies. Start the writer before compatible readers. Older binaries must not open
-v30 state; manually renaming or symlinking versioned directories bypasses the
-pruning safety boundary.
+For an archive that stays in v29, rolling back to Zebra 7.0.0 requires stopping the
+writer and direct readers, removing the unsupported pruning field, and starting the
+older binary with the same `indexer` setting; no rename is needed. For v30 state,
+follow the [checked rollback and recovery procedures](pruning.md#format-30-recovery-and-copies):
+never rename pruned state into v29. Keep backups outside the managed cache.
+Disabling `state.delete_old_database` does not preserve a moved directory.
+Upgrade direct readers of v30 state, including Zallet's and Zaino's Zebra backends,
+together with the writer: their `zebra-state` dependency must support v30 and unavailable
+historical bodies. Start the writer before compatible readers.
 
 Format reuse does not fix old custom-network accounting: existing state with
 nonzero genesis transparent outputs must still be rebuilt, including experimental

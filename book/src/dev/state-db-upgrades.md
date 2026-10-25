@@ -148,13 +148,20 @@ For most state upgrades, we want to modify the database format of the existing d
 Major version changes create a new cache and require a full resync unless a registered
 upgrade supports reusing the previous major version.
 
-Archive nodes stay at format v29. Enabling pruning selects v30 and moves a compatible
-v29 archive into `state/v30` without rewriting records. This directory boundary prevents
-older archive-only readers from opening state that may have pruned block bodies. Ordinary
-archive nodes therefore keep their 7.x rollback path; before enabling pruning, retain a
-separate v29 archive backup, because disabling old-database cleanup does not preserve the
-moved directory. A pruned database cannot change spending-index mode: writable opens reject
-incompatible builds before any blocks can be committed.
+Archive operation keeps format v29/29.0.0 when pruning is disabled and no v30 state exists.
+Enabling pruning selects v30/30.0.0 and moves compatible v29 state into `state/v30`
+without rewriting records. This directory boundary prevents older archive-only readers
+from opening state that may have pruned block bodies. Existing v30 state takes precedence
+over v29 even after pruning is disabled; the directories are never merged. A pruned
+database cannot change spending-index mode: writable opens reject incompatible builds
+before any blocks can be committed. Before enabling pruning, retain a separate v29
+archive backup: disabling old-database cleanup does not preserve the moved directory.
+
+An archive that stays in v29 can roll back to Zebra 7.0.0 by stopping the writer and all
+direct readers, removing the unsupported pruning configuration field, and starting the
+older binary with the same `indexer` setting. No rename is needed. For never-pruned v30
+state, use only the [checked rollback procedure](../user/pruning.md#roll-back-v30-before-any-deletion).
+After deletion, restore an archive or resync instead; never rename pruned state into v29.
 
 The NU7/NSM format is v29. Its registered upgrade automatically reuses compatible v28
 state without resyncing or rewriting existing records. When no v29 database exists,
@@ -169,12 +176,12 @@ backup outside the active cache for rollback. A v28 reader cannot read the wider
 written by v29. Setting `state.delete_old_database = false` only disables cleanup;
 it does not preserve the directory that the upgrade moves.
 
-Direct database readers must be upgraded with the writer: Zallet's Zebra backend,
-Zaino's Zebra read-state backend, and other consumers opening Zebra's cache need a
-compatible `zebra-state` dependency; pruning-node readers must also handle v30 and unavailable bodies.
+Direct database readers of v30 state must be upgraded with the writer: Zallet's Zebra
+backend, Zaino's Zebra read-state backend, and other consumers opening that cache need a
+v30-compatible `zebra-state` dependency that handles unavailable block bodies.
 Start the writer before compatible readers; read-only instances do not perform
-the upgrade. Manually renaming or symlinking versioned directories bypasses the
-pruning safety boundary.
+the upgrade. Outside the checked never-pruned rollback procedure, manually renaming
+or symlinking versioned directories bypasses the pruning safety boundary.
 Integration builds and their binary caches must identify the Zebra revision used
 by each direct reader as well as the writer, rather than matching only the
 downstream application's revision.

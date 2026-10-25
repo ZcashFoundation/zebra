@@ -68,17 +68,23 @@ instead.
 
 ## Check the database format version
 
-A snapshot only loads into a `zebrad` whose state database format _major_
-version matches the archive. If they differ, the snapshot won't load; don't use
-it. Get a snapshot cut for your version, or run a `zebrad` that matches.
+Normally, the snapshot's database format _major_ version must match the format selected by your
+configuration and existing state. Archives keep v29/29.0.0 with pruning disabled unless v30 state
+already exists. Enabling pruning selects v30/30.0.0 and, when no v30 database exists, moves compatible
+v29 state into the v30 directory. Existing v30 state takes precedence; the directories are never
+merged. The move leaves no v29 backup. Read [rollback and recovery](pruning.md#format-30-recovery-and-copies)
+before enabling pruning or restoring v30 state. An archive that stays in v29 can roll back to Zebra
+7.0.0 without renaming; never rename pruned state to force compatibility.
+For other mismatches, use a snapshot matching your build unless its release documents a supported
+upgrade.
 
 Both sides of that comparison are easy to read:
 
 - The archive: `db_major` in `snapshots.json`, the `v<major>` in its filename,
   and `database_format_major_version` in its manifest.
-- Your build: `DATABASE_FORMAT_VERSION` in `zebra-state/src/constants.rs` at
-  your release's tag. Zebra also logs it at startup as the `v<major>` component
-  of the cached state path:
+- Your build and configuration: the supported versions in `zebra-state/src/constants.rs` at
+  your release's tag, whether pruning is enabled, and any existing v30 state. Zebra logs the selected
+  version at startup as the `v<major>` component of the cached state path:
 
   ```text
   zebra_state::...::disk_db: Opened Zebra state cache at /home/user/.cache/zebra/state/v28/mainnet
@@ -86,6 +92,29 @@ Both sides of that comparison are easy to read:
 
 The manifest is also where you'll find the snapshot's chain height and the
 `zebrad` version that produced it.
+
+## Pruned state and recovery
+
+For mining and pool backends, an archive snapshot can be loaded and then converted using
+[pruning](pruning.md). Follow the publisher's current metadata; do not assume that a separately
+labelled pruned snapshot family is available or that a snapshot contains the history you need.
+A checksum authenticates neither the producer nor its claimed retention.
+
+To back up your own pruned node, stop Zebra cleanly before copying the complete
+`state/v30/<network>/` directory. Do not copy live database files. Record the generating build,
+network, database version, finalized tip height and hash, actual `pruneheight`,
+configured retention, and whether the build uses the `indexer` feature. Keep that backup
+outside the managed cache.
+
+Restore into a clean, separate `cache_dir`, preserving the normal directory layout. A pruned backup
+requires pruning to be enabled and the same spending-index build layout; it cannot become an archive
+by changing the config. After startup, confirm the loaded tip and actual `pruneheight`, let the node
+catch up, and obtain fresh mining work before routing miners to it. Test recent-body queries and
+the expected failures for pruned bodies against the pool's software.
+
+To recover full history, restore a compatible **archive** snapshot or resync in a separate cache
+directory with pruning disabled. Never extract an archive over pruned state. A pruned backup cannot
+restore the history already missing when it was made, and raising retention does not fill gaps.
 
 ## Extract into your `cache_dir`
 
@@ -169,7 +198,9 @@ curl -sS "$url" | docker run --rm -i \
   extracted the archive. Check both paths, and that the extracted tree is
   `<cache_dir>/state/v<major>/<network>/`.
 - **`zebrad` won't start, or errors about the state format.** Compare
-  `database_format_major_version` in the manifest with your build's
-  `DATABASE_FORMAT_VERSION`. A mismatch won't fix itself on retry.
+  `database_format_major_version` with your build and the supported upgrade path
+  [above](#check-the-database-format-version). For pruned state, also check the pruning
+  configuration and `indexer` build setting. An incompatible format or missing history
+  will not fix itself on retry.
 - **Checksum mismatch.** Re-download. Don't use a file that fails
   `sha256sum -c`.
