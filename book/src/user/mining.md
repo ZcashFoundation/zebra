@@ -2,6 +2,12 @@
 
 Zebra's RPC methods support miners and mining pools.
 
+For a mining backend that does not need full historical bodies, consider
+[pruned mining nodes](pruning.md). Pruning is irreversible. Choose retention for the oldest
+block and transaction bodies used by payout and accounting queries, including outage recovery.
+The minimum 10,000-block window is about 8.7 days at 75-second spacing but only 2.9 days at
+25-second spacing. Use a separate archive when those queries need older history.
+
 Contents:
 
 - [Download Zebra](#download-and-build-zebra)
