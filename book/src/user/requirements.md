@@ -25,6 +25,12 @@ data. We expect disk usage to grow over time. Syncing from a
 [state snapshot](./snapshots.md) temporarily needs about twice that while the
 archive is extracted.
 
+Mining and pool backends can reduce historical body storage with [pruning](pruning.md). This does
+not set a fixed disk-size ceiling or lower the RAM requirements: validation state and retained
+indexes keep growing. Keep free space for startup, extraction, and compaction; deleted bodies do not
+immediately disappear from disk. Plan archive conversion for the existing database size, not just
+the desired retained window.
+
 Zebra cleans up its database periodically, and also when you shut it down or
 restart it. Changes are committed using RocksDB database transactions. If you
 forcibly terminate Zebra, or it panics, any incomplete changes will be rolled
