@@ -4377,10 +4377,52 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     updater.abort();
 }
 
-/// Rejections do not delay idle arrivals; a burst yields one throttled follow-up for parked miners.
+/// Rejections do not delay arrivals, and parked long polls do not record template build work.
 #[tokio::test(start_paused = true)]
-async fn getblocktemplate_long_poll_returns_on_mempool_change() {
+async fn getblocktemplate_long_poll_records_only_template_build_time() {
+    use metrics::{
+        Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder, SharedString,
+        Unit,
+    };
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct BuildDurations(Mutex<Vec<f64>>);
+
+    impl HistogramFn for BuildDurations {
+        fn record(&self, value: f64) {
+            self.0.lock().unwrap().push(value);
+        }
+    }
+
+    struct BuildRecorder(Arc<BuildDurations>);
+
+    impl Recorder for BuildRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::noop()
+        }
+
+        fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+            if key.name() == "rpc.getblocktemplate.build.duration_seconds" {
+                assert_eq!(key.labels().count(), 0);
+                Histogram::from_arc(self.0.clone())
+            } else {
+                Histogram::noop()
+            }
+        }
+    }
+
     let _init_guard = zebra_test::init();
+    let durations = Arc::new(BuildDurations::default());
+    metrics::set_global_recorder(BuildRecorder(durations.clone())).unwrap();
     let net = Network::Mainnet;
     let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
     let tip_hash = Hash([1; 32]);
@@ -4505,6 +4547,17 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     })
     .await
     .expect("initial full template is published");
+    let builds_before = durations.0.lock().unwrap().len();
+    assert!(
+        builds_before > 0,
+        "the updater records completed template builds"
+    );
+    assert!(durations
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|duration| *duration > 0.0));
     tokio::time::advance(precompute::MEMPOOL_THROTTLE).await;
     let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
         long_poll_id: Some(initial.long_poll_id),
@@ -4539,6 +4592,11 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         1,
         "rejection reads are throttled"
     );
+    assert_eq!(
+        durations.0.lock().unwrap().len(),
+        builds_before,
+        "parked long polls and rejected mempool entries do not build templates",
+    );
 
     let start = tokio::time::Instant::now();
     pool_tx.send_replace(transactions[..2].to_vec());
@@ -4560,6 +4618,11 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         .any(|tx| tx.hash == added_id.mined_id()));
     assert_ne!(updated.long_poll_id, initial.long_poll_id);
     assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 1);
+    assert_eq!(
+        durations.0.lock().unwrap().len(),
+        builds_before + 1,
+        "serving a cached template records only its background build",
+    );
 
     let follow_up = rpc.get_block_template(Some(GetBlockTemplateParameters {
         long_poll_id: Some(updated.long_poll_id),
@@ -6264,6 +6327,121 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     read_state_responder.abort();
     mempool_responder.abort();
     updater.abort();
+}
+
+/// Submission counters use result labels, including validation failures returned as RPC success.
+#[test]
+fn rpc_submitblock_outcome_metrics() {
+    use metrics::{
+        atomics::AtomicU64, Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder,
+        SharedString, Unit,
+    };
+    use std::{collections::HashMap, sync::Mutex};
+
+    #[derive(Default)]
+    struct SubmissionRecorder(Mutex<HashMap<Key, Arc<AtomicU64>>>);
+
+    impl Recorder for SubmissionRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::from_arc(
+                self.0
+                    .lock()
+                    .unwrap()
+                    .entry(key.clone())
+                    .or_default()
+                    .clone(),
+            )
+        }
+
+        fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, _: &Key, _: &Metadata<'_>) -> Histogram {
+            Histogram::noop()
+        }
+    }
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let recorder = SubmissionRecorder::default();
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut verifier: MockService<_, _, _, BoxError> =
+                    MockService::build().for_unit_tests();
+                let (_logs, logs) = watch::channel(None);
+                let (rpc, queue) = RpcImpl::new(
+                    Mainnet,
+                    Default::default(),
+                    false,
+                    "0.0.1",
+                    "RPC metrics test",
+                    MockService::build().for_unit_tests(),
+                    MockService::build().for_unit_tests(),
+                    MockService::build().for_unit_tests(),
+                    verifier.clone(),
+                    MockSyncStatus::default(),
+                    NoChainTip,
+                    MockAddressBookPeers::default(),
+                    logs,
+                    None,
+                );
+                let block_bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+                let block: Block = block_bytes.as_slice().zcash_deserialize_into().unwrap();
+                for (verification, expected) in [
+                    (Ok(block.hash()), SubmitBlockResponse::Accepted),
+                    (
+                        Err(BoxError::from(zebra_consensus::RouterError::Checkpoint {
+                            source: Box::new(
+                                zebra_consensus::VerifyCheckpointError::AlreadyVerified {
+                                    height: Height(1),
+                                    verified_height: Height(1),
+                                },
+                            ),
+                        })),
+                        SubmitBlockErrorResponse::Duplicate.into(),
+                    ),
+                    (
+                        Err(BoxError::from("invalid submitted block")),
+                        SubmitBlockErrorResponse::Rejected.into(),
+                    ),
+                ] {
+                    let (response, ()) = tokio::join!(
+                        rpc.submit_block(HexData(block_bytes.clone()), None),
+                        async {
+                            verifier
+                                .expect_request_that(|_| true)
+                                .await
+                                .respond(verification);
+                        },
+                    );
+                    assert_eq!(response.unwrap(), expected);
+                }
+                assert_eq!(
+                    rpc.submit_block(HexData(Vec::new()), None).await.unwrap(),
+                    SubmitBlockErrorResponse::Rejected.into(),
+                );
+                queue.abort();
+            })
+            .await
+            .expect("submission metrics do not wait for network peers");
+        });
+    });
+    let counters = recorder.0.lock().unwrap();
+    for (outcome, expected) in [("accepted", 1), ("duplicate", 1), ("rejected", 2)] {
+        let key = Key::from_parts("rpc.submitblock.outcomes.total", &[("outcome", outcome)]);
+        assert_eq!(
+            counters
+                .get(&key)
+                .map_or(0, |value| value.load(Ordering::Relaxed)),
+            expected,
+            "missing submitblock outcome: {outcome}",
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
