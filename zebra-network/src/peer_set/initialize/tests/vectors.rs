@@ -898,6 +898,81 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
     stop_crawler(crawl_task_handle).await;
 }
 
+/// Test that a timer crawl which discovers a candidate does not also refresh initial peers.
+#[tokio::test]
+async fn crawler_does_not_readd_initial_peers_after_finding_candidates() {
+    let _init_guard = zebra_test::init();
+
+    let initial_addr: PeerSocketAddr = "127.1.1.1:8233".parse().unwrap();
+    let discovered_addr: PeerSocketAddr = "127.1.1.2:8233".parse().unwrap();
+    let config = Config {
+        initial_mainnet_peers: [initial_addr.remove_socket_addr_privacy().to_string()].into(),
+        cache_dir: CacheDir::disabled(),
+        // Only the first timer tick should run during this test.
+        crawl_new_peer_interval: CRAWLER_TEST_DURATION * 2,
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+
+    let peer_set = service_fn(move |req| async move {
+        match req {
+            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
+                discovered_addr,
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )])),
+            _ => unreachable!("unexpected request: {req:?}"),
+        }
+    });
+    let (next_peer_service, crawl_service) =
+        crawler_services(address_book_service.clone(), peer_set);
+    let (outbound_connector, _dial_count, _peer_tracker_rx) = counting_connector(0);
+    let channel_size = config.peerset_outbound_connection_limit() * 2;
+    let (peerset_tx, mut peerset_rx) = mpsc::channel(channel_size);
+    let (demand_tx, demand_rx) = mpsc::channel(channel_size);
+
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
+        outbound_connector,
+        peerset_tx,
+        ActiveConnectionCounter::new_counter(),
+        address_book_updater,
+    ));
+
+    let (connected_addr, _client) = tokio::time::timeout(CRAWLER_TEST_DURATION, peerset_rx.next())
+        .await
+        .expect("the crawl discovers a peer and queues connection demand")
+        .expect("the crawler holds the peer set sender");
+    assert_eq!(connected_addr, discovered_addr);
+
+    // Allow an incorrectly spawned refresh to finish resolving the literal initial address.
+    tokio::time::sleep(CRAWLER_TEST_DURATION / 10).await;
+    stop_crawler(crawl_task_handle).await;
+
+    assert!(
+        address_book
+            .lock()
+            .expect("no task panicked while holding the address book")
+            .get(initial_addr)
+            .is_none(),
+        "a successful crawl should not trigger an initial peer refresh",
+    );
+}
+
 /// Test that a crawler with no peers adds its initial peers to the address book,
 /// and dials them.
 #[tokio::test(start_paused = true)]

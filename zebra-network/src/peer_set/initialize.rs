@@ -937,7 +937,7 @@ enum CrawlerAction {
     HandshakeFinished,
     /// Clear a finished demand crawl (DemandHandshakeOrCrawl with no peers).
     DemandCrawlFinished,
-    /// Clear a finished TimerCrawl, which saw `ready_candidates` candidates ready to dial.
+    /// Clear a finished TimerCrawl, with `ready_candidates` candidates ready after crawling.
     TimerCrawlFinished { ready_candidates: usize },
     /// Clear a finished re-add of the initial peers, which left `ready_candidates`
     /// candidates ready to dial.
@@ -1169,7 +1169,7 @@ where
                         );
 
                         // Keep trying to fill the peer set up to the outbound connection limit.
-                        let ready_candidates = queue_ready_candidate_demand(
+                        queue_ready_candidate_demand(
                             &address_book_service,
                             crawl_demand_tx.clone(),
                             spare_capacity,
@@ -1178,6 +1178,8 @@ where
 
                         crawl(crawl_service, crawl_demand_tx).await?;
 
+                        // The crawl may have found candidates, so refresh the recovery snapshot.
+                        let ready_candidates = ready_peer_count(&address_book_service).await;
                         Ok(TimerCrawlFinished { ready_candidates })
                     }
                     .in_current_span(),
