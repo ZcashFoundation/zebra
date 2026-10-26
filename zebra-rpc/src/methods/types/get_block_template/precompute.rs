@@ -410,6 +410,7 @@ where
     // Transaction selection, the coinbase transaction, and the block roots are all CPU-bound, and
     // a shielded coinbase takes seconds to prove, so keep them off the async executor.
     tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
         let mempool_txs = select_mempool_transactions(
             &network,
             height,
@@ -421,7 +422,7 @@ where
         );
 
         // `submit_old` depends on the long poll ID the client sent, so the RPC sets it.
-        Some(BlockTemplateResponse::new_internal(
+        let template = BlockTemplateResponse::new_internal(
             &network,
             &coinbase_cache,
             &miner_params,
@@ -429,7 +430,10 @@ where
             long_poll_id,
             mempool_txs,
             None,
-        ))
+        );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(started.elapsed().as_secs_f64());
+        Some(template)
     })
     .await
     .map_misc_error()
