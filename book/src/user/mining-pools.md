@@ -97,10 +97,127 @@ Zebra validates blocks and serves mining work; it is not a wallet. Point the poo
 connection at Zebra, and its payout or payment-processor connection at a compatible wallet that
 controls the reward address. Configure the same intended reward address on each mining backend.
 
-Use `validateaddress` or `z_validateaddress` to check address validity, not wallet ownership. The
-transparent-address response omits `ismine`; a valid `z_validateaddress` response reports
-`ismine: false`. Neither proves that the payout wallet can spend the rewards. Check ownership with
-that wallet and verify the pool's payout integration separately before production use.
+Use Zebra's `validateaddress` or `z_validateaddress` to check address validity, not wallet ownership.
+The transparent-address response omits `ismine`; a valid shielded-address response reports
+`ismine: false`. Check ownership with the payout wallet instead.
+
+### Wallet RPC compatibility
+
+As of 27 October 2026, no released Zallet direct-state backend reads this Zebra's database; see
+[the database compatibility table](zallet.md#keep-the-versions-in-step). The beta.3 Zaino backend
+can fetch over JSON-RPC without reading that database, but that topology is untested here.
+The payout RPC gaps below apply regardless of backend.
+
+This inventory compares [s-nomp at `88187c9`][snomp-payments] and
+[Miningcore at `a553f62`][miningcore-payments] with
+[Zallet 0.1.0-beta.3 at `987382f`][zallet-rpcs] and the
+[zcashd-compat sidecar](zcashd-compat.md), release `zebra-compat-v1.3.0`.
+
+| Processor | Wallet calls | Zallet | Sidecar |
+| --- | --- | --- | --- |
+| Both | `gettransaction`, `z_getbalance` | Absent; use `z_viewtransaction`, `z_getbalanceforaccount` | Available; enable `allowdeprecated=z_getbalance` |
+| Both | `z_shieldcoinbase`, `z_sendmany`, `z_getoperationresult` | Available; sending has [altered semantics][zallet-semantics] | Available for transparent/Sapling flows |
+| s-nomp | `getbalance`, `listunspent`, `sendmany` | Absent; account balances, `z_listunspent`, `z_sendmany` replace them | Available |
+| s-nomp | `validateaddress`, `z_validateaddress` | Transparent validation omits required `ismine`; shielded method absent | Available with ownership information |
+| s-nomp | `getaccount` | Absent | Absent; this processor ignores its failed result |
+| s-nomp | `z_getoperationstatus` | Available | Available |
+| Miningcore | `listunspent` (fallback shielding), `walletpassphrase`, `walletlock` | First absent; lock/unlock available | Available; lock/unlock need an encrypted wallet, whose creation is experimental and disabled by default |
+
+The processors also query chain RPCs: s-nomp uses `getblock`, `getmininginfo`, and
+`getnetworkinfo`; Miningcore uses `getblockchaininfo`. Those are not Zallet wallet methods.
+The sidecar serves them. Miningcore constructs its payout client from the first daemon entry;
+it does not provide s-nomp's separate `paymentProcessing.daemon` connection.
+
+Miningcore remains inspected-only. Its hard-coded `0.0001` ZEC fee failed a separate shielding
+probe, and its sends need an explicit privacy policy for transparent recipients. Adapting its fee
+selection and privacy policy remains untested. The tested s-nomp changes below do not enable
+legacy privacy behavior.
+
+### Tested sidecar payout path
+
+An isolated Regtest run mined through s-nomp, recorded real miner shares in Redis, and let
+`libs/paymentProcessor.js` shield rewards, unshield into its payout address, and pay the miner.
+The test used:
+
+| Component | Version or revision |
+| --- | --- |
+| Zebra | `7.0.0+210.gf94b0b5`, revision `f94b0b5e5819`, archive mode |
+| Sidecar | Unmodified `zebra-compat-v1.3.0`, revision `5c11db4f4fbc` |
+| s-nomp | `0.0.9`, base `88187c9`, with the changes below |
+| node-stratum-pool | `0.2.0`, revision [`2a0572caa96b`](https://github.com/upbqdn/node-stratum-pool/commit/2a0572caa96b953a82fc481a7164a030e0c3e0f2), preserving Zebra's coinbase |
+| nheqminer | Revision [`72e320aacaa4`](https://github.com/ZcashFoundation/nheqminer/commit/72e320aacaa49c9e170be62d28a4189957767d3c), two CPU threads, Equihash 200,9 |
+| Runtime | Node.js `8.17.0`, Redis `7.2.6` |
+
+Apply these changes to `libs/paymentProcessor.js`. They track the shielding operation ID, reserve
+the configured unshielding fee and permit the transparent staging recipient:
+
+```diff
+@@ -275 +275 @@
+-                    var opid = (result.response || result[0].response);
++                    var opid = (result.response || result[0].response).opid;
+@@ -294 +294 @@
+-        if ((zBalance - 10000) <= 0)
++        if ((zBalance - coinsToSatoshies(fee)) <= 0)
+@@ -303 +303 @@
+-        var amount = satoshisToCoins(zBalance - 10000);
++        var amount = satoshisToCoins(zBalance - coinsToSatoshies(fee));
+@@ -305 +305,2 @@
+-        var params = [poolOptions.zAddress, [{'address': poolOptions.tAddress, 'amount': amount}]];
++        var params = [poolOptions.zAddress, [{'address': poolOptions.tAddress, 'amount': amount}],
++            minConfShield, fee, 'AllowRevealedRecipients'];
+```
+
+1. Run an **archive** Zebra and an [externally managed sidecar](zcashd-compat.md#running-externally-managed).
+   Pin the sidecar's only peer with `connect=<Zebra-P2P-address>` and `listen=0`; keep both RPC
+   endpoints on loopback with separate credentials. Set `[zcashd_compat] enabled = true` and
+   `manage_zcashd = false` on Zebra. Do not set `state.prune_blocks_older_than`: startup rejects
+   sidecars with pruning enabled, even before deletion. The sidecar synchronizes over P2P and does
+   not read Zebra's database, so the database-format mismatch does not affect it.
+2. Create two distinct wallet-controlled transparent addresses with `getnewaddress` and a Sapling
+   address with `z_getnewaddress sapling`. Enable `allowdeprecated=getnewaddress`,
+   `allowdeprecated=z_getnewaddress`, and `allowdeprecated=z_getbalance` in the sidecar's
+   `zcash.conf`. Verify ownership with the wallet's `validateaddress` and `z_validateaddress`.
+   Set the reward address as `[mining] miner_address` on Zebra and `address` in s-nomp; set
+   the other transparent address as `tAddress` and the Sapling address as `zAddress`.
+3. Point s-nomp's `daemons` at Zebra and `paymentProcessing.daemon` at the sidecar's authenticated
+   RPC endpoint. Enable `paymentProcessing.enabled` and use `paymentMode: "prop"`,
+   `minConf: 10`, `paymentInterval: 30`, `minimumPayment: 0.05`, and `walletInterval: 1`.
+   In the coin profile, retain `requireShielding: true` and `txfee: 0.0004`.
+   Keep `rewardRecipients: {}` and `poolHex: ""`: this Stratum adapter preserves Zebra's coinbase
+   rather than inserting pool-fee outputs. The test used a share difficulty of `1 / 1024`,
+   disabled the website and clustering, and enabled `cleanJobsOnTemplateUpdate` for nheqminer.
+4. Connect the miner with its transparent payout address as the username. Let the processor
+   observe maturity through the sidecar, complete shielding and unshielding, and call `sendmany`.
+   Check its Redis payment record, confirm that transaction on Zebra, and verify the recipient's
+   output amount. The configured fee covers the tested small withdrawal, not arbitrary batches;
+   size fees under ZIP 317. The privacy policy reveals recipient addresses and amounts.
+
+For reproduction, the run activated Overwinter through NU5 at height 1 on both nodes, left later
+upgrades inactive, and used fresh state with no funding streams. Zebra used `network = "Regtest"`,
+`rpc.debug_force_finished_sync = true`, `rpc.enable_cookie_auth = false` on loopback only, and
+`mempool.debug_enable_at_height = 0`. The sidecar used `regtest=1` and six `nuparams` entries:
+`5ba81b19:1`, `76b809bb:1`, `2bb40e60:1`, `f5b9230b:1`, `e9ff75a6:1`, and `c2d6d0b4:1`.
+It also set `regtestshieldcoinbase=1`, `regtestacceptunvalidatedpow=1`, and `maxtipage=2000000000`.
+These test-only auth, sync, and PoW settings must not be copied to public networks.
+
+The pool mined height 1. After stopping the miner, Zebra generated 101 blocks to mature its reward,
+then ten blocks for each processor-created transaction. The test waited for matching node tips and
+the sidecar's `getblockchaininfo.fullyNotified` after each batch. Shielding spent the pool coinbase
+at height 103; unshielding confirmed at 113; the processor's **6.2496 ZEC** miner payment confirmed
+at 123 and had ten confirmations at 132. The Redis payment record credited the real height-1
+round, and the recipient UTXO matched its amount. Additional generated rewards shared the wallet;
+the test did not fabricate shares or issue shielding, unshielding, or payment calls itself.
+
+This proves one worker's proportional accounting and scheduled payout, not production readiness.
+It does not test multiple miners, pool fees, restart or reorg recovery, encrypted wallets,
+production proof of work, or upgrade transitions. The legacy Node.js version is unsupported.
+Keep payouts transparent/Sapling: the sidecar [never supports Ironwood and rejects Orchard from
+NU6.3 onward](zcashd-compat.md#wallet-shielded-pool-support-orchard--ironwood).
+
+[snomp-payments]: https://github.com/ZcashFoundation/s-nomp/blob/88187c9ea162ec2fa8542290166aaaa5b5e04b0a/libs/paymentProcessor.js
+[miningcore-payments]: https://github.com/oliverw/miningcore/blob/a553f62301f44c6df80891e408b6526d1dd98692/src/Miningcore/Blockchain/Equihash/EquihashPayoutHandler.cs
+[zallet-rpcs]: https://github.com/zcash/zallet/blob/987382f67e622915228686e9f956c6a9c9a7514c/book/src/zcashd/rpc_status.md
+[zallet-semantics]: https://zcash.github.io/zallet/zcashd/json_rpc.html#z_sendmany
 
 To reduce backend disk use, see [pruned mining nodes](pruning.md). Choose retention for the oldest
 block and transaction bodies used by payout and accounting queries, including outage recovery.
