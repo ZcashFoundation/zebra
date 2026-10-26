@@ -123,6 +123,7 @@ where
             };
 
         chain_state = updated_chain_state;
+        let mut accepted_at = tokio::time::Instant::now();
 
         // TODO: Move logic for calling the peer set to its own method.
 
@@ -161,6 +162,7 @@ where
 
                         (hash, height) = mined_block;
                         is_block_submission = true;
+                        accepted_at = tokio::time::Instant::now();
                     }
                 }
             };
@@ -188,7 +190,25 @@ where
 
             // Await bounded local writes in a spawned task so they don't delay later broadcasts.
             // Errors can represent partial delivery; don't retry and duplicate successful writes.
-            tokio::spawn(broadcast_fut);
+            tokio::spawn(async move {
+                let result = broadcast_fut.await;
+                if is_block_submission {
+                    let outcome = if result.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    };
+                    metrics::counter!(
+                        "sync.mined.block.announcement.outcomes.total",
+                        "outcome" => outcome,
+                    )
+                    .increment(1);
+                    if result.is_ok() {
+                        metrics::histogram!("sync.mined.block.announcement.duration_seconds")
+                            .record(accepted_at.elapsed().as_secs_f64());
+                    }
+                }
+            });
 
             // TODO: Move this logic for marking the last change hash as seen to its own method.
 

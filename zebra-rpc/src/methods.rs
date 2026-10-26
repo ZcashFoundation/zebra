@@ -2950,6 +2950,7 @@ where
         );
 
         let height = chain_info.tip_height.next().map_misc_error()?;
+        let build_started = std::time::Instant::now();
 
         // Randomly select some mempool transactions.
         let coinbase_cache = self.gbt.coinbase_cache();
@@ -2984,6 +2985,8 @@ where
             mempool_txs,
             submit_old,
         );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(build_started.elapsed().as_secs_f64());
 
         // Coinbase construction can take seconds. Recheck the whole advertised range after it,
         // just as the cache does, rather than returning timestamps invalidated by clock rollback.
@@ -3010,7 +3013,9 @@ where
                     "submit block failed: block bytes could not be deserialized into a structurally valid block"
                 );
 
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
+                return Ok(
+                    SubmitBlockResponse::from(SubmitBlockErrorResponse::Rejected).with_metrics(),
+                );
             }
         };
 
@@ -3040,7 +3045,7 @@ where
                     .advertise_mined_block(hash, height)
                     .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
 
-                return Ok(SubmitBlockResponse::Accepted);
+                return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
@@ -3086,7 +3091,7 @@ where
             Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
         };
 
-        Ok(response.into())
+        Ok(SubmitBlockResponse::from(response).with_metrics())
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {
