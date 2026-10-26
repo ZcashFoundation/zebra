@@ -49,6 +49,16 @@ pub trait ChainTip {
     /// Does not mark the best tip as seen.
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>>;
 
+    /// Returns the monotonic publication time of the current best tip if its hash matches.
+    ///
+    /// The hash check and timestamp read must use the same snapshot. This prevents callers from
+    /// attributing a timestamp to a different tip during a concurrent update.
+    /// Returns `None` when the hash differs, the tip is absent, or the implementation does not
+    /// track publication times. An initial tip uses its publication time at startup.
+    fn best_tip_changed_at(&self, _expected_hash: block::Hash) -> Option<std::time::Instant> {
+        None
+    }
+
     /// Returns the height and the block time of the best chain tip.
     /// Returning both values at the same time guarantees that they refer to the same chain tip.
     ///

@@ -132,6 +132,7 @@ Zebra exports duration metrics as Prometheus summaries, with quantiles plus `_su
 | --- | --- | --- | --- |
 | `rpc.submitblock.outcomes.total` | Counter | `outcome` | Submission results: `accepted`, `duplicate`, `duplicate-inconclusive`, `inconclusive`, or `rejected`. |
 | `rpc.getblocktemplate.build.duration_seconds` | Summary | None | Completed template construction: transaction selection, coinbase construction, and block roots, in seconds. |
+| `rpc.getblocktemplate.first_template.duration_seconds` | Summary | None | Seconds from best-tip publication to the first template served with that tip as its parent. |
 | `sync.mined.block.announcement.outcomes.total` | Counter | `outcome` | Mined-block announcement attempts: `completed` or `failed`. |
 | `sync.mined.block.announcement.duration_seconds` | Summary | None | Seconds from gossip receiving an accepted mined block to successful completion of its announcement's local writes. |
 
@@ -142,6 +143,13 @@ Some result variants are reserved by the response type and are not currently ret
 Build timing covers the shared constructor used by background and fallback builders, not state or
 mempool reads, executor scheduling, long-poll waits, or cache hits. It records each completed build,
 including work superseded before a miner requests it.
+
+First-template latency uses the state's monotonic publication time, not the block header timestamp or
+the time the RPC notices a change. It records once per tip transition across RPC clones; repeated
+requests do not add samples. Tips with no served template and templates on uncommitted candidates are
+excluded. Returning to an earlier tip after a reorg starts a new interval. At startup, timing begins
+when the state publishes its loaded tip. The measurement ends when the RPC returns the template,
+before network delivery or pool job distribution; it also includes time until a miner requests work.
 
 Announcement completion means every selected connection completed its local write, not that peers
 received, validated, or relayed the block. Failed attempts include write errors and timeouts; a retry
