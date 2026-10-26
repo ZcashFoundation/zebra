@@ -36,8 +36,8 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     ops::RangeInclusive,
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -955,6 +955,9 @@ where
     /// Handler for the `getblocktemplate` RPC.
     gbt: GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>,
 
+    /// Last best-tip publication served to a miner, shared by all RPC clones.
+    first_template_tip: Arc<Mutex<Option<(block::Hash, Instant)>>>,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
@@ -1055,6 +1058,7 @@ where
             address_book,
             last_warn_error_log_rx,
             gbt,
+            first_template_tip: Default::default(),
             #[cfg(test)]
             template_clock: None,
         };
@@ -1067,6 +1071,23 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Records the first served template for each best-tip publication, including reorgs.
+    fn served_block_template(&self, template: BlockTemplateResponse) -> GetBlockTemplateResponse {
+        let mut recorded = self
+            .first_template_tip
+            .lock()
+            .expect("first-template bookkeeping does not panic while locked");
+        let hash = template.previous_block_hash;
+        if let Some(changed_at) = self.latest_chain_tip.best_tip_changed_at(hash) {
+            if *recorded != Some((hash, changed_at)) {
+                metrics::histogram!("rpc.getblocktemplate.first_template.duration_seconds")
+                    .record(changed_at.elapsed().as_secs_f64());
+                *recorded = Some((hash, changed_at));
+            }
+        }
+        template.into()
     }
 
     /// Reads wall time for template deadlines and serve-time timestamp validation.
@@ -2801,7 +2822,7 @@ where
             .precomputed_block_template(client_long_poll_id, long_poll_started)
             .await
         {
-            return Ok(template.into());
+            return Ok(self.served_block_template(template));
         }
 
         // - Checks and fetches that can change during long polling
@@ -2946,7 +2967,7 @@ where
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
                         .await
                     {
-                        return Ok(template.into());
+                        return Ok(self.served_block_template(template));
                     }
                 }
 
@@ -3026,7 +3047,7 @@ where
             <= self
                 .template_clock_now()
                 .saturating_add(Duration32::from_hours(2)))
-        .then(|| template.into())
+        .then(|| self.served_block_template(template))
         .ok_or_misc_error("local clock moved backwards while building the block template")
     }
 
