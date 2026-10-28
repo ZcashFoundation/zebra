@@ -634,14 +634,17 @@ pub fn tx_transparent_coinbase_spends_maturity(
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
 ) -> Result<(), TransactionError> {
+    // The restriction depends only on the transaction, network and height, so compute it once:
+    // it inspects the transaction's transparent outputs, and doing that for every spend makes
+    // this check quadratic in the transaction's inputs and outputs.
+    let spend_restriction = tx.coinbase_spend_restriction(network, height);
+
     for spend in tx.spent_outpoints() {
         let utxo = block_new_outputs
             .get(&spend)
             .map(|ordered_utxo| ordered_utxo.utxo.clone())
             .or_else(|| spent_utxos.get(&spend).cloned())
             .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
-
-        let spend_restriction = tx.coinbase_spend_restriction(network, height);
 
         zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
     }

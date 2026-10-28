@@ -45,6 +45,8 @@ use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerif
 
 #[cfg(test)]
 mod prop;
+#[cfg(test)]
+mod transparent_scripts;
 
 /// Returns the timeout duration for tests, extended when running under coverage
 /// instrumentation to account for the performance overhead.
@@ -2207,10 +2209,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     assert_eq!(
         result,
-        Err(TransactionError::InternalDowncastError(
-            "downcast to known transaction error type failed, original error: ScriptInvalid"
-                .to_string()
-        ))
+        Err(TransactionError::Script(zebra_script::Error::ScriptInvalid))
     );
 }
 
@@ -2686,7 +2685,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
     // Create a non-coinbase V5 tx. Its branch must be the one active at `height_max`, so the
     // expiry-height rule is what rejects it rather than the consensus branch ID check.
     let transaction = Transaction::test_v5(
-        NetworkUpgrade::Nu6_3,
+        NetworkUpgrade::current(&Network::Mainnet, height_max),
         vec![input],
         vec![output],
         LockTime::unlocked(),
@@ -2816,10 +2815,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     assert_eq!(
         result,
-        Err(TransactionError::InternalDowncastError(
-            "downcast to known transaction error type failed, original error: ScriptInvalid"
-                .to_string()
-        ))
+        Err(TransactionError::Script(zebra_script::Error::ScriptInvalid))
     );
 }
 

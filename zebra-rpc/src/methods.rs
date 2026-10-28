@@ -464,6 +464,8 @@ pub trait Rpc {
     /// - Only the multi-argument format is used by lightwalletd and this is what we currently support:
     /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
     /// - It is recommended that users call the method with start/end heights such that the response can't be too large.
+    /// - At most 10,000 addresses are accepted, and a query matching more than 100,000
+    ///   transactions is rejected; narrow the height range instead.
     #[method(name = "getaddresstxids")]
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
 
@@ -481,7 +483,7 @@ pub trait Rpc {
     ///         - `addresses`: (array, required, example=[\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"]) The addresses to get outputs from.
     ///         - `chaininfo`: (boolean, optional, default=false) Include chain info with results
     ///         - `startHeight`: (numeric, optional, default=0) Only return outputs at or above this height
-    ///         - `maxEntries`: (numeric, optional, default=0) Return at most this many outputs, zero for no limit
+    ///         - `maxEntries`: (numeric, optional, default=0) Return at most this many outputs, zero for up to 100,000
     ///
     /// # Notes
     ///
@@ -489,6 +491,9 @@ pub trait Rpc {
     /// that pages through a large address does not make the node read the whole UTXO set each
     /// time. Callers must set both or neither: `maxEntries` alone would truncate the outputs
     /// before the height filter ran.
+    ///
+    /// At most 10,000 addresses are accepted. Without `maxEntries`, a query matching more than
+    /// 100,000 outputs is rejected, and so is a larger `maxEntries`.
     ///
     /// lightwalletd always uses the multi-address request, without chaininfo:
     /// <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402>
@@ -683,6 +688,26 @@ pub trait Rpc {
     /// - No notes
     #[method(name = "z_validateaddress")]
     async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
+
+    /// Converts a transparent P2PKH address to a ZIP 320 TEX address.
+    ///
+    /// zcashd reference: [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)
+    /// method: post
+    /// tags: util
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: (string, required) The transparent P2PKH address to convert.
+    ///
+    /// # Notes
+    ///
+    /// - Addresses that don't decode, or are for another network, return error `-5`; addresses
+    ///   that decode but aren't transparent P2PKH return error `-8`. This follows zcashd for the
+    ///   common cases, but not exactly: zcashd returns `-8` for Sprout addresses and for unified
+    ///   addresses with unknown receivers, where Zebra returns `-5`, because Zebra's
+    ///   `primitives::Address` can't represent them at all. Zallet differs from both.
+    #[method(name = "z_converttex")]
+    async fn z_convert_tex(&self, address: String) -> Result<String>;
 
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
@@ -880,6 +905,9 @@ where
     /// if end of support is enforced on `network`. Reported by the `getdeprecationinfo` RPC.
     end_of_support_height: Option<Height>,
 
+    /// The maximum number of results the address RPCs return before rejecting the query.
+    max_address_query_results: usize,
+
     // Services
     //
     /// A handle to the mempool service.
@@ -999,6 +1027,7 @@ where
             network: network.clone(),
             debug_force_finished_sync,
             end_of_support_height: None,
+            max_address_query_results: MAX_ADDRESS_QUERY_RESULTS,
             mempool: mempool.clone(),
             state: state.clone(),
             read_state: read_state.clone(),
@@ -1204,6 +1233,16 @@ where
         self.end_of_support_height = end_of_support_height;
         self
     }
+
+    /// Sets the maximum number of results the `getaddresstxids` and `getaddressutxos` RPCs return.
+    #[cfg(test)]
+    pub(crate) fn with_max_address_query_results(
+        mut self,
+        max_address_query_results: usize,
+    ) -> Self {
+        self.max_address_query_results = max_address_query_results;
+        self
+    }
 }
 
 #[async_trait]
@@ -1222,7 +1261,10 @@ where
         let version = GetInfoResponse::version_from_string(&self.build_version)
             .expect("invalid version string");
 
-        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+        let connections = read_address_book(&self.address_book, |book| {
+            book.recently_live_peers(Utc::now()).len()
+        })
+        .await?;
 
         let last_error_recorded = self.last_warn_error_log_rx.borrow().clone();
         let (last_error_log, _level, last_error_log_time) = last_error_recorded.unwrap_or((
@@ -2467,9 +2509,12 @@ where
 
         let valid_addresses = request.valid_addresses()?;
 
+        // Ask for one more than the cap, so an oversized result can be detected.
+        let cap = self.max_address_query_results;
         let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
             addresses: valid_addresses,
             height_range,
+            max_entries: Some(cap.saturating_add(1)),
         };
         let response = read_state
             .ready()
@@ -2479,6 +2524,13 @@ where
 
         let hashes = match response {
             zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
+                if hashes.len() > cap {
+                    return Err(format!(
+                        "more than {cap} transactions match; narrow the height range"
+                    ))
+                    .map_error(server::error::LegacyCode::InvalidParameter);
+                }
+
                 let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
 
                 hashes
@@ -2520,15 +2572,26 @@ where
                 .unwrap_or(u32::MAX)
                 .min(Height::MAX.0),
         );
-        let max_entries = (utxos_request.max_entries > 0)
-            // Cast is safe: `usize` is at least 32 bits on all supported platforms.
-            .then_some(utxos_request.max_entries as usize);
+        // Cast is safe: `usize` is at least 32 bits on all supported platforms.
+        let requested_entries = utxos_request.max_entries as usize;
+        let cap = self.max_address_query_results;
+        if requested_entries > cap {
+            return Err(format!("maxEntries must be at most {cap}"))
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
+        // Without `maxEntries`, ask for one more than the cap, so an oversized result can be detected.
+        let max_entries = if requested_entries > 0 {
+            requested_entries
+        } else {
+            cap.saturating_add(1)
+        };
 
         // get utxos data for addresses
         let request = zebra_state::ReadRequest::UtxosByAddresses {
             addresses: valid_addresses,
             height_range: start_height..=Height::MAX,
-            max_entries,
+            max_entries: Some(max_entries),
         };
         let response = read_state
             .ready()
@@ -2570,6 +2633,13 @@ where
             response_utxos.push(entry);
 
             last_output_location = output_location;
+        }
+
+        if response_utxos.len() > cap {
+            return Err(format!(
+                "more than {cap} unspent outputs match; page with startHeight and maxEntries"
+            ))
+            .map_error(server::error::LegacyCode::InvalidParameter);
         }
 
         if !utxos_request.chain_info {
@@ -3105,7 +3175,10 @@ where
         // Deprecated: zcashd always returns 0.
         let timeoffset = 0;
 
-        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+        let connections = read_address_book(&self.address_book, |book| {
+            book.recently_live_peers(Utc::now()).len()
+        })
+        .await?;
 
         // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
         let networks = vec![
@@ -3140,15 +3213,17 @@ where
     }
 
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {
-        let address_book = self.address_book.clone();
-        Ok(address_book
-            .recently_live_peers(chrono::Utc::now())
-            .into_iter()
-            .map(|meta_addr| {
-                let banscore = address_book.misbehavior_score(meta_addr.addr());
-                PeerInfo::from_meta_addr(meta_addr, banscore)
-            })
-            .collect())
+        read_address_book(&self.address_book, |address_book| {
+            address_book
+                .recently_live_peers(chrono::Utc::now())
+                .into_iter()
+                .map(|meta_addr| {
+                    let banscore = address_book.misbehavior_score(meta_addr.addr());
+                    PeerInfo::from_meta_addr(meta_addr, banscore)
+                })
+                .collect()
+        })
+        .await
     }
 
     async fn ping(&self) -> Result<()> {
@@ -3170,6 +3245,39 @@ where
         let network = self.network.clone();
 
         z_validate_address(network, raw_address)
+    }
+
+    async fn z_convert_tex(&self, address: String) -> Result<String> {
+        use zcash_address::{ToAddress, ZcashAddress};
+        use zebra_chain::{parameters::NetworkKind, primitives};
+
+        let address = address
+            .parse::<ZcashAddress>()
+            .ok()
+            .and_then(|address| address.convert::<primitives::Address>().ok())
+            // zcashd decodes against the active chain params, so a wrong-network address is
+            // just "invalid". Testnet and Regtest share an encoding; only Mainnet differs.
+            .filter(|address| {
+                (address.network() == NetworkKind::Mainnet)
+                    == (self.network.kind() == NetworkKind::Mainnet)
+            })
+            .ok_or("Invalid address")
+            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+        let primitives::Address::Transparent(Address::PayToPublicKeyHash { pub_key_hash, .. }) =
+            address
+        else {
+            return Err("Address is not a transparent p2pkh address")
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        };
+
+        // Encode for the configured network, not the parsed address's network: Testnet and
+        // Regtest share transparent address prefixes, so a `tm...` input always decodes as
+        // Testnet, but their TEX HRPs differ (`textest` vs `texregtest`).
+        //
+        // Encode via `zcash_address`: `transparent::Address`'s `Display` impl Base58Check-encodes
+        // the `Tex` variant with the P2PKH version bytes, which would yield a `t1...` string.
+        Ok(ZcashAddress::from_tex(self.network.kind().into(), pub_key_hash).encode())
     }
 
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse> {
@@ -4026,21 +4134,51 @@ enum DGetAddressBalanceRequest {
 #[deprecated(note = "Use `GetAddressBalanceRequest` instead.")]
 pub type AddressStrings = GetAddressBalanceRequest;
 
+/// The maximum number of addresses a client can send in one request.
+pub(crate) const MAX_REQUEST_ADDRESSES: usize = 10_000;
+
+/// The maximum number of results `getaddresstxids` and `getaddressutxos` return before
+/// rejecting the query; clients narrow the height range or page instead.
+pub(crate) const MAX_ADDRESS_QUERY_RESULTS: usize = 100_000;
+
 /// A collection of validatable addresses
 pub trait ValidateAddresses {
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
     fn valid_addresses(&self) -> Result<HashSet<Address>> {
+        if self.addresses().len() > MAX_REQUEST_ADDRESSES {
+            return Err(format!(
+                "too many addresses: the limit is {MAX_REQUEST_ADDRESSES}"
+            ))
+            .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
         // Reference for the legacy error code:
         // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
         let valid_addresses: HashSet<Address> = self
             .addresses()
             .iter()
             .map(|address| {
-                address
+                let address: Address = address
                     .parse()
-                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+                // Reject TEX addresses, which parse but can never match an index entry.
+                //
+                // Transparent outputs are only ever classified as P2PKH or P2SH by
+                // `Output::address()`, since the output script has no TEX discriminator, and the
+                // index keys on the `Address` variant as well as the hash. So a TEX address would
+                // silently return an empty result rather than the balance of the P2PKH address it
+                // was derived from. zcashd's address index never sees TEX addresses at all, so an
+                // error is also the compatible behaviour here.
+                if matches!(address, Address::Tex { .. }) {
+                    return Err("TEX addresses are not supported by the address index, \
+                         use the transparent P2PKH address they were derived from")
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey);
+                }
+
+                Ok(address)
             })
             .collect::<Result<_>>()?;
 
@@ -4114,7 +4252,7 @@ pub struct GetAddressUtxosRequest {
     #[serde(default)]
     #[serde(rename = "startHeight")]
     start_height: u64,
-    /// The maximum number of unspent outputs to return, or zero for no limit.
+    /// The maximum number of unspent outputs to return, or zero for up to 100,000.
     #[serde(default)]
     #[serde(rename = "maxEntries")]
     max_entries: u32,
@@ -4132,7 +4270,7 @@ impl GetAddressUtxosRequest {
     }
 
     /// Limits this request to the unspent outputs at or above `start_height`, and to at most
-    /// `max_entries` of them. Zero means "from the genesis block" and "no limit".
+    /// `max_entries` of them. Zero means "from the genesis block" and "up to 100,000".
     ///
     /// Both limits are taken together, because applying `max_entries` on its own would
     /// truncate the outputs before the height filter ran.
@@ -4989,6 +5127,22 @@ impl IronwoodTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }
+}
+
+/// Runs `read` against the address book on a blocking thread, so waiting on its
+/// mutex doesn't park an async runtime worker (#11618).
+async fn read_address_book<AddressBook, T>(
+    address_book: &AddressBook,
+    read: impl FnOnce(AddressBook) -> T + Send + 'static,
+) -> Result<T>
+where
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+    T: Send + 'static,
+{
+    let address_book = address_book.clone();
+    tokio::task::spawn_blocking(move || read(address_book))
+        .await
+        .map_misc_error()
 }
 
 /// Build a valid height range from the given optional start and end numbers.

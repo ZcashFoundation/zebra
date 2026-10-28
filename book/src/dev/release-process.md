@@ -25,7 +25,7 @@ The version number is incremented based on the level of change included in the r
 
 ### Supported Releases
 
-Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **12 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
+Every Zebra version released by the Zcash Foundation is supported up to a specific height. Currently we support each version for about **8 weeks** (see `EOS_PANIC_AFTER` in `zebrad/src/components/sync/end_of_support.rs`) but this can change from release to release.
 
 When the Zcash chain reaches this end of support height, `zebrad` will shut down and the binary will refuse to start.
 
@@ -128,6 +128,8 @@ Everything else is automatic. release-plz creates and updates a PR whose branch 
 ### Review the Release PR
 
 Track each release in an issue created from the [release issue template](https://github.com/ZcashFoundation/zebra/issues/new?template=release.md), and follow its checklist. It covers the preparation steps and the review of the Release PR's version bumps and changelogs.
+
+To check the bumps, read the "Public API diff since zebrad vX" comment on the Release PR. `PR Gate / release-api-diff` refreshes it on every Release PR update with each crate's public API and dependency changes since the last zebrad release, and names any crate whose own last release is older.
 
 ### What Release Readiness Reports
 

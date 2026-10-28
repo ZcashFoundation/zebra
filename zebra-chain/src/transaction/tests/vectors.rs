@@ -1817,3 +1817,144 @@ fn non_coinbase_with_null_prevout_input_is_not_valid_non_coinbase() {
     assert!(!tx.is_coinbase());
     assert!(tx.is_valid_non_coinbase());
 }
+
+/// Tests that dropping every transparent input from a transaction with no transparent
+/// outputs leaves no transparent bundle, so its txid matches its serialized form.
+///
+/// ZIP-244 defines a single transparent digest for a transaction with no transparent
+/// inputs or outputs, but librustzcash only produces it for an absent bundle: a present
+/// bundle with empty `vin` and `vout` hashes differently. Both serialize to the same
+/// bytes, which always parse as absent.
+#[test]
+fn with_transparent_inputs_drops_empty_bundle() {
+    let _test_guard = zebra_test::init();
+
+    let orchard = fake_orchard_bundle(
+        Flags::ENABLED,
+        ZatBalance::from_i64(0).expect("zero is a valid balance"),
+        1,
+        1,
+        BundleVersion::orchard_insecure_v1(),
+    );
+    let transaction = Transaction::test_v5_with_orchard(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+        block::Height(0),
+        Some(orchard),
+    )
+    .with_transparent_inputs(Vec::new());
+
+    assert!(transaction.transparent_bundle().is_none());
+
+    let deserialized_transaction: Transaction = transaction
+        .zcash_serialize_to_vec()
+        .expect("the fixture serializes")
+        .zcash_deserialize_into()
+        .expect("the serialized fixture parses");
+    assert_eq!(deserialized_transaction.hash(), transaction.hash());
+}
+
+/// Computing the signature hashes of every transparent input of a transaction must take
+/// time linear in the number of inputs, so a transaction with many inputs can't make
+/// script verification quadratic.
+///
+/// In a debug build, the linear implementation takes about 40 ms per transaction, and the
+/// quadratic one took about 6 s for v4 and 85 s for v5 and v6 transactions.
+#[test]
+fn sighash_of_every_input_is_linear_in_the_number_of_inputs() {
+    let _init_guard = zebra_test::init();
+
+    /// Enough inputs to make quadratic sighash computation obvious, while keeping each
+    /// transaction well under the maximum block size.
+    const INPUT_COUNT: u32 = 10_000;
+    /// The longest a linear implementation might take on a slow, unoptimized test build.
+    const MAX_DURATION: std::time::Duration = std::time::Duration::from_secs(2);
+
+    // A P2PKH `scriptPubKey` with a zero key hash, and a dummy `scriptSig`; computing the
+    // sighash doesn't check either of them.
+    let mut p2pkh = vec![0x76, 0xa9, 0x14];
+    p2pkh.extend_from_slice(&[0; 20]);
+    p2pkh.extend_from_slice(&[0x88, 0xac]);
+    let lock_script = transparent::Script::new(&p2pkh);
+    let inputs: Vec<_> = (0..INPUT_COUNT)
+        .map(|index| transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: Hash([1; 32]),
+                index,
+            },
+            unlock_script: transparent::Script::new(&[0; 2]),
+            sequence: u32::MAX,
+        })
+        .collect();
+    let outputs = vec![transparent::Output {
+        value: Amount::try_from(1).expect("1 zatoshi is a valid amount"),
+        lock_script: lock_script.clone(),
+    }];
+    let all_previous_outputs = Arc::new(vec![
+        transparent::Output {
+            value: Amount::try_from(1).expect("1 zatoshi is a valid amount"),
+            lock_script: lock_script.clone(),
+        };
+        inputs.len()
+    ]);
+
+    let lock_time = LockTime::min_lock_time_timestamp();
+    let expiry_height = block::Height(0);
+    let transactions = [
+        (
+            Transaction::test_v4(inputs.clone(), outputs.clone(), lock_time, expiry_height),
+            NetworkUpgrade::Canopy,
+        ),
+        (
+            Transaction::test_v5(
+                NetworkUpgrade::Nu5,
+                inputs.clone(),
+                outputs.clone(),
+                lock_time,
+                expiry_height,
+            ),
+            NetworkUpgrade::Nu5,
+        ),
+        (
+            Transaction::test_v6(
+                NetworkUpgrade::Nu6_3,
+                inputs,
+                outputs,
+                lock_time,
+                expiry_height,
+            ),
+            NetworkUpgrade::Nu6_3,
+        ),
+    ];
+
+    for (transaction, nu) in transactions {
+        let start = std::time::Instant::now();
+
+        let sighasher = transaction
+            .sighasher(nu, all_previous_outputs.clone())
+            .expect("network upgrade is valid for the transaction");
+        let mut sighashes = std::collections::HashSet::new();
+        for input_index in 0..all_previous_outputs.len() {
+            let sighash = sighasher.sighash(
+                HashType::ALL,
+                Some((input_index, lock_script.as_raw_bytes().to_vec())),
+            );
+            sighashes.insert(sighash.0);
+        }
+
+        let elapsed = start.elapsed();
+        assert_eq!(
+            sighashes.len(),
+            all_previous_outputs.len(),
+            "each input of a v{} transaction has a distinct sighash",
+            transaction.version(),
+        );
+        assert!(
+            elapsed < MAX_DURATION,
+            "computing {INPUT_COUNT} sighashes of a v{} transaction took {elapsed:?}",
+            transaction.version(),
+        );
+    }
+}

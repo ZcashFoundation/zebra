@@ -69,30 +69,11 @@ fn check_parameters_impl() {
             zp_network.coin_type(),
             "Parameters::coin_type() outputs must match"
         );
+        // The address encoding constants are functions of the network type.
         assert_eq!(
-            network.hrp_sapling_extended_spending_key(),
-            zp_network.hrp_sapling_extended_spending_key(),
-            "Parameters::hrp_sapling_extended_spending_key() outputs must match"
-        );
-        assert_eq!(
-            network.hrp_sapling_extended_full_viewing_key(),
-            zp_network.hrp_sapling_extended_full_viewing_key(),
-            "Parameters::hrp_sapling_extended_full_viewing_key() outputs must match"
-        );
-        assert_eq!(
-            network.hrp_sapling_payment_address(),
-            zp_network.hrp_sapling_payment_address(),
-            "Parameters::hrp_sapling_payment_address() outputs must match"
-        );
-        assert_eq!(
-            network.b58_pubkey_address_prefix(),
-            zp_network.b58_pubkey_address_prefix(),
-            "Parameters::b58_pubkey_address_prefix() outputs must match"
-        );
-        assert_eq!(
-            network.b58_script_address_prefix(),
-            zp_network.b58_script_address_prefix(),
-            "Parameters::b58_script_address_prefix() outputs must match"
+            network.network_type(),
+            zp_network.network_type(),
+            "Parameters::network_type() outputs must match"
         );
     }
 }

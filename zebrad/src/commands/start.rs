@@ -384,7 +384,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) =
+        let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
                 config.network.clone(),
                 inbound,
@@ -423,7 +423,7 @@ impl StartCmd {
         let (mempool, mempool_transaction_subscriber) = Mempool::new(
             &config.network.network,
             &config.mempool,
-            peer_set.clone(),
+            peer_set.background_service(),
             state.clone(),
             tx_verifier,
             sync_status.clone(),
@@ -448,7 +448,7 @@ impl StartCmd {
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
-            block_download_peer_set: peer_set.clone(),
+            block_download_peer_set: peer_set.background_service(),
             block_verifier: block_verifier_router.clone(),
             mempool: mempool.clone(),
             state: state.clone(),
@@ -601,7 +601,7 @@ impl StartCmd {
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change.clone(),
-                peer_set.clone(),
+                block_advertiser,
                 Some(submit_block_channel.receiver()),
             )
             .in_current_span(),

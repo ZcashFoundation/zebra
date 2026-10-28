@@ -59,10 +59,11 @@ pub enum Request {
     /// didn't start with a `Vec` but with, e.g., an iterator, they can collect
     /// directly into a `HashSet` and save work.
     ///
-    /// If this requests a recently-advertised block, the peer set will make a
-    /// best-effort attempt to route the request to a peer that advertised the
-    /// block. This routing is only used for request sets of size 1.
-    /// Otherwise, it is routed using the normal load-balancing strategy.
+    /// Single-block requests prefer a connected peer that advertised the block. For blocks
+    /// nobody advertised, they prefer peers that serve historic blocks. If no ready peer can
+    /// serve the block but a busy peer might have it, the request waits for up to
+    /// [`INVENTORY_BUSY_PEER_WAIT_TIMEOUT`](crate::constants::INVENTORY_BUSY_PEER_WAIT_TIMEOUT).
+    /// Larger request sets use normal load balancing.
     ///
     /// The list contains zero or more block hashes.
     ///
@@ -70,6 +71,31 @@ pub enum Request {
     ///
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
+
+    /// Download one block from a connected peer, waiting for eligible peer capacity.
+    ///
+    /// This outbound-only request is used by sync and gossip downloaders. Unlike
+    /// [`Request::BlocksByHash`], temporary lack of capacity does not cause a local refusal.
+    /// Callers must bound the entire readiness and response operation with a deadline.
+    /// The peer's response timeout starts only when the request is dispatched.
+    ///
+    /// A known advertiser is preferred even if its advertisement was lost from the inventory
+    /// registry. Missing-inventory reports, prior failures, and connection eligibility still apply.
+    /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
+    ///
+    /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
+    /// Inbound `getdata` messages are always decoded as [`Request::BlocksByHash`], never this variant.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Blocks`](super::Response::Blocks) containing the requested block,
+    /// or an error if the download fails.
+    BlockDownload {
+        /// The hash of the block to download.
+        hash: block::Hash,
+        /// A connected peer known to have advertised this block, if any.
+        advertiser: Option<PeerSocketAddr>,
+    },
 
     /// Request transactions by their unmined transaction ID.
     ///
@@ -190,9 +216,8 @@ pub enum Request {
     /// [`Request::BlocksByHash`] against the "inbound" service passed to
     /// [`init`](crate::init).
     ///
-    /// The peer set routes this request specially, sending it to *a fraction of*
-    /// the available peers. See [`number_of_peers_to_broadcast()`](crate::PeerSet::number_of_peers_to_broadcast)
-    /// for more details.
+    /// Outbound block adverts use [`crate::BlockAdvertiser`], which samples peers and always
+    /// includes configured sidecars independently of ordinary request readiness.
     ///
     /// The second field is the address of the peer that sent us this `inv`:
     /// `Some(addr)` when the advertisement was relayed from a remote peer,
@@ -202,13 +227,18 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Nil`](super::Response::Nil).
+    /// Outbound success acknowledges local writes to every selected peer, not remote receipt.
+    /// Inbound handlers return [`Response::Nil`](super::Response::Nil) after accepting inventory.
     AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
 
-    /// Advertise a block to all ready peers. This is equivalent to
-    /// [`Request::AdvertiseBlock`] except that the peer set will route
-    /// this request to all available ready peers. Used by the gossip task
-    /// to broadcast mined blocks to all ready peers.
+    /// Advertise a block to every connected, non-banned peer.
+    ///
+    /// Use [`crate::BlockAdvertiser`], not the ordinary peer service. Each peer has a bounded
+    /// advert channel; full or closed queues, revoked authorization, and write errors are failures.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
     AdvertiseBlockToAll(block::Hash),
 
     /// Request the contents of this node's mempool.
@@ -217,6 +247,16 @@ pub enum Request {
     ///
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
+
+    /// Drive local peer-set maintenance without sending a request to a remote peer.
+    ///
+    /// The network-owned idle poller routes queued discovery and inventory requests when peers,
+    /// deadlines, or cancellations change. Advert maintenance is acknowledged independently of
+    /// ordinary readiness.
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil).
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    PollPeerSet,
 }
 
 impl fmt::Display for Request {
@@ -228,6 +268,7 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
+            Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -249,6 +290,7 @@ impl fmt::Display for Request {
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Request::PollPeerSet => "PollPeerSet".to_string(),
         })
     }
 }
@@ -261,6 +303,7 @@ impl Request {
             Request::Ping(_) => "Ping",
 
             Request::BlocksByHash(_) => "BlocksByHash",
+            Request::BlockDownload { .. } => "BlockDownload",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",
@@ -271,6 +314,7 @@ impl Request {
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+            Request::PollPeerSet => "PollPeerSet",
         }
     }
 
@@ -278,16 +322,16 @@ impl Request {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Request::BlocksByHash(_) | Request::TransactionsById(_)
+            Request::BlockDownload { .. } | Request::BlocksByHash(_) | Request::TransactionsById(_)
         )
     }
 
     /// Returns the block hash inventory downloads from the request, if any.
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
-        if let Request::BlocksByHash(block_hashes) = self {
-            block_hashes.clone()
-        } else {
-            HashSet::new()
+        match self {
+            Request::BlockDownload { hash, .. } => HashSet::from([*hash]),
+            Request::BlocksByHash(block_hashes) => block_hashes.clone(),
+            _ => HashSet::new(),
         }
     }
 

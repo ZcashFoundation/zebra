@@ -29,7 +29,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let mut child = testdir
         .spawn_child(args!["start"])?
-        .with_timeout(Duration::from_secs(30));
+        .with_timeout(Duration::from_secs(30))?;
 
     child.expect_stdout_line_matches("Starting zebrad")?;
     child.expect_stdout_line_matches("Starting end of support task")?;

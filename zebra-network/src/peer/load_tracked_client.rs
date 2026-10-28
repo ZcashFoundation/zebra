@@ -15,7 +15,10 @@ use tower::{
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
     peer::{Client, ConnectedAddr, ConnectionInfo},
-    protocol::external::{canonical_socket_addr, types::Version},
+    protocol::external::{
+        canonical_socket_addr,
+        types::{PeerServices, Version},
+    },
 };
 
 /// A client service wrapper that keeps track of its load.
@@ -28,12 +31,16 @@ pub struct LoadTrackedClient {
 
     /// The metadata for the connected peer `service`.
     connection_info: Arc<ConnectionInfo>,
+
+    /// Sends block adverts even when the load-tracked service is busy.
+    pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<crate::peer_set::BlockAdvert>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
 impl From<Client> for LoadTrackedClient {
     fn from(client: Client) -> Self {
         let connection_info = client.connection_info.clone();
+        let block_advert_tx = client.block_advert_tx.clone();
 
         let service = PeakEwma::new(
             client,
@@ -45,6 +52,7 @@ impl From<Client> for LoadTrackedClient {
         LoadTrackedClient {
             service,
             connection_info,
+            block_advert_tx,
         }
     }
 }
@@ -53,6 +61,16 @@ impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
+    }
+
+    /// Retrieve the services the peer advertised in its `version` message.
+    pub fn remote_services(&self) -> PeerServices {
+        self.connection_info.remote.services
+    }
+
+    /// Returns the shared metadata allocation identifying this connection.
+    pub(crate) fn connection_info(&self) -> &Arc<ConnectionInfo> {
+        &self.connection_info
     }
 
     /// Returns true if this peer connected directly to us from `ip`.

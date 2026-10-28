@@ -35,7 +35,7 @@ use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::Dat
 use zebra_test::net::random_known_port;
 
 use crate::{
-    address_book_updater::AddressBookUpdater,
+    address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
@@ -43,14 +43,14 @@ use crate::{
     peer_set::{
         crawler_services,
         initialize::{
-            accept_inbound_connections, add_initial_peers, crawl_and_dial, limit_initial_peers,
-            open_listener, DiscoveredPeer,
+            accept_inbound_connections, add_initial_peers, batch_misbehavior_updates,
+            crawl_and_dial, limit_initial_peers, open_listener, DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -229,7 +229,7 @@ async fn peer_limit_zero_mainnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book =
+    let (_network, address_book) =
         init_with_peer_limit(0, unreachable_inbound_service, Mainnet, None, None).await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
@@ -251,7 +251,7 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         0,
         unreachable_inbound_service,
         Network::new_default_testnet(),
@@ -279,7 +279,7 @@ async fn peer_limit_one_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -298,7 +298,7 @@ async fn peer_limit_one_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         1,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -324,7 +324,7 @@ async fn peer_limit_two_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -343,7 +343,7 @@ async fn peer_limit_two_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         2,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -414,7 +414,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
 }
 
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_zero_connect_panic() {
     let _init_guard = zebra_test::init();
 
@@ -438,7 +438,7 @@ async fn crawler_peer_limit_zero_connect_panic() {
 }
 
 /// Test the crawler with an outbound peer limit of one peer, and a connector that always errors.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_error() {
     let _init_guard = zebra_test::init();
 
@@ -462,7 +462,7 @@ async fn crawler_peer_limit_one_connect_error() {
 
 /// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then disconnects the peer.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
@@ -511,7 +511,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
 
 /// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then holds the peer open.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
@@ -569,6 +569,15 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
     }
 
     assert!(
+        peer_change_count > 0,
+        "expected successful peer connections"
+    );
+    assert_eq!(
+        peer_tracker_count, peer_change_count,
+        "expected one held tracker per successful peer connection",
+    );
+
+    assert!(
         peer_change_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
         peer_change_count,
@@ -586,7 +595,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
 }
 
 /// Test the crawler with the default outbound peer limit, and a connector that always errors.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_error() {
     let _init_guard = zebra_test::init();
 
@@ -610,7 +619,7 @@ async fn crawler_peer_limit_default_connect_error() {
 
 /// Test the crawler with the default outbound peer limit,
 /// and a connector that returns success then disconnects the peer.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
@@ -661,7 +670,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
 
 /// Test the crawler with the default outbound peer limit,
 /// and a connector that returns success then holds the peer open.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
@@ -720,6 +729,15 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     }
 
     assert!(
+        peer_change_count > 0,
+        "expected successful peer connections"
+    );
+    assert_eq!(
+        peer_tracker_count, peer_change_count,
+        "expected one held tracker per successful peer connection",
+    );
+
+    assert!(
         peer_change_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
         peer_change_count,
@@ -740,7 +758,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
 /// using existing address book candidates, without any demand signals, and even when
 /// crawls return no new addresses. Then test that it replaces dropped connections,
 /// and doesn't dial over the limit once it is reached.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_refills_spare_outbound_capacity_on_timer() {
     let _init_guard = zebra_test::init();
 
@@ -1523,7 +1541,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
         ..Config::default()
     };
 
-    let (mut peer_set, address_book, misbehavior_tx) = init(
+    let (mut peer_set, address_book, misbehavior_tx, _advertiser) = init(
         config,
         peers_inbound_service,
         NoChainTip,
@@ -1566,9 +1584,10 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     // Ban the peer, using the same channel that block and transaction verification uses.
     misbehavior_tx
-        .send((
+        .send(MisbehaviorReport::new(
             PeerSocketAddr::from(SocketAddr::new(peer_ip.into(), ipv4_listen_addr.port())),
             constants::MAX_PEER_MISBEHAVIOR_SCORE,
+            "test misbehavior",
         ))
         .await
         .expect("misbehavior channel is open");
@@ -1972,7 +1991,7 @@ async fn self_connections_should_fail() {
         ..Config::default()
     };
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         TEST_PEERSET_INITIAL_TARGET_SIZE,
         unreachable_inbound_service,
         Mainnet,
@@ -2223,7 +2242,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _advertiser) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2262,14 +2281,14 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
 /// Uses `default_config` or Zebra's defaults for the rest of the configuration.
 ///
-/// Returns the newly created [`AddressBook`] for testing.
+/// Returns the network owner and newly created [`AddressBook`] for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
     network: Network,
     force_listen_addr: impl Into<Option<SocketAddr>>,
     default_config: impl Into<Option<Config>>,
-) -> Arc<std::sync::Mutex<AddressBook>>
+) -> (crate::NetworkService, Arc<std::sync::Mutex<AddressBook>>)
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
@@ -2289,7 +2308,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (peer_service, address_book, _, _advertiser) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2297,7 +2316,7 @@ where
     )
     .await;
 
-    address_book
+    (peer_service, address_book)
 }
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
@@ -2652,4 +2671,62 @@ where
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx, address_book_updater_guard)
+}
+
+/// Check that misbehaviour reports sent while a flush is waiting on the address book
+/// updater are received, rather than filling up the channel and being dropped.
+#[tokio::test]
+async fn misbehavior_reports_are_received_during_flush() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    const CHANNEL_SIZE: usize = 4;
+    const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
+
+    // A full address book channel, which nothing reads until the end of the test,
+    // makes the flush wait.
+    let (address_book_updater, mut address_book_rx) = change_channel(1);
+
+    let batch_task = tokio::spawn(batch_misbehavior_updates(
+        misbehavior_rx,
+        address_book_updater,
+        FLUSH_INTERVAL,
+    ));
+
+    let report = |port| {
+        MisbehaviorReport::new(
+            PeerSocketAddr::from(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)),
+            1,
+            "test",
+        )
+    };
+
+    // The first flush sends one of these updates, then waits to send the other one.
+    misbehavior_tx.send(report(1)).await.unwrap();
+    misbehavior_tx.send(report(2)).await.unwrap();
+    tokio::time::sleep(FLUSH_INTERVAL * 2).await;
+
+    // Verification code uses `try_send()`, which fails if the channel is full.
+    for _ in 0..CHANNEL_SIZE * 3 {
+        misbehavior_tx
+            .try_send(report(3))
+            .expect("the batch task should keep receiving while it waits to flush");
+        tokio::task::yield_now().await;
+    }
+
+    // Unblock the flush, then wait for the next one, which has all the reports for peer 3.
+    let mut updates = 0;
+    while tokio::time::timeout(FLUSH_INTERVAL * 3, address_book_rx.recv())
+        .await
+        .is_ok_and(|update| update.is_some())
+    {
+        updates += 1;
+    }
+
+    assert_eq!(updates, 3, "expected one address book update for each peer");
+
+    drop(misbehavior_tx);
+    batch_task.await.expect("batch task should not panic");
 }

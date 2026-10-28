@@ -108,8 +108,9 @@ permissions:
   contents: read
 
 jobs:
-  # Resolve the workflow environment once so every downstream job and the
-  # SENTRY_ENVIRONMENT / GCP labels stay in lockstep.
+  # Resolve the workflow environment once so every downstream job and the GCP
+  # labels stay in lockstep. Test nodes report to Sentry as `ci` instead, so they
+  # don't count toward the dev, stage, or prod fleet in Sentry.
   #
   # Also resolve the GCE instance and data-disk names once, here, so every job that
   # creates, inspects or deletes them agrees. Both names identify the run that owns
@@ -141,7 +142,7 @@ jobs:
   # instance labels, where there is no 63-character budget to compete for.
   determine-environment:
     name: Determine environment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       environment: ${{ steps.set.outputs.environment }}
@@ -332,8 +333,9 @@ jobs:
             CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
           fi
 
-          # Environment variables for the container
-          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${WORKFLOW_ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${{ inputs.test_id }}"
+          # Environment variables for the container. SENTRY_ENVIRONMENT is `ci` for every
+          # trigger, so test runs stay out of the fleet's release health in Sentry.
+          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=ci,GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${{ inputs.test_id }}"
 
           # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
           GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
@@ -474,8 +476,8 @@ jobs:
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
       #
-      # If the container has already finished, `docker wait` should return its status.
-      # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
+      # If the container has already finished, `docker wait` returns its status. A failed
+      # `docker wait` prints no status, which must fail the step, not count as success.
       #
       # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
       # with that status.
@@ -499,7 +501,7 @@ jobs:
           EXIT_STATUS=\$(sudo docker wait ${CONTAINER_ID});
           echo 'Container exit status: '\$EXIT_STATUS;
 
-          if [ \"\$EXIT_STATUS\" -ne 0 ]; then
+          if [ \"\$EXIT_STATUS\" != 0 ]; then
             echo 'Test failed with exit code: '\$EXIT_STATUS;
             exit 1;
           else
@@ -602,7 +604,7 @@ jobs:
   # generation tests.
   upload-checkpoint-artifact:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, test-result ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
@@ -665,7 +667,7 @@ jobs:
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, test-result ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
@@ -1027,7 +1029,7 @@ jobs:
   # delete the Google Cloud instance for this test
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, create-state-image, upload-checkpoint-artifact ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
@@ -1112,7 +1114,7 @@ jobs:
 
   deployment-success:
     name: Integration test deployment success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Always run this job to check the status of dependent jobs
     if: always()
     needs:

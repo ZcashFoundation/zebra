@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "14.0.0"
+version = "15.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal
@@ -67,8 +67,8 @@ thiserror = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["sync", "time"] }
-tokio-util = { workspace = true, features = ["codec"] }
-tower = { workspace = true, features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
+tower = { workspace = true, features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer", "limit"] }
 
 metrics = { workspace = true }
 tracing-futures = { workspace = true }
@@ -87,7 +87,7 @@ howudoin = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "14.0.0", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

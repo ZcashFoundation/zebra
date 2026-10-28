@@ -51,6 +51,12 @@ pub fn transparent_spend(
         let inputs = transaction.inputs();
         let spends = inputs.iter().filter_map(transparent::Input::outpoint);
 
+        // The restriction depends only on the transaction, network and height, so compute it
+        // once per transaction rather than once per spend: it inspects the transaction's
+        // transparent outputs, which would make this loop quadratic in inputs and outputs.
+        let spend_restriction = transaction
+            .coinbase_spend_restriction(&finalized_state.network(), semantically_verified.height);
+
         for spend in spends {
             let utxo = transparent_spend_chain_order(
                 spend,
@@ -70,10 +76,6 @@ pub fn transparent_spend(
             // We don't want to use UTXOs from invalid pending blocks,
             // so we check transparent coinbase maturity and shielding
             // using known valid UTXOs during non-finalized chain validation.
-            let spend_restriction = transaction.coinbase_spend_restriction(
-                &finalized_state.network(),
-                semantically_verified.height,
-            );
             transparent_coinbase_spend(spend, spend_restriction, utxo.as_ref())?;
 
             // We don't delete the UTXOs until the block is committed,

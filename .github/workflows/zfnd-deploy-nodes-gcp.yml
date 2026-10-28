@@ -1,7 +1,7 @@
 # Build and deploy Zebra nodes to Google Cloud Platform.
 #
-# The event-driven wrapper preserves the existing PR, main, release, and manual
-# build inputs. Deployment is delegated to zfnd-deploy-prebuilt-nodes-gcp.yml
+# The event-driven wrapper preserves the existing PR, main, next, release, and
+# manual build inputs. Deployment is delegated to zfnd-deploy-prebuilt-nodes-gcp.yml
 # with the complete immutable image identity returned by the build.
 name: Deploy Nodes to GCP
 
@@ -47,6 +47,7 @@ on:
         default: dev
         options:
           - dev
+          - next
           - prod
       # Disk configuration
       need_cached_disk:
@@ -72,9 +73,10 @@ on:
         default: ""
 
   push:
-    # Skip main branch updates where Rust code and dependencies aren't modified.
+    # Skip main and next branch updates where Rust code and dependencies aren't modified.
     branches:
       - main
+      - next
     paths:
       # code and tests
       - "**/*.rs"
@@ -126,7 +128,7 @@ jobs:
   # the reusable deployment workflow.
   set-matrix:
     name: Resolve event deployment inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       networks: ${{ steps.set-matrix.outputs.networks }}
       zones: ${{ steps.set-matrix.outputs.zones }}
@@ -170,17 +172,23 @@ jobs:
               CACHED_DISK_TYPE="${DISPATCH_CACHED_DISK_TYPE}"
               LOG_FILE="${DISPATCH_LOG_FILE}"
               VERIFY="false"
-              # A dispatch binds the reserved address when it targets prod, or when it
-              # runs from `main` - where the dev prefix resolves to the stage MIG, and
-              # so must keep advertising the stage address.
-              if [ "${DISPATCH_ENVIRONMENT}" = "prod" ] || [ "${REF_NAME}" = "main" ]; then
+              # A dispatch binds the reserved address when it targets prod or next, or
+              # when it runs from `main` or `next` - where the dev prefix resolves to the
+              # stage or next MIG, and so must keep advertising that MIG's address.
+              if [ "${DISPATCH_ENVIRONMENT}" = "prod" ] || [ "${DISPATCH_ENVIRONMENT}" = "next" ] \
+                || [ "${REF_NAME}" = "main" ] || [ "${REF_NAME}" = "next" ]; then
                 USE_RESERVED_IP="true"
               else
                 USE_RESERVED_IP="false"
               fi
               ;;
             push)
-              ENVIRONMENT="stage"
+              # The push trigger only lists `main` and `next`.
+              if [ "${REF_NAME}" = "next" ]; then
+                ENVIRONMENT="next"
+              else
+                ENVIRONMENT="stage"
+              fi
               USE_CACHED_DISK="true"
               VERIFY="true"
               USE_RESERVED_IP="true"
@@ -218,13 +226,13 @@ jobs:
     # Build for:
     # - Pull requests
     # - Manual workflow_dispatch
-    # - Push to main branch
+    # - Push to main and next branches
     # - Releases
     if: >-
       ${{
         (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
         github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && github.ref_name == 'main') ||
+        (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'next')) ||
         (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
       }}
     with:
@@ -248,13 +256,14 @@ jobs:
       ${{
         github.repository_owner == 'ZcashFoundation' &&
         (
-          (github.event_name == 'push' && github.ref_name == 'main') ||
+          (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'next')) ||
           (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
           github.event_name == 'workflow_dispatch'
         )
       }}
     permissions:
       contents: read
+      deployments: read # the Sentry job reads the previous deploy to the environment
       id-token: write
       issues: write
     uses: ./.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
@@ -270,12 +279,14 @@ jobs:
       log_file: ${{ needs.set-matrix.outputs.log_file }}
       verify: ${{ fromJSON(needs.set-matrix.outputs.verify) }}
       use_reserved_ip: ${{ fromJSON(needs.set-matrix.outputs.use_reserved_ip) }}
+    secrets:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
   build-failure-issue:
     name: Open or update issues for image build failures
     needs: [build]
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write

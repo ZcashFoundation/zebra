@@ -479,11 +479,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
         assert_eq!(persisted_template.previous_block_hash(), restored.hash());
         #[cfg(unix)]
         {
-            let pid = child
-                .child
-                .as_ref()
-                .expect("the node is still owned until shutdown")
-                .id();
+            let pid = child.id();
             crate::common::zcashd_compat::launch::send_signal(pid, "-TERM")?;
         }
         #[cfg(not(unix))]
@@ -1403,6 +1399,25 @@ async fn nu7_stretched_first_halving() -> Result<()> {
         client
             .submit_block(Arc::unwrap_or_clone(regtest_genesis_block()))
             .await?;
+
+        // Unlike the non-verbose query, verbose getrawmempool fails until the mempool is active.
+        let mut last_error = None;
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while let Err(error) = client
+                .json_result_from_call::<serde_json::Value>("getrawmempool", "[true]")
+                .await
+            {
+                last_error = Some(error);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            eyre!(
+                "mempool did not become active within 30 seconds after genesis \
+                 (last RPC error: {last_error:?})"
+            )
+        })?;
 
         let mut subsidies = Vec::new();
         let mut pool = 0;

@@ -184,18 +184,22 @@ pub(crate) use peer_set::PeerSet;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use crate::{
     isolated::{connect_isolated_tcp_direct_with_inbound, connect_isolated_with_inbound},
+    peer_set::set::tests::consumer as test_support,
     protocol::external::canonical_peer_addr,
 };
 
 pub use crate::{
     address_book::AddressBook,
     address_book_peers::AddressBookPeers,
-    ban_list::BanList,
+    ban_list::{BanList, MisbehaviorReport},
     config::{CacheDir, Config},
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::{PeerAddrState, PeerSocketAddr},
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
-    peer_set::{init, init_with_block_gossip_peer_ips},
+    peer_set::{
+        init, init_with_block_gossip_peer_ips, BlockAdvertiser, NetworkResponseFuture,
+        NetworkService,
+    },
     policies::RetryLimit,
     protocol::{
         external::{Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE},

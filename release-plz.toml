@@ -16,7 +16,8 @@ git_release_enable = false
 # fragments after release-plz has selected the versions.
 changelog_update = false
 
-# Breaking-change detection runs per PR via ziff, not in the release-pr job.
+# The PR gate's `api-diff` job detects breaking changes per PR with zc, so the
+# release-pr job does not repeat that work.
 semver_check = false
 
 # These commits trigger version bumps. Other commits can still cascade through

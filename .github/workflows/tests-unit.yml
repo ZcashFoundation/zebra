@@ -2,21 +2,28 @@ name: Unit Tests
 
 on:
   pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, labeled]
+    branches: [main, next]
+    # `edited` covers a pull request retargeted to `next`, which must not keep a result
+    # that a skipped run reported against `main`.
+    types: [opened, synchronize, reopened, labeled, edited]
   push:
     branches: [main]
   merge_group:
     types: [checks_requested]
 
-# Cancel obsolete test runs after new commits. Unrelated label events use a
-# separate group so they cannot cancel the required unit test run.
+# Cancel obsolete test runs after new commits. For `main`, unrelated label events and
+# edits skip the tests, so they get a group of their own, keyed by run id: they can
+# cancel neither the required unit test run nor each other, and cancelling one would
+# report the required check as failed, because `alls-green` reads a cancelled need as
+# a failure. For `next`, those events run the tests, so they share the normal group.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
-      github.event.action == 'labeled' &&
-      github.event.label.name != 'release' &&
-      'ignored-label' ||
+      github.base_ref != 'next' &&
+      (github.event.action == 'labeled' &&
+      github.event.label.name != 'release' ||
+      github.event.action == 'edited') &&
+      format('ignored-event-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
@@ -34,8 +41,7 @@ env:
 
 jobs:
   changes:
-    if: github.event.action != 'labeled' || github.event.label.name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       unit_tests: ${{ steps.filter.outputs.unit_tests || 'true' }}
@@ -53,11 +59,21 @@ jobs:
   run-unit-tests:
     name: stable 1.97.0
     needs: changes
-    if: needs.changes.outputs.unit_tests == 'true'
+    # Adding a label that is not `release`, or editing the pull request, cannot change the
+    # result of a test run on a head commit that did not move, and this is the longest
+    # job in CI, so it must not re-run for one. `allowed-skips` tolerates the skip; the
+    # tests still have to pass on the merge group before anything reaches main. `next`
+    # has no merge queue, so its pull requests always run the tests: a skip would
+    # replace a failed run's result.
+    if: >-
+      needs.changes.outputs.unit_tests == 'true' &&
+      (github.base_ref == 'next' ||
+      (github.event.action != 'labeled' && github.event.action != 'edited') ||
+      github.event.label.name == 'release')
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     env:
       # Thin LTO roughly doubles the time to link the release test binaries and
@@ -65,6 +81,7 @@ jobs:
       # binaries Zebra ships. This is job-level so the Rust cache key includes
       # it, and dependencies built with and without LTO are never mixed.
       CARGO_PROFILE_RELEASE_LTO: "false"
+      JUNIT_REPORT: target/nextest/ci/junit.xml
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -87,6 +104,57 @@ jobs:
       - name: Run unit tests
         run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
+      - name: Summarize flaky and failed unit tests
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os
+          import xml.etree.ElementTree as ET
+
+          rows = []
+          for case in ET.parse(os.environ["JUNIT_REPORT"]).iter("testcase"):
+              tags = {child.tag for child in case}
+              if tags & {"failure", "error"}:
+                  status = "Failed"
+              elif tags & {"flakyFailure", "flakyError"}:
+                  status = "Flaky"
+              else:
+                  continue
+              # Each flaky or rerun element is one attempt before the final result.
+              attempts = 1 + sum(child.tag.startswith(("flaky", "rerun")) for child in case)
+              rows.append(f"| {status} | `{case.get('classname')} {case.get('name')}` | {attempts} |")
+
+          print("## Unit test retries and failures\n")
+          if rows:
+              print("| Result | Test | Attempts |\n| --- | --- | ---: |")
+              print("\n".join(rows))
+          else:
+              print("No flaky or failed tests.")
+          PY
+
+  run-zebra-test-windows:
+    name: zebra-test Windows 1.97.0
+    needs: changes
+    # Edits only rerun it for `next`, as for the Linux tests above.
+    if: >-
+      needs.changes.outputs.unit_tests == 'true' &&
+      (github.base_ref == 'next' || github.event.action != 'edited')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: 1.97.0
+          cache-key: unit-tests-1.97.0-zebra-test-windows
+          cache-on-failure: true
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run zebra-test on Windows
+        run: cargo test --locked -p zebra-test
+
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
@@ -94,7 +162,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -112,22 +180,12 @@ jobs:
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
   unit-tests:
-    # Keep skipped unrelated-label runs from replacing the required check.
-    name: >-
-      ${{
-        github.event.action == 'labeled' &&
-        github.event.label.name != 'release' &&
-        'Label does not require unit tests' ||
-        'unit-tests'
-      }}
-    runs-on: ubuntu-latest
-    if: >-
-      always() &&
-      (github.event.action != 'labeled' ||
-      github.event.label.name == 'release')
+    runs-on: ubuntu-26.04
+    if: always()
     needs:
       - changes
       - run-unit-tests
+      - run-zebra-test-windows
       - check-no-git-dependencies
     timeout-minutes: 30
     steps:
@@ -135,4 +193,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: run-unit-tests, check-no-git-dependencies
+          allowed-skips: run-unit-tests, run-zebra-test-windows, check-no-git-dependencies

@@ -19,9 +19,9 @@ use thiserror::Error;
 use tokio::{
     sync::{oneshot, watch},
     task::JoinHandle,
-    time::timeout,
+    time::{timeout, timeout_at, Instant},
 };
-use tower::{hedge, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -32,7 +32,8 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+    BLOCK_DOWNLOAD_ROUND_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
+    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
 #[cfg(test)]
@@ -69,18 +70,6 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Copy, Clone, Debug)]
-pub(super) struct AlwaysHedge;
-
-impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
-    fn can_retry(&self, _req: &Request) -> bool {
-        true
-    }
-    fn clone_request(&self, req: &Request) -> Option<Request> {
-        Some(req.clone())
-    }
-}
-
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
@@ -106,6 +95,14 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
         hash: block::Hash,
     },
+
+    /// No peer delivered the block before the download round's deadline.
+    ///
+    /// The round covers waiting for a peer that might have the block, retries, and both hedged
+    /// requests. The syncer treats this like a missing block: a hedged request that already
+    /// failed with `NotFound` can still be waiting for its sibling when the deadline drops both.
+    #[error("block download round timed out: {hash:?}")]
+    DownloadTimedOut { hash: block::Hash },
 
     /// A downloaded block was a long way ahead of the state chain tip.
     /// This error should be very rare during normal operation.
@@ -179,9 +176,7 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
-    #[error(
-        "timeout during service readiness, download, verification, or internal downloader operation"
-    )]
+    #[error("timeout waiting for the network service to be ready")]
     Timeout,
 }
 
@@ -323,9 +318,8 @@ where
     /// that are too far ahead of the current state tip.
     /// Uses `max_checkpoint_height` to work around a known block timeout (#5125).
     ///
-    /// The [`Downloads`] stream is agnostic to the network policy, so retry and
-    /// timeout limits should be applied to the `network` service passed into
-    /// this constructor.
+    /// Retry and hedge policies are supplied by `network`. A single deadline bounds network
+    /// readiness and the complete download round, including retries and hedges.
     pub fn new(
         network: ZN,
         verifier: ZV,
@@ -356,9 +350,8 @@ where
 
     /// Queue a block for download and verification.
     ///
-    /// This method waits for the network to become ready, and returns an error
-    /// only if the network service fails. It returns immediately after queuing
-    /// the request.
+    /// This method waits for the network to become ready, returning an error if readiness fails
+    /// or the download deadline expires. It returns immediately after queuing the request.
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
@@ -376,12 +369,14 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        let block_req = self
-            .network
-            .ready()
-            .await
+        let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
+        let block_req = timeout_at(deadline, self.network.ready())
+            .await?
             .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
+            .call(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            });
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -410,7 +405,9 @@ where
                             .record(download_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
+                    rsp = timeout_at(deadline, block_req) => rsp
+                        .map_err(|_| BlockDownloadVerifyError::DownloadTimedOut { hash })?
+                        .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
                 let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {

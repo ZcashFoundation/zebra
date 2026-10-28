@@ -2,18 +2,21 @@
 
 use abscissa_core::{Command, Configurable, FrameworkError, Runnable};
 use clap::Parser;
-use std::{ffi::OsString, path::PathBuf};
+use std::{ffi::OsString, path::PathBuf, sync::LazyLock};
 
-use crate::config::ZebradConfig;
+use crate::{application::build_version, config::ZebradConfig};
 
 use super::ZebradCmd;
+
+/// The build version that `--version` and `--help` print.
+static BUILD_VERSION: LazyLock<String> = LazyLock::new(|| build_version().to_string());
 
 /// Toplevel entrypoint command.
 ///
 /// Handles obtaining toplevel help as well as verbosity settings.
 #[derive(Debug, clap::Parser)]
 #[clap(
-    version = clap::crate_version!(),
+    version = BUILD_VERSION.as_str(),
     author="Zcash Foundation <zebra@zfnd.org>",
     help_template = "\
 {name} {version}\n

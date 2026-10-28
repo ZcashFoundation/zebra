@@ -43,6 +43,19 @@ until you configure an OpenTelemetry endpoint using the tracing config or the
 Official Zebra release builds include Sentry support. Sentry is only activated
 when the `SENTRY_DSN` environment variable is set.
 
+When Sentry is active, Zebra sends:
+
+- errors and panics as Sentry issues;
+- warnings, errors, and the once-a-minute sync progress logs as Sentry Logs,
+  including a log each time the best chain tip enters a different network upgrade;
+- release health sessions: each `zebrad` run is split into daily sessions, and
+  the last one ends as exited on a clean shutdown and as crashed on a panic or a
+  fatal error. Every session of a run has the same user ID, so Sentry's
+  crash-free users rate is the share of runs without a crash.
+
+Events and logs carry the `chain.network` tag, and once the node has a chain tip,
+`chain.height` and `chain.network_upgrade`.
+
 You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
 attached to Sentry events. Zebra also tags events with the git SHA when
 available, preferring the runtime `GITHUB_SHA` (full commit SHA on GitHub
@@ -54,6 +67,10 @@ can pass `CI_PR_NUMBER` and `CI_TEST_ID` for additional correlation. These
 values are read at runtime, so container images do not need CI-specific build
 arguments, and the `ZEBRA_*` environment namespace remains reserved for Zebra
 configuration.
+
+Zebra names its Sentry release after its build version, which `zebrad --version`
+prints, for example `7.0.0-rc.0+git.6d1e414`. Set `SENTRY_RELEASE` to use a
+different name.
 
 [tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter

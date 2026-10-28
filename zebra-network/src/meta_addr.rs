@@ -336,6 +336,8 @@ pub enum MetaAddrChange {
     UpdateMisbehavior {
         addr: PeerSocketAddr,
         score_increment: u32,
+        /// Why the peer was scored, logged if this change bans the peer's group.
+        reason: String,
     },
 }
 
@@ -474,10 +476,15 @@ impl MetaAddr {
     /// (`new_connected`). On Linux dual-stack sockets, inbound IPv4 connections
     /// arrive as IPv4-mapped IPv6 addresses (`::ffff:A.B.C.D`); without
     /// canonicalization, `apply_to_meta_addr` panics on the addr invariant.
-    pub fn new_misbehavior(addr: PeerSocketAddr, score_increment: u32) -> MetaAddrChange {
+    pub fn new_misbehavior(
+        addr: PeerSocketAddr,
+        score_increment: u32,
+        reason: impl Into<String>,
+    ) -> MetaAddrChange {
         UpdateMisbehavior {
             addr: canonical_peer_addr(*addr),
             score_increment,
+            reason: reason.into(),
         }
     }
 
@@ -1018,6 +1025,15 @@ impl MetaAddrChange {
                 score_increment, ..
             } => *score_increment,
             _ => 0,
+        }
+    }
+
+    /// Returns the reason the peer was scored, or `None` if this is not an
+    /// [`MetaAddrChange::UpdateMisbehavior`] change.
+    pub fn misbehavior_reason(&self) -> Option<&str> {
+        match self {
+            MetaAddrChange::UpdateMisbehavior { reason, .. } => Some(reason),
+            _ => None,
         }
     }
 

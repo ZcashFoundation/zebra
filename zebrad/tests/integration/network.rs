@@ -23,7 +23,7 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
     config::{default_test_config, testdir, use_live_peers},
-    launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt},
+    launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt, LAUNCH_DELAY},
     test_type::TestType::*,
 };
 
@@ -51,7 +51,7 @@ fn live_mainnet_peer_handshake() -> Result<()> {
     let mut child = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
-        .with_timeout(LIVE_PEER_HANDSHAKE_TIMEOUT);
+        .with_timeout(LIVE_PEER_HANDSHAKE_TIMEOUT)?;
 
     let initial_peers_line = child
         .expect_stdout_line_matches("finished connecting to initial seed and disk cache peers")?;
@@ -86,6 +86,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 
     // Write a configuration that has our created network listen_addr
     let mut config = default_test_config(&Mainnet);
+    config.network.cache_dir = false.into();
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
@@ -115,6 +116,7 @@ fn zebra_metrics_conflict() -> Result<()> {
 
     // Write a configuration that has our created metrics endpoint_addr
     let mut config = default_test_config(&Mainnet);
+    config.network.cache_dir = false.into();
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -144,6 +146,7 @@ fn zebra_tracing_conflict() -> Result<()> {
 
     // Write a configuration that has our created tracing endpoint_addr
     let mut config = default_test_config(&Mainnet);
+    config.network.cache_dir = false.into();
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
@@ -167,15 +170,12 @@ fn zebra_rpc_conflict() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
-        return Ok(());
-    }
-
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
     //
     // This is the required setting to detect port conflicts.
     let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+    config.network.cache_dir = false.into();
 
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
@@ -282,7 +282,7 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 .with_exact_config(&config)?
                 .spawn_child(args!["start"])?
                 .bypass_test_capture(true)
-                .with_timeout(test_type.zebrad_timeout())
+                .with_timeout(test_type.zebrad_timeout())?
                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
             // Signal once node 1 is listening. A dial that lands before the listener
@@ -291,6 +291,8 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
             zebrad_child.expect_stdout_line_matches(regex::escape(&format!(
                 "Opened Zcash protocol endpoint at {node1_listen_addr}"
             )))?;
+            let mut zebrad_child =
+                zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY)?;
             let _ = node1_listening_tx.send(());
 
             while !is_finished.load(Ordering::SeqCst) {
@@ -351,8 +353,14 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 .with_exact_config(&config)?
                 .spawn_child(args!["start"])?
                 .bypass_test_capture(true)
-                .with_timeout(test_type.zebrad_timeout())
+                .with_timeout(test_type.zebrad_timeout())?
                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+
+            zebrad_child.expect_stdout_line_matches(regex::escape(&format!(
+                "Opened RPC endpoint at {rpc_listen_addr}"
+            )))?;
+            let mut zebrad_child =
+                zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY)?;
 
             while !is_finished.load(Ordering::SeqCst) {
                 zebrad_child.wait_for_stdout_line(Some("zebraB2".to_string()));
@@ -420,21 +428,16 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 }
 
 /// Regression test for #10715: a node that has synced to the shared chain tip must not
-/// disconnect its upstream peer due to empty `FindBlocks` responses.
+/// disconnect its upstream peer merely because discovery finds no new blocks.
 ///
-/// Before the fix, the stall tracker ran unconditionally and disconnected peers after 3
-/// consecutive empty-response `FindBlocks` cycles, even when both nodes were already at
-/// the same tip. The fix gates stall tracking on `is_at_or_near_network_tip`, so the
-/// peer is only tracked during genuine catch-up, not once the node is fully synced.
+/// Successful empty replies and caller-cancelled discovery requests are not peer failures.
 ///
 /// Sets up two regtest nodes:
 /// - Node A (upstream): mines a small chain and listens for P2P connections
 /// - Node B (internal): connects exclusively to Node A and syncs to its tip
 ///
 /// After both nodes share the same tip, the test polls `getpeerinfo` on Node B for
-/// 30 seconds and asserts that Node A is always connected. If the stall tracker fires
-/// incorrectly, Node A is dropped within ~6 seconds (3 cycles × 2-second regtest restart
-/// delay) and the assertion fails.
+/// 30 seconds and asserts that Node A remains connected across repeated discovery timeouts.
 #[tokio::test]
 async fn synced_node_keeps_upstream_peer_connected() -> Result<()> {
     tokio::time::timeout(
@@ -521,9 +524,7 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     tracing::info!("Node B has synced to Node A's tip; verifying Node A stays connected");
 
-    // The regtest sync loop restarts every 2 seconds. With the bug, 3 consecutive
-    // empty-response cycles (~6 seconds) would disconnect Node A. Poll for 30 seconds
-    // to give the stall tracker ample time to fire if the fix is not in effect.
+    // Cover several discovery timeouts and sync restarts after both nodes reach the shared tip.
     for i in 0..30_u32 {
         let peer_info: Vec<PeerInfo> = internal_client
             .json_result_from_call("getpeerinfo", "[]")
@@ -533,7 +534,7 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
         assert!(
             !peer_info.is_empty(),
             "upstream peer was disconnected {i} seconds after reaching the shared tip; \
-             the stall tracker must not fire when the node is at or near the network tip"
+             empty or caller-cancelled discovery requests must not cause disconnection"
         );
 
         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -252,7 +252,7 @@ owners' current releases and the version line at the top is updated.
 | `walletlock`                                                                              | [Zallet][zallet-walletlock]             | Done      | Unlocks and re-locks the key store.                                                                                                            |
 | `walletpassphrase`                                                                        | [Zallet][zallet-walletpassphrase]       | Done      | Unlocks and re-locks the key store.                                                                                                            |
 | `walletpassphrasechange`                                                                  | [Zallet][zallet-status]                 | Undecided |                                                                                                                                                |
-| [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)                           | [Zallet][zallet-z_converttex]           | Done      |                                                                                                                                                |
+| [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)                           | Zebra                                   | Done      | Zallet implements it too.                                                                                                                      |
 | [`z_exportkey`](https://zcash.github.io/rpc/z_exportkey.html)                             | [Zallet][zallet-z_exportkey]            | Done      |                                                                                                                                                |
 | [`z_exportviewingkey`](https://zcash.github.io/rpc/z_exportviewingkey.html)               | [Zallet][zallet-z_exportviewingkey]     | Done      | Shipped in 0.1.0-beta.2; Zallet's status page still lists it as not implemented.                                                               |
 | [`z_exportwallet`](https://zcash.github.io/rpc/z_exportwallet.html)                       | [Zallet][zallet-status]                 | Planned   | Planned as a ZeWIF export, likely a CLI command.                                                                                               |
@@ -381,7 +381,6 @@ loopback or private address. Zallet uses this service; see
 [zallet-verifymessage]: https://zcash.github.io/zallet/rpc/index.html#verifymessage
 [zallet-walletlock]: https://zcash.github.io/zallet/rpc/index.html#walletlock
 [zallet-walletpassphrase]: https://zcash.github.io/zallet/rpc/index.html#walletpassphrase
-[zallet-z_converttex]: https://zcash.github.io/zallet/rpc/index.html#z_converttex
 [zallet-z_exportkey]: https://zcash.github.io/zallet/rpc/index.html#z_exportkey
 [zallet-z_exportviewingkey]: https://zcash.github.io/zallet/rpc/index.html#z_exportviewingkey
 [zallet-z_getaddressforaccount]: https://zcash.github.io/zallet/rpc/index.html#z_getaddressforaccount

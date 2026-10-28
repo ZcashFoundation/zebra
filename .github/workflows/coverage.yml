@@ -24,7 +24,7 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       coverage: ${{ steps.filter.outputs.coverage || 'true' }}
@@ -48,7 +48,7 @@ jobs:
     permissions:
       id-token: write
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
 
     steps:
@@ -82,7 +82,7 @@ jobs:
           files: lcov.info
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: always()
     needs:
       - changes

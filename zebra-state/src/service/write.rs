@@ -67,23 +67,18 @@ pub(crate) fn validate_and_commit_non_finalized(
 }
 
 /// Update the [`LatestChainTip`], [`ChainTipChange`], and `non_finalized_state_sender`
-/// channels with the latest non-finalized [`ChainTipBlock`] and
-/// [`Chain`].
-///
-/// `last_zebra_mined_log_height` is used to rate-limit logging.
+/// channels with the latest state. If there is no non-finalized chain, use the
+/// finalized tip.
 ///
 /// If `backup_dir_path` is `Some`, the non-finalized state is written to the backup
 /// directory before updating the channels.
 ///
-/// Returns the latest non-finalized chain tip height.
-///
-/// # Panics
-///
-/// If the `non_finalized_state` is empty.
+/// Returns the latest chain tip height, or `None` if both states are empty.
 #[instrument(
     level = "debug",
     skip(
         non_finalized_state,
+        finalized_state,
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path,
@@ -92,19 +87,20 @@ pub(crate) fn validate_and_commit_non_finalized(
 )]
 fn update_latest_chain_channels(
     non_finalized_state: &NonFinalizedState,
+    finalized_state: &ZebraDb,
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
-) -> block::Height {
-    let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
-
-    let tip_block = best_chain
-        .tip_block()
-        .expect("unexpected empty chain: must commit at least one block before updating channels")
-        .clone();
-    let tip_block = ChainTipBlock::from(tip_block);
-
-    let tip_block_height = tip_block.height;
+) -> Option<block::Height> {
+    let non_finalized_tip = non_finalized_state
+        .best_tip_block()
+        .cloned()
+        .map(ChainTipBlock::from);
+    let tip_block_height = if let Some(tip) = &non_finalized_tip {
+        Some(tip.height)
+    } else {
+        finalized_state.finalized_tip_height()
+    };
 
     if let Some(backup_dir_path) = backup_dir_path {
         non_finalized_state.write_to_backup(backup_dir_path);
@@ -113,7 +109,15 @@ fn update_latest_chain_channels(
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
-    chain_tip_sender.set_best_non_finalized_tip(tip_block);
+    if let Some(tip) = non_finalized_tip {
+        chain_tip_sender.set_best_non_finalized_tip(tip);
+    } else {
+        let finalized_tip = finalized_state
+            .tip_block()
+            .map(crate::CheckpointVerifiedBlock::from)
+            .map(ChainTipBlock::from);
+        chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);
+    }
 
     tip_block_height
 }
@@ -125,7 +129,9 @@ struct WriteBlockWorkerTask {
     non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteMessage>,
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
-    invalid_block_reset_sender: UnboundedSender<block::Hash>,
+    /// Signals the [`crate::service::StateService`] that a finalized block commit failed,
+    /// carrying the durable finalized tip height and hash to reset to.
+    invalid_block_reset_sender: UnboundedSender<(Option<block::Height>, block::Hash)>,
     /// Signals the [`crate::service::StateService`] that a non-finalized block was rejected by
     /// the write task, so its hash should be removed from
     /// `non_finalized_block_write_sent_hashes`.
@@ -201,7 +207,7 @@ impl BlockWriteSender {
         backup_dir_path: Option<PathBuf>,
     ) -> (
         Self,
-        tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
@@ -331,8 +337,10 @@ impl WriteBlockWorkerTask {
                         "committing a block to the finalized state failed, resetting state queue",
                     );
 
-                    let send_result =
-                        invalid_block_reset_sender.send(finalized_state.db.finalized_tip_hash());
+                    let send_result = invalid_block_reset_sender.send((
+                        finalized_state.db.finalized_tip_height(),
+                        finalized_state.db.finalized_tip_hash(),
+                    ));
 
                     if send_result.is_err() {
                         info!(
@@ -373,6 +381,7 @@ impl WriteBlockWorkerTask {
             let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
                 update_latest_chain_channels(
                     non_finalized_state,
+                    &finalized_state.db,
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path.as_deref(),
@@ -448,10 +457,12 @@ impl WriteBlockWorkerTask {
             //       or do the channel update after the finalized state commit
             let tip_block_height = update_latest_chain_channels(
                 non_finalized_state,
+                &finalized_state.db,
                 chain_tip_sender,
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
-            );
+            )
+            .expect("just successfully inserted a non-finalized block above");
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
@@ -493,3 +504,6 @@ impl WriteBlockWorkerTask {
         std::mem::drop(self.finalized_state);
     }
 }
+
+#[cfg(test)]
+mod tests;

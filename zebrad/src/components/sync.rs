@@ -21,8 +21,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tower::{
-    builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
-    Service, ServiceExt,
+    builder::ServiceBuilder, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout, Service,
+    ServiceExt,
 };
 
 use zebra_chain::{
@@ -30,7 +30,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network as zn;
 use zebra_state as zs;
 
 use crate::{
@@ -40,20 +40,28 @@ use crate::{
 mod downloads;
 pub mod end_of_support;
 mod gossip;
-mod progress;
+mod hedge;
+pub(crate) mod progress;
 mod recent_sync_lengths;
 mod status;
 
 #[cfg(test)]
 mod tests;
 
-use downloads::{AlwaysHedge, Downloads};
+use downloads::Downloads;
+use hedge::SuccessHedge;
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
+
+/// Match the missing-block errors used by both hedging and sync recovery.
+fn is_not_found(error: &dyn std::error::Error) -> bool {
+    // TODO: improve this by checking the type (#2908).
+    format!("{error:?}").contains("NotFound")
+}
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
@@ -143,23 +151,18 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// If this timeout is set too low, the peer set and remote peers can get overloaded.
 pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 
-/// Controls how long we wait for a block download request to complete.
+/// The per-peer wire-response budget used to derive complete download deadlines.
 ///
-/// This timeout makes sure that the syncer doesn't hang when:
-///   - the lookahead queue is full, and
-///   - we are waiting for a request that is stuck.
+/// Connections start this timeout at dispatch, not while waiting for capacity. The complete sync
+/// operation is separately bounded by [`BLOCK_DOWNLOAD_ROUND_TIMEOUT`].
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = zn::constants::REQUEST_TIMEOUT;
+
+/// Bounds one complete block download round, including readiness, capacity waits and both hedges.
 ///
-/// See [`BLOCK_VERIFY_TIMEOUT`] for details.
-///
-/// ## Correctness
-///
-/// If this timeout is removed (or set too high), the syncer will sometimes hang.
-///
-/// If this timeout is set too low, the syncer will sometimes get stuck in a
-/// failure loop.
-///
-/// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+/// Reuse the existing four-attempt response budget rather than charging capacity waits as attempts.
+/// The retry limit is the constant 3, so conversion to u32 is lossless.
+const BLOCK_DOWNLOAD_ROUND_TIMEOUT: Duration =
+    BLOCK_DOWNLOAD_TIMEOUT.saturating_mul(BLOCK_DOWNLOAD_RETRY_LIMIT as u32 + 1);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -341,7 +344,7 @@ where
         + Sync
         + Clone
         + 'static,
-    ZN::Future: Send,
+    ZN::Future: Send + 'static,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
         + Send
         + Sync
@@ -392,7 +395,7 @@ where
     downloads: Pin<
         Box<
             Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                ConcurrencyLimit<SuccessHedge<ConcurrencyLimit<Retry<zn::RetryLimit, ZN>>>>,
                 Timeout<ZV>,
                 ZSR,
                 ZSTip,
@@ -419,7 +422,7 @@ where
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
-    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
 
     /// Blocks whose download failed with `NotFound` and should be re-requested on
     /// the next sync round, instead of being silently dropped (#5709).
@@ -447,7 +450,7 @@ where
         + Sync
         + Clone
         + 'static,
-    ZN::Future: Send,
+    ZN::Future: Send + 'static,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
         + Send
         + Sync
@@ -486,7 +489,7 @@ where
         state: ZS,
         read_state: ZSR,
         latest_chain_tip: ZSTip,
-        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -522,26 +525,21 @@ where
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
 
-        // The Hedge middleware is the outermost layer, hedging requests
-        // between two retry-wrapped networks.  The innermost timeout
-        // layer is relatively unimportant, because slow requests will
-        // probably be preemptively hedged.
-        //
-        // The Hedge goes outside the Retry, because the Retry layer
-        // abstracts away spurious failures from individual peers
-        // making a less-fallible network service, and the Hedge layer
-        // tries to reduce latency of that less-fallible service.
-        let block_network = Hedge::new(
+        // Capacity waiting stays inside the network request and does not consume a retry.
+        // Connections start response deadlines at wire dispatch; Downloads bounds readiness
+        // and the complete hedged retry operation with one absolute deadline.
+        // Hedge entire retry sequences so individual peer failures are retried before hedging.
+        // The inner limit bounds active sequences across both arms; exhausted arms release it
+        // immediately so their delayed siblings can start even at a limit of one.
+        // The outer limit bounds logical downloads, holding admission while any arm can succeed.
+        // Success, final failure, or cancellation releases it before block verification starts.
+        let block_network = SuccessHedge::new(
             ServiceBuilder::new()
                 .concurrency_limit(download_concurrency_limit)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
-            AlwaysHedge,
-            20,
-            0.95,
-            2 * SYNC_RESTART_DELAY,
         );
+        let block_network = ConcurrencyLimit::new(block_network, download_concurrency_limit);
 
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
@@ -754,19 +752,33 @@ where
     /// checkpoint verifier from advancing. Waiting for the lookahead pause to
     /// clear would deadlock — the pause cannot clear until this block arrives.
     /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
+    /// Blocks that can't get network capacity before the download deadline stay queued for the
+    /// next sync round.
     async fn reobtain_missing_blocks(&mut self) {
         if self.reobtain_hashes.is_empty() {
             return;
         }
 
-        for hash in std::mem::take(&mut self.reobtain_hashes) {
+        let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
+        for hash in hashes.by_ref() {
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
             if let Err(error) = self.downloads.download_and_verify(hash).await {
                 trace!(?hash, ?error, "re-download of missing block not queued");
+                // Any other error means the network failed or wasn't ready before the download
+                // deadline. Keep this block and the rest for the next sync round, rather than
+                // dropping blocks the verifier is waiting for, or waiting out each deadline.
+                if !matches!(
+                    error,
+                    BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
+                ) {
+                    self.reobtain_hashes.insert(hash);
+                    break;
+                }
             }
         }
+        self.reobtain_hashes.extend(hashes);
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -1210,27 +1222,38 @@ where
                 trace!(?height, ?hash, "verified and committed block to state");
 
                 // The block arrived, so forget any re-request bookkeeping for it.
+                self.reobtain_hashes.shift_remove(&hash);
                 self.block_reobtain_retries.remove(&hash);
                 self.utxo_race_drops = 0;
 
                 return Ok(());
             }
 
-            Err(BlockDownloadVerifyError::Invalid {
-                ref error,
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) if error.misbehavior_score() != 0 => {
-                let _ = self
-                    .misbehavior_sender
-                    .try_send((advertiser_addr, error.misbehavior_score()));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::Invalid {
+                    ref error,
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) if error.misbehavior_score() != 0 => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    error.misbehavior_score(),
+                    verify_error.to_string(),
+                ));
             }
 
-            Err(BlockDownloadVerifyError::InvalidHeight {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::InvalidHeight {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    verify_error.to_string(),
+                ));
             }
 
             // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
@@ -1239,11 +1262,17 @@ where
             // not recompute the header's commitment to the body's authorizing data
             // (GHSA-g95h-hw6g-pvgv). Peers that serve genuinely old blocks arrive unattributed and
             // fall through unscored. Score only a parent-proven rewrite.
-            Err(BlockDownloadVerifyError::BehindTipHeightLimit {
-                advertiser_addr: Some(advertiser_addr),
-                ..
-            }) => {
-                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::BehindTipHeightLimit {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    format!("parent header contradicts coinbase height: {verify_error}"),
+                ));
             }
 
             // `AboveLookaheadHeightLimit` deliberately falls through unscored, and must
@@ -1261,6 +1290,8 @@ where
         // next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`:
         // - `DownloadFailed`/`NotFound`: no peer delivered the block, which wedges the checkpoint
         //   frontier until the verify timeout (#5709).
+        // - `DownloadTimedOut`: no peer delivered the block within the download round. One hedged
+        //   request can already have failed with `NotFound` while its sibling was still waiting.
         // - `BehindTipHeightLimit`: the body was not a usable block for this hash, so the hash is
         //   still missing (GHSA-g95h-hw6g-pvgv). This re-request runs whether or not the peer could
         //   be attributed, and covers the window before a score reaches the address book, which
@@ -1279,10 +1310,11 @@ where
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
             Err(BlockDownloadVerifyError::DownloadFailed { error, hash })
-                if format!("{error:?}").contains("NotFound") =>
+                if is_not_found(error.as_ref()) =>
             {
                 Some(*hash)
             }
+            Err(BlockDownloadVerifyError::DownloadTimedOut { hash }) => Some(*hash),
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
             Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
                 if Self::is_utxo_lookup_timeout(e) =>
@@ -1512,7 +1544,7 @@ where
             }
 
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{error:?}").contains("NotFound") =>
+                if is_not_found(error.as_ref()) =>
             {
                 // Covers these errors:
                 // - NotFoundResponse
@@ -1521,6 +1553,10 @@ where
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
                 debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                false
+            }
+            BlockDownloadVerifyError::DownloadTimedOut { .. } => {
+                debug!(error = ?e, "no peer delivered the block within the download round, re-requesting, continuing");
                 false
             }
 

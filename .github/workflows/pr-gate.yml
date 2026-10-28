@@ -7,25 +7,27 @@ on:
   # re-evaluate release readiness.
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
-    branches: [main]
+    branches: [main, next]
   push:
     branches: [main]
   merge_group:
     types: [checks_requested]
 
 # Cancel obsolete gate runs after new commits. Events that cannot change the gate
-# outcome use separate groups so they cannot cancel the required PR Gate run:
-# unrelated labels, and edits that leave the title and the base branch alone.
+# outcome get a group of their own, keyed by run id, so they can cancel neither the
+# required PR Gate run nor each other: unrelated labels, and edits that leave the
+# title and the base branch alone. Cancelling one of those runs would report the
+# required check as failed, because `alls-green` reads a cancelled need as a failure.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
       (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
       github.event.label.name != 'release' &&
-      'ignored-label' ||
+      format('ignored-label-{0}', github.run_id) ||
       github.event.action == 'edited' &&
       github.event.changes.title == null &&
       github.event.changes.base == null &&
-      'ignored-edit' ||
+      format('ignored-edit-{0}', github.run_id) ||
       'required'
     }}
   cancel-in-progress: true
@@ -36,21 +38,22 @@ permissions:
 
 env:
   CLICOLOR: 1
+  # Every zc job shares these, because a cache entry is only valid for one zc release and one
+  # feature policy. Bump the key prefix with the zc pin: a saved key can never be refreshed.
+  ZC_CACHE_KEY_PREFIX: zc-cache-v0.7.0
+  ZC_FEATURES: exclude:proptest-impl,fuzzing,bench
 
 jobs:
   changes:
-    # Only the release label affects gate results, and only a title or base edit
-    # can change the declaration this gate reads. Every other label and edit event
-    # is a no-op, so it must not spend a runner or replace the required check.
-    if: >-
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
-    runs-on: ubuntu-latest
+    # Runs for every trigger, including the labels and edits that cannot change the
+    # gate outcome. `pr-gate-result` is a required check, so every PR Gate run has to
+    # report it, and it can only report an honest verdict if the cheap policy jobs
+    # re-evaluate the declaration. Only `api-diff` and `release-api-diff` are expensive
+    # enough to skip.
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
-      semver: ${{ steps.filter.outputs.semver || 'true' }}
+      api_diff: ${{ steps.filter.outputs.api_diff || 'true' }}
       breaking: ${{ steps.title.outputs.breaking }}
       type: ${{ steps.title.outputs.type }}
       conventional: ${{ steps.title.outputs.conventional }}
@@ -101,15 +104,22 @@ jobs:
             echo "conventional=$conventional"
           } >> "$GITHUB_OUTPUT"
 
-  semver-checks:
+  api-diff:
     needs: changes
-    # Real work runs only on contributor pull requests that change Rust and do not already declare
-    # a break with `!`. A declared break is allowed through; release-plz majors the version at release.
+    # Real work runs only on pull requests that change Rust. A declared break runs too: the diff is
+    # the evidence a reviewer needs to judge what the `!` actually covers. Merge groups and pushes
+    # skip it because each queued pull request already passed it against its own fork point.
+    # An unrelated label, or an edit that leaves the title and the base branch alone, cannot change the
+    # API delta of a head commit that did not move, so it must not spend runner time.
+    # `pr-gate-result` tolerates the resulting skip.
     if: >-
       github.event_name == 'pull_request' &&
-      needs.changes.outputs.semver == 'true' &&
-      needs.changes.outputs.breaking == 'false'
-    runs-on: ubuntu-latest
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
+      needs.changes.outputs.api_diff == 'true'
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -121,19 +131,197 @@ jobs:
       - name: Compute the baseline from the PR's fork point
         id: baseline
         env:
-          BASE_REF: ${{ github.base_ref }}
+          # The PR's direct base, as in `changelog-gate`, so a stacked PR's diff is only its own.
+          # Caches exist only for fork points on `main`, so a stacked PR builds its baseline.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           # `fetch-depth: 0` populates the base branch without persisting credentials.
           echo "rev=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-zebra-build
-      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+      - name: Restore the zc rustdoc cache
+        # Restores what `api-diff-warm` saved for the fork point; a pull request must never save.
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          # Gate the consumer-facing library crates only. zebrad is a binary whose build script
-          # needs test-only protos absent from the baseline; zebra-test and zebra-utils are test
-          # and tooling crates whose feature-gated APIs are not stability surfaces.
-          exclude: zebrad, zebra-test, zebra-utils
-          feature-group: default-features
-          baseline-rev: ${{ steps.baseline.outputs.rev }}
+          # The path is part of the cache version, so it must match the save path exactly.
+          path: target/zc-cache/${{ steps.baseline.outputs.rev }}.*
+          key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ steps.baseline.outputs.rev }}
+      # A declared break only has to analyse cleanly; an undeclared one must not break the API.
+      - name: Diff the public API and dependencies
+        id: zc
+        uses: ZcashFoundation/zc@8e37c96bff652df008a645b566cb9d3124b10edc # v0.7.0
+        with:
+          baseline: ${{ steps.baseline.outputs.rev }}
+          fail-on: ${{ needs.changes.outputs.breaking == 'true' && 'error' || 'api-breaking' }}
+          features: ${{ env.ZC_FEATURES }}
+      - name: Explain how to resolve the failure
+        if: failure() && steps.zc.outcome == 'failure'
+        env:
+          REPORT: ${{ steps.zc.outputs.report }}
+          VERDICT: ${{ steps.zc.outputs.verdict }}
+        run: |
+          stages=""
+          if [[ -f "$REPORT" ]]; then
+            stages="$(jq -r '[.crates[].error.stage // empty] | unique | join(" ")' "$REPORT")"
+          fi
+          if [[ "$VERDICT" == "breaking" ]]; then
+            title="Declare or avoid the break"
+            hint="If the break is intended, add '!' to the PR title and a 'breaking' change fragment. zc already leaves out the 'proptest-impl', 'fuzzing', and 'bench' features. It still counts zebrad's library, but a break only in zebrad's library does not need '!'."
+          elif [[ "$stages" == *baseline_build* ]]; then
+            title="The fork point does not build"
+            hint="zc could not build this PR's fork point on the base branch with its pinned nightly. Every PR from that fork point fails the same way, so a rerun will not help; it needs a fix on the base branch or in zc."
+          elif [[ "$stages" == *head_build* ]]; then
+            title="This branch does not build"
+            hint="zc could not build this branch with its pinned nightly. Check the zc output above; a rerun only helps if the failure was transient."
+          else
+            title="Rerun the analysis"
+            hint="zc could not analyse every crate. Rerun the job; if it fails again, check the zc output above."
+          fi
+          echo "::notice title=${title}::${hint} This check is advisory and does not block merging."
+
+  # A pull request can only restore caches written on its own ref or on main, so this push-only
+  # job saves each main commit's rustdoc JSON for pull requests that fork from it. Runs are not
+  # cancelled, because a commit without a saved entry leaves its pull requests uncached.
+  api-diff-warm:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Build the rustdoc JSON for this commit
+        # Comparing the commit with itself builds each crate once. Warming only has to populate
+        # the cache, so it never fails the job.
+        continue-on-error: true
+        uses: ZcashFoundation/zc@8e37c96bff652df008a645b566cb9d3124b10edc # v0.7.0
+        with:
+          baseline: ${{ github.sha }}
+          head: ${{ github.sha }}
+          features: ${{ env.ZC_FEATURES }}
+      - name: Save the zc rustdoc cache
+        # zc names cache files `<commit>.<fingerprint>...`, so this saves only this commit's files.
+        if: hashFiles(format('target/zc-cache/{0}.*', github.sha)) != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: target/zc-cache/${{ github.sha }}.*
+          key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ github.sha }}
+
+  # Posts the public API and dependency diff since the last zebrad release on the Release PR, so
+  # reviewers can check each crate's bump. Like `api-diff`, it skips labels and edits that cannot
+  # change the diff.
+  release-api-diff:
+    if: >-
+      github.event_name == 'pull_request' &&
+      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'release') &&
+      (github.event.action != 'edited' ||
+      github.event.changes.title != null || github.event.changes.base != null) &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write # creates or updates the sticky API diff comment
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Find the last zebrad release
+        id: baseline
+        run: |
+          if ! tag="$(git describe --tags --match 'v*' --abbrev=0 HEAD)"; then
+            echo "::error title=No release tag found::This diff needs a v* tag reachable from the release PR head."
+            exit 1
+          fi
+          # `v*` tags are zebrad's. A library crate that skipped a zebrad release has an older
+          # tag of its own, and its changes from before `$tag` are missing from the diff.
+          older_crate_tags=""
+          while read -r crate; do
+            [[ -d "$crate" ]] || continue
+            crate_tag="$(git describe --tags --match "${crate}-v*" --abbrev=0 HEAD)"
+            if ! git merge-base --is-ancestor "$tag" "$crate_tag"; then
+              older_crate_tags+="${older_crate_tags:+ }${crate_tag}"
+            fi
+          done < <(git tag --list '*-v*' --merged HEAD | sed 's/-v[0-9].*$//' | sort -u)
+          {
+            echo "tag=${tag}"
+            echo "rev=$(git rev-parse "${tag}^{commit}")"
+            echo "older_crate_tags=${older_crate_tags}"
+          } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Restore the zc rustdoc cache
+        # Restores what `api-diff-warm` saved for the release commit; a pull request must never save.
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          # The path is part of the cache version, so it must match the save path exactly.
+          path: target/zc-cache/${{ steps.baseline.outputs.rev }}.*
+          key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ steps.baseline.outputs.rev }}
+      - name: Diff the public API and dependencies since the last release
+        id: zc
+        uses: ZcashFoundation/zc@8e37c96bff652df008a645b566cb9d3124b10edc # v0.7.0
+        with:
+          baseline: ${{ steps.baseline.outputs.tag }}
+          fail-on: none
+          features: ${{ env.ZC_FEATURES }}
+          with-changelog: "true"
+      - name: Post the diff as a pull request comment
+        # A cancelled run must not replace the previous diff with a failure notice.
+        if: ${{ !cancelled() && steps.baseline.outputs.tag != '' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CHANGELOG_FILE: ${{ steps.zc.outputs.changelog }}
+          OLDER_CRATE_TAGS: ${{ steps.baseline.outputs.older_crate_tags }}
+          TAG: ${{ steps.baseline.outputs.tag }}
+        with:
+          script: |
+            const fs = require('fs');
+
+            const marker = '<!-- release-api-diff -->';
+            const tag = process.env.TAG;
+            const head = context.payload.pull_request.head.sha.slice(0, 12);
+            const file = process.env.CHANGELOG_FILE;
+            const olderCrateTags = process.env.OLDER_CRATE_TAGS.split(' ').filter(Boolean);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const code = items => items.map(item => `\`${item}\``).join(', ');
+
+            let header = `${marker}\n## Public API diff since zebrad ${tag}\n\nComparing \`${tag}\` with \`${head}\`.\n`;
+            if (olderCrateTags.length > 0) {
+              header += `\nThese crates were last released before zebrad ${tag}, so their changes from before it are missing: ${code(olderCrateTags)}.\n`;
+            }
+
+            let body;
+            if (fs.existsSync(file)) {
+              body = `${header}\n${fs.readFileSync(file, 'utf8')}`;
+              // The run summary keeps the whole diff when the comment has to be cut.
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+            } else {
+              body = `${header}\nThe diff could not be produced. See [the job log](${runUrl}).`;
+            }
+
+            // GitHub rejects comment bodies over 65536 characters, so cut back to a whole crate section.
+            if (body.length > 65536) {
+              const kept = body.slice(0, 60000);
+              const boundary = kept.lastIndexOf('\n## ');
+              const cut = boundary > header.length ? boundary : kept.lastIndexOf('\n');
+              const dropped = [...body.slice(cut).matchAll(/^## (.+)$/gm)].map(match => match[1]);
+              const including = dropped.length > 0 ? `, including ${code(dropped)}` : '';
+              body = `${body.slice(0, cut)}\n\nThe [run summary](${runUrl}) has the full diff${including}.\n`;
+            }
+
+            const issue = { ...context.repo, issue_number: context.issue.number };
+            const comments = await github.paginate(github.rest.issues.listComments, issue);
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' && c.body.startsWith(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...issue, body });
+            }
 
   # This checks for changelog entries depending on the type of the PR (per title).
   # An entry is required for a crate if any file in the crate changed.
@@ -141,7 +329,7 @@ jobs:
   changelog-gate:
     needs: changes
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -151,7 +339,9 @@ jobs:
           persist-credentials: false
       - name: Check declaration and package changelogs
         env:
-          BASE_REF: ${{ github.base_ref }}
+          # The PR's direct base. GitHub runs a stacked PR's workflows as if it targeted the stack's
+          # base, so `github.base_ref` would attribute lower PRs' fragments to this one.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BREAKING: ${{ needs.changes.outputs.breaking }}
           CONVENTIONAL: ${{ needs.changes.outputs.conventional }}
           DECLARED_TYPE: ${{ needs.changes.outputs.type }}
@@ -165,7 +355,7 @@ jobs:
   # combine on the merge queue ref and on `main` is checked too.
   changelog-fragments:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -233,7 +423,7 @@ jobs:
       - name: Check desired release state
         id: cargo-release
         continue-on-error: true
-        uses: ZcashFoundation/cargo-release@0083006dfd267ed560b4cf1aed347ef2f326162e # v0.1.0
+        uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
         with:
           phase: check
           base-sha: ${{ steps.release-target.outputs.base_sha }}
@@ -278,27 +468,16 @@ jobs:
           fi
 
   pr-gate-result:
-    # Keep skipped unrelated-label and unrelated-edit runs from replacing the
-    # required check.
-    name: >-
-      ${{
-        (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-        github.event.label.name != 'release' &&
-        'Label does not affect the PR gate' ||
-        github.event.action == 'edited' &&
-        github.event.changes.title == null &&
-        github.event.changes.base == null &&
-        'Edit does not affect the PR gate' ||
-        'pr-gate-result'
-      }}
-    runs-on: ubuntu-latest
-    if: >-
-      always() &&
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null)
-    needs: [changes, semver-checks, changelog-gate, changelog-fragments, release-readiness]
+    # The ruleset requires the `pr-gate-result` context, and GitHub resolves it against
+    # the check runs of the newest PR Gate run for the head commit. So the job keeps a
+    # fixed name and runs for every trigger: a run that reports nothing under this name
+    # leaves the required check waiting for a status that never arrives, which is what a
+    # renamed or skipped result job did. Renaming also never worked as written, because
+    # GitHub does not evaluate `name` expressions for a job it skips, so those runs
+    # reported the raw expression text.
+    runs-on: ubuntu-26.04
+    if: always()
+    needs: [changes, api-diff, changelog-gate, changelog-fragments, release-readiness]
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
@@ -309,6 +488,9 @@ jobs:
           # entries are good enough. `allowed-failures` also tolerates a skip, and
           # must not be combined with `allowed-skips`: alls-green requires every
           # `allowed-skips` job to be skipped or successful, even a failure-allowed one.
-          # Temporarily keep semver checks advisory until #11409 is resolved.
-          allowed-failures: changelog-gate, semver-checks
+          # `api-diff` stays advisory until after the NU7 Mainnet decision on 2026-10-20, so a
+          # new blocking check cannot stall merges before then. When it becomes required, move it
+          # to `allowed-skips` instead of dropping it from both lists: no-op label and edit runs
+          # skip it, and an intolerant list would turn each of them into a failed required check.
+          allowed-failures: changelog-gate, api-diff
           allowed-skips: release-readiness

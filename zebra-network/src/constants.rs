@@ -149,8 +149,24 @@ pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 
 
 /// Zebra rotates its peer inventory registry every time this interval elapses.
 ///
-/// After 2 of these intervals, Zebra's local available and missing inventory entries expire.
+/// Available, missing, and failed inventory entries expire after two rotations. Delayed polling
+/// restarts this interval instead of replaying missed rotations.
 pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
+
+/// How long a single-hash [`Request::BlocksByHash`](crate::Request::BlocksByHash) waits for
+/// eligible busy capacity before returning a local refusal.
+///
+/// Sync and gossip downloaders use [`Request::BlockDownload`](crate::Request::BlockDownload)
+/// instead: capacity waits do not consume peer attempts, and the caller bounds the complete
+/// readiness and response operation. The connection's [`REQUEST_TIMEOUT`] starts at wire dispatch.
+pub const INVENTORY_BUSY_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// How long a find-blocks or find-headers request waits for a busy serving peer before it can
+/// fall back to any ready peer.
+///
+/// This wait starts when the request enters the peer set and counts towards the syncer's
+/// six-second request timeout, leaving time for the fallback peer to respond.
+pub const FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// The default peer address crawler interval.
 ///
@@ -330,6 +346,9 @@ pub const ADDR_RESPONSE_LIMIT_DENOMINATOR: usize = 2;
 /// above does not shrink the address book (see #11103).
 pub const MAX_ADDRS_IN_ADDRESS_BOOK: usize = MAX_ADDRS_IN_MESSAGE * 5;
 
+/// The maximum number of gossiped addresses applied to the address book in one request.
+pub(crate) const GOSSIPED_ADDRS_PER_REQUEST: usize = 100;
+
 /// Truncate timestamps in outbound address messages to this time interval.
 ///
 /// ## SECURITY
@@ -347,9 +366,9 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
 ///
-/// Advertise NU7 Testnet support; Mainnet's assigned version must wait for its activation schedule.
+/// Advertise NU7 support on Mainnet and Testnet.
 /// See [ZIP 204](https://zips.z.cash/zip-0204#assigning-protocol-versions-to-network-upgrades).
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_180);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_190);
 
 /// The default RTT estimate for peer responses.
 ///

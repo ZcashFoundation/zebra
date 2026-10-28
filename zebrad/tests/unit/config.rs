@@ -21,7 +21,7 @@ use crate::common::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config,
         random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
     },
-    launch::{ZebradTestDirExt, EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY},
+    launch::{ZebradTestDirExt, LAUNCH_DELAY},
     sync::TINY_CHECKPOINT_TIMEOUT,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -62,6 +62,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let _init_guard = zebra_test::init();
 
     let mut config = default_test_config(&Mainnet);
+    config.network.cache_dir = false.into();
     let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
@@ -78,9 +79,9 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let mut child = run_dir
         .path()
         .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(EXTENDED_LAUNCH_DELAY);
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    child.expect_stdout_line_matches("Opened Zebra state cache at")?;
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -223,7 +224,7 @@ fn persistent_mode_peer_cache() -> Result<()> {
     let mut peer = testdir()?
         .with_config(&mut peer_config)?
         .spawn_child(args!["start"])?
-        .with_timeout(LAUNCH_DELAY);
+        .with_timeout(LAUNCH_DELAY)?;
 
     let peer_addr = read_listen_addr_from_logs(&mut peer, OPENED_P2P_ENDPOINT_MSG)?;
 
@@ -770,7 +771,7 @@ fn non_blocking_logger() -> Result<()> {
             let dir = testdir()?.with_config(&mut config)?;
             let mut child = dir
                 .spawn_child(args!["start"])?
-                .with_timeout(TINY_CHECKPOINT_TIMEOUT);
+                .with_timeout(TINY_CHECKPOINT_TIMEOUT)?;
 
             // Create an http client
             let client = RpcRequestClient::new_with_timeout(rpc_address, RPC_REQUEST_TIMEOUT);
@@ -824,9 +825,10 @@ fn non_blocking_logger() -> Result<()> {
     });
 
     // Wait until the spawned task finishes up to 90 seconds before shutting down tokio runtime.
-    if done_rx.recv_timeout(Duration::from_secs(90)).is_ok() {
-        rt.shutdown_timeout(Duration::from_secs(3));
+    if done_rx.recv_timeout(Duration::from_secs(90)).is_err() {
+        test_task_handle.abort();
     }
+    rt.shutdown_timeout(Duration::from_secs(3));
 
     match test_task_handle.now_or_never() {
         Some(Ok(result)) => result,
