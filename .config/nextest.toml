@@ -1,7 +1,7 @@
 # Nextest configuration for Zebra
 #
 # Profiles:
-#   default       Local dev: runs unit + integration (excludes stateful + e2e)
+#   default       Local dev: runs unit + integration (excludes stateful, e2e, zcashd-compat)
 #   ci            PR CI: same scope, CI-tuned output
 #   ci-stateful   GCP: runs stateful tests selected by --filter-expr
 #   ci-e2e        GCP: runs E2E tests selected by --filter-expr
@@ -13,7 +13,9 @@ status-level = "pass"
 # Keep this 20-minute backstop in sync with profile.ci. In-test deadlines,
 # sequential phases, and cleanup need time to report failures before termination.
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+# The zcashd-compat suite needs a zcashd sidecar and passes without testing anything when
+# `TEST_ZCASHD_COMPAT` is unset, so it runs only under its own profiles.
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- CI Profile (PRs) ---
 
@@ -21,7 +23,7 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=u
 fail-fast = false
 failure-output = "immediate"
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
@@ -98,8 +100,8 @@ test-group = 'serial-live-testnet'
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_testnet$/)'
 test-group = 'serial-live-testnet'
 
-# Force zcashd-compat integration tests serial in every profile, so a parallel
-# --run-ignored=all run cannot collide on their released RPC/P2P ports.
+# Force zcashd-compat integration tests serial in every profile, so an explicitly selected
+# parallel run cannot collide on their released RPC/P2P ports.
 [[profile.default.overrides]]
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
