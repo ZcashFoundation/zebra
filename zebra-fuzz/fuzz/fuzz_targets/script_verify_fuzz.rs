@@ -173,7 +173,9 @@ fuzz_target!(|data: &[u8]| {
     // size) and reserve the last 25% for script bytecode. If the head
     // is too short for any sensible split, give the script at least
     // 1 byte.
-    let split_at = (head.len() * 3 / 4).max(1).min(head.len().saturating_sub(1));
+    let split_at = (head.len() * 3 / 4)
+        .max(1)
+        .min(head.len().saturating_sub(1));
     let tx_bytes = &head[..split_at];
     let script_bytes = &head[split_at..];
 

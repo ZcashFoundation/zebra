@@ -40,7 +40,7 @@ blake2b_simd = { workspace = true }
 bellman = { workspace = true }
 bls12_381 = { workspace = true }
 groth16 = { workspace = true }
-halo2 = { package = "halo2_proofs", version = "0.4" }
+halo2 = { workspace = true }
 jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }

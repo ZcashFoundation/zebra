@@ -54,18 +54,17 @@ fuzz_target!(|data: &[u8]| {
     // and the writer here is a `Vec`, so this can only fail if an implementation
     // contradicts that contract. Unwrapping rather than returning keeps the
     // round-trip checks below reachable in every case where they apply.
-    let serialized = tx
-        .zcash_serialize_to_vec()
-        .expect("ZcashSerialize is infallible except for writer errors, and a Vec writer cannot fail");
+    let serialized = tx.zcash_serialize_to_vec().expect(
+        "ZcashSerialize is infallible except for writer errors, and a Vec writer cannot fail",
+    );
 
     // Decode the re-encoded bytes. Unlike the two serialize steps, this one can
     // genuinely fail, and a failure is the finding: it means the serializer
     // emitted bytes that its own deserializer rejects. Skipping it — as an
     // `if let Ok(..)` would — discards both assertions below in precisely the
     // case they exist to catch.
-    let tx2 = Transaction::zcash_deserialize(Cursor::new(&serialized)).expect(
-        "round-trip decode failure — serialize emitted bytes its own deserializer rejects",
-    );
+    let tx2 = Transaction::zcash_deserialize(Cursor::new(&serialized))
+        .expect("round-trip decode failure — serialize emitted bytes its own deserializer rejects");
 
     // The two encodings must match byte-for-byte (idempotent canonical form) and
     // the two decoded values must be structurally equal (serialize is invertible
