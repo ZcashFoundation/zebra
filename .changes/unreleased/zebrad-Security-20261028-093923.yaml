@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Bound memory amplification from peer block requests by retaining at most 16 distinct block hashes before inbound dispatch.
+time: 2026-10-28T09:39:23.329626942-05:00

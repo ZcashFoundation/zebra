@@ -321,6 +321,18 @@ pub const PEER_GET_ADDR_TIMEOUT: Duration = Duration::from_secs(8);
 /// With a fanout of 3, we were dropping a lot of responses, because the overall crawl timed out.
 pub const GET_ADDR_FANOUT: usize = 1;
 
+/// The maximum number of distinct block hashes retained from a peer's `getdata` request.
+///
+/// The inbound service uses the same limit when serving blocks. Additional block hashes are
+/// ignored before allocating and cloning the internal request.
+///
+/// This is the same as `zcashd`'s request limit:
+/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
+///
+/// (Zebra's outbound request limit is one block in transit per peer, because it fans out block
+/// requests to many peers instead of just a few peers.)
+pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
+
 /// The maximum number of addresses allowed in an `addr` or `addrv2` message.
 ///
 /// `addr`:
