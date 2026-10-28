@@ -25,6 +25,10 @@ failure-output = "immediate"
 slow-timeout = { period = "5m", terminate-after = 4 }
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
+# Record retry attempts for the unit test job summary.
+[profile.ci.junit]
+path = "junit.xml"
+
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
