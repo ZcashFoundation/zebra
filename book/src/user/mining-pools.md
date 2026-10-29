@@ -91,6 +91,22 @@ polling as a backstop; coalesced intermediate tips do not necessarily create seq
 The endpoint has no authentication; expose it only to trusted clients. See
 [ZMQ block notifications](mining.md#zmq-block-notifications) for framing and resource limits.
 
+## Resolve equal-work tip races
+
+When backends choose different tips with equal cumulative work, call `preciousblock` with the same
+known, non-finalized tip hash on each backend to align the fleet:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"preciousblock","params":["<preferred non-finalized tip hash>"]}
+```
+
+Among equal-work tips the last call wins, but more-work chains always take precedence, so a call on a
+block with less work than the best tip is a no-op. The preference covers only that block while it is
+a tip: once a block is added on top of it, the extended chain no longer carries it. If the race
+continues at the next height with equal work, call `preciousblock` again on each backend with your
+new tip. Known non-tip or finalized blocks also return `null` without changing the preference;
+unknown hashes return `Block not found`. Preferences are in memory only and are forgotten on restart.
+
 ## Keep mining and payouts separate
 
 Zebra validates blocks and serves mining work; it is not a wallet. Point the pool's mining RPC
