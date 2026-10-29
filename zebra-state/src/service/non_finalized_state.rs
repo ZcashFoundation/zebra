@@ -29,7 +29,7 @@ use crate::{
         MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES,
         MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS, MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT,
     },
-    error::ReconsiderError,
+    error::{PreciousError, ReconsiderError},
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{
         check,
@@ -158,6 +158,9 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
+    /// Monotonically increasing tip preference, never written to the database or backup.
+    precious_rank: u64,
+
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
@@ -213,6 +216,7 @@ impl Clone for NonFinalizedState {
     fn clone(&self) -> Self {
         Self {
             chain_set: self.chain_set.clone(),
+            precious_rank: self.precious_rank,
             network: self.network.clone(),
             max_index_entries: self.max_index_entries,
             // Only the write task reports evicted blocks.
@@ -233,6 +237,7 @@ impl NonFinalizedState {
     pub fn new(network: &Network) -> NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
+            precious_rank: 0,
             network: network.clone(),
             max_index_entries: Some(if network.is_a_test_network() {
                 MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS
@@ -380,6 +385,7 @@ impl NonFinalizedState {
                 .zip(other.chain_set.iter())
                 .all(|(self_chain, other_chain)| self_chain.eq_internal_state(other_chain))
             && self.network == other.network
+            && self.precious_rank == other.precious_rank
     }
 
     /// Returns an iterator over the non-finalized chains, with the best chain first.
@@ -505,8 +511,8 @@ impl NonFinalizedState {
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
-        // Chain::cmp uses the partial cumulative work, the tip's receipt time, and the
-        // hash of the tip block. None of these fields has interior mutability.
+        // Chain::cmp uses work, precious rank, receipt time, and tip hash.
+        // None of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
         #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
@@ -609,6 +615,47 @@ impl NonFinalizedState {
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
+    }
+
+    /// Prefer this tip over other equal-work tips until it is extended or forked.
+    ///
+    /// Known non-tip blocks, tips with less work than the best chain, and repeats of the latest
+    /// call are accepted unchanged. Later calls take precedence; neither the preference nor its
+    /// counter is persisted.
+    pub fn precious_block(
+        &mut self,
+        block_hash: Hash,
+        finalized_state: &ZebraDb,
+    ) -> Result<block::Hash, PreciousError> {
+        let Some(mut chain) = self.find_chain(|chain| chain.non_finalized_tip_hash() == block_hash)
+        else {
+            if self.any_chain_contains(&block_hash) || finalized_state.contains_hash(block_hash) {
+                return Ok(block_hash);
+            }
+            return Err(PreciousError::MissingBlock(block_hash));
+        };
+
+        // A repeat of the latest call already holds the newest rank.
+        if chain.precious_rank == Some(self.precious_rank)
+            || chain.partial_cumulative_work
+                < self
+                    .best_chain()
+                    .expect("the requested tip belongs to a non-empty chain set")
+                    .partial_cumulative_work
+        {
+            return Ok(block_hash);
+        }
+
+        self.precious_rank = self
+            .precious_rank
+            .checked_add(1)
+            .expect("u64 cannot be exhausted by preciousblock calls in a node's lifetime");
+        self.chain_set.remove(&chain);
+        Arc::make_mut(&mut chain).precious_rank = Some(self.precious_rank);
+        self.chain_set.insert(chain);
+        self.update_metrics_for_chains();
+        self.update_metrics_bars();
+        Ok(block_hash)
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
@@ -1136,7 +1183,7 @@ impl NonFinalizedState {
     /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
-    /// (Using the first-received, then tip block hash tie-breakers.)
+    /// (Using the precious preference, first-received, then tip block hash tie-breakers.)
     pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,
