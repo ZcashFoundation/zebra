@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: Added the required `RpcServer::precious_block` method for equal-work tip selection; downstream trait implementations must implement it.
+time: 2026-10-29T15:18:56.348811258-05:00
