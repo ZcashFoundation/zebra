@@ -1423,6 +1423,16 @@ pub enum Request {
     /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
+    /// Prefers the given block over equal-work chain tips in the non-finalized state.
+    ///
+    /// Finalized blocks, known non-tip blocks, and lower-work tips succeed without changing state.
+    /// The latest call wins; the preference is lost when the tip changes or the node restarts.
+    ///
+    /// Returns [`Response::Precious`] with the requested hash, or a
+    /// [`PreciousError`](crate::error::PreciousError) if the block was not found or the request
+    /// could not be processed.
+    PreciousBlock(block::Hash),
+
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
@@ -1471,6 +1481,7 @@ impl Request {
             Request::KnownBlock(_) => "known_block",
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
+            Request::PreciousBlock(_) => "precious_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
@@ -2134,6 +2145,7 @@ impl TryFrom<Request> for ReadRequest {
             | Request::AuthenticateEarlyRelay(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
+            | Request::PreciousBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
