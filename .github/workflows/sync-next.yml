@@ -1,8 +1,7 @@
 # Keep `next` current with `main` through a reviewable pull request.
 #
-# After each push to `main`, opens a `main` -> `next` pull request, or leaves the open
-# one to pick up the new commits. A maintainer merges it with a merge commit, resolving
-# any conflicts on a separate branch first. See book/src/dev/next-branch.md.
+# After each push to `main`, moves the `sync/main-to-next` branch up to `main` and opens or
+# updates its auto-merging pull request into `next`. See book/src/dev/next-branch.md.
 name: Sync main to next
 
 on:
@@ -19,7 +18,8 @@ permissions: {}
 jobs:
   sync:
     name: Open or update the sync pull request
-    if: github.repository_owner == 'ZcashFoundation'
+    # `github.sha` is the commit to sync, so a manual run must start from `main`.
+    if: github.repository_owner == 'ZcashFoundation' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
@@ -32,7 +32,7 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: read
+          permission-contents: write
           permission-pull-requests: write
 
       - name: Open or update the sync pull request
@@ -40,53 +40,53 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}
+          MAIN_SHA: ${{ github.sha }}
+          SYNC_BRANCH: sync/main-to-next
         run: |
-          # `gh pr list --head` matches the branch name in any fork, so a fork's `main`
-          # could stand in for this repository's. The REST filter takes the owner.
-          find_sync_pr() {
-            gh api "repos/${REPO}/pulls?state=open&base=next&head=${OWNER}:main" \
-              --jq '.[0].number // empty'
-          }
-
-          if ! BRANCH=$(gh api "repos/${REPO}/branches/next" --jq '.name' 2>&1); then
-            if [[ "${BRANCH}" == *"HTTP 404"* ]]; then
-              echo "::notice::The next branch does not exist, so there is nothing to sync."
-              exit 0
-            fi
-            echo "${BRANCH}"
-            exit 1
-          fi
-
-          AHEAD=$(gh api "repos/${REPO}/compare/next...main" --jq '.ahead_by')
+          AHEAD=$(gh api "repos/${REPO}/compare/next...${MAIN_SHA}" --jq '.ahead_by')
           if [ "${AHEAD}" -eq 0 ]; then
             echo "next already contains every commit on main."
             exit 0
           fi
 
-          PR=$(find_sync_pr)
-          if [ -z "${PR}" ]; then
-            BODY_FILE=$(mktemp)
-            cat > "${BODY_FILE}" <<'BODY'
-          Brings the commits merged to `main` into `next`.
-
-          Merge this pull request with a merge commit, so `next` keeps each commit from `main`.
-
-          If it has conflicts, resolve them on a separate branch, because this pull request's head is `main`. The steps are in [The `next` branch](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/next-branch.md#resolve-sync-conflicts).
-          BODY
-            gh pr create --repo "${REPO}" --base next --head main \
-              --title "chore: sync main to next" --body-file "${BODY_FILE}"
-            PR=$(find_sync_pr)
+          # Create the branch, or fast-forward it, or merge main into it once a maintainer's
+          # conflict resolution blocks the fast-forward. Never force it over that resolution.
+          if ! gh api "repos/${REPO}/git/refs" -f ref="refs/heads/${SYNC_BRANCH}" -f sha="${MAIN_SHA}" --silent 2>/dev/null &&
+            ! gh api -X PATCH "repos/${REPO}/git/refs/heads/${SYNC_BRANCH}" -f sha="${MAIN_SHA}" -F force=false --silent 2>/dev/null &&
+            ! MERGE=$(gh api "repos/${REPO}/merges" -f base="${SYNC_BRANCH}" -f head="${MAIN_SHA}" --silent 2>&1); then
+            if [[ "${MERGE}" != *"HTTP 409"* ]]; then
+              echo "${MERGE}"
+              exit 1
+            fi
+            echo "::warning::main conflicts with ${SYNC_BRANCH}. Merge main into it, as described in book/src/dev/next-branch.md."
           fi
-          echo "Sync pull request #${PR} has ${AHEAD} commit(s) from main."
+
+          # `gh pr list --head` matches the branch name in any fork. The REST filter takes the owner.
+          PR=$(gh api "repos/${REPO}/pulls?state=open&base=next&head=${OWNER}:${SYNC_BRANCH}" \
+            --jq '.[0].html_url // empty')
+          if [ -z "${PR}" ]; then
+            PR=$(gh pr create --repo "${REPO}" --base next --head "${SYNC_BRANCH}" \
+              --title "chore: sync main to next" --body-file - <<'BODY'
+          Brings the commits merged to `main` into `next`. It merges itself with a merge commit once the required checks pass.
+
+          If it conflicts with `next`, resolve the conflicts on this pull request's branch. The steps are in [The `next` branch](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/next-branch.md#resolve-sync-conflicts).
+          BODY
+            )
+          fi
+          echo "Sync pull request ${PR} has ${AHEAD} commit(s) from main."
 
           # GitHub computes mergeability asynchronously after the head moves.
           MERGEABLE=UNKNOWN
           for _ in $(seq 1 6); do
-            MERGEABLE=$(gh pr view "${PR}" --repo "${REPO}" --json mergeable --jq '.mergeable')
+            STATE=$(gh pr view "${PR}" --json mergeable,autoMergeRequest \
+              --jq '"\(.mergeable) \(.autoMergeRequest != null)"')
+            read -r MERGEABLE AUTO_MERGE <<< "${STATE}"
             [ "${MERGEABLE}" != "UNKNOWN" ] && break
             sleep 10
           done
+          # GitHub turns auto-merge off when a pull request conflicts, so turn it back on here.
           if [ "${MERGEABLE}" = "CONFLICTING" ]; then
-            echo "::warning::Sync pull request #${PR} conflicts with next. Resolve it on a separate branch, as described in its body."
-            echo "Sync pull request #${PR} conflicts with \`next\` and needs a maintainer to resolve it." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Sync pull request ${PR} conflicts with next. Resolve it on ${SYNC_BRANCH}, as described in its body."
+          elif [ "${MERGEABLE}" = "MERGEABLE" ] && [ "${AUTO_MERGE}" = "false" ]; then
+            gh pr merge "${PR}" --auto --merge
           fi
