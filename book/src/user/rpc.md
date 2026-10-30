@@ -147,7 +147,7 @@ this is not a guarantee that every failure matches `zcashd` byte for byte.
 
 ## Methods
 
-Zebra 7.0.0 registers the following 41 JSON-RPC method names. The
+Zebra 7.0.0 registers the following 42 JSON-RPC method names. The
 [RPC trait and implementation](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/methods.rs)
 define their parameters and results. The `rpc.discover` method returns an
 OpenRPC 1.3.2 document with machine-readable method and type schemas.
@@ -178,6 +178,7 @@ OpenRPC 1.3.2 document with machine-readable method and type schemas.
 | `z_getsubtreesbyindex` | Returns indexed subtree roots and completion heights for Sapling, Orchard, or Ironwood. |
 | `invalidateblock` | Invalidates a block in non-finalized state; cannot invalidate finalized blocks. |
 | `reconsiderblock` | Reconsiders a cached invalidated block and returns the reconsidered block hashes. |
+| `preciousblock` | Prefers a non-finalized tip over competing tips with equal cumulative work; the last call wins and the preference is lost on restart. |
 
 ### Transactions and mempool
 
