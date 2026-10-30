@@ -8,8 +8,7 @@
 # - A release or pre-release is published, from any branch
 # - A maintainer manually validates binary preparation before a release
 #
-# Promoting a pre-release to a release does not trigger it again, so each
-# version is built once.
+# Promoting a pre-release to a release does not trigger it again, so each version is built once.
 name: Release binaries
 
 on:
@@ -104,7 +103,7 @@ jobs:
     with:
       release_tag: ${{ github.event.release.tag_name }}
 
-  # Pre-releases leave the Docker Hub description alone: it is pushed from the release commit's README.
+  # Only full releases update the Docker Hub description, because it is pushed from the release commit's README.
   dockerhub-description:
     if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease
     runs-on: ubuntu-26.04

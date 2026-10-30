@@ -127,9 +127,8 @@ jobs:
   # Resolve event-specific values once, then pass explicit deployment inputs to
   # the reusable deployment workflow.
   #
-  # Pre-releases from `next` (every pre-release version except a release
-  # candidate, which is cut from `main`) preview work production must not run,
-  # so they skip this job and, through `needs`, every build and deployment.
+  # Pre-releases from `next` (any pre-release except a release candidate, which is cut from `main`) never deploy to production.
+  # They skip this job, and with it every build and deployment that `needs` it.
   set-matrix:
     name: Resolve event deployment inputs
     if: >-

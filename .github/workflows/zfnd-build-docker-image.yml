@@ -162,8 +162,8 @@ jobs:
           echo "SOURCE_SHA_SHORT=${SOURCE_SHA:0:7}" >> "$GITHUB_ENV"
           echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      # OCI labels for the per-platform images. The merge job applies the image tags; the tag rules
-      # here only choose the `org.opencontainers.image.version` label.
+      # OCI Image Format Specification labels for each platform image.
+      # The merge job applies the image tags, so these tag rules only set the version label.
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
@@ -302,28 +302,38 @@ jobs:
           pattern: digests-${{ inputs.image_name }}-*
           merge-multiple: true
 
-      # Tags for the multi-platform image, in Artifact Registry and, only when release-binaries.yml
-      # sets inputs.publish_to_dockerhub, on Docker Hub:
-      # - A release gets its version (`X.Y.Z`) and `latest`. A pre-release (`X.Y.Z-alpha.N`) only
-      #   gets its version: metadata-action never moves `latest` to a pre-release version.
-      # - A pre-release from `next` (every pre-release version except a release candidate, which
-      #   is cut from `main`) also moves `edge`. zfnd-deploy-nodes-gcp.yml skips these releases.
-      # - CI builds get `pr-<number>`, the branch name, and `nightly` on schedules.
-      # - Every build except a release gets `sha-<short>`, which the integration tests pull.
-      #   metadata-action ignores `event=` on `type=sha`, so `enable` is what scopes it.
+      # Automatic tag management for the multi-platform image
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
         with:
+          # list of Docker images to use as base name for tags
+          # Docker Hub publishing requires inputs.publish_to_dockerhub to be explicitly set to true (defaults to false), which only release-binaries.yml does.
+          # This prevents duplicate publishing when both release-binaries.yml and deploy-nodes.yml run
+          # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
             zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub }}
+          # generate Docker tags based on the following events/attributes
           tags: |
+            # These DockerHub release tags support the following use cases:
+            # - `latest`: Automatically points to the most recent Zebra release, ensuring users always get the latest stable version when pulling or updating.
+            # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
+            # Pre-release versions (e.g., 1.2.3-alpha.0) only get their exact version tag, never `latest`.
+            #
             type=semver,pattern={{version}}
+            # - `edge`: Points to the most recent pre-release from `next`, which is any pre-release except a release candidate (release candidates are cut from `main`).
             type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc') }}
+            # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
+            # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
+            # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
+            # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
             type=ref,event=pr
             type=ref,event=branch
             type=schedule
+            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
+            # Applied to every build except releases, to ensure CI tests use the exact image from the last commit.
+            # metadata-action ignores `event=` on `type=sha`, so `enable` is what limits it.
             type=sha,enable=${{ github.event_name != 'release' }}
 
       - name: Authenticate to Google Cloud
