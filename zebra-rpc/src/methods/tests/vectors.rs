@@ -3087,7 +3087,7 @@ fn getblocktemplate_mutations_preserve_coinbase_balance() {
     assert_eq!(template.mutable, ["time"]);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
 
@@ -3414,40 +3414,79 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     // does not match the `last_seen_tip_hash` in the FullTransactions response from the mempool.
     assert!(get_block_template.transactions.is_empty());
 
-    // Simulate a state snapshot captured before a backwards wall-clock adjustment.
-    // Its cur_time still fits, but its advertised maximum no longer does.
-    let mut rollback_state = read_state.clone();
-    let (rollback_result, ..) = tokio::join!(
-        rpc.get_block_template(None),
-        make_mock_mempool_request_handler(vec![], fake_tip_hash),
-        async {
-            rollback_state
-                .expect_request(ReadRequest::ChainInfo)
-                .await
-                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                    expected_difficulty: fake_difficulty,
-                    chain_value_pools: Default::default(),
-                    tip_height: fake_tip_height,
-                    tip_hash: fake_tip_hash,
-                    cur_time: fake_cur_time,
-                    min_time: fake_min_time,
-                    max_time: DateTime32::now()
-                        .saturating_add(zebra_chain::serialization::Duration32::from_hours(3)),
-                    chain_history_root: fake_history_tree(&Mainnet).hash(),
-                }));
-            // The fallback checks the committed tip before rejecting the clock range.
-            rollback_state
-                .expect_request(ReadRequest::Tip)
-                .await
-                .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
-        },
-    );
-    assert_eq!(
-        rollback_result
-            .expect_err("the whole range must fit the current clock bound")
-            .code(),
-        i32::from(server::error::LegacyCode::Misc),
-    );
+    // The state snapshot precedes a backwards clock step during the mempool read.
+    let snapshot_max = fake_cur_time.saturating_add(Duration32::from_hours(2));
+    let clock = Arc::new(AtomicU32::new(fake_cur_time.timestamp()));
+    rpc.template_clock = Some(clock.clone());
+    let expected_id = LongPollInput::new(
+        fake_tip_height,
+        fake_tip_hash,
+        snapshot_max,
+        std::iter::empty(),
+    )
+    .generate_id();
+    for now in [
+        fake_cur_time.saturating_sub(Duration32::from_seconds(2)),
+        fake_cur_time.saturating_sub(Duration32::from_seconds(1)),
+        fake_min_time
+            .saturating_sub(Duration32::from_hours(2))
+            .saturating_sub(Duration32::from_seconds(1)),
+    ] {
+        clock.store(fake_cur_time.timestamp(), Ordering::SeqCst);
+        let mut rollback_state = read_state.clone();
+        let mut rollback_mempool = mempool.clone();
+        let (rollback_result, ..) = tokio::join!(
+            rpc.get_block_template(None),
+            async {
+                let request = rollback_mempool
+                    .expect_request(mempool::Request::FullTransactions)
+                    .await;
+                clock.store(now.timestamp(), Ordering::SeqCst);
+                request.respond(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: fake_tip_hash,
+                });
+            },
+            async {
+                rollback_state
+                    .expect_request(ReadRequest::ChainInfo)
+                    .await
+                    .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                        expected_difficulty: fake_difficulty,
+                        chain_value_pools: Default::default(),
+                        tip_height: fake_tip_height,
+                        tip_hash: fake_tip_hash,
+                        cur_time: fake_cur_time,
+                        min_time: fake_min_time,
+                        max_time: snapshot_max,
+                        chain_history_root: fake_history_tree(&Mainnet).hash(),
+                    }));
+                rollback_state
+                    .expect_request(ReadRequest::Tip)
+                    .await
+                    .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
+            },
+        );
+        let max_time = now.saturating_add(Duration32::from_hours(2));
+        if max_time < fake_min_time {
+            assert_eq!(
+                rollback_result
+                    .expect_err("an empty range is unusable")
+                    .code(),
+                i32::from(server::error::LegacyCode::Misc),
+            );
+            continue;
+        }
+        let template = rollback_result
+            .expect("a usable range survives clock rollback")
+            .try_into_template()
+            .expect("template-mode response");
+        assert_eq!(template.max_time, max_time);
+        assert_eq!(template.cur_time, fake_cur_time);
+        assert_eq!(template.min_time, fake_min_time);
+        assert_eq!(template.long_poll_id, expected_id);
+    }
 
     mempool.expect_no_requests().await;
 }
@@ -4326,6 +4365,29 @@ async fn fallback_completion(
     )
 }
 
+/// Historical Mainnet timestamps remain usable, but expired prior work cannot be retained.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fallback_rechecks_retention_after_build() {
+    let _init_guard = zebra_test::init();
+    let (template, context, _) = fallback_completion(Network::Mainnet, true).await;
+    assert_eq!(template.submit_old, Some(false));
+    assert_eq!(template.max_time, context.max_time);
+    assert!(template.cur_time <= template.max_time);
+}
+
+/// Crossing Testnet's standard-difficulty boundary during construction requires fresh context.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fallback_rechecks_difficulty_after_build() {
+    let _init_guard = zebra_test::init();
+    let network = Network::new_default_testnet();
+    let (template, context, _) = fallback_completion(network.clone(), true).await;
+    assert_eq!(
+        template.bits,
+        network.target_difficulty_limit().to_compact()
+    );
+    assert!(template.min_time > context.max_time);
+}
+
 /// CPU-bound construction must not execute on the single async runtime thread.
 #[tokio::test(flavor = "current_thread")]
 async fn getblocktemplate_fallback_builds_off_executor() {
@@ -4741,6 +4803,166 @@ async fn getblocktemplate_reports_updater_failure_and_recovers() {
         .unwrap();
     assert_eq!(template.previous_block_hash, hash);
     updater.abort();
+}
+
+/// Rebuilds through the real updater, rather than reclamping one cached template.
+async fn fresh_publication_retention(network: Network, cross_difficulty_boundary: bool) {
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = Hash([1; 32]);
+    let now = DateTime32::from(1_700_000_000);
+    // After rollback, the two-hour local bound precedes both the MTP maximum and the
+    // Testnet difficulty boundary. These future timestamps remain usable mining work.
+    let context = GetBlockTemplateChainInfo {
+        tip_height: height,
+        tip_hash: hash,
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        min_time: now.saturating_add(Duration32::from_hours(1)),
+        cur_time: now.saturating_add(Duration32::from_hours(1)),
+        max_time: now.saturating_add(Duration32::from_hours(2)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    };
+    let (context_tx, context_rx) = watch::channel(context.clone());
+    let read_state = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, BoxError>(match request {
+            ReadRequest::ChainInfo => ReadResponse::ChainInfo(context_rx.borrow().clone()),
+            ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+            other => panic!("unexpected state request: {other:?}"),
+        }))
+    });
+    let mempool = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, BoxError>(match request {
+            mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                transactions: vec![],
+                transaction_dependencies: Default::default(),
+                last_seen_tip_hash: hash,
+            },
+            mempool::Request::TransactionIds => {
+                mempool::Response::TransactionIds(Default::default())
+            }
+            other => panic!("unexpected mempool request: {other:?}"),
+        }))
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let mut rpc = template_regression_rpc(network.clone(), mempool, read_state, tip, sync);
+    let clock = Arc::new(AtomicU32::new(now.timestamp()));
+    rpc.template_clock = Some(clock.clone());
+    let cache = rpc.gbt.template_cache().unwrap();
+    let publication = |expected_max_time, wall_time| {
+        let mut changes = cache.subscribe();
+        let network = &network;
+        async move {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if let Some(template) = cache.template_for_tip(hash, network, wall_time) {
+                        if template.max_time == expected_max_time {
+                            break template;
+                        }
+                    }
+                    changes.changed().await;
+                }
+            })
+            .await
+            .expect("the updater must publish the newly fetched timestamp range")
+        }
+    };
+    let (events, _) = broadcast::channel(1);
+    let updater = rpc
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(events))
+        .unwrap();
+    let initial = publication(context.max_time, now).await;
+    let parameters = |id| {
+        Some(GetBlockTemplateParameters {
+            long_poll_id: Some(id),
+            ..Default::default()
+        })
+    };
+    let mut waiting = rpc.get_block_template(parameters(initial.long_poll_id));
+    assert!(futures::poll!(&mut waiting).is_pending());
+
+    if cross_difficulty_boundary {
+        let after_boundary = context.max_time.saturating_add(Duration32::from_seconds(1));
+        let new_max_time = context
+            .min_time
+            .saturating_add(Duration32::from_minutes(90))
+            .saturating_sub(Duration32::from_seconds(1));
+        clock.store(after_boundary.timestamp(), Ordering::SeqCst);
+        context_tx.send_modify(|context| {
+            context.expected_difficulty = network.target_difficulty_limit().to_compact();
+            context.min_time = after_boundary;
+            context.cur_time = after_boundary;
+            context.max_time = new_max_time;
+        });
+        tokio::time::advance(Duration::from_secs(
+            types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+        ))
+        .await;
+        let updated = publication(new_max_time, after_boundary).await;
+        assert_ne!(updated.bits, initial.bits);
+        assert!(updated.max_time > initial.max_time);
+        let response = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("a difficulty-boundary publication must release the long poll")
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        updater.abort();
+        assert_eq!(
+            response.submit_old,
+            Some(false),
+            "a larger new maximum does not preserve expired work across a difficulty boundary"
+        );
+    } else {
+        for seconds in [1, 2, 3] {
+            let wall_time = now.saturating_add(Duration32::from_seconds(seconds));
+            let max_time = wall_time.saturating_add(Duration32::from_hours(2));
+            clock.store(wall_time.timestamp(), Ordering::SeqCst);
+            context_tx.send_modify(|context| context.max_time = max_time);
+            tokio::time::advance(Duration::from_secs(
+                types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+            ))
+            .await;
+            let updated = publication(max_time, wall_time).await;
+            assert_eq!(updated.previous_block_hash, initial.previous_block_hash);
+            assert_eq!(updated.bits, initial.bits);
+            assert_eq!(updated.min_time, initial.min_time);
+            assert!(updated.transactions.is_empty() && initial.transactions.is_empty());
+            assert!(wall_time < initial.max_time);
+            if let std::task::Poll::Ready(response) = futures::poll!(&mut waiting) {
+                let response = response.unwrap().try_into_template().unwrap();
+                assert_eq!(
+                    response.submit_old,
+                    Some(true),
+                    "an advancing clock cap must not cancel still-valid work on {network}"
+                );
+                waiting = rpc.get_block_template(parameters(response.long_poll_id));
+                assert!(futures::poll!(&mut waiting).is_pending());
+            }
+            // Keeping the poll parked is also valid: unchanged work need not notify the miner.
+        }
+        updater.abort();
+    }
+}
+
+/// Fresh publications must not turn ordinary recovery from rollback into work cancellation.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fresh_publications_retain_clock_capped_work() {
+    let _init_guard = zebra_test::init();
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        fresh_publication_retention(network, false).await;
+    }
+}
+
+/// A new, wider minimum-difficulty range does not make the expired standard-difficulty work valid.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fresh_publications_reject_difficulty_boundary_work() {
+    let _init_guard = zebra_test::init();
+    fresh_publication_retention(Network::new_default_testnet(), true).await;
 }
 
 /// A slow rebuild must not replay a failure from before genesis or from a previous committed tip.
