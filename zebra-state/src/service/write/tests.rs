@@ -410,7 +410,6 @@ fn precious_response_follows_tip_and_snapshot_publication() {
         non_finalized_state_sender,
         backup_dir_path: None,
         early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
-        pruning_wake: None,
     };
     worker.run();
     assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), second.hash());
