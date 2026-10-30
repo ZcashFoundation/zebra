@@ -1,0 +1,5 @@
+project: zebrad
+kind: Changed
+body: 'Store and announce verified transactions without waiting for the five-second mempool
+  queue check on idle nodes ([#11376](https://github.com/ZcashFoundation/zebra/pull/11376)).'
+time: 2026-09-02T15:02:44.000000000Z
