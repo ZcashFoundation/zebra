@@ -26,7 +26,8 @@ Operating a multi-instance regional MIG also coupled deploy-landed to node-healt
 - Each zone must update independently. The workflow does not serialize zones or guarantee that other zones keep serving.
 - Cleanup must be auditable: explicit manual reap commands and documented age/name filters. Protection labels are not enforced.
 - Cache images produced by integration tests must remain the cold-start mechanism for fresh deploys; cache images are network-scoped (same image seeds all zones).
-- The architecture must compose with the existing `release:published` trigger contract.
+- The architecture must use `release:released` to deploy stable releases,
+  including promoted prereleases.
 - The naming model must reuse existing label vocabulary.
 
 ## Considered Options
@@ -77,6 +78,10 @@ One MIG per matrix cell. Names encode every identity axis:
 | `push` to `main`     | `zfnd-dev-zebra`     | `zebrad-main-${network}-${zone-letter}`  | `zebrad-cache-main-${network}-${zone-letter}` |
 | `push` to `next`     | `zfnd-dev-zebra`     | `zebrad-next-${network}-${zone-letter}`  | `zebrad-cache-next-${network}-${zone-letter}` |
 | `workflow_dispatch`  | `zfnd-dev-zebra`     | `zebrad-${branch}-${network}-${zone-letter}` | `zebrad-cache-${branch}-${network}-${zone-letter}` |
+
+`release:released` deploys `v`-prefixed releases on stable publication or
+promotion from prerelease. Prerelease publication is skipped; manual dispatch
+keeps its selected destination.
 
 `zone-letter` is `b`, `c`, or `d` (the last segment of `us-east1-b`, etc.). Push and release fan out to six zonal MIGs (2 networks × 3 zones). The `next` environment deploys from the long-lived [`next` branch](../../../book/src/dev/next-branch.md), so the team can compare its sync with stage on identical infrastructure. Its fixed `next-` prefix keeps it apart from stage's `main-` resources in the shared project. A `workflow_dispatch` deploys a single zonal MIG with user-selected network and zone (default `us-east1-b`).
 

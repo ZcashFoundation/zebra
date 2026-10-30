@@ -64,13 +64,13 @@ process:
    its channel. The controller derives the channel from the package's SemVer
    suffix and rejects a conflicting existing channel on recovery.
 
-A GitHub prerelease is **not a production-isolation mechanism** in the current
-workflows. The [GCP deployment workflow][deploy-workflow] handles
-`release: published` events and sends `v`-prefixed releases to production without
-a prerelease exclusion. Coordinate production safeguards before publishing a
-candidate. The [binary workflow][binary-workflow] instead handles
-`release: released`, so an ordinary prerelease does not get the stable Docker
-and binary distribution jobs.
+Publishing a GitHub prerelease does not deploy it to production. The
+[GCP deployment workflow][deploy-workflow] and
+[binary workflow][binary-workflow] handle `release: released` for
+`v`-prefixed tags: stable publication or promotion of a prerelease.
+Prereleases skip production deployment and stable Docker and binary
+distribution. Manual dispatch can still target production independently
+of the release channel.
 
 ### Distribution tags
 
