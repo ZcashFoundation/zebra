@@ -180,12 +180,11 @@ height_range = { start = 9, end = 30 }
 recipients = [{ receiver = "Deferred", numerator = 12 }]
 ```
 
-Malformed funding addresses, reversed ranges, excessive numerator sums, and
-missing positional defaults trigger assertions rather than structured
-configuration errors. Lockbox addresses and their aggregate amount are
-validated when used, not comprehensively when deserialized. Supply valid
-addresses, keep the total within the monetary range, and ensure the chain has
-enough lockbox value for the configured payout.
+Zebra rejects malformed funding addresses, reversed ranges, excessive
+numerator sums, missing positional defaults, and insufficient or wrong-network
+addresses during configuration loading, on both Testnet and Regtest. It also
+checks lockbox addresses and rejects a total above `2100000000000000` zatoshis.
+The chain must still have enough lockbox value for the configured payout.
 
 ### Checkpoints
 
@@ -204,9 +203,9 @@ height 1, the default genesis-only list is sufficient. For a fork, use
 checkpoints only on the shared prefix; never include public hashes at or
 after divergence. Do not edit Zebra's bundled checkpoint file.
 
-Regtest does not run the full custom-Testnet checkpoint-coverage and
-funding-address validation. Acceptance of its configuration is not proof that
-the resulting blocks can be mined or verified.
+Regtest does not run the full custom-Testnet checkpoint-coverage validation.
+Acceptance of its configuration is not proof that the resulting blocks can be
+mined or verified.
 
 ## Peer isolation and storage
 
