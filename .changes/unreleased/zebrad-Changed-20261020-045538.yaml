@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce Orchard verification cost through faster curve normalization and field arithmetic.
+time: 2026-10-20T04:55:38.792650446+02:00
