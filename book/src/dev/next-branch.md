@@ -25,6 +25,25 @@ For simple text conflicts, the pull request's **Resolve conflicts** button makes
 
 Later pushes to `main` are merged into the branch, never force-pushed over your resolution. If that merge conflicts, merge `origin/main` into the branch the same way.
 
+## Publish a Pre-Release
+
+A pre-release from `next`, such as an [alpha or a beta](release-process.md#previews), publishes what `next` runs as a GitHub pre-release with signed binaries and a Docker Hub image tagged with its version and `edge`, without publishing crates. Release candidates are cut from `main` instead.
+
+1. Merge a `chore(release): set zebrad version to <version>` pull request into `next` that sets the `zebrad` version to a pre-release version, such as `X.Y.Z-alpha.N` or `X.Y.Z-beta.N`, and updates `Cargo.lock`. Do not use the `rc` identifier: it marks a release candidate from `main`, which deploys production. Later sync pull requests can conflict on that version: keep the higher one.
+2. Generate the release notes from the pending change fragments, without committing them:
+
+   ```bash
+   changie batch v<version> --project zebrad --dry-run > release-notes.md
+   ```
+
+3. Publish the pre-release on the merge commit from step 1, with your own GitHub credentials. A release created with a workflow's `GITHUB_TOKEN` does not start the release workflows.
+
+   ```bash
+   gh release create v<version> --target <commit> --prerelease --title "Zebra <version>" --notes-file release-notes.md
+   ```
+
+Never promote it to a full release, which would make it the Latest release.
+
 ## Compare `next` With `main`
 
 `next` nodes report to Sentry in the `next` environment, and stage nodes in `stage`. Compare nodes on the same network and zone, for example `zebrad-next-mainnet-b` and `zebrad-main-mainnet-b`.
