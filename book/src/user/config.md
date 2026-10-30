@@ -145,6 +145,7 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `listen_addr` | IP address string, optional port | `"[::]"`, resolved to `"[::]:8233"` on Mainnet | P2P listener. An omitted port becomes `8233` on Mainnet or `18233` on Testnet and Regtest. The generated Mainnet configuration includes the explicit port. |
 | `external_addr` | Optional IP address string, optional port | Absent | Address advertised to peers instead of the listener address, for network address translation (NAT), containers, or load balancers. Does not change the bind address. Uses the selected network's default port if omitted. |
 | `network` | Network-name string or parameter table | `"Mainnet"` | Select `"Mainnet"`, `"Testnet"`, or `"Regtest"`, or use a configured-network table as described below. |
+| `experimental_early_block_relay` | Boolean | `false` | Experimental next-tip block relay with peers that also enable it. Negotiated peers can serve authenticated blocks before full transaction validation; Zebra still fully verifies every block, and ordinary relay of committed blocks is unchanged. Uses a temporary service bit until a production one is allocated. |
 | `initial_mainnet_peers` | Array of address strings | Mainnet seed list below | Initial Mainnet peers; each IP address or DNS name must include a port. Duplicate strings are removed while preserving order. |
 | `initial_testnet_peers` | Array of address strings | Testnet seed list below | Initial Testnet peers. Regtest removes public seed names and retains only resolved loopback addresses. |
 | `cache_dir` | Boolean or path string | `true` | Use the default cache directory when `true`, disable the peer disk cache when `false`, or use the supplied directory. Independent of `[state] cache_dir`. |
@@ -518,6 +519,7 @@ Rust API: [`zebrad::components::notify::Config`](https://docs.rs/zebrad/latest/z
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `block_notify_command` | Optional string | Absent | Shell command launched after a best-chain tip change when Zebra is close to the network tip. Every `%s` becomes the new tip's 64-digit hexadecimal block hash. |
+| `zmqpubhashblock` | Optional string | Absent | ZMQ PUB endpoint for best-chain tip hashes, equivalent to zcashd's `-zmqpubhashblock`, for example `"tcp://127.0.0.1:28332"`. Requires a binary built with the `zmq` feature. Startup fails if the endpoint is invalid or unavailable, or if the feature is missing. The socket has no authentication; expose it only to trusted clients. |
 
 Zebra executes the command through `/bin/sh -c` on Unix or `cmd /C` on Windows,
 with the node process's privileges. Standard input, output, and error are
@@ -528,6 +530,10 @@ Notification commands run independently of block validation. Notifications are
 best effort: fast synchronization and reorganizations can coalesce intermediate
 tips, and a slow command does not prevent later commands from starting. Do not
 use notifications as an exactly-once block index.
+
+ZMQ notifications follow the same rules, and the publisher also drops messages
+when its bounded queue overflows. Subscribers must reconcile through RPC after a
+gap or a reconnect.
 
 ## `[zcashd_compat]`
 
