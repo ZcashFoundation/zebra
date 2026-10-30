@@ -1,280 +1,456 @@
-# GCP Deployment Operations
+# GCP deployment operations
 
-Operational procedures for the GCP Continuous Delivery pipeline. Architectural rationale: [ADR 0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md). High-level model: [Continuous Delivery](continuous-delivery.md).
+Use the [continuous-delivery topology](continuous-delivery.md#zonal-instance-groups)
+to select the project, zone, managed instance group (MIG), and state disk.
+Authenticate `gh` and `gcloud` with authorized repository and project
+accounts. Set the target explicitly; these values select one stage
+Mainnet node:
 
-Two GCP projects (`zfnd-prod-zebra`, `zfnd-dev-zebra`) in `us-east1`, zones `b`, `c`, `d`. Every MIG, instance, and disk carries `environment`, `network`, `zone`, `created_by`, `github_ref`, and `github_sha` labels. The `environment` label is standardized as `dev`, `stage`, `next`, or `prod`. Use `created_by` as the kind discriminator: `release`, `push`, or `workflow_dispatch`.
-
-The recipes below assume `gh` and `gcloud` are authenticated, and use these shell defaults when scoped to dev:
-
-```bash
+```sh
 P=zfnd-dev-zebra
+ZONE=us-east1-b
+MIG=zebrad-main-mainnet-b
+DISK=zebrad-cache-main-mainnet-b
 ```
 
-For production, set `P=zfnd-prod-zebra` instead.
+For next, use the `next-` prefix instead of `main-`. For production, set
+`P=zfnd-prod-zebra` and omit the prefix:
+`MIG=zebrad-mainnet-b`, `DISK=zebrad-cache-mainnet-b`.
+Use `--zone` for these MIGs, not `--region`.
 
-Zonal MIGs use `--zone` (not `--region`). One MIG per zone per network. MIG names end with the zone letter (`-b`, `-c`, `-d`).
+Instance templates and new disks receive `app`, `environment`, `network`,
+`zone`, `created_by`, `github_ref`, and `github_sha` labels; instances
+inherit template labels. Existing disk labels are not refreshed. Find MIGs
+by name: they do not receive these labels.
 
 ## Deploy success has two stages
 
-Each `deploy-nodes` matrix cell reports two sequential signals:
+Each [deployment job](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml)
+reports:
 
-- **Template rollout** waits up to 10 minutes for the requested template to reach the zonal MIG. A failure means the deployment infrastructure did not converge.
-- **Application health**, when enabled, then waits up to 90 minutes for the zonal MIG to reach HEALTHY. A failure means the node took longer than that to establish peers and catch up to chain tip; on-call action is usually "wait, or investigate why sync is slow".
+1. **Template rollout:** `wait-until --version-target-reached --timeout=600`.
+2. **Group stability:** `wait-until --stable --timeout=5400`, only with
+   `verify=true`.
 
-The per-MIG concurrency lock covers both stages, so another run cannot replace the template while health is being verified. Either failure uses `failure-issue` with label `ci-fail/release`.
+The [per-MIG lock](continuous-delivery.md#update-mechanics) covers both stages.
+Pushes and releases enable the second stage; manual dispatches do not.
+Check `instanceHealth` and container logs even after the group is stable.
 
-## Quick reference
+The workflow creates an HTTP health check on port 8080 at `/healthy`, with
+a 60-second interval, a 10-second timeout, three failed probes to become
+unhealthy, and two successful probes to become healthy. New MIGs have a
+3,600-second autohealing initialization delay. The node requires at least
+one recently live peer through `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`.
+Check sync progress separately before serving clients:
+[`/healthy` checks liveness, not sync readiness](../user/health.md).
 
-| Goal                                                 | Section                                                       |
-| ---------------------------------------------------- | ------------------------------------------------------------- |
-| Smoke-test a PR branch / find / label / reap         | [PR deploys](#pr-deploys)                                     |
-| Run changes on nodes before `main`, compare with stage | [The `next` branch](next-branch.md)                         |
-| Diagnose a deploy that does not converge             | [Diagnose a stuck MIG](#diagnose-a-stuck-mig)                 |
-| Recover from a corrupted cache disk                  | [Recover a corrupted cache disk](#recover-a-corrupted-cache-disk) |
-| Create a disk when no cache image matches            | [Bootstrap a disk without a cache image](#bootstrap-a-disk-without-a-cache-image) |
-| Cut a release with a backwards-incompatible DB format | [DB-format-version-break release](#db-format-version-break-release) |
-| Migrate a regional MIG to zonal                      | [Regional-to-zonal migration](#regional-to-zonal-migration)   |
-| Look up cache images, static IPs, daily cleanup      | [Reference](#reference)                                       |
+Rollout or stability failures print instance state and recent container
+logs; `failure-issue` opens or updates an issue labeled `ci-fail/release`.
+Investigate the failing stage.
+
+Automatic deployments [do not serialize zones](continuous-delivery.md#update-mechanics).
+Use one-zone manual deployments for a controlled migration.
 
 ## PR deploys
 
-A PR deploy creates one zonal MIG `zebrad-${branch}-${network}-${zone-letter}` in `zfnd-dev-zebra`, bootstrapped from the latest matching cache image (preferring images from the same branch, falling back to `main`, then any branch). Lives until you reap it.
-
 ### Run one
 
-```bash
-gh workflow run zfnd-deploy-nodes-gcp.yml -R ZcashFoundation/zebra \
-  --ref my-branch \
-  -f network=Mainnet \
-  -f zone=us-east1-b \
-  -f environment=dev \
-  -f need_cached_disk=true \
-  -f cached_disk_type=tip
-```
+Dispatch from a repository-owned feature branch to create or update one
+branch-specific MIG:
 
-### Find yours
-
-```bash
-gcloud compute instance-groups managed list --project $P \
-  --filter="labels.created_by=workflow_dispatch AND labels.github_ref=my-branch-slug"
-```
-
-### Spare from cleanup
-
-Apply one of two labels:
-
-- `keep_until=YYYY-MM-DD` — self-expiring; eligible for reaping after the date passes.
-- `delete_protection=true` — indefinite; requires manual removal before reaping.
-
-> **Warning:** the daily cleanup workflow (`zfnd-delete-gcp-resources.yml`) sweeps PR-deploy
-> resources by age and name and does **not** honor these labels. They only take effect with
-> the label-aware [sweep recipe](#sweep-expired) below, so don't rely on a label alone to
-> protect a PR deploy from the daily sweep.
-
-Apply to the instance and disk now if you need protection immediately (labels propagate to new instances on the next template swap):
-
-```bash
-MIG=zebrad-my-branch-mainnet-b
-ZONE=us-east1-b
-INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG" \
-  --zone "$ZONE" --project $P --format='value(instance.basename())' | head -1)
-gcloud compute instances add-labels "$INSTANCE" --zone "$ZONE" --project $P \
-  --labels="keep_until=2026-05-01"
-gcloud compute disks add-labels "zebrad-cache-my-branch-mainnet-b" \
-  --zone "$ZONE" --project $P \
-  --labels="keep_until=2026-05-01"
-```
-
-### Reap one
-
-The stateful policy `auto-delete=on-permanent-instance-deletion` removes the disk with the MIG.
-
-```bash
-gcloud compute instance-groups managed delete "$MIG" --zone "$ZONE" --project $P --quiet
-```
-
-### Sweep expired
-
-```bash
-TODAY=$(date +%Y-%m-%d)
-for line in $(gcloud compute instance-groups managed list --project $P \
-    --filter="labels.created_by=workflow_dispatch" \
-    --format='csv[no-heading](name,zone.basename(),labels.keep_until,labels.delete_protection)' \
-    | awk -F, -v today="$TODAY" '$4 == "true" || $3 == "" { next } $3 < today { print $1 "|" $2 }'); do
-  MIG="${line%|*}"
-  ZONE="${line#*|}"
-  echo "Reaping $MIG in $ZONE"
-  gcloud compute instance-groups managed delete "$MIG" --zone "$ZONE" --project $P --quiet
-done
-```
-
-Review the candidate list before piping into delete.
-
-## Diagnose a stuck MIG
-
-```bash
-MIG=zebrad-main-mainnet-b
-ZONE=us-east1-b
-
-gcloud compute instance-groups managed describe "$MIG" --zone "$ZONE" --project $P \
-  --format="value(currentActions,status.isStable,status.versionTarget.isReached)"
-gcloud compute instance-groups managed list-instances "$MIG" --zone "$ZONE" --project $P \
-  --format="table(NAME,STATUS,HEALTH_STATE,LAST_ERROR)"
-gcloud compute instance-groups managed list-errors "$MIG" --zone "$ZONE" --project $P --limit=10
-```
-
-When `list-errors` reports `RESOURCE_IN_USE_BY_ANOTHER_RESOURCE` on a stateful disk, find the squatter:
-
-```bash
-DISK=zebrad-cache-main-mainnet-b
-gcloud compute disks describe "$DISK" --zone "$ZONE" --project $P \
-  --format="value(users.basename())"
-```
-
-The squatter is another MIG's instance. Reap that MIG (recipe above).
-
-## Recover a corrupted cache disk
-
-When Zebra crash-loops on a zonal disk, recover that one zone from the last good cache image. Sister zones keep serving.
-
-```bash
-NET=mainnet; ZONE=us-east1-b; ZONE_LETTER=b
-MIG=zebrad-main-${NET}-${ZONE_LETTER}
-DISK=zebrad-cache-main-${NET}-${ZONE_LETTER}
-TS=$(date +%Y%m%d-%H%M)
-
-# 1. Drain: preserve the disk via auto-delete=never, then scale to 0
-INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG" \
-  --zone "$ZONE" --project $P --format='value(name)' | head -1)
-gcloud compute instance-groups managed instance-configs update "$MIG" \
-  --zone "$ZONE" --project $P --instance "$INSTANCE" \
-  --stateful-disk "device-name=${DISK},auto-delete=never"
-gcloud compute instance-groups managed resize "$MIG" --size 0 --zone "$ZONE" --project $P
-
-# 2. Snapshot the corrupted disk for forensics, then delete it
-gcloud compute snapshots create "${DISK}-corrupted-${TS}" \
-  --source-disk "$DISK" --source-disk-zone "$ZONE" --project $P
-gcloud compute disks delete "$DISK" --zone "$ZONE" --project $P --quiet
-
-# 3. Redeploy via workflow_dispatch for this single zone
-gh workflow run zfnd-deploy-nodes-gcp.yml -R ZcashFoundation/zebra \
-  -f network=Mainnet -f zone="$ZONE" -f environment=dev \
+```sh
+gh workflow run zfnd-deploy-nodes-gcp.yml \
+  --repo ZcashFoundation/zebra --ref my-branch \
+  -f network=Mainnet -f zone=us-east1-b -f environment=dev \
   -f need_cached_disk=true -f cached_disk_type=tip
 ```
 
-For production: set `P=zfnd-prod-zebra`, `MIG=zebrad-${NET}-${ZONE_LETTER}`, `DISK=zebrad-cache-${NET}-${ZONE_LETTER}`. Production has no automatic cache image; restore from a recent operator-taken snapshot.
+The `network` input accepts `Mainnet` or `Testnet`. The `environment` input
+accepts `dev`, `next`, or `prod`; there is no `stage` choice. To update stage
+manually, select `dev` from the `main` ref. That targets stage resource
+names but uses `dev` environment variables and Sentry labeling.
+
+Selecting `next` or `prod` targets the stable environment regardless of
+the selected source ref. Selecting `dev` from `next` also targets next's
+resource names. Do not use these combinations for an isolated PR test.
+
+### Find yours
+
+Resource names use the URL-safe ref slug produced by
+`rlespinasse/github-slug-action`. For the example branch:
+
+```sh
+gcloud compute instance-groups managed list --project "$P" \
+  --filter='name=zebrad-my-branch-mainnet-b'
+gcloud compute instances list --project "$P" \
+  --filter='labels.created_by=workflow_dispatch AND labels.github_ref=my-branch'
+```
+
+See [branch-deployment networking](continuous-delivery.md#state-and-addresses)
+for external IP and outbound connectivity behavior.
+
+### Reap one
+
+Confirm that the MIG is a disposable branch deployment, not stage, next,
+or production. The workflow's disk policy is
+`auto-delete=on-permanent-instance-deletion`: deleting the MIG or reducing
+its size can delete its state disk. Snapshot state that must survive first.
+
+```sh
+MIG=zebrad-my-branch-mainnet-b
+ZONE=us-east1-b
+gcloud compute instance-groups managed delete "$MIG" \
+  --zone "$ZONE" --project "$P"
+```
+
+Keep the confirmation prompt. Remove a template only after checking that no
+MIG references it. [Daily cleanup](#daily-cleanup) does not reap branch MIGs;
+`keep_until` and `delete_protection` labels do not protect resources.
+
+## Diagnose a stuck MIG
+
+Inspect template convergence, instance health, and creation errors:
+
+```sh
+gcloud compute instance-groups managed describe "$MIG" \
+  --zone "$ZONE" --project "$P" \
+  --format='yaml(targetSize,currentActions,status,versions,statefulPolicy)'
+gcloud compute instance-groups managed list-instances "$MIG" \
+  --zone "$ZONE" --project "$P" \
+  --format='table(instance.basename(),instanceStatus,currentAction,instanceHealth[0].detailedHealthState,lastAttempt.errors.errors[0].message)'
+gcloud compute instance-groups managed list-errors "$MIG" \
+  --zone "$ZONE" --project "$P" --limit=10
+```
+
+For a disk attachment conflict, inspect the disk's users:
+
+```sh
+gcloud compute disks describe "$DISK" --zone "$ZONE" --project "$P" \
+  --format='yaml(name,sizeGb,users)'
+```
+
+Inspect each reported instance's `created-by` metadata to identify its MIG.
+Do not delete an instance or another MIG merely because it holds the disk.
+Confirm which deployment owns the state, stop competing deployments, and
+preserve any required disk before removing an obsolete owner. A read-write
+state disk must not be shared between independent MIGs.
+
+Read recent container logs for the selected instance:
+
+```sh
+INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG" \
+  --zone "$ZONE" --project "$P" --format='value(instance.basename())')
+INSTANCE_ID=$(gcloud compute instances describe "$INSTANCE" \
+  --zone "$ZONE" --project "$P" --format='value(id)')
+gcloud logging read \
+  "logName=\"projects/${P}/logs/cos_containers\" AND resource.labels.instance_id=\"${INSTANCE_ID}\"" \
+  --project "$P" --freshness=2h --limit=100 \
+  --format='value(jsonPayload.message)'
+```
+
+These commands require exactly one instance. If there are none, inspect
+creation errors first. An ordinary deployment updates a size-zero MIG's
+template without resizing it.
+
+## Recover a corrupted cache disk
+
+Recover one zone at a time. Stop concurrent deployments to the same MIG
+before changing its disk. Select a known-good snapshot or compatible cache
+image before deleting anything, and retain a snapshot of the failed disk
+for diagnosis.
+
+### Detach and preserve the existing disk
+
+Change the group's disk policy to preserve the disk on permanent deletion:
+
+```sh
+gcloud compute instance-groups managed update "$MIG" \
+  --zone "$ZONE" --project "$P" \
+  --stateful-disk="device-name=${DISK},auto-delete=never"
+gcloud compute instance-groups managed describe "$MIG" \
+  --zone "$ZONE" --project "$P" --format='yaml(statefulPolicy)'
+gcloud compute instance-groups managed instance-configs list "$MIG" \
+  --zone "$ZONE" --project "$P" --format=json
+```
+
+Confirm the effective [disk policy](https://cloud.google.com/compute/docs/instance-groups/configuring-stateful-disks-in-migs)
+is `NEVER`; change any conflicting per-instance auto-delete rule to `never`
+before proceeding. Preserve reserved external addresses; their workflow
+policy already uses `auto-delete=never`.
+
+Delete only the selected MIG, then confirm that the disk has no users:
+
+```sh
+gcloud compute instance-groups managed delete "$MIG" \
+  --zone "$ZONE" --project "$P"
+gcloud compute disks describe "$DISK" --zone "$ZONE" --project "$P" \
+  --format='yaml(name,users)'
+```
+
+Do not continue while the disk is attached. Snapshot the detached disk:
+
+```sh
+SNAPSHOT="${DISK}-recovery-$(date -u +%Y%m%d-%H%M%S)"
+gcloud compute snapshots create "$SNAPSHOT" --project "$P" \
+  --source-disk "$DISK" --source-disk-zone "$ZONE"
+gcloud compute snapshots describe "$SNAPSHOT" --project "$P" \
+  --format='yaml(status,sourceDisk,creationTimestamp)'
+```
+
+Require `READY` before discarding the original disk. This snapshot preserves
+the failed state; it is not the known-good restore source.
+
+### Restore and redeploy
+
+Set `RESTORE_SNAPSHOT` to the verified, known-good snapshot in the selected
+project. Check its source disk, network, and database compatibility:
+
+```sh
+RESTORE_SNAPSHOT=known-good-snapshot
+gcloud compute snapshots describe "$RESTORE_SNAPSHOT" --project "$P" \
+  --format='yaml(status,sourceDisk,diskSizeGb,creationTimestamp)'
+```
+
+After confirming it is `READY`, replace the disk under the same name:
+
+```sh
+gcloud compute disks delete "$DISK" --zone "$ZONE" --project "$P"
+gcloud compute disks create "$DISK" --zone "$ZONE" --project "$P" \
+  --source-snapshot "$RESTORE_SNAPSHOT" --type=pd-balanced
+```
+
+Alternatively, [create the disk from a verified cache image](#bootstrap-a-disk-without-a-cache-image).
+Dispatch the intended source ref, network, zone, and environment with
+`need_cached_disk=false`. For the stage defaults above:
+
+```sh
+gh workflow run zfnd-deploy-nodes-gcp.yml \
+  --repo ZcashFoundation/zebra --ref main \
+  -f network=Mainnet -f zone="$ZONE" -f environment=dev \
+  -f need_cached_disk=false
+```
+
+For next, use `--ref next -f environment=next`. For production, use the
+approved release tag with `-f environment=prod`. The absent MIG is recreated
+at size one, its stateful disk policy is restored, and the workflow attempts
+to bind its reserved address. Verify health and the address before
+recovering another zone.
 
 ## Bootstrap a disk without a cache image
 
-A deploy seeds a new zone's disk from a cache image that matches the commit's state format. When none exists, for example after a major format change on `next`, zones that have a disk still roll out, and a zone without one fails. Create that disk from the newest `zebrad-cache-main-*` image, named and sized like the other disks, then rerun the deploy. If Zebra can restore the image's older major format, it migrates that state into the new format. Otherwise it syncs the new format from genesis.
+Deployment [cache policy](continuous-delivery.md#state-and-addresses) permits
+missing images, not missing disks. Production disks must exist before a
+release-triggered deployment.
+
+To seed a missing disk manually, select a verified image for the same
+network and a compatible database version. Set `IMAGE_PROJECT` to the
+project containing it and `IMAGE` to its exact name:
+
+```sh
+IMAGE_PROJECT=zfnd-dev-zebra
+IMAGE=verified-cache-image
+gcloud compute images describe "$IMAGE" --project "$IMAGE_PROJECT" \
+  --format='yaml(name,status,diskSizeGb,labels,description)'
+```
+
+Require `READY` and sufficient disk capacity, then create the disk:
+
+```sh
+gcloud compute disks create "$DISK" --zone "$ZONE" --project "$P" \
+  --image="$IMAGE" --image-project="$IMAGE_PROJECT" \
+  --size=400GB --type=pd-balanced
+```
+
+Increase the size if the source image requires more than 400 GB. A snapshot
+can be used instead with `--source-snapshot`. Dispatch with
+`need_cached_disk=false` after creating the disk.
+
+Check [state compatibility and rollback requirements](../user/upgrading.md)
+before selecting an older image; it does not necessarily avoid a full resync.
 
 ## DB-format-version-break release
 
-When `zebra-state/src/constants.rs::DATABASE_FORMAT_VERSION` changes in a backwards-incompatible way, the in-place rolling swap fails because the new Zebra can't read the old RocksDB. Do it one zone at a time with snapshot-based handoff:
+A database major-version change does not by itself require a fresh disk.
+Use the [upgrade and rollback requirements](../user/upgrading.md), not the
+version number, to plan recovery.
 
-```bash
-P=zfnd-prod-zebra; NET=mainnet; TS=$(date +%Y%m%d-%H%M)
+Before a format-changing rollout:
 
-for Z in b c d; do
-  MIG=zebrad-${NET}-${Z}; DISK=zebrad-cache-${NET}-${Z}; ZONE=us-east1-${Z}
+1. Check source and destination [state compatibility](../user/upgrading.md).
+2. Take independent, consistent snapshots before the new binary writes to
+   each disk. Stop the writer and any direct database readers while taking
+   the rollback copy. Use the preservation procedure above when removing a
+   MIG to detach its disk.
+3. Deploy one network/zone manually, then verify its application health and
+   logs before proceeding. Publishing a release starts the automatic
+   six-cell deployment; it does not provide this one-zone ordering.
+4. Retain the snapshots until rollback to the previous binary is no longer
+   required.
 
-  # Snapshot before touching
-  gcloud compute snapshots create "${DISK}-pre-major-${TS}" \
-    --source-disk "$DISK" --source-disk-zone "$ZONE" --project $P
-
-  # Drain, preserving disk
-  INSTANCE=$(gcloud compute instance-groups managed list-instances "$MIG" \
-    --zone "$ZONE" --project $P --format='value(name)' | head -1)
-  gcloud compute instance-groups managed instance-configs update "$MIG" \
-    --zone "$ZONE" --project $P --instance "$INSTANCE" \
-    --stateful-disk "device-name=${DISK},auto-delete=never"
-  gcloud compute instance-groups managed resize "$MIG" --size 0 --zone "$ZONE" --project $P
-done
-
-# Publish the release; the workflow's release path recreates each zonal MIG
-# with the new template, which attaches the preserved disks.
-
-# Rollback (only if the release fails): restore disks from snapshots, deploy previous tag
-for Z in b c d; do
-  DISK=zebrad-cache-${NET}-${Z}; ZONE=us-east1-${Z}
-  gcloud compute disks delete "$DISK" --zone "$ZONE" --project $P --quiet
-  gcloud compute disks create "$DISK" --zone "$ZONE" --project $P \
-    --source-snapshot "${DISK}-pre-major-${TS}"
-done
-```
+For rollback, use [disk recovery](#recover-a-corrupted-cache-disk) with a
+pre-upgrade snapshot and dispatch the previous approved tag to the same
+production destination. Do not start the old binary against a disk whose
+format it cannot read. Preserve the failed upgraded disk for diagnosis
+before replacing it. Verify each restored node before moving to another
+zone.
 
 ## Regional-to-zonal migration
 
-One-shot procedure to convert an environment from the old regional architecture (one regional MIG per network holding three instances) to zonal (three zonal MIGs per network, one instance each). Run once per environment.
+A regional MIG cannot be renamed into three zonal MIGs. For an existing
+regional deployment, schedule the cutover explicitly; the workflow does
+not migrate it automatically.
 
-```bash
-P=zfnd-prod-zebra   # or zfnd-dev-zebra
-NET=mainnet
-OLD_MIG=zebrad-${NET}    # for prod; use zebrad-main-${NET} for dev
-OLD_DISK=zebrad-cache-${NET}    # for prod; use zebrad-cache-main-${NET} for dev
-TS=$(date +%Y%m%d-%H%M)
+1. Inventory the regional MIG, its three instances, zonal disks, and
+   reserved addresses. Record the current template and exact source ref.
+2. Stop writers and preserve every state disk. Set each effective stateful
+   disk policy to `never` before deleting the regional MIG; use `--region`
+   for the old group, not the zonal commands above.
+3. Confirm all disks are detached. Snapshot each zone's disk and require
+   `READY` for all snapshots before replacing or deleting old resources.
+4. Create a disk in each destination zone from the corresponding snapshot,
+   using the [current naming scheme](continuous-delivery.md#zonal-instance-groups).
+5. Dispatch the selected source ref once per network and zone with
+   `need_cached_disk=false`. Verify each new MIG's health and reserved IP.
+6. Remove obsolete disks and templates only after the new deployment is
+   operational and the rollback copies are retained.
 
-# 1. Snapshot each zonal disk (three per network)
-for Z in b c d; do
-  gcloud compute snapshots create "${OLD_DISK}-${Z}-pre-zonal-${TS}" \
-    --source-disk "$OLD_DISK" --source-disk-zone "us-east1-${Z}" --project $P
-done
-
-# 2. Delete the old regional MIG (disks auto-deleted; we have snapshots)
-gcloud compute instance-groups managed delete "$OLD_MIG" \
-  --region us-east1 --project $P --quiet
-
-# 3. Create zonal disks from the snapshots with the new name scheme
-#    Prod:    zebrad-cache-${NET}-${Z}
-#    Staging: zebrad-cache-main-${NET}-${Z}
-for Z in b c d; do
-  NEW_DISK=zebrad-cache-${NET}-${Z}    # or zebrad-cache-main-${NET}-${Z}
-  gcloud compute disks create "$NEW_DISK" \
-    --zone "us-east1-${Z}" --project $P \
-    --source-snapshot "${OLD_DISK}-${Z}-pre-zonal-${TS}" \
-    --size 400 --type pd-balanced
-done
-
-# 4. Trigger workflow_dispatch for each (network, zone). The workflow sees
-#    the zonal disks exist and attaches them; no fresh bootstrap from cache.
-for Z in b c d; do
-  gh workflow run zfnd-deploy-nodes-gcp.yml -R ZcashFoundation/zebra \
-    -f network=Mainnet -f zone="us-east1-${Z}" \
-    -f environment=$([ "$P" = "zfnd-prod-zebra" ] && echo prod || echo dev) \
-    -f need_cached_disk=false
-done
-```
-
-Repeat for Testnet. After all six (2 networks × 3 zones) zonal MIGs are HEALTHY, the migration for this environment is complete; retire the pre-zonal snapshots after a hold period.
+Repeat for both networks. Do not run an unattended loop that deletes all
+zones before verifying the first replacement.
 
 ## Reference
 
-**Static IPs** are externally provisioned and map deterministically to zones:
+### Static IPs
 
-- `us-east1-b` → `zebra-${network}` (primary)
-- `us-east1-c` → `zebra-${network}-secondary`
-- `us-east1-d` → `zebra-${network}-tertiary`
+| Zone | Stage and production address name | Next address name |
+| --- | --- | --- |
+| `us-east1-b` | `zebra-${network}` | `zebra-next-${network}` |
+| `us-east1-c` | `zebra-${network}-secondary` | `zebra-next-${network}-secondary` |
+| `us-east1-d` | `zebra-${network}-tertiary` | `zebra-next-${network}-tertiary` |
 
-Stage and production use these names in their own projects. `next` shares stage's project, so its addresses are `zebra-next-${network}`, `zebra-next-${network}-secondary`, and `zebra-next-${network}-tertiary`.
+Reserve addresses before deployment. Stage and production reuse names in
+different projects; next has separate names in the development project.
 
-The workflow assigns them via per-instance configs whenever the caller passes `use_reserved_ip`: always for `push` and `release`, and for a workflow_dispatch that selects `prod` or `next`, or runs from the `main` or `next` ref. Three dispatch cases to watch:
+The workflow resolves the address for stable destinations and advertises
+it through `ZEBRA_NETWORK__EXTERNAL_ADDR`, but assigns it only during fresh
+MIG creation. A missing reservation produces a warning and skips binding.
+An existing MIG does not get its binding repaired by rerunning deployment.
 
-- Selecting `prod` updates the stable production MIG and its reserved IP for the selected network and zone, from whatever ref you dispatched.
-- Selecting `next` updates the `next` MIG and its reserved IP the same way, from whatever ref you dispatched.
-- Selecting `dev` **from the `main` or `next` ref** resolves to the `main-` or `next-` prefix, so it updates the **stage** or **next** MIG and its reserved address — not a branch-private one.
+Inspect the instance's actual `networkInterfaces` and its per-instance
+configuration before repairing it. For a missing per-instance
+configuration, use the same operation as the workflow:
 
-Every other dev workflow_dispatch gets no external IP at all: the instance template passes `--no-address`, so those instances reach the network outbound-only and never advertise a `ZEBRA_NETWORK__EXTERNAL_ADDR`. Reserve new addresses manually with `gcloud compute addresses create` before adding capacity.
-
-Assignment only happens when the MIG is first created. If `instance-configs create` fails, or the address was not reserved at the time (the step warns and continues), a later rerun will not repair the binding — the MIG already exists, so the step is skipped — while the template may still carry `ZEBRA_NETWORK__EXTERNAL_ADDR`. Repair it by hand with `gcloud compute instance-groups managed instance-configs create`.
-
-**Cache images** are produced by `zfnd-deploy-integration-tests-gcp.yml`'s `create-state-image` job. Naming pattern: `{prefix}-{branch}-{sha}-v{state-version}-{network}-{tip|checkpoint}[-u]-{HHMMSS}`. One image per network seeds all three zones. Lookup priority: current branch, then `main`, then any branch; most recent first. List recent:
-
-```bash
-gcloud compute images list --project zfnd-dev-zebra \
-  --filter="name~^zebrad-cache-.*-v27-mainnet-tip" \
-  --sort-by=~creationTimestamp --limit=5
+```sh
+IP_NAME=zebra-mainnet
+IP_ADDRESS=$(gcloud compute addresses describe "$IP_NAME" \
+  --region=us-east1 --project "$P" --format='value(address)')
+gcloud compute instance-groups managed instance-configs create "$MIG" \
+  --instance="$INSTANCE" --zone="$ZONE" --project "$P" \
+  --stateful-external-ip="address=${IP_ADDRESS},interface-name=nic0,auto-delete=never"
 ```
 
-**Sentry releases** use the name deployed nodes report, for example `7.0.0-rc.0+git.6d1e414`. After a stage or prod deploy succeeds, the `sentry-release-name` job reads that name from the deployed image with `zebrad --version`. The `sentry-release` job then creates the release in the `zfnd/zebrad` Sentry project, associates the commits since the previous successful deploy to that environment through Sentry's GitHub integration, and records a deploy. It needs the `SENTRY_AUTH_TOKEN` repository secret, an organization token. Without the secret, the job skips its steps and records nothing. Dev and next deploys are not recorded.
+Require a nonempty address first. Select the correct name for the
+environment and zone. If the configuration already exists, update it
+rather than creating another. The command applies the configuration to
+the instance by default. Verify that its actual external address matches
+the advertised address after the update; successful submission alone does
+not establish that the binding is live.
 
-**Daily cleanup** (`zfnd-delete-gcp-resources.yml`) sweeps old instances, templates, disks, and cache images by age and name. It does not honor `keep_until` or `delete_protection` labels on PR deploys; use the [sweep recipe](#sweep-expired) for label-aware control. The eighteen stable cache disks (`zebrad-cache-{mainnet,testnet}-{b,c,d}` in production, `zebrad-cache-main-{mainnet,testnet}-{b,c,d}` in stage, and `zebrad-cache-next-{mainnet,testnet}-{b,c,d}` in next) are never eligible because GCP refuses to delete attached disks; if any stable disk ever shows up unattached, that is itself an incident.
+### Cache images
+
+The integration workflow's `create-state-image` job produces names of the
+form:
+
+```text
+{prefix}-{ref-slug}-{sha}-v{major}-{network}-{tip|checkpoint}[-u]-{HHMMSS}
+```
+
+The prefix is `zebrad-cache` or `lwd-cache`. The ref slug is truncated to 12
+characters, the SHA to seven, and the time is UTC. The database major comes
+from the running test's logs, not merely from the source constant.
+
+The [lookup script](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/scripts/gcp-get-cached-disks.sh)
+requires a `READY` image matching purpose, database major, network, and
+state kind. It tries a branch-specific pattern, then `main`, then any
+branch, selecting the newest match in each query. The current first
+pattern places the branch where generated names put the commit SHA, so it
+does not provide the intended same-branch preference for ordinary branch
+names. Do not rely on same-branch or same-commit cache selection. Inspect
+the chosen image in the job output.
+
+The `allow_missing` input permits an empty selected name, not a failed
+image-list query. List recent v29 Mainnet tip images with:
+
+```sh
+gcloud compute images list --project zfnd-dev-zebra \
+  --filter='status=READY AND name~^zebrad-cache-.*-v29-mainnet-tip' \
+  --sort-by='~creationTimestamp' --limit=5
+```
+
+### Sentry releases
+
+Successful `stage`, `next`, and `prod` deployments run `sentry-release-name`.
+It reads the node's release name from the exact image with `zebrad --version`,
+using an environment, `id-token: write`, and `GCP_ARTIFACTS_SA` to pull from GAR.
+
+The separate `sentry-release` job has no GitHub environment and only
+`deployments: read` permission, keeping GCP credentials out of the Sentry
+action's container. Using optional repository secret `SENTRY_AUTH_TOKEN`, it
+records the release and deployment environment in organization `zfnd`,
+project `zebrad`.
+
+The commit range ends at the deployed source SHA. Among the latest 50 GitHub
+deployments in the same environment, the job finds a different SHA whose
+latest status is `success` and passes it as `previous_commit`. Without a
+match, it supplies no previous commit; it never uses another environment's
+newest Sentry release.
+
+Without `SENTRY_AUTH_TOKEN`, the recording job skips its steps; the image
+version reader still runs. Deployments selecting `dev` do not enter this
+recording path, even when their ref targets stage or next resource names.
+
+Zebra reads [CI and Git metadata](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/sentry.rs#L78-L130)
+from the container's runtime environment. Pass these values at deployment;
+do not bake environment-specific metadata into shared images. Sentry events
+carry tags and a `ci` context; Logs carry the same tags as attributes and
+prefix the context fields with `ci.`.
+
+| Runtime variable | Sentry metadata |
+| --- | --- |
+| `GITHUB_ACTIONS` | Sets `ci.provider=github-actions` when equal to `true`, ignoring case. |
+| `GITHUB_EVENT_NAME` | `deploy.trigger` tag. |
+| `CI_PR_NUMBER`, `CI_TEST_ID` | `pr.number` and `test.id` tags. |
+| `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` | `run_id` and `run_attempt` in the CI context. |
+| `GITHUB_WORKFLOW`, `GITHUB_JOB` | `workflow` and `job` in the CI context. |
+| `GITHUB_SHA` | `git.sha` tag; otherwise uses the build-time `SHORT_SHA`, then `VERGEN_GIT_SHA`, when available. |
+| `GITHUB_REF_POINT_SLUG_URL`, `GITHUB_HEAD_REF_SLUG_URL`, `GITHUB_REF_NAME_SLUG_URL` | First nonempty value becomes the `git.ref` tag, in this order. Raw `GITHUB_REF_NAME` is not used. |
+
+Runtime values are trimmed; empty values are ignored. The
+[node deployment](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml#L435)
+passes its source SHA as `GITHUB_SHA` and its selected environment as
+`SENTRY_ENVIRONMENT`. The
+[integration-test deployment](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-integration-tests-gcp.yml#L336-L338)
+uses `SENTRY_ENVIRONMENT=ci` for every trigger, keeping test runs out of the
+fleet's release-health environment.
+
+### Daily cleanup
+
+The [cleanup workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-delete-gcp-resources.yml)
+runs daily at 07:00 UTC, or manually, with the `dev` environment. Its
+scripts use age and name filters, not `keep_until` or `delete_protection`:
+
+| Resource | Selection and retention |
+| --- | --- |
+| Instances | Names ending in `-[0-9a-f]{7,}`; three-day age cutoff, or six days with `long-test=true` |
+| Instance templates | The same name suffix; two-day age cutoff |
+| Disks | Unattached, older than the two-day cutoff, and either the suffix above or a `zebrad-` prefix excluding `zebrad-cache` |
+| Cache images | Preserve all newer than the two-day cutoff and the newest two older images per network/state-kind category |
+
+Cutoffs are dates, not exact elapsed-hour deadlines. Decimal GitHub run IDs
+match the hexadecimal-looking suffix filter. Current stable cache disk
+names end in a zone letter and begin with `zebrad-cache-`, so neither disk
+selector matches them, even when detached. Current CD template names also
+end in a zone letter and are outside the template selector. Do not assume
+the cleanup workflow reaps branch MIGs or their templates.
+
+Image retention is not partitioned by branch or database major. Preserve
+required rollback snapshots independently of CI cache-image retention.
