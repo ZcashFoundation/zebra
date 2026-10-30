@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce Orchard proof decoding and verification CPU costs with lazy Pasta square-root chains, streamlined Halo 2 queries and rotations, and cached instance commitments.
+time: 2026-10-24T18:43:11.858140068+02:00

@@ -1308,7 +1308,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "git+https://github.com/upbqdn/halo2?rev=c61deee3528a3526d73660f32525ff41599fb5c1#c61deee3528a3526d73660f32525ff41599fb5c1"
+source = "git+https://github.com/upbqdn/halo2?rev=2332fc0e2060dc99c6865097f70f817c8cb6aa4e#2332fc0e2060dc99c6865097f70f817c8cb6aa4e"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1332,7 +1332,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.0"
-source = "git+https://github.com/upbqdn/halo2?rev=c61deee3528a3526d73660f32525ff41599fb5c1#c61deee3528a3526d73660f32525ff41599fb5c1"
+source = "git+https://github.com/upbqdn/halo2?rev=2332fc0e2060dc99c6865097f70f817c8cb6aa4e#2332fc0e2060dc99c6865097f70f817c8cb6aa4e"
 dependencies = [
  "bitvec",
  "ff",
@@ -1343,7 +1343,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.0"
-source = "git+https://github.com/upbqdn/halo2?rev=c61deee3528a3526d73660f32525ff41599fb5c1#c61deee3528a3526d73660f32525ff41599fb5c1"
+source = "git+https://github.com/upbqdn/halo2?rev=2332fc0e2060dc99c6865097f70f817c8cb6aa4e#2332fc0e2060dc99c6865097f70f817c8cb6aa4e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2445,7 +2445,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.1"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=569f897edd5db401dafacca25d4760da533ad683#569f897edd5db401dafacca25d4760da533ad683"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=8cf375255b07e486b3eeceaa2ec465ec79bb2086#8cf375255b07e486b3eeceaa2ec465ec79bb2086"
 dependencies = [
  "blake2b_simd",
  "ff",
