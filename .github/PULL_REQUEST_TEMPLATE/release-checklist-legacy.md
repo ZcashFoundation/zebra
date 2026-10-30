@@ -40,17 +40,13 @@ These steps can be done a few days before the release, in the same PR:
 automated release-plz workflow is not usable. Keep all changelog edits in the
 release branch until the release PR is merged.
 
-Changelog entries are authored and curated per PR in the `[Unreleased]` section
-of `CHANGELOG.md`, so the entries for this release are already written. We follow
-the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+Changelog entries are authored per PR in `.changes/unreleased/*.yaml` and
+generated with Changie. Never edit root or crate `CHANGELOG.md` files by hand.
 
-To finalize the change log:
-
-- [ ] Rename the `[Unreleased]` heading to
-      `## [Zebra <version>](https://github.com/ZcashFoundation/zebra/releases/tag/v<version>) - <date>`
-- [ ] Read through the finalized entries and confirm each one reads well for
-      Zebra users and sits in the right category, fixing anything that slipped
-      past per-PR review
+- [ ] Curate the `zebrad` fragments in `.changes/unreleased/`, checking that each
+      entry reads well for Zebra users and sits in the right category.
+- [ ] After choosing versions, batch and regenerate the changelogs as described
+      in [Update Crate Versions and Crate Change Logs](#update-crate-versions-and-crate-change-logs).
 
 ## README
 
@@ -105,18 +101,17 @@ Choose a release level for `zebrad`. Release levels are based on user-visible ch
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
 and make sure you're a member of owners group.
 
-Crate changelog entries are authored per PR in each crate's `CHANGELOG.md`
-`[Unreleased]` section, and breaking changes are declared per PR with a
-conventional-commit `!`. The release level for each crate follows those markers:
+Crate changelog entries are authored per PR in `.changes/unreleased/*.yaml`,
+and breaking changes are declared per PR with a conventional-commit `!`.
+The release level for each crate follows those markers:
 a `!` since the previous release means a major release, a new API means a minor
 release, otherwise a patch release.
 
 - [ ] Determine which crates require release. Run `git diff --stat <previous_tag>`
       and enumerate the crates that had changes.
 - [ ] For each crate that requires a release:
-  - [ ] Rename the `[Unreleased]` heading in the crate `CHANGELOG.md` to the new
-        version, and confirm the already-authored entries read correctly for a
-        crate consumer.
+  - [ ] Curate its fragments in `.changes/unreleased/`, checking that the entries
+        read correctly for a crate consumer.
   - [ ] Bump the crate version:
 
 ```sh
@@ -125,7 +120,16 @@ cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # 
 cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 ```
 
-- [ ] Commit and push the above version changes to the release branch.
+- [ ] For each released crate without pending fragments, because it is released
+      only for a dependency update, add one first:
+      `changie new -j <crate> -k Changed -b 'Updated dependencies.'`
+- [ ] For each released crate (including `zebrad`), run
+      `changie batch "v<version>" --project <crate>` with its selected version,
+      then run `changie merge` to regenerate the changelogs.
+      If already batched, edit `.changes/<crate>/v<version>.md` and run
+      `changie merge` instead.
+- [ ] Commit and push the version changes, `.changes/` sources, and generated
+      changelogs to the release branch.
 
 ### Verify the API bump (backstop)
 
@@ -193,7 +197,10 @@ The end of support height is calculated from the current blockchain height:
 
 ## Publish Release
 
-- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
+- [ ] For stable versions only, [publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases)
+      by disabling 'pre-release', then clicking "Set as the latest release".
+      Keep RC versions as prereleases; see the
+      [preview release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#preview-releases).
 
 ## Publish Crates
 
@@ -214,7 +221,8 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 
 ## Publish Docker Images
 
-- [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
+- [ ] For stable versions only, wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
+      The workflow does not run for prereleases.
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
 - [ ] Thaw `main` in the [Merge Freeze dashboard](https://www.mergefreeze.com/), if
       it was frozen there.
@@ -230,7 +238,7 @@ If building or running fails after tagging:
 1. Fix the bug that caused the failure
 2. Start a new `patch` release
 3. Skip the **Release Preparation**, and start at the **Release Changes** step
-4. Update `CHANGELOG.md` with details about the fix
+4. Add change fragments describing the fix
 5. Follow the release checklist for the new Zebra version
 
 </details>
