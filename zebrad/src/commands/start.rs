@@ -403,6 +403,7 @@ impl StartCmd {
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
+                read_only_state_service.clone(),
                 tx_verifier_setup_rx,
             )
             .await;
@@ -425,6 +426,7 @@ impl StartCmd {
             &config.mempool,
             peer_set.background_service(),
             state.clone(),
+            tower::util::BoxCloneService::new(read_only_state_service.clone()),
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip.clone(),
@@ -953,6 +955,7 @@ impl StartCmd {
         let config = APPLICATION.config();
 
         // Ignore the checkpoint verify limit, because it is very large.
+        // Mempool reads bypass the state writer's buffer.
         //
         // TODO: do we also need to account for concurrent use across services?
         //       we could multiply the maximum by 3/2, or add a fixed constant
@@ -960,7 +963,6 @@ impl StartCmd {
             config.sync.download_concurrency_limit,
             config.sync.full_verify_concurrency_limit,
             inbound::downloads::MAX_INBOUND_CONCURRENCY,
-            mempool::downloads::MAX_INBOUND_CONCURRENCY,
         ]
         .into_iter()
         .max()
