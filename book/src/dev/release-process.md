@@ -285,8 +285,8 @@ fix is ready; step 6 waits for fixed crate versions to be published.
 
    Require matching digests. Copying the image index preserves its digest-bound
    signatures and attestations. Delete the withdrawn Docker Hub version tag and
-   matching `sha-<short-commit>` tag; remove only aliases with the withdrawn
-   digest. Pulls by digest can still succeed, and downloaded copies remain usable.
+   any aliases with the withdrawn digest, including SHA tags from older releases.
+   Pulls by digest can still succeed, and downloaded copies remain usable.
 
 3. **Roll production back only where safe.** Check disk compatibility and inspect
    the good tag's deployment workflow: the tag supplies both code and workflow.

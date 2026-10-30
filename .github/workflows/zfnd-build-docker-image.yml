@@ -194,10 +194,9 @@ jobs:
             type=ref,event=branch
             type=edge,enable={{is_default_branch}}
             type=schedule
-            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
-            # Applied during pull requests and branch pushes to ensure CI tests use the exact image from the last commit.
-            type=sha,event=pr
-            type=sha,event=branch
+            # - `sha-xxxxxxx`: Identifies the exact commit for CI tests on every nonrelease event.
+            # Release builds omit SHA tags in both registries.
+            type=sha,enable=${{ github.event_name != 'release' }}
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -339,8 +338,7 @@ jobs:
             type=ref,event=branch
             type=edge,enable={{is_default_branch}}
             type=schedule
-            type=sha,event=pr
-            type=sha,event=branch
+            type=sha,enable=${{ github.event_name != 'release' }}
 
       - name: Authenticate to Google Cloud
         id: auth
