@@ -111,5 +111,13 @@ The supplied dashboards use aggregate totals and the bounded `implementation` la
 on `zcash.net.peer.version.outcomes.total` for successful handshake software breakdowns.
 These are cumulative handshake counts, not counts of currently connected peers.
 Peer addresses and full user agents remain available in logs and peer metadata.
-Protocol-version labels and inbound error descriptions are unchanged, so this change
-does not bound every network metric's cardinality.
+
+Metric labels use bounded values:
+
+- `mempool.failed.verify.tasks.total` `reason`: `in_state`, `state_error`,
+  `download_failed`, `cancelled`, `invalid`, or `timeout`.
+- `zebra.net.in.errors` `error`: `io`, `parse`, `utf8_error`,
+  `try_from_slice_error`, `try_from_int_error`, `from_hex_error`, `amount`,
+  `bad_transaction_balance`, `script`, `opcode`, or `num`.
+- Handshake `remote_version` and `negotiated_version`: known protocol versions or
+  `other`.

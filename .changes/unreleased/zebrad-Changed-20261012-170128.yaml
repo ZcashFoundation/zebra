@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: "Disabled Nagle's algorithm (`TCP_NODELAY`) on peer connections, like zcashd does. This removes delays of 40ms or more when Zebra sends several small messages in a row, for example when it relays mempool transactions to zcashd peers."
+time: 2026-10-12T17:01:28.000000000Z

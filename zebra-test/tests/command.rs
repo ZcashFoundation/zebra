@@ -1,6 +1,7 @@
 //! Tests for the [`zebra_test::command`] module.
 
 use std::{
+    io::ErrorKind,
     process::Command,
     time::{Duration, Instant},
 };
@@ -15,30 +16,82 @@ use zebra_test::{
     prelude::Stdio,
 };
 
-/// Returns true if `cmd` with `args` runs successfully.
+/// Returns true if `cmd` with `args` can be spawned, regardless of its exit status.
 ///
-/// On failure, prints an error message to stderr.
-/// (This message is captured by the test runner, use `cargo test -- --nocapture` to see it.)
-///
-/// The command's stdout and stderr are ignored.
+/// Only a missing executable skips a test; other spawn or wait errors panic.
+/// Missing commands are reported to stderr, which is captured by the test runner.
+/// The command's stdout and stderr are ignored, and the probe child is reaped.
 #[allow(clippy::print_stderr)]
 fn is_command_available(cmd: &str, args: &[&str]) -> bool {
-    let status = Command::new(cmd)
+    let spawn_result = Command::new(cmd)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .spawn();
 
-    match status {
-        Err(e) => {
-            eprintln!("Skipping test because '{cmd} {args:?}' returned error {e:?}");
+    match spawn_result {
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            eprintln!("Skipping test because '{cmd} {args:?}' was not found: {error:?}");
             false
         }
-        Ok(status) if !status.success() => {
-            eprintln!("Skipping test because '{cmd} {args:?}' returned status {status:?}");
-            false
+        Err(error) => panic!("could not spawn availability probe '{cmd} {args:?}': {error:?}"),
+        Ok(mut child) => {
+            child.wait().unwrap_or_else(|error| {
+                panic!("could not reap availability probe '{cmd}': {error:?}")
+            });
+            true
         }
-        _ => true,
+    }
+}
+
+/// Missing executables are reported as unavailable.
+#[test]
+fn missing_command_is_unavailable() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let dir = tempdir()?;
+    let missing = dir.path().join("missing-command");
+
+    assert!(!is_command_available(missing.to_str().unwrap(), &[]));
+    Ok(())
+}
+
+/// Invalid command paths fail instead of being reported as unavailable.
+#[test]
+#[should_panic(expected = "could not spawn availability probe")]
+fn invalid_command_path_panics() {
+    let _init_guard = zebra_test::init();
+
+    is_command_available("\0", &[]);
+}
+
+/// A command that exits unsuccessfully is still available.
+#[test]
+fn nonzero_exit_command_is_available() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // An unknown libtest option exits unsuccessfully without running any tests.
+    let executable = std::env::current_exe()?;
+
+    assert!(is_command_available(
+        executable.to_str().unwrap(),
+        &["--zebra-test-invalid-option"],
+    ));
+    Ok(())
+}
+
+/// Wait for a short-lived fixture to exit without consuming its output.
+fn wait_for_fixture_exit(child: &mut zebra_test::command::TestChild<tempfile::TempDir>) {
+    let deadline = child
+        .deadline()
+        .expect("fixtures set a timeout before waiting for exit");
+    while child.is_running() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "the fixture must exit before its deadline"
+        );
+        std::thread::sleep(remaining.min(Duration::from_millis(10)));
     }
 }
 
@@ -175,26 +228,26 @@ fn failure_regex_matches_stdout_failure_message() {
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stderr,
-/// and panic with a test failure message.
+/// and fail with a test failure message.
 #[test]
 fn failure_regex_matches_stderr_failure_message() {
     let _init_guard = zebra_test::init();
 
-    // The read command prints its prompt to stderr.
-    //
-    // This is tricky to get right, because:
-    // - some read command versions only accept integer timeouts
-    // - some installs only have read as a shell builtin
-    // - some `sh` shells don't allow the `-t` option for read
     const TEST_CMD: &str = "bash";
-    // Skip the test if the test system does not have the command
-    if !is_command_available(TEST_CMD, &["-c", "read -t 1 -p failure_message"]) {
+    // Skip the test if the test system does not have a working shell. On Windows, `bash` can be
+    // the WSL launcher, which fails when no Linux distribution is installed.
+    if !is_command_available(TEST_CMD, &["-c", ":"])
+        || !Command::new(TEST_CMD)
+            .args(["-c", ":"])
+            .status()
+            .is_ok_and(|status| status.success())
+    {
         return;
     }
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, args![ "-c": "read -t 1 -p failure_message" ])
+        .spawn_child_with_command(TEST_CMD, args![ "-c": "echo failure_message >&2" ])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .expect("short test timeout fits in Instant")
@@ -226,7 +279,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
         return;
     }
 
-    let _child = tempdir()
+    let mut child = tempdir()
         .unwrap()
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
@@ -234,8 +287,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
         .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Drop should read all unread output.
 }
@@ -291,7 +343,7 @@ fn failure_regex_reads_multi_line_output_on_drop() {
     }
 
     let panic = std::panic::catch_unwind(|| {
-        let _child = tempdir()
+        let mut child = tempdir()
             .unwrap()
             .spawn_child_with_command(
                 TEST_CMD,
@@ -305,8 +357,7 @@ fn failure_regex_reads_multi_line_output_on_drop() {
             .expect("short test timeout fits in Instant")
             .with_failure_regex_set("failure_message", RegexSet::empty());
 
-        // Give the child process enough time to print its output.
-        std::thread::sleep(Duration::from_secs(1));
+        wait_for_fixture_exit(&mut child);
 
         // Drop should read all unread output.
     })
@@ -339,8 +390,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
         .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Kill should read all unread output to generate the error context,
     // or the output should be read on drop.
@@ -360,7 +410,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
         return;
     }
 
-    let child = tempdir()
+    let mut child = tempdir()
         .unwrap()
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
@@ -368,8 +418,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
         .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Kill on error should read all unread output to generate the error context,
     // or the output should be read on drop.
@@ -390,7 +439,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
         return;
     }
 
-    let child = tempdir()
+    let mut child = tempdir()
         .unwrap()
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
@@ -398,8 +447,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
         .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Kill on error should read all unread output to generate the error context,
     // or the output should be read on drop.
@@ -465,9 +513,6 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
         .with_timeout(Duration::from_secs(5))
         .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
-
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
 
     let error = child.wait_with_output().unwrap_err();
     assert!(format!("{error:?}").contains("Logged a failure message"));

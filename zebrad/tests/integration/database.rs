@@ -24,7 +24,8 @@ use crate::common::{
     test_type::TestType::*,
 };
 
-pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
+pub const MAX_ASYNC_BLOCKING_TIME: Duration =
+    zebra_test::mock_service::DEFAULT_REQUEST_OBSERVATION_TIMEOUT;
 
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {

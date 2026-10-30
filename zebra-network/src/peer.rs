@@ -21,6 +21,7 @@ pub(crate) use handshake::register_inventory_status;
 use client::{ClientRequestReceiver, InProgressClientRequest, MustUseClientResponseSender};
 
 pub(crate) use client::{CancelHeartbeatTask, ClientRequest};
+pub(crate) use connector::{connect_tcp_nodelay, set_tcp_nodelay};
 
 pub use client::Client;
 pub use connection::Connection;

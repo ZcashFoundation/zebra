@@ -19,7 +19,7 @@ use crate::common::{
 async fn rpc_get_block_from_cached_state() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let test_type = TestType::UpdateCachedState;
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
     let network = Network::Mainnet;
 
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =

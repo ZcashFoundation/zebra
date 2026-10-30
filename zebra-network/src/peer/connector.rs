@@ -1,6 +1,7 @@
 //! Wrapper around handshake logic that also opens a TCP connection.
 
 use std::{
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -96,7 +97,7 @@ where
         // `zebra_network::init()` implements a connection timeout on this future.
         // Any code outside this future does not have a timeout.
         async move {
-            let tcp_stream = TcpStream::connect(*addr).await?;
+            let tcp_stream = connect_tcp_nodelay(*addr).await?;
             let client = hs
                 .oneshot(HandshakeRequest::<TcpStream> {
                     data_stream: tcp_stream,
@@ -108,5 +109,31 @@ where
         }
         .instrument(connector_span)
         .boxed()
+    }
+}
+
+/// Opens a TCP connection to the peer at `addr`, with [`set_tcp_nodelay`] applied.
+pub(crate) async fn connect_tcp_nodelay(addr: SocketAddr) -> std::io::Result<TcpStream> {
+    let tcp_stream = TcpStream::connect(addr).await?;
+    set_tcp_nodelay(&tcp_stream);
+
+    Ok(tcp_stream)
+}
+
+/// Disables Nagle's algorithm on a peer's TCP connection.
+///
+/// Zebra writes each message to the socket in one flush, so this does not split messages
+/// into extra packets. But with Nagle's algorithm, a small message sent straight after
+/// another small message waits until the peer acknowledges the first one, and peers can
+/// delay that acknowledgement for 40ms or more. For example, this happens to a response
+/// with a `tx` and a `notfound` message, or to a request sent right after an `inv`.
+///
+/// zcashd and Bitcoin Core also disable Nagle's algorithm on their peer connections.
+pub(crate) fn set_tcp_nodelay(tcp_stream: &TcpStream) {
+    if let Err(error) = tcp_stream.set_nodelay(true) {
+        debug!(
+            ?error,
+            "failed to disable Nagle's algorithm on peer connection"
+        );
     }
 }

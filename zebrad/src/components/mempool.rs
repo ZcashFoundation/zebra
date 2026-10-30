@@ -778,7 +778,7 @@ impl Service<Request> for Mempool {
 
                         tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
-                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
+                        metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.metric_label()).increment(1);
 
                         invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
