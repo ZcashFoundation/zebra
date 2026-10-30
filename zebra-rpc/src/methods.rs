@@ -1143,6 +1143,7 @@ where
                 self.read_state.clone(),
                 self.latest_chain_tip.clone(),
                 self.gbt.sync_status(),
+                self.gbt.block_verifier_router(),
             )
             .in_current_span(),
         ))
@@ -3186,6 +3187,12 @@ where
                 let error = box_error
                     .downcast::<RouterError>()
                     .map(|boxed_chain_error| *boxed_chain_error);
+                if let Ok(error) = &error {
+                    if error.is_resource_pressure() {
+                        // Queue pressure and range recovery are not consensus rejections.
+                        return Err(ErrorObject::owned(0, error.to_string(), None::<()>));
+                    }
+                }
 
                 tracing::info!(
                     ?error,
