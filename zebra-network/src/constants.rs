@@ -316,6 +316,10 @@ pub const GET_ADDR_FANOUT: usize = 1;
 /// <https://zips.z.cash/zip-0155#specification>
 pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 
+/// The maximum number of block hashes kept from a `FindBlocks` response, matching the
+/// `MAX_FIND_BLOCK_HASHES_RESULTS` limit that Zebra and zcashd apply when serving `getblocks`.
+pub const MAX_FIND_BLOCKS_RESPONSE_HASHES: usize = 500;
+
 /// The fraction of addresses Zebra sends in response to a `Peers` request.
 ///
 /// Each response contains approximately:
