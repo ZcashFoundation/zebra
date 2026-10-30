@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// The mempool transaction cost limit.
     ///
-    /// This limits the total serialized byte size of all transactions in the mempool.
+    /// This limits the sum of transaction costs: each is the greater of its serialized byte size
+    /// and 10,000. It is not a process-memory limit.
     ///
     /// Consensus rule:
     /// > There MUST be a configuration option mempooltxcostlimit, which SHOULD default to 80000000.

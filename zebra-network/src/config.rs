@@ -78,19 +78,19 @@ pub struct Config {
     /// Can be `address:port` or just `address`. If there is no configured
     /// port, Zebra will use the default port for the configured `network`.
     ///
-    /// `address` can be an IP address or a DNS name. DNS names are
-    /// only resolved once, when Zebra starts up.
+    /// `address` must be an IP literal, not a DNS name.
     ///
     /// By default, Zebra listens on `[::]` (all IPv6 and IPv4 addresses).
     /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
     ///
     /// If a specific listener address is configured, Zebra will advertise
-    /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("\[::\]:port"), which is not advertised to other nodes.
+    /// it to other nodes unless [`Self::external_addr`] overrides it.
+    /// The default unspecified address ("\[::\]:port") is not advertised.
     ///
-    /// Zebra does not currently support:
-    /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
-    /// - [Auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
+    /// Set [`Self::external_addr`] to advertise a different address. Zebra does not support
+    /// [auto-discovering its external address][external-ip].
+    ///
+    /// [external-ip]: https://github.com/ZcashFoundation/zebra/issues/1893
     ///
     /// However, other Zebra instances compensate for unspecified or incorrect
     /// listener addresses by adding the external IP addresses of peers to
@@ -835,7 +835,7 @@ impl<'de> Deserialize<'de> for Config {
             Err(_) => match listen_addr.parse::<IpAddr>() {
                 Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
                 Err(err) => Err(de::Error::custom(format!(
-                    "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                    "{err}; Hint: use an IPv4 or IPv6 address; the port is optional (bracket IPv6 with a port)"
                 ))),
             },
         }?;
@@ -846,7 +846,7 @@ impl<'de> Deserialize<'de> for Config {
                 Err(_) => match address.parse::<IpAddr>() {
                     Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),
                     Err(err) => Err(de::Error::custom(format!(
-                        "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                        "{err}; Hint: use an IPv4 or IPv6 address; the port is optional (bracket IPv6 with a port)"
                     ))),
                 },
             }?

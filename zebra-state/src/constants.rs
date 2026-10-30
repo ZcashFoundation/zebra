@@ -50,14 +50,14 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network
 ///   directory to `state/v29`, without a resync or record migration. Retain a v28 backup for rollback:
 ///   disabling old-database cleanup does not prevent this move, and v28 readers cannot use new records.
-/// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
-///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
-///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree
-///   `zcash_history::Entry` records from 253 to 326 bytes, because NU6.3 adds Ironwood fields to
-///   `zcash_history::NodeData` (read code accepts the legacy 253-byte width and zero-pads it up to
-///   the current width). New CFs are created and the wider records are read in place when the
-///   database is opened, so this is a major bump that is restorable from the previous major
-///   database format version (no resync, no data migration).
+/// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families and widens
+///   the chain value pool `ValueBalance` serialization from 40 to 48 bytes for the `ironwood` pool
+///   (read code accepts 32/40/48-byte records). Also widens the history-tree `zcash_history::Entry`
+///   records from 253 to 326 bytes, because NU6.3 adds Ironwood fields to `zcash_history::NodeData`
+///   (read code accepts the legacy 253-byte width and zero-pads it up to the current width).
+///   New CFs are created and the wider records are read in place when the database is opened.
+///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
+///   format is reusable without a resync.
 const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a

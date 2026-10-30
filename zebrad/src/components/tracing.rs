@@ -101,8 +101,9 @@ pub struct InnerConfig {
     /// and more details on the syntax can be found there or in the examples
     /// below.
     ///
-    /// If no filter is specified (`None`), the filter is set to `info` if the
-    /// `-v` flag is given and `warn` if it is not given.
+    /// Without an explicit filter, `start` and `copy-state` use `info`, or `debug` with `-v`.
+    /// `generate` and `tip-height` always use `warn`, or `info` with `-v`, ignoring explicit
+    /// filters.
     ///
     /// # Examples
     ///
@@ -228,15 +229,15 @@ pub struct InnerConfig {
 }
 
 /// The progress bars that Zebra will show while running.
+///
+/// Both modes currently render the same bars.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgressConfig {
-    /// Show a lot of progress bars.
+    /// Show progress bars, currently identical to [`Self::Summary`].
     Detailed,
 
-    /// Show a few important progress bars.
-    //
-    // TODO: actually hide some progress bars in this mode.
+    /// Show progress bars, currently identical to [`Self::Detailed`].
     #[default]
     #[serde(other)]
     Summary,

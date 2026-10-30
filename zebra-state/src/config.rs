@@ -62,7 +62,7 @@ pub struct Config {
     ///
     /// This cache stores permanent blockchain state that can be replicated from
     /// the network, including the best chain, blocks, the UTXO set, and other indexes.
-    /// Any state that can be rolled back is only stored in memory.
+    /// Non-finalized state is held in memory and, by default, backed up to disk for restart.
     ///
     /// The `zebra-state` cache does *not* include any private data, such as wallet data.
     ///
@@ -93,11 +93,12 @@ pub struct Config {
     /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
     /// underneath the `cache_dir` path, where `N` is the state format version.
     ///
-    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
-    /// and re-syncs from genesis.
+    /// Compatible state formats can be upgraded in place or reused from the preceding major
+    /// version. Without a reusable database, Zebra creates a new state directory and re-syncs from
+    /// genesis.
     ///
-    /// Old state versions are automatically deleted at startup. You can also manually delete old
-    /// state versions.
+    /// Old state versions are deleted at startup when [`Self::delete_old_database`] is enabled.
+    /// You can also manually delete old state versions.
     pub cache_dir: PathBuf,
 
     /// Whether to use an ephemeral database.

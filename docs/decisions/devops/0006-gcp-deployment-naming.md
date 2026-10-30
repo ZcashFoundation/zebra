@@ -23,8 +23,8 @@ Operating a multi-instance regional MIG also coupled deploy-landed to node-healt
 - Chain state must persist across releases, including major-version upgrades. A multi-day resync is unacceptable.
 - A failed deploy must surface a clear, per-zone, per-network error within minutes.
 - A developer must be able to deploy a PR branch to a single zone in dev without colliding with other deploys.
-- Updates must be true rolling: one zone at a time, others keep serving.
-- Cleanup must be auditable and reversible: label-based protection, manual reap commands, no accidental destruction of live stateful disks.
+- Each zone must update independently. The workflow does not serialize zones or guarantee that other zones keep serving.
+- Cleanup must be auditable: explicit manual reap commands and documented age/name filters. Protection labels are not enforced.
 - Cache images produced by integration tests must remain the cold-start mechanism for fresh deploys; cache images are network-scoped (same image seeds all zones).
 - The architecture must compose with the existing `release:published` trigger contract.
 - The naming model must reuse existing label vocabulary.
@@ -56,7 +56,7 @@ Operating a multi-instance regional MIG also coupled deploy-landed to node-healt
 #### Option 3: Zonal MIG per (environment, branch, network, zone)
 
 - Good, because the MIG is the instance: 1:1:1:1 between MIG, instance, stateful disk, static IP. No "regional disks with the same name across zones" ambiguity.
-- Good, because `--max-unavailable=1` is natively valid (single-instance MIG). Updates are true per-zone rolling: one zonal MIG replaces its instance while the sister zonal MIGs keep serving.
+- Good, because `--max-unavailable=1` is natively valid (single-instance MIG). Each zonal MIG replaces its own instance independently; concurrent updates can make sister MIGs unavailable too.
 - Good, because per-zone failures are isolated: one zone's warmup slowness doesn't block the others, and the matrix's `fail-fast: false` gives six independent (network, zone) status cells on the GitHub UI.
 - Good, because deploy-landed (`--version-target-reached`) and node-healthy (`--stable`) are distinct steps, while the per-cell deployment lock covers both.
 - Good, because `find-cached-disks` runs per-network (one lookup per network, image seeds all three zones).
@@ -82,10 +82,10 @@ One MIG per matrix cell. Names encode every identity axis:
 
 ### Update mechanics
 
-- Every trigger runs per-cell: `rolling-action start-update` on an existing zonal MIG with `--max-unavailable=1 --max-surge=0 --replacement-method=recreate`. True per-zone rolling.
+- Every trigger runs per-cell: `rolling-action start-update` on an existing zonal MIG with `--max-unavailable=1 --max-surge=0 --replacement-method=recreate`. Matrix cells can roll out concurrently; there is no inter-zone availability guarantee.
 - Fresh MIG creation pre-creates the zonal disk from the network-scoped cache image, then the template attaches it via `--disk=name=…` (not `--create-disk`). This decouples "disk populated from image" from "MIG attaches disk" and handles both fresh deploys and manual pre-seeding identically.
 - The MIG's health check (`/healthy`, `--initial-delay=3600`) governs autohealing tolerance.
-- Deploy-landed waits `--version-target-reached --timeout=600` (template rollout done). When verification is enabled, the same locked job then waits `--stable --timeout=5400` (peer mesh + warmup complete). Keeping both steps under the per-cell deployment lock prevents a later run from replacing the template during health verification.
+- Deploy-landed waits `--version-target-reached --timeout=600` (template rollout done). When verification is enabled, the same locked job then waits `--stable --timeout=5400` (peer mesh + warmup complete). Keeping both steps under the per-cell deployment lock prevents a later run from replacing that cell's template during health verification; it does not lock other zones.
 
 ### Static IPs
 
@@ -101,7 +101,7 @@ The deployment workflow takes this as an explicit `use_reserved_ip` input rather
 
 ### Labels
 
-Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `created_by`, `github_ref`, `github_sha`. The `environment` label is standardized as `dev`, `stage`, `next`, or `prod`. The `created_by` label (`release`, `push`, or `workflow_dispatch`) discriminates the deploy kind for cleanup and inspection. PR-deploy cleanup uses `keep_until=YYYY-MM-DD` and `delete_protection=true` opt-out labels.
+Instance templates and new disks receive `app`, `environment`, `network`, `zone`, `created_by`, `github_ref`, and `github_sha` labels. Instances inherit template labels; existing disk labels are not refreshed, and MIGs do not receive these labels. The `environment` label is standardized as `dev`, `stage`, `next`, or `prod`. The `created_by` label (`release`, `push`, or `workflow_dispatch`) identifies the deploy kind for inspection. Cleanup uses age and name filters, not `keep_until` or `delete_protection` labels.
 
 ### Accepted trade-offs
 
