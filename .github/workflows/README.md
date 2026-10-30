@@ -222,8 +222,8 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
-- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, plus the [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
-- **Book (next)** (`book-next.yml`): Starts `book.yml` on `main` after a push to `next` changes the book
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
+- **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment

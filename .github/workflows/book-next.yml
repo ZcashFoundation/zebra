@@ -1,5 +1,8 @@
-# Republish the docs site after a push to `next` changes its book. Only `main`
-# may deploy, so this starts `book.yml` there. See book/src/dev/next-branch.md.
+# Build the `next` branch book. When this run succeeds, `book.yml` on `main`
+# publishes the result at `/next`. See book/src/dev/next-branch.md.
+#
+# `next` merges need no review, so this runs on `next`: any cache its book
+# preprocessors write stays scoped to `next`, out of reach of `main`'s jobs.
 name: Book (next)
 
 on:
@@ -14,17 +17,35 @@ on:
 permissions: {}
 
 jobs:
-  republish:
-    name: Republish the docs site from main
+  build:
+    name: Build next Book
     if: github.repository_owner == 'ZcashFoundation'
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
-      # GITHUB_TOKEN events start no workflow runs, except `workflow_dispatch`.
-      actions: write
+      contents: read
     steps:
-      - name: Start the Book workflow on main
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup mdBook
+        uses: jontze/action-mdbook@6c0be56d14c4bf16861b00af61f50ff7400ce502 #v4.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mdbook-version: ~0.5
+          use-mermaid: true
+
+      - name: Build next book
+        run: |
+          mdbook build book --dest-dir "$(pwd)"/target/next-book
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh workflow run book.yml --ref main
+          MDBOOK_BOOK__TITLE: The Zebra Book (next)
+
+      # `main` publishes the newest build until a newer one replaces it.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: next-book
+          path: target/next-book
+          if-no-files-found: error
+          retention-days: 90

@@ -3,8 +3,13 @@ name: Book
 on:
   push:
     branches: [main]
-  # `book-next.yml` starts a run on `main` after a push changes the `next` book.
-  workflow_dispatch:
+  # Publishes each `next` book build from `book-next.yml` at `/next`.
+  # zizmor: ignore[dangerous-triggers] -- runs `main`'s copy of this file and no code
+  # from `next`; it only publishes the rendered HTML from that run's artifact
+  workflow_run:
+    workflows: ["Book (next)"]
+    types: [completed]
+    branches: [next]
 
 # GitHub Pages accepts one deployment at a time. Runs queue in push order, so an
 # older build never publishes over a newer one, and a newer push replaces any
@@ -34,48 +39,15 @@ jobs:
         with:
           filters: .github/path-filters.yml
 
-  # The `next` branch book, published at `/next`. `next` merges need no review,
-  # so it builds without the deploy jobs' permissions.
-  next-book:
-    name: Build next Book
-    needs: changes
-    if: needs.changes.outputs.book == 'true'
-    permissions:
-      contents: read
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          ref: next
-          persist-credentials: false
-
-      - name: Setup mdBook
-        uses: jontze/action-mdbook@6c0be56d14c4bf16861b00af61f50ff7400ce502 #v4.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          mdbook-version: ~0.5
-          use-mermaid: true
-
-      - name: Build next book
-        run: |
-          mdbook build book --dest-dir "$(pwd)"/target/next-book
-        env:
-          MDBOOK_BOOK__TITLE: The Zebra Book (next)
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
-        with:
-          name: next-book
-          path: target/next-book
-          if-no-files-found: error
-          retention-days: 1
-
   build:
     name: Build Docs
-    needs: [changes, next-book]
-    # Publishes `main`'s docs without `/next` when the next book fails.
-    if: ${{ !cancelled() && needs.changes.outputs.book == 'true' }}
+    needs: changes
+    # A failed `next` book build has nothing new to publish.
+    if: >-
+      needs.changes.outputs.book == 'true' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     permissions:
+      actions: read
       contents: read
       id-token: write
       statuses: write
@@ -110,13 +82,6 @@ jobs:
           # The -A and -W settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
           RUSTDOCFLAGS: --html-in-header katex-header.html -A rustdoc::private_intra_doc_links -D warnings
-
-      - name: Include the next branch book
-        if: needs.next-book.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
-        with:
-          name: next-book
-          path: target/docs/next
 
       - name: Build internal docs
         run: |
@@ -154,6 +119,34 @@ jobs:
           git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
           git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
 
+      # `book-next.yml` builds the `next` book in a run on `next`, because its
+      # unreviewed preprocessors could otherwise write caches that `main` restores.
+      - name: Find the next branch book
+        id: next-book
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Only this repository's branches create push runs, so a fork's pull
+          # request can't stand in for `next`.
+          RUN_ID=$(gh api "repos/${REPO}/actions/workflows/book-next.yml/runs?branch=next&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+          if [[ -n "${RUN_ID}" ]] && gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?name=next-book" \
+              --jq '.artifacts[] | select(.expired | not) | .id' | grep -q .; then
+            echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::No unexpired next book build was found, so /next is not published."
+          fi
+
+      - name: Include the next branch book
+        if: steps.next-book.outputs.run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: next-book
+          path: target/docs/next
+          run-id: ${{ steps.next-book.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d #v6.0.0
 
@@ -164,11 +157,11 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    # The github-pages environment only accepts deployments from main.
+    # Only deploy if a push to main
+    # TODO: Uncomment this before merging
+    # if: github.ref_name == 'main' && github.event_name == 'push'
     needs: [changes, build]
-    # A failure skips every job after it in the `needs` chain, so without
-    # `!cancelled()` a failed next book would skip this job through `build`.
-    if: ${{ !cancelled() && needs.build.result == 'success' && github.ref_name == 'main' }}
+    if: needs.changes.outputs.book == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
 
