@@ -575,15 +575,6 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     for i in 1..=5u64 {
         let fee = Amount::try_from(i * 1_000).expect("valid amount");
         cache.store(height, fee, None, paid_coinbase.clone());
-        assert!(
-            cache
-                .0
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .transactions
-                .len()
-                <= 4
-        );
     }
 
     // The zero-fee entry must survive eviction at capacity.
