@@ -237,6 +237,7 @@ impl Input {
     /// # Panics
     ///
     /// If the provided [`Output`]s don't have this input's [`OutPoint`].
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub(crate) fn value_from_outputs(
         &self,
         outputs: &HashMap<OutPoint, Output>,

@@ -688,30 +688,56 @@ impl Transaction {
         &self,
         outputs: &std::collections::HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
-        self.transparent_value_balance_with(|input| input.value_from_outputs(outputs))
+        self.transparent_value_balance_with(|outpoint| {
+            outputs
+                .get(outpoint)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "provided Outputs (length {:?}) don't have spent {:?}",
+                        outputs.len(),
+                        outpoint
+                    )
+                })
+                .value()
+        })
     }
 
-    /// Computes the transparent balance using borrowed input values.
+    /// Computes the transparent balance from borrowed prevouts and output amounts.
     #[allow(clippy::unwrap_in_result)]
     fn transparent_value_balance_with(
         &self,
-        input_value: impl Fn(&transparent::Input) -> Amount<NonNegative>,
+        input_value: impl Fn(&transparent::OutPoint) -> Amount<NonNegative>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
         use crate::amount::Error as AmountError;
 
         let input_value = self
-            .inputs()
-            .iter()
-            .map(input_value)
+            .transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| &bundle.vin)
+            .map(|input| {
+                let outpoint = input.prevout();
+                if *outpoint == zcash_transparent::bundle::OutPoint::NULL {
+                    Amount::zero()
+                } else {
+                    input_value(&transparent::OutPoint {
+                        hash: Hash(*outpoint.hash()),
+                        index: outpoint.n(),
+                    })
+                }
+            })
             .sum::<Result<Amount<NonNegative>, AmountError>>()
             .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
         let output_value = self
-            .outputs()
-            .iter()
-            .map(|o| o.value())
+            .transparent_bundle()
+            .into_iter()
+            .flat_map(|bundle| &bundle.vout)
+            .map(|output| {
+                Amount::try_from(u64::from(output.value()))
+                    .expect("librustzcash Zatoshis is always a valid non-negative Amount")
+            })
             .sum::<Result<Amount<NonNegative>, AmountError>>()
             .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
@@ -754,7 +780,14 @@ impl Transaction {
         &self,
         utxos: &std::collections::HashMap<transparent::OutPoint, U>,
     ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
-        let transparent = self.transparent_value_balance_with(|input| input.value(utxos))?;
+        let transparent = self.transparent_value_balance_with(|outpoint| {
+            utxos
+                .get(outpoint)
+                .unwrap_or_else(|| panic!("provided Utxos don't have spent {outpoint:?}"))
+                .as_ref()
+                .output
+                .value()
+        })?;
         let sprout = self.sprout_value_balance()?;
         let sapling = self.sapling_value_balance();
         let orchard = self.orchard_value_balance();
