@@ -2284,6 +2284,7 @@ async fn rpc_getpeerinfo() {
         false,
         "/Zebra:2.1.0/".to_string(),
         zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+        Height(2_500_000),
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -2301,6 +2302,7 @@ async fn rpc_getpeerinfo() {
         true,
         "/zcashd:5.8.0/".to_string(),
         zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+        Height(2_499_900),
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -2354,6 +2356,10 @@ async fn rpc_getpeerinfo() {
     // Response of length should be 2. We have 2 connected peers and 1 unconnected peer in the address book.
     assert_eq!(get_peer_info.len(), 2);
 
+    let peers = serde_json::to_value(&get_peer_info).expect("peer info is serializable");
+    assert_eq!(peers[0]["startingheight"].as_i64(), Some(2_500_000));
+    assert_eq!(peers[1]["startingheight"].as_i64(), Some(2_499_900));
+
     let mut res_iter = get_peer_info.into_iter();
     // Check for the outbound peer
     assert_eq!(
@@ -2372,6 +2378,31 @@ async fn rpc_getpeerinfo() {
     );
 
     mempool.expect_no_requests().await;
+}
+
+#[test]
+fn peer_info_startingheight_preserves_signed_wire_values() {
+    let addr = "127.0.0.1:8233".parse().unwrap();
+    let instant = std::time::Instant::now();
+    let now = DateTime32::now();
+    let unknown =
+        zebra_network::types::MetaAddr::new_initial_peer(addr).into_new_meta_addr(instant, now);
+    assert_eq!(PeerInfo::from_meta_addr(unknown, 0).startingheight, -1);
+
+    for (bits, expected) in [(0, 0), (0x7fff_ffff, i32::MAX), (u32::MAX, -1)] {
+        let peer = zebra_network::types::MetaAddr::new_connected(
+            addr,
+            &PeerServices::NODE_NETWORK,
+            false,
+            String::new(),
+            zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+            Height(bits),
+        )
+        .into_new_meta_addr(instant, now);
+        let peer = serde_json::to_value(PeerInfo::from_meta_addr(peer, 0))
+            .expect("peer info is serializable");
+        assert_eq!(peer["startingheight"].as_i64(), Some(i64::from(expected)));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2440,41 +2471,102 @@ async fn rpc_getblockhash() {
     mempool.expect_no_requests().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn rpc_getmininginfo() {
     let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for network in [Mainnet, Network::new_default_testnet()] {
+            let pow_limit = network.target_difficulty_limit();
+            for target in [pow_limit, pow_limit * 2 / 3, pow_limit / 4096] {
+                let chain_info = GetBlockTemplateChainInfo {
+                    expected_difficulty: target.into(),
+                    tip_height: Height::MIN,
+                    tip_hash: network.genesis_hash(),
+                    cur_time: DateTime32::now(),
+                    min_time: DateTime32::now(),
+                    max_time: DateTime32::now(),
+                    chain_history_root: None,
+                    chain_value_pools: Default::default(),
+                };
+                let read_state = tower::service_fn(move |request| {
+                    let response = match request {
+                        ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info.clone()),
+                        ReadRequest::SolutionRate { .. } => ReadResponse::SolutionRate(None),
+                        _ => panic!("unexpected mining info request: {request:?}"),
+                    };
+                    async { Ok::<_, BoxError>(response) }
+                });
+                let (_tx, rx) = tokio::sync::watch::channel(None);
+                let (rpc, _) = RpcImpl::new(
+                    network.clone(),
+                    Default::default(),
+                    Default::default(),
+                    "0.0.1",
+                    "RPC test",
+                    MockService::build().for_unit_tests(),
+                    MockService::build().for_unit_tests(),
+                    read_state,
+                    MockService::build().for_unit_tests(),
+                    MockSyncStatus::default(),
+                    NoChainTip,
+                    MockAddressBookPeers::default(),
+                    rx,
+                    None,
+                );
 
-    // Create a continuous chain of mainnet blocks from genesis
-    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .values()
-        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
-        .collect();
+                let mining_info = rpc.get_mining_info().await.expect("mining info succeeds");
+                let difficulty = rpc.get_difficulty().await.expect("difficulty succeeds");
+                let info = rpc.get_info().await.expect("node info succeeds");
+                let mining_info =
+                    serde_json::to_value(mining_info).expect("mining info is serializable");
+                let info = serde_json::to_value(info).expect("node info is serializable");
+                assert_eq!(mining_info["difficulty"].as_f64(), Some(difficulty));
+                assert_eq!(mining_info["difficulty"], info["difficulty"]);
+            }
+        }
+    })
+    .await
+    .expect("mining info must not stall");
+}
 
-    // Create a populated state service
-    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+#[tokio::test]
+async fn rpc_difficulty_defaults_to_one_with_empty_state() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for network in [Mainnet, Network::new_default_testnet()] {
+            let (state, read_state, tip, _) = zebra_state::init_test_services(&network).await;
+            let (_tx, rx) = tokio::sync::watch::channel(None);
+            let (rpc, _) = RpcImpl::new(
+                network,
+                Default::default(),
+                Default::default(),
+                "0.0.1",
+                "RPC test",
+                MockService::build().for_unit_tests(),
+                state,
+                Buffer::new(read_state, 1),
+                MockService::build().for_unit_tests(),
+                MockSyncStatus::default(),
+                tip,
+                MockAddressBookPeers::default(),
+                rx,
+                None,
+            );
 
-    // Init RPC
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        MockService::build().for_unit_tests(),
-        state.clone(),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        tip.clone(),
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    rpc.get_mining_info()
-        .await
-        .expect("get_mining_info call should succeed");
+            let info = rpc
+                .get_info()
+                .await
+                .expect("node info accepts an empty state");
+            let mining_info = rpc
+                .get_mining_info()
+                .await
+                .expect("mining info accepts an empty state");
+            assert_eq!(info.difficulty, 1.0);
+            assert_eq!(mining_info.difficulty(), 1.0);
+        }
+    })
+    .await
+    .expect("empty-state difficulty queries must not stall");
 }
 
 #[tokio::test(flavor = "multi_thread")]

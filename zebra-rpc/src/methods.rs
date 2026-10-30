@@ -3446,10 +3446,14 @@ where
             };
         }
 
+        let difficulty =
+            chain_tip_difficulty(network.clone(), self.read_state.clone(), true).await?;
+
         Ok(GetMiningInfoResponse::new_internal(
             tip_height,
             current_block_size,
             current_block_tx,
+            difficulty,
             network,
             solution_rate_fut.await?,
         ))
@@ -5690,9 +5694,7 @@ where
 
     let response = match (should_use_default, response) {
         (_, Ok(res)) => res,
-        (true, Err(_)) => {
-            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64);
-        }
+        (true, Err(_)) => return Ok(1.0),
         (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
     };
 

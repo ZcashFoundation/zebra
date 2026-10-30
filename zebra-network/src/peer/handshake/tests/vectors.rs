@@ -21,6 +21,9 @@ fn serialization_error_metric_labels_ignore_details() {
     }
 }
 
+/// The height advertised by the scripted remote peer.
+const REMOTE_START_HEIGHT: block::Height = block::Height(2_500_000);
+
 /// Spawns a scripted remote peer on `remote_stream` that answers a handshake with a version
 /// message advertising `remote_services`, then a verack.
 fn spawn_remote_peer(
@@ -52,7 +55,7 @@ fn spawn_remote_peer(
             address_from: AddrInVersion::new(listen_addr, remote_services),
             nonce: Nonce::default(),
             user_agent: "/test-remote/".to_string(),
-            start_height: block::Height(0),
+            start_height: REMOTE_START_HEIGHT,
             relay: false,
         };
 
@@ -298,6 +301,66 @@ async fn early_block_relay_requires_bilateral_handshake() {
     })
     .await
     .expect("bilateral handshakes must complete within the test deadline");
+}
+
+/// Successful handshakes publish the remote start height for inbound and outbound peers.
+#[tokio::test]
+async fn handshake_records_start_height() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let book_addr: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    for connected_addr in [
+        ConnectedAddr::new_inbound_direct(book_addr),
+        ConnectedAddr::new_outbound_direct(book_addr),
+    ] {
+        let (address_book_tx, mut address_book_rx) = address_book_updater::change_channel(10);
+        let handshake = Handshake::builder()
+            .with_config(Config {
+                network: network.clone(),
+                ..Config::default()
+            })
+            .with_inbound_service(service_fn(|_req| async move {
+                Ok::<Response, BoxError>(Response::Nil)
+            }))
+            .with_latest_chain_tip(NoChainTip)
+            .with_address_book_updater(address_book_tx)
+            .finish()
+            .expect("provided mandatory builder parameters");
+        let (local_stream, remote_stream) = tokio::io::duplex(65536);
+        let remote_peer = spawn_remote_peer(remote_stream, &network, PeerServices::NODE_NETWORK);
+        let client = timeout(
+            TEST_TIMEOUT,
+            handshake.oneshot(HandshakeRequest {
+                data_stream: local_stream,
+                connected_addr,
+                connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+            }),
+        )
+        .await
+        .expect("handshake must not time out")
+        .expect("serving peer handshake succeeds");
+
+        let update = timeout(TEST_TIMEOUT, address_book_rx.recv())
+            .await
+            .expect("address book update must not time out")
+            .expect("successful handshake publishes an address book update")
+            .into_change()
+            .expect("handshake publishes a peer change");
+        let now = Utc::now();
+        let instant = std::time::Instant::now();
+        let initial = MetaAddr::new_initial_peer(book_addr)
+            .into_new_meta_addr(instant, now.try_into().unwrap());
+        for previous in [None, Some(initial)] {
+            let peer = update
+                .apply_to_meta_addr(previous, instant, now)
+                .expect("successful handshake updates new and existing peers");
+            assert_eq!(peer.start_height(), Some(REMOTE_START_HEIGHT));
+        }
+
+        drop(client);
+        remote_peer.abort();
+    }
 }
 
 /// A rejected non-serving outbound peer must NOT have its advertised services recorded by the
