@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 8.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v8.0.0) - 2026-10-30
+
+### Changed
+
+- Disabled Nagle's algorithm (`TCP_NODELAY`) on peer connections, like zcashd does. This removes delays of 40ms or more when Zebra sends several small messages in a row, for example when it relays mempool transactions to zcashd peers.
+- Bound metric labels: `mempool.failed.verify.tasks.total` uses error kinds for `reason` (retaining `timeout`), `zebra.net.in.errors` uses error kinds for `error`, and handshake protocol-version labels use known versions or `other`. Update custom selectors that match full error messages or unknown protocol versions.
+- Updated the `pulldown-cmark` build dependency to 0.13.5, clearing RUSTSEC-2026-0414. Zebra isn't affected; it only runs the crate at build time, on the doc comments of its own protobuf files.
+- Updated the `libz-sys` build dependency to 1.1.31, clearing RUSTSEC-2026-0418. Zebra isn't affected: the leak needs `cc` 1.6.0 or later, and Zebra's lockfile uses `cc` 1.2.61.
+
+### Fixed
+
+- Misbehaving peers reach the ban threshold reliably under load, because score increments are no longer lost while earlier scores are being applied ([#10601](https://github.com/ZcashFoundation/zebra/issues/10601)).
+- Failed client connections to the tracing filter endpoint (built with the `filter-reload` feature) are now logged as warnings instead of errors, so they no longer create Sentry issues when Sentry is enabled.
+
+### Security
+
+- Update `ctutils` to 0.4.5 to fix RUSTSEC-2026-0385, non-constant-time mask generation and `u128` comparisons. Zebra holds no keys and uses the affected hashing and signature code on public data.
+- Update tokio to 1.54.1 to fix RUSTSEC-2026-0386, safe `AsyncFd` constructors that violate I/O safety. Zebra doesn't use `AsyncFd`.
+
 ## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-10-22
 
 This release supports the NU7 network upgrade on Mainnet, which activates at

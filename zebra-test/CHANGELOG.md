@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [6.0.0] - 2026-10-30
+
+### Breaking Changes
+
+- A `Transcript` now checks the request of entries that expect an error, and fails a step that takes longer than 60 seconds.
+- A `MockService` now panics when its request queue overflows instead of silently dropping requests, and expected requests get up to 10 seconds by default; absence checks keep the 300 ms window, now named `DEFAULT_REQUEST_OBSERVATION_TIMEOUT` instead of `DEFAULT_MAX_REQUEST_DELAY`.
+
 ## [5.0.0] - 2026-10-22
 
 ### Breaking Changes
