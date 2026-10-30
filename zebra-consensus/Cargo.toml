@@ -96,6 +96,7 @@ proptest-derive = { workspace = true }
 spandoc = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+tower = { workspace = true, features = ["limit"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 

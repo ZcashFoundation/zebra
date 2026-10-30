@@ -1,0 +1,8 @@
+project: zebra-consensus
+kind: Changed
+body: >-
+  Block transaction verification looks up transparent inputs concurrently while preserving input order.
+  State and mempool lookup deadlines now include service readiness, with the existing timeout durations.
+  Transaction and block verification keep the first error while draining sibling verification work
+  ([#11186](https://github.com/ZcashFoundation/zebra/pull/11186)).
+time: 2026-09-22T14:08:32Z

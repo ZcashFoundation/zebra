@@ -29,6 +29,113 @@ use super::*;
 
 mod nu7;
 
+/// A proposal error must retain transaction siblings whose Rayon work is already dispatched.
+#[tokio::test]
+async fn proposal_error_waits_for_dispatched_transaction_siblings() {
+    use std::time::Duration;
+    use tokio::sync::{oneshot, Mutex};
+    use tokio::time::timeout;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (_, bytes) = network
+        .block_iter()
+        .find(|(height, _)| **height == 982_681)
+        .expect("the historical fixture contains a block with multiple transactions");
+    let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+    assert!(block.transactions.len() >= 2);
+    let failed_id = block.transactions[0].hash();
+    let held_id = block.transactions[1].hash();
+    let deadline = Duration::from_secs(10);
+    let (started, entered) = oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let (finished, mut completed) = oneshot::channel();
+    let worker = Arc::new(Mutex::new(Some((started, held, finished))));
+    let (fail, failure) = oneshot::channel();
+    let (reported, error_reported) = oneshot::channel();
+    let failure = Arc::new(Mutex::new(Some((failure, reported))));
+    let transactions = tower::service_fn(move |request: transaction::BlockRequest| {
+        let worker = worker.clone();
+        let failure = failure.clone();
+        async move {
+            if request.transaction_hash == failed_id {
+                let (failure, reported) = failure.lock().await.take().unwrap();
+                failure.await?;
+                let _ = reported.send(());
+                return Err::<transaction::BlockResponse, BoxError>(
+                    TransactionError::BadBalance.into(),
+                );
+            }
+            if request.transaction_hash == held_id {
+                let (started, held, finished) = worker.lock().await.take().unwrap();
+                crate::primitives::spawn_fifo(move || {
+                    let _ = started.send(());
+                    // Disconnect or a failing test must not strand a Rayon worker.
+                    let released = held.recv_timeout(deadline).is_ok();
+                    let _ = finished.send(released);
+                })
+                .await?;
+            }
+            Ok(transaction::BlockResponse {
+                tx_id: request.transaction.unmined_id(),
+                miner_fee: None,
+                sigops: 0,
+            })
+        }
+    });
+    let state = tower::service_fn(|request| async move {
+        assert!(
+            matches!(request, zs::Request::KnownBlock(_)),
+            "failed semantic verification must not reach contextual proposal validation"
+        );
+        Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+    });
+    let checking = SemanticBlockVerifier::new(&network, state, transactions)
+        .oneshot(Request::CheckProposal(block));
+    tokio::pin!(checking);
+    tokio::select! {
+        result = &mut checking => panic!("proposal completed before worker dispatch: {result:?}"),
+        result = timeout(deadline, entered) => result.expect("the worker starts").unwrap(),
+    }
+    fail.send(()).unwrap();
+    let premature = timeout(deadline, async {
+        tokio::select! {
+            biased;
+            result = &mut checking => Some(result),
+            result = error_reported => {
+                result.expect("the failing transaction reports its error");
+                None
+            }
+        }
+    })
+    .await
+    .expect("the transaction error is processed");
+    let returned_early = premature.is_some();
+    assert!(matches!(
+        completed.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    release.send(()).unwrap();
+    let result = match premature {
+        Some(result) => result,
+        None => timeout(deadline, &mut checking)
+            .await
+            .expect("the drained proposal finishes"),
+    };
+    assert!(timeout(deadline, completed)
+        .await
+        .expect("the worker finishes")
+        .unwrap());
+    assert!(matches!(
+        result,
+        Err(VerifyBlockError::Transaction(TransactionError::BadBalance))
+    ));
+    assert!(
+        !returned_early,
+        "a proposal error must retain dispatched sibling transaction work"
+    );
+}
+
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
