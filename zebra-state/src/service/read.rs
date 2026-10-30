@@ -21,7 +21,7 @@ pub mod find;
 pub mod tree;
 
 #[cfg(test)]
-mod tests;
+pub(in crate::service) mod tests;
 
 pub use address::{
     balance::transparent_balance,
