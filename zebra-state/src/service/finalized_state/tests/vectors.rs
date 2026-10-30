@@ -107,6 +107,52 @@ fn custom_genesis_unspendable_outputs_survive_reopen() {
     );
 }
 
+/// An ephemeral config has no database on disk before one is opened, and an open ephemeral database
+/// reads back the format version it writes.
+#[test]
+fn ephemeral_database_reads_back_its_format_version() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::{
+        config::database_format_version_on_disk,
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let config = Config::ephemeral();
+    let version = state_database_format_version_in_code();
+
+    assert_eq!(
+        database_format_version_on_disk(&config, STATE_DATABASE_KIND, version.major, &network)
+            .unwrap(),
+        None,
+    );
+
+    let mut db = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &version,
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+
+    // An unversioned database directory reads as `major.0.0`, so write a different version.
+    let written = Version::new(version.major, 99, 0);
+    db.update_format_version_on_disk(&written).unwrap();
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(written));
+
+    db.shutdown(true);
+}
+
 /// A pre-NU7 v28 cache is reused without rewriting legacy records, then accepts new v29 blocks.
 #[tokio::test]
 async fn v28_cache_is_reused_with_legacy_value_pools() {

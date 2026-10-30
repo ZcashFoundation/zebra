@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: An ephemeral database keeps its format version file in its own temporary directory and creates no other temporary directories. `database_format_version_on_disk` returns `Ok(None)` for an ephemeral config, since its database is only created when opened.
+time: 2026-10-24T20:43:52.694897599+02:00
