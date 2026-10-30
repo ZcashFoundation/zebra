@@ -26,7 +26,7 @@ Merge it with a merge commit. GitHub then marks the automatic sync pull request 
 
 ## Release an Alpha
 
-An [alpha](release-process.md#previews) publishes what `next` runs as a GitHub pre-release with signed binaries and a Docker Hub image, without publishing crates.
+An [alpha](release-process.md#previews) publishes what `next` runs as a GitHub pre-release with signed binaries and a Docker Hub image tagged with its version and `edge`, without publishing crates.
 
 1. Merge a `chore(release): set zebrad version to <version>` pull request into `next` that sets the `zebrad` version, such as `8.1.0-alpha.0`, and updates `Cargo.lock`. Later sync pull requests can conflict on that version: keep the higher one.
 2. Generate the release notes from the pending change fragments, without committing them:

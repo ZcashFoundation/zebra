@@ -174,7 +174,6 @@ jobs:
             type=semver,pattern={{version}}
             type=ref,event=pr
             type=ref,event=branch
-            type=edge
             type=schedule
 
       - name: Authenticate to Google Cloud
@@ -307,7 +306,8 @@ jobs:
       # sets inputs.publish_to_dockerhub, on Docker Hub:
       # - A release gets its version (`1.2.3`) and `latest`. A pre-release (`1.2.3-alpha.0`) only
       #   gets its version: metadata-action never moves `latest` to a pre-release version.
-      # - CI builds get `pr-<number>`, the branch name, `edge` on the default branch, and `nightly` on schedules.
+      # - An alpha, released from `next`, also moves `edge`.
+      # - CI builds get `pr-<number>`, the branch name, and `nightly` on schedules.
       # - Every build except a release gets `sha-<short>`, which the integration tests pull.
       #   metadata-action ignores `event=` on `type=sha`, so `enable` is what scopes it.
       - name: Docker meta
@@ -319,9 +319,9 @@ jobs:
             zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub }}
           tags: |
             type=semver,pattern={{version}}
+            type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-alpha') }}
             type=ref,event=pr
             type=ref,event=branch
-            type=edge
             type=schedule
             type=sha,enable=${{ github.event_name != 'release' }}
 

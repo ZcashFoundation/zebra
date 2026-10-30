@@ -60,10 +60,11 @@ Every pre-release has signed Linux binaries attached to its GitHub Release, and 
 
 Zebra's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
-| Tag         | Description                                                        |
-| :---------- | :----------------------------------------------------------------- |
-| latest      | The most recent stable version.                                    |
-| `<version>` | One exact release or pre-release, such as `7.0.0` or `8.1.0-rc.0`. |
+| Tag         | Description                                                                                     |
+| :---------- | :---------------------------------------------------------------------------------------------- |
+| latest      | The most recent stable version.                                                                 |
+| edge        | The most recent alpha, released from the [`next` branch](next-branch.md). May not always exist. |
+| `<version>` | One exact release or pre-release, such as `7.0.0` or `8.1.0-rc.0`.                              |
 
 ### Feature Flags
 
