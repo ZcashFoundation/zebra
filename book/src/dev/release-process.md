@@ -48,23 +48,23 @@ You can update to any version of Zebra, provided that the following criteria are
 
 We let you preview what's coming with pre-releases:
 
-| Pre-release type  | Details                                                                                                                                                                                            |
-| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Alpha             | An early preview of features that are still on the [`next` branch](next-branch.md). An alpha release is indicated by a release tag appended with the `-alpha` identifier, such as `8.1.0-alpha.0`. |
-| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as `8.1.0-beta.0`.                             |
-| Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`.                                   |
+| Pre-release type  | Details                                                                                                        |
+| :---------------- | :------------------------------------------------------------------------------------------------------------- |
+| Alpha             | An early preview of work on the [`next` branch](next-branch.md#publish-a-pre-release), tagged `X.Y.Z-alpha.N`. |
+| Beta              | A release under active development and testing, from the `next` branch, tagged `X.Y.Z-beta.N`.                 |
+| Release candidate | A release for final testing of new features, cut from `main` and tagged `X.Y.Z-rc.N`.                          |
 
-Every pre-release has signed Linux binaries attached to its GitHub Release, and a Docker Hub image tagged with its exact version.
+Any other pre-release identifier also marks a release from `next`. Every pre-release has signed Linux binaries attached to its GitHub Release, and a Docker Hub image tagged with its exact version.
 
 ### Distribution tags
 
 Zebra's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
-| Tag         | Description                                                                                     |
-| :---------- | :---------------------------------------------------------------------------------------------- |
-| latest      | The most recent stable version.                                                                 |
-| edge        | The most recent alpha, released from the [`next` branch](next-branch.md). May not always exist. |
-| `<version>` | One exact release or pre-release, such as `7.0.0` or `8.1.0-rc.0`.                              |
+| Tag         | Description                                                               |
+| :---------- | :------------------------------------------------------------------------ |
+| latest      | The most recent stable version.                                           |
+| edge        | The most recent pre-release from the `next` branch. May not always exist. |
+| `<version>` | One exact release or pre-release, such as `X.Y.Z` or `X.Y.Z-rc.N`.        |
 
 ### Feature Flags
 
@@ -216,7 +216,7 @@ In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback t
    docker buildx imagetools create -t zfnd/zebra:latest zfnd/zebra:<good>
    ```
 
-   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. In the Docker Hub repository, delete the `<bad>` tag, and for releases up to 7.0.0 also the `sha-<7 chars>` tag with the same digest (the short SHA of the Release PR's merge commit), so nobody can fetch the withdrawn image by tag. A pull by digest can still succeed.
+   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. In the Docker Hub repository, delete the `<bad>` tag and, if the withdrawn image has one, the `sha-<7 chars>` tag with the same digest (the short SHA of the Release PR's merge commit, which older releases were also tagged with), so nobody can fetch the withdrawn image by tag. A pull by digest can still succeed.
 
 3. Roll production back to `<good>`. `zfnd-deploy-nodes-gcp.yml` builds and deploys the commit of the ref it runs from, so dispatch it from the good release tag, once per network and zone. Leave out a network whose active upgrades `<good>` does not support. The production state disks already exist, so skip the cached-disk lookup:
 

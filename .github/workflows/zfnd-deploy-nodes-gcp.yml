@@ -127,14 +127,15 @@ jobs:
   # Resolve event-specific values once, then pass explicit deployment inputs to
   # the reusable deployment workflow.
   #
-  # Alpha and beta pre-releases preview work production must not run, so they
-  # skip this job and, through `needs`, every build and deployment.
+  # Pre-releases from `next` (every pre-release version except a release
+  # candidate, which is cut from `main`) preview work production must not run,
+  # so they skip this job and, through `needs`, every build and deployment.
   set-matrix:
     name: Resolve event deployment inputs
     if: >-
       ${{
         !(github.event_name == 'release' &&
-          (contains(github.event.release.tag_name, '-alpha') || contains(github.event.release.tag_name, '-beta')))
+          contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc'))
       }}
     runs-on: ubuntu-26.04
     outputs:

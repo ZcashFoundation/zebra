@@ -304,9 +304,10 @@ jobs:
 
       # Tags for the multi-platform image, in Artifact Registry and, only when release-binaries.yml
       # sets inputs.publish_to_dockerhub, on Docker Hub:
-      # - A release gets its version (`1.2.3`) and `latest`. A pre-release (`1.2.3-alpha.0`) only
+      # - A release gets its version (`X.Y.Z`) and `latest`. A pre-release (`X.Y.Z-alpha.N`) only
       #   gets its version: metadata-action never moves `latest` to a pre-release version.
-      # - An alpha, released from `next`, also moves `edge`.
+      # - A pre-release from `next` (every pre-release version except a release candidate, which
+      #   is cut from `main`) also moves `edge`. zfnd-deploy-nodes-gcp.yml skips these releases.
       # - CI builds get `pr-<number>`, the branch name, and `nightly` on schedules.
       # - Every build except a release gets `sha-<short>`, which the integration tests pull.
       #   metadata-action ignores `event=` on `type=sha`, so `enable` is what scopes it.
@@ -319,7 +320,7 @@ jobs:
             zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub }}
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-alpha') }}
+            type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc') }}
             type=ref,event=pr
             type=ref,event=branch
             type=schedule

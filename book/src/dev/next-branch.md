@@ -24,11 +24,11 @@ gh pr create --base next --title "chore: sync main to next"
 
 Merge it with a merge commit. GitHub then marks the automatic sync pull request as merged, or leaves it open with only newer commits.
 
-## Release an Alpha
+## Publish a Pre-Release
 
-An [alpha](release-process.md#previews) publishes what `next` runs as a GitHub pre-release with signed binaries and a Docker Hub image tagged with its version and `edge`, without publishing crates.
+A pre-release from `next`, such as an [alpha or a beta](release-process.md#previews), publishes what `next` runs as a GitHub pre-release with signed binaries and a Docker Hub image tagged with its version and `edge`, without publishing crates. Release candidates are cut from `main` instead.
 
-1. Merge a `chore(release): set zebrad version to <version>` pull request into `next` that sets the `zebrad` version, such as `8.1.0-alpha.0`, and updates `Cargo.lock`. Later sync pull requests can conflict on that version: keep the higher one.
+1. Merge a `chore(release): set zebrad version to <version>` pull request into `next` that sets the `zebrad` version to a pre-release version, such as `X.Y.Z-alpha.N` or `X.Y.Z-beta.N`, and updates `Cargo.lock`. Do not use the `rc` identifier: it marks a release candidate from `main`, which deploys production. Later sync pull requests can conflict on that version: keep the higher one.
 2. Generate the release notes from the pending change fragments, without committing them:
 
    ```bash

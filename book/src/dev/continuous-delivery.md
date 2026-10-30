@@ -1,6 +1,6 @@
 # Zebra Continuous Delivery
 
-The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment, every commit merged to [`next`](next-branch.md) to the `next` environment, and every published release to `prod`, except alpha and beta pre-releases, on Google Cloud Platform. PR-triggered work uses the `dev` environment.
+The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment, every commit merged to [`next`](next-branch.md) to the `next` environment, and every published release to `prod`, except pre-releases from `next`, on Google Cloud Platform. PR-triggered work uses the `dev` environment.
 
 ## Topology: one zonal MIG per (environment, branch, network, zone)
 
@@ -34,7 +34,7 @@ Each `deploy-nodes` cell holds its per-MIG concurrency lock through template rol
 The workflow runs on:
 
 - a `push` to `main` or `next` that touches Rust code, dependencies, Docker files, or the workflow itself
-- a published `release`, except an alpha or beta pre-release
+- a published `release`, unless it is a pre-release from `next`: any pre-release version other than a release candidate
 - a `workflow_dispatch` from any branch (dispatcher picks `network`, `zone`, and `environment`)
 
 Pull requests run only the Docker-configuration tests; they do not deploy.
