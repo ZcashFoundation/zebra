@@ -115,7 +115,6 @@ fn update_latest_chain_channels(
     } else {
         let finalized_tip = finalized_state
             .tip_block()
-            .expect("the finalized tip must have a complete stored body")
             .map(crate::CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
         chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);
@@ -149,8 +148,6 @@ struct WriteBlockWorkerTask {
     backup_dir_path: Option<PathBuf>,
     /// Excludes authentication against a snapshot during retention-changing mutations.
     early_relay: Arc<super::early_relay::EarlyRelayState>,
-    /// Coalesces durable finalized-tip notifications for the pruning worker.
-    pruning_wake: Option<crossbeam_channel::Sender<()>>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -197,7 +194,6 @@ pub(super) struct BlockWriteSender {
 
 impl BlockWriteSender {
     /// Creates a new [`BlockWriteSender`] with the given receivers and states.
-    #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
         skip_all,
@@ -213,7 +209,6 @@ impl BlockWriteSender {
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
         early_relay: Arc<super::early_relay::EarlyRelayState>,
-        pruning_wake: Option<crossbeam_channel::Sender<()>>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -245,7 +240,6 @@ impl BlockWriteSender {
                     non_finalized_state_sender,
                     backup_dir_path,
                     early_relay,
-                    pruning_wake,
                 }
                 .run()
             })
@@ -287,7 +281,6 @@ impl WriteBlockWorkerTask {
             non_finalized_state_sender,
             backup_dir_path,
             early_relay,
-            pruning_wake,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -360,9 +353,6 @@ impl WriteBlockWorkerTask {
                     let tip_block = ChainTipBlock::from(finalized);
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
-                    if let Some(wake) = pruning_wake {
-                        let _ = wake.try_send(());
-                    }
                     Ok(hash)
                 }
                 Err(error) => {
@@ -606,9 +596,6 @@ impl WriteBlockWorkerTask {
                     non_finalized_state_sender,
                     backup_dir_path.as_deref(),
                 );
-                if let Some(wake) = pruning_wake {
-                    let _ = wake.try_send(());
-                }
             }
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",

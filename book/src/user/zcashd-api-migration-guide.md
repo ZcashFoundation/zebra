@@ -35,40 +35,6 @@ an unmodified payout processor works with Zallet.
 84 of the 135 methods (62%) have a working path today: the method itself, or a
 replacement that does the same job.
 
-### Pruned history
-
-Archive operation remains the default. See [pruned mining nodes](pruning.md) for configuration,
-retention, format-30 upgrades, monitoring, and recovery. Enabling pruning immediately removes
-`NODE_NETWORK` from peer advertisements and rejects zcashd sidecars, even before deletion.
-
-For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
-(`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`, matching zcashd.
-Verbosity 3 also fails if a spent output's parent transaction is unavailable, even when the
-requested block is retained. Historical verbosity 1 remains available with complete transaction IDs.
-
-For `getrawtransaction`, a known transaction whose body is unavailable returns `-32603` and
-`"Transaction not available (pruned data)"`, with or without a block hash. Unknown transactions
-still return `-5`. Mempool and retained transactions remain available.
-
-The `getblockchaininfo` response reports actual availability: `pruned` is true when a historical
-body prefix is missing, and `pruneheight` is the start of the complete retained suffix. Genesis
-remains available below that floor. An archive reports `pruned: false` and omits `pruneheight`.
-These fields describe stored data, not a configured retention target.
-
-Historical headers, transaction IDs, address balances and UTXOs, treestates, and subtrees remain
-available from retained indexes. These do not replace the bodies required for historical wallet
-rescans or indexer bootstrap. The [gRPC history contract](../api.md#historical-data-availability)
-returns `FAILED_PRECONDITION` for pruned bodies and attempts to send a terminal error if a stream
-encounters unavailable history after earlier results. A stalled consumer can miss that error when
-the send times out. Clients must check range completeness; stream closure alone does not prove it.
-
-### Pruned output versions
-
-For `gettxout`, Zebra returns `"version": null` when the unspent output exists but its creating
-transaction body has been pruned. The value, script, confirmations, and coinbase flag remain available
-from the UTXO set. Retained and mempool transactions still return their exact numeric version.
-This differs from zcashd, which persists transaction versions in its coins database.
-
 ## How to read the table
 
 ### Method
@@ -176,7 +142,7 @@ owners' current releases and the version line at the top is updated.
 | [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)             | Zebra | Partial | The regtest-only key is spelled `fully_notified`; zcashd spells it `fullyNotified`.                                                                                                                                                                                                                                                        |
 | [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)               | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
 | [`getspentinfo`](https://zcash.github.io/rpc/getspentinfo.html)                 | Zebra | Planned | Will use the spending-transaction index from Zebra's `indexer` build feature.                                                                                                                                                                                                                                                              |
-| [`gettxout`](https://zcash.github.io/rpc/gettxout.html)                         | Zebra | Partial | See [pruned output versions](#pruned-output-versions). |
+| [`gettxout`](https://zcash.github.io/rpc/gettxout.html)                         | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
 | [`gettxoutproof`](https://zcash.github.io/rpc/gettxoutproof.html)               | Zebra | Planned | [Decision][11022-decisions]                                                                                                                                                                                                                                                                                                                |
 | [`gettxoutsetinfo`](https://zcash.github.io/rpc/gettxoutsetinfo.html)           | —     | Retired | Block-explorer index, out of scope for a validator node. Build on the indexer gRPC service instead.                                                                                                                                                                                                                                        |
 | [`verifychain`](https://zcash.github.io/rpc/verifychain.html)                   | —     | Retired | Out of scope for a validator node.                                                                                                                                                                                                                                                                                                         |

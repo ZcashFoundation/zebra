@@ -34,7 +34,6 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
-    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -108,14 +107,6 @@ pub struct Config {
 
     /// The network to connect to.
     pub network: Network,
-
-    /// Runtime service capabilities advertised to peers.
-    ///
-    /// Defaults to archive service. At startup, zebrad sets this from the node's storage mode.
-    /// Enabled experimental services are added separately.
-    /// This field is not serialized or read from configuration files.
-    #[serde(skip)]
-    pub local_services: PeerServices,
 
     /// Enable experimental next-tip early block relay with peers that also opt in.
     ///
@@ -233,16 +224,6 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns the service mask for version messages and local address advertisements.
-    pub(crate) fn advertised_services(&self) -> PeerServices {
-        let mut services = self.local_services;
-        services.set(
-            PeerServices::NODE_EARLY_BLOCK_RELAY,
-            self.experimental_early_block_relay,
-        );
-        services
-    }
-
     /// The maximum number of outbound connections that Zebra will open at the same time.
     /// When this limit is reached, Zebra stops opening outbound connections.
     ///
@@ -600,7 +581,6 @@ impl Default for Config {
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
             network: Network::Mainnet,
-            local_services: PeerServices::NODE_NETWORK,
             experimental_early_block_relay: false,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
@@ -771,7 +751,6 @@ impl From<Config> for DConfig {
             listen_addr,
             external_addr,
             network,
-            local_services: _,
             experimental_early_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -910,7 +889,6 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
-            local_services: PeerServices::NODE_NETWORK,
             experimental_early_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,

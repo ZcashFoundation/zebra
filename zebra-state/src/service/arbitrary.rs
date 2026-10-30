@@ -217,20 +217,6 @@ pub async fn populated_state(
     LatestChainTip,
     ChainTipChange,
 ) {
-    populated_state_with_debug(blocks, network, false).await
-}
-
-/// Like [`populated_state`], with optional format checks disabled for corruption tests.
-pub async fn populated_state_with_debug(
-    blocks: impl IntoIterator<Item = Arc<Block>>,
-    network: &Network,
-    debug_skip_format_upgrades: bool,
-) -> (
-    Buffer<BoxService<Request, Response, BoxError>, Request>,
-    ReadStateService,
-    LatestChainTip,
-    ChainTipChange,
-) {
     let blocks: Vec<CheckpointVerifiedBlock> = blocks.into_iter().map(Into::into).collect();
     let tip_height = blocks.iter().map(|block| block.height).max();
     let requests = blocks
@@ -239,14 +225,8 @@ pub async fn populated_state_with_debug(
 
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
-    let (state, read_state, latest_chain_tip, mut chain_tip_change) = StateService::new_with_debug(
-        Config::ephemeral(),
-        network,
-        Height::MAX,
-        0,
-        debug_skip_format_upgrades,
-    )
-    .await;
+    let (state, read_state, latest_chain_tip, mut chain_tip_change) =
+        StateService::new(Config::ephemeral(), network, Height::MAX, 0).await;
     let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();

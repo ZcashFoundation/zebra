@@ -1,6 +1,0 @@
-project: zebra-rpc
-kind: breaking
-body: >-
-  Changed `OutputObject` version accessors and constructors to use `Option<u32>`; pruned creating
-  transaction versions serialize as null.
-time: 2026-10-24T23:13:51.703673446+02:00

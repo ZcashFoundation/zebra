@@ -13,22 +13,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
-    types::PeerServices,
     Config,
 };
-
-#[test]
-fn local_services_are_runtime_only() {
-    let mut config = Config::default();
-    assert_eq!(config.local_services, PeerServices::NODE_NETWORK);
-    config.local_services.remove(PeerServices::NODE_NETWORK);
-
-    let serialized = toml::to_string(&config).unwrap();
-    assert!(!serialized.contains("local_services"));
-    let restored: Config = toml::from_str(&serialized).unwrap();
-    assert_eq!(restored.local_services, PeerServices::NODE_NETWORK);
-    assert!(toml::from_str::<Config>("local_services = 0").is_err());
-}
 
 #[test]
 fn parse_config_listen_addr() {

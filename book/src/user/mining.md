@@ -2,10 +2,6 @@
 
 Zebra's RPC methods support miners and mining pools.
 
-For a mining backend that does not need full historical bodies, consider
-[pruned mining nodes](pruning.md). Pruning is irreversible; pool payout and accounting queries may
-need a longer retention window or a separate archive.
-
 Contents:
 
 - [Download Zebra](#download-and-build-zebra)

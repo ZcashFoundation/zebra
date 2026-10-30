@@ -148,13 +148,6 @@ For most state upgrades, we want to modify the database format of the existing d
 Major version changes create a new cache and require a full resync unless a registered
 upgrade supports reusing the previous major version.
 
-The current format is v30. Its registered upgrade moves compatible v29 archives
-into `state/v30` without rewriting records. This directory boundary prevents older
-archive-only readers from opening state that may have pruned block bodies. Retain
-a separate v29 archive backup for rollback; disabling old-database cleanup does
-not preserve the moved directory. A pruned database cannot change spending-index
-mode: writable opens reject incompatible builds before any blocks can be committed.
-
 The NU7/NSM format is v29. Its registered upgrade automatically reuses compatible v28
 state without resyncing or rewriting existing records. When no v29 database exists,
 the writer moves the v28 network directory into `state/v29`, provided the old state
@@ -163,17 +156,16 @@ records remain readable with a zero NSM balance; new writes use 56 and 60 bytes.
 The NSM balance follows the existing 52-byte `BlockInfo` prefix, leaving the
 block-size offset unchanged.
 
-For a v28-to-v29 upgrade, stop Zebra and direct database readers and retain a v28
-backup outside the active cache for rollback. A v28 reader cannot read the wider records
+Before upgrading, stop Zebra and direct database readers and retain a v28 backup
+outside the active cache for rollback. A v28 reader cannot read the wider records
 written by v29. Setting `state.delete_old_database = false` only disables cleanup;
 it does not preserve the directory that the upgrade moves.
 
 Direct database readers must be upgraded with the writer: Zallet's Zebra backend,
 Zaino's Zebra read-state backend, and other consumers opening Zebra's cache need a
-v30-compatible `zebra-state` dependency that handles unavailable block bodies.
-Start the writer before compatible readers; read-only instances do not perform
-the upgrade. Manually renaming or symlinking versioned directories bypasses the
-pruning safety boundary.
+v29-compatible `zebra-state` dependency. Start the writer before compatible readers;
+read-only instances do not perform the upgrade. Manually renaming or symlinking
+versioned directories is not a substitute for the supported upgrade.
 Integration builds and their binary caches must identify the Zebra revision used
 by each direct reader as well as the writer, rather than matching only the
 downstream application's revision.
@@ -252,34 +244,6 @@ This means that:
 
 If there is an upgrade failure, panic and tell the user to delete their cached state and re-launch
 Zebra.
-
-#### Historical body availability
-
-Before changing the format, migrations that require historical bodies must reject a database with
-an unavailable body prefix. New migrations require full history by default; only migrations that
-use retained data may opt out through `DiskFormatUpgrade::requires_full_history()`.
-Spending-index build-mode changes also require archive history.
-Intermediate version writes preserve the stored spending-index build metadata until conversion
-finishes, so an interrupted upgrade cannot mislabel an unchanged index layout.
-
-The pruning startup gate is `ZebraDb::ready_for_pruning()`. It remains false until migrations,
-spending-index conversion, and detailed format checks finish successfully. The earlier
-`finished_format_upgrades()` flag only controls write compatibility and must not enable deletion.
-Read-only instances and skipped or cancelled checks never open the pruning gate.
-
-Restart checks still search at most 100,000 blocks for observed transaction branch IDs. Missing
-history is not evidence of a valid branch. Pruning caches a matching witness and checks new finalized
-blocks without rescanning a branchless suffix. Its initial search is bounded to 100,000 blocks;
-without a witness it waits without deleting bodies or rejecting the chain. Deletion preserves the
-witness even when it is older than the requested retention window.
-With `state.prune_blocks_older_than` set, one state-owned worker starts pruning after this gate
-opens, wakes at startup and on finalized-tip changes, and deletes at most 100 heights per batch.
-Only transaction bodies are deleted; genesis is retained. The retained floor is derived from
-transaction rows, with no new persisted marker or column family beyond the v30 format boundary.
-Normal RocksDB compaction reclaims disk space outside the commit path.
-
-State copying inspects source availability and the target tip before opening a writable target.
-An unavailable source range requires an archive snapshot or resync; genesis remains copyable.
 
 #### Performance Constraints
 
