@@ -31,7 +31,7 @@ use super::{key, BlockFlush, Queueing, Verifier, BLOCKS};
 
 tokio::task_local! {
     /// Overrides only flush routing; tests still use the real bounded crypto batch worker.
-    pub(in crate::primitives) static FLUSH: Box<dyn Fn(Verifier) -> Result<bool, BoxError> + Send + Sync>;
+    pub(crate) static FLUSH: Box<dyn Fn(Verifier) -> Result<bool, BoxError> + Send + Sync>;
     static REGISTRY_ACCESSES: Cell<usize>;
 }
 
