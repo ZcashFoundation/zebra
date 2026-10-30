@@ -163,3 +163,225 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         "expected the pushed transaction failure to carry its peer, branch, and height, got {error:?}"
     );
 }
+
+/// Same-effects variants from one host share a slot, released on every terminal path.
+#[tokio::test(start_paused = true)]
+async fn same_effects_variants_share_pending_slot_per_peer() {
+    let _init_guard = zebra_test::init();
+    let source: SocketAddr = "192.0.2.1:8233".parse().expect("valid socket address");
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .rev()
+        .find(|tx| matches!(tx.transaction.id, UnminedTxId::Witnessed(_)))
+        .expect("block test vectors contain a witnessed transaction");
+    let first_id = transaction.transaction.id;
+    let mut variant_id = first_id;
+    variant_id
+        .auth_digest_mut()
+        .expect("witnessed transactions have an authorization digest")
+        .0[0] ^= 1;
+
+    let mut peer_set: MockService<zn::Request, zn::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let mut verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let state = service_fn(|request| async move {
+        match request {
+            zs::Request::Transaction(_) => Ok(zs::Response::Transaction(None)),
+            zs::Request::Tip => Ok(zs::Response::Tip(None)),
+            request => Err(BoxError::from(format!(
+                "unexpected state request: {request:?}"
+            ))),
+        }
+    });
+    let mut downloads = Downloads::new(peer_set.clone(), verifier.clone(), state);
+
+    downloads
+        .download_if_needed_and_verify(Gossip::Id(first_id), Some(source), None)
+        .expect("first variant is admitted");
+    let download = peer_set
+        .expect_request(zn::Request::TransactionsById([first_id].into()))
+        .await;
+
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(Gossip::Id(variant_id), Some(source), None),
+        Err(MempoolError::AlreadyQueued)
+    ));
+    assert_eq!(downloads.in_flight(), 1);
+
+    download.respond(zn::Response::Transactions(vec![
+        zn::InventoryResponse::Available((transaction.transaction.clone(), None)),
+    ]));
+    let verification = verifier
+        .expect_request_that(|request| request.transaction.id == first_id)
+        .await;
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(Gossip::Id(variant_id), Some(source), None),
+        Err(MempoolError::AlreadyQueued)
+    ));
+    verification.respond(tx::MempoolResponse::from(transaction));
+
+    let completed = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+        .await
+        .expect("first variant finishes")
+        .expect("a task was queued")
+        .expect("verification does not time out")
+        .expect("first variant verifies successfully");
+    assert_eq!(completed.0.transaction.id, first_id);
+    assert_eq!(downloads.in_flight(), 0);
+
+    for outcome in ["failure", "cancellation", "timeout", "cancel_all"] {
+        downloads
+            .download_if_needed_and_verify(Gossip::Id(variant_id), Some(source), None)
+            .expect("completion releases the mined-ID reservation");
+        let download = peer_set
+            .expect_request(zn::Request::TransactionsById([variant_id].into()))
+            .await;
+        assert!(matches!(
+            downloads.download_if_needed_and_verify(Gossip::Id(first_id), Some(source), None),
+            Err(MempoolError::AlreadyQueued)
+        ));
+
+        match outcome {
+            "failure" => download.respond_error("download failed".into()),
+            "cancellation" => {
+                downloads.cancel(&[variant_id.mined_id()].into());
+                assert!(matches!(
+                    downloads.download_if_needed_and_verify(
+                        Gossip::Id(first_id),
+                        Some(source),
+                        None
+                    ),
+                    Err(MempoolError::AlreadyQueued)
+                ));
+            }
+            "timeout" => {
+                tokio::time::advance(RATE_LIMIT_DELAY).await;
+            }
+            "cancel_all" => {
+                downloads.cancel_all();
+            }
+            _ => unreachable!("all test outcomes are handled"),
+        }
+
+        let completed = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+            .await
+            .expect("terminal task is ready");
+        match outcome {
+            "failure" | "cancellation" => {
+                let error = completed
+                    .expect("a task was queued")
+                    .expect("task does not time out")
+                    .expect_err("task does not verify");
+                assert_eq!(error.0, variant_id);
+                assert!(matches!(
+                    (outcome, error.1),
+                    ("failure", TransactionDownloadVerifyError::DownloadFailed(_))
+                        | ("cancellation", TransactionDownloadVerifyError::Cancelled)
+                ));
+            }
+            "timeout" => assert_eq!(
+                completed
+                    .expect("a task was queued")
+                    .expect_err("task times out")
+                    .0,
+                variant_id
+            ),
+            "cancel_all" => assert!(completed.is_none()),
+            _ => unreachable!("all test outcomes are handled"),
+        }
+        assert_eq!(downloads.in_flight(), 0);
+    }
+
+    downloads
+        .download_if_needed_and_verify(Gossip::Id(first_id), Some(source), None)
+        .expect("reset releases the mined-ID reservation");
+    downloads.cancel_all();
+}
+
+/// A fabricated authorization digest must not suppress other peers' or local candidates.
+#[tokio::test(start_paused = true)]
+async fn unverified_witnessed_id_does_not_reserve_other_sources() {
+    let _init_guard = zebra_test::init();
+    let attacker: SocketAddr = "192.0.2.1:8233".parse().expect("valid socket address");
+    let honest_peer: SocketAddr = "192.0.2.2:8233".parse().expect("valid socket address");
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .rev()
+        .find(|tx| matches!(tx.transaction.id, UnminedTxId::Witnessed(_)))
+        .expect("block test vectors contain a witnessed transaction");
+    let txid = transaction.transaction.id;
+    let mut fabricated_id = txid;
+    fabricated_id
+        .auth_digest_mut()
+        .expect("witnessed transactions have an authorization digest")
+        .0[0] ^= 1;
+
+    let mut peer_set: MockService<zn::Request, zn::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let mut verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let state = service_fn(|request| async move {
+        match request {
+            zs::Request::Transaction(_) => Ok(zs::Response::Transaction(None)),
+            zs::Request::Tip => Ok(zs::Response::Tip(None)),
+            request => Err(BoxError::from(format!(
+                "unexpected state request: {request:?}"
+            ))),
+        }
+    });
+    let mut downloads = Downloads::new(peer_set.clone(), verifier.clone(), state);
+
+    for source in [Some(honest_peer), None] {
+        for gossip in [
+            Gossip::Id(txid),
+            Gossip::Tx(transaction.transaction.clone()),
+        ] {
+            downloads
+                .download_if_needed_and_verify(Gossip::Id(fabricated_id), Some(attacker), None)
+                .expect("fabricated ID starts a download");
+            let attack = peer_set
+                .expect_request(zn::Request::TransactionsById([fabricated_id].into()))
+                .await;
+
+            let needs_download = matches!(gossip, Gossip::Id(_));
+            downloads
+                .download_if_needed_and_verify(gossip, source, None)
+                .expect("another source's candidate is not suppressed by a fabricated ID");
+            assert_eq!(downloads.in_flight(), 2);
+            if needs_download {
+                peer_set
+                    .expect_request(zn::Request::TransactionsById([txid].into()))
+                    .await
+                    .respond(zn::Response::Transactions(vec![
+                        zn::InventoryResponse::Available((transaction.transaction.clone(), None)),
+                    ]));
+            }
+            verifier
+                .expect_request_that(|request| request.transaction.id == txid)
+                .await
+                .respond(tx::MempoolResponse::from(transaction.clone()));
+            let verified = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+                .await
+                .expect("honest candidate completes while the fabricated ID remains pending")
+                .expect("honest task was queued")
+                .expect("verification does not time out")
+                .expect("honest candidate verifies");
+            assert_eq!(verified.0.transaction.id, txid);
+
+            attack.respond_error("notfound".into());
+            let failed = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+                .await
+                .expect("failed download completes")
+                .expect("fabricated ID was queued")
+                .expect("download does not time out")
+                .expect_err("fabricated ID has no transaction");
+            assert_eq!(failed.0, fabricated_id);
+            assert!(matches!(
+                failed.1,
+                TransactionDownloadVerifyError::DownloadFailed(_)
+            ));
+            assert_eq!(downloads.in_flight(), 0);
+        }
+    }
+}

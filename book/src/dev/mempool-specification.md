@@ -49,7 +49,10 @@ The service accepts candidates through three paths:
 The [download pipeline][downloads] performs these steps:
 
 1. Check storage for an existing transaction or cached rejection. Deduplicate
-   outstanding requests by unmined transaction ID.
+   outstanding requests by exact unmined ID. Variants with the same mined ID
+   share a pending slot only when supplied by the same advertising IP address;
+   one host's authorization variant cannot reserve other hosts' or local variants.
+   Release reservations when tasks complete, fail, time out, or finish cancellation.
 2. Enforce a global limit of **500** concurrent download/verification tasks and
    a limit of **5 per advertising IP address**. Multiple connections from the
    same IP share that allowance. Crawler and local submissions have no source IP
