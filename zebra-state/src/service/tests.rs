@@ -412,6 +412,8 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
             panic!("the first candidate must reserve the available slot");
         };
         changes.changed().await;
+        assert!(Arc::ptr_eq(&changes.block(block.hash()).unwrap(), &block));
+        assert!(changes.block(block::Hash([0xff; 32])).is_none());
 
         let mut replacement = (*block).clone();
         Arc::make_mut(&mut replacement.header).nonce = [1; 32].into();
@@ -436,6 +438,7 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
         tokio::time::advance(Duration::from_secs(31)).await;
         tokio::time::resume();
         changes.changed().await;
+        assert!(changes.block(block.hash()).is_none());
         assert!(matches!(
             read_state
                 .oneshot(ReadRequest::MiningCandidate)
