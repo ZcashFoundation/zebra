@@ -1098,6 +1098,11 @@ pub enum Request {
     /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if
     /// the block fails contextual validation or otherwise could not be committed.
     ///
+    /// Success acknowledges publication in the non-finalized state, before older blocks past the
+    /// reorg limit are written to the finalized database. The same writer completes those writes
+    /// before processing another block. A finalization failure remains fatal; success is not a
+    /// durability guarantee for the new block or completion of older blocks' finalization.
+    ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed. A
     /// request to commit a block which has been queued internally but not yet
