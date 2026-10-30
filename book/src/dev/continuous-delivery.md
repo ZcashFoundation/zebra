@@ -29,7 +29,9 @@ wrapper's image build.
 
 The `released` activity covers stable publication and promotion of a
 prerelease to a stable release. Prerelease publication does not trigger this
-workflow. Manual dispatch still uses the selected environment. Docker Hub
+workflow. A release whose tag marks a pre-release from [`next`](next-branch.md),
+any pre-release version other than a release candidate, never deploys, even
+after promotion. Manual dispatch still uses the selected environment. Docker Hub
 publication belongs to release automation, not this deployment wrapper.
 See the [release process](release-process.md) before publishing a release
 or dispatching a production deployment.
@@ -50,9 +52,9 @@ The `GCP_PROJECT` variable comes from the selected GitHub environment.
 | [`zfnd-deploy-nodes-gcp.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml#L238-L246) | `zebrad` | `runtime` |
 | [`zfnd-ci-integration-tests-gcp.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-ci-integration-tests-gcp.yml#L156-L166) | Value of `CI_IMAGE_NAME` | `tests` |
 
-Docker Hub publication additionally requires `publish_to_dockerhub=true`,
-a `release` event, and `prerelease=false`. Only the release-binaries caller
-enables it. Nonrelease builds publish only to GAR, not Docker Hub or GitHub
+Docker Hub publication additionally requires `publish_to_dockerhub=true`.
+Only the release-binaries caller enables it, for every published release and
+prerelease. Nonrelease builds publish only to GAR, not Docker Hub or GitHub
 Container Registry (GHCR); the builder has no GHCR destination.
 
 The tag recipes produce these development tags; matching conditions combine:
@@ -61,7 +63,7 @@ The tag recipes produce these development tags; matching conditions combine:
 | --- | --- |
 | Pull-request ref | `pr-<number>` |
 | Branch ref, including manual dispatch from a branch | Sanitized branch name |
-| Default-branch ref | `edge` |
+| Prerelease tag from `next` (any prerelease except `-rc`) | `edge` |
 | Scheduled run | `nightly`, the default `type=schedule` pattern |
 | Nonrelease event with a commit SHA | `sha-<first-seven-characters>` |
 

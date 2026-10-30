@@ -14,8 +14,10 @@ the [deployment triggers and environments](continuous-delivery.md#triggers-and-e
    requires `lint`, `unit-tests`, `test-crates`, `pr-gate-result`, and
    `merge-policy`. It requires a PR and merge commits, but no approving
    review or merge queue. It does not require `mergefreeze`.
-3. Keep `next` current by merging the automatic `main`-to-`next` sync PR
-   with a merge commit. Resolve conflicts on a separate branch as below.
+3. Keep `next` current through the automatic `main`-to-`next` sync PR,
+   which merges itself with a merge commit once its checks pass. To hold
+   it, add the `do-not-merge` label. Resolve conflicts on its branch as
+   below.
 4. To promote the branch, open a PR from `next` to `main`. It follows
    `main`'s [review and merge-queue requirements](continuous-integration.md#automated-merges).
    Review the entire branch difference, not only the latest change.
@@ -26,50 +28,77 @@ manually for `next`; they do not run on its PRs or gate its merges.
 ## Synchronization from main
 
 The [sync workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/sync-next.yml)
-runs on every `main` push and manual dispatch. Its `sync` job uses
-`ubuntu-26.04` with a five-minute timeout and:
+runs on every `main` push and on manual dispatch from `main`. Its `sync` job
+uses `ubuntu-26.04` with a five-minute timeout and:
 
-- Exits successfully if `next` does not exist or already contains every
-  commit from `main`.
-- Finds an open PR whose head is this repository's `main` and base is
-  `next`, rather than accepting a fork's branch with the same name.
-- Creates `chore: sync main to next` if that PR does not exist. An existing
-  PR picks up subsequent commits through its `main` head.
-- Reports conflicting mergeability in the run summary. It does not resolve
-  conflicts or merge the PR automatically.
+- Exits successfully if `next` already contains every commit from `main`.
+- Moves the `sync/main-to-next` branch up to `main`: it creates the branch,
+  fast-forwards it, or, once a maintainer's conflict resolution blocks the
+  fast-forward, merges `main` into it. It never force-pushes over that
+  resolution.
+- Finds an open PR from this repository's `sync/main-to-next` into `next`,
+  rather than accepting a fork's branch with the same name, and creates
+  `chore: sync main to next` if none exists.
+- Enables auto-merge with a merge commit when the PR is mergeable. A
+  conflicting PR can't merge itself; the run summary reports the conflict.
 
 The job opens PRs with a GitHub App token from `RELEASE_APP_ID` and
-`RELEASE_APP_PRIVATE_KEY`, requesting contents-read and pull-requests-write
+`RELEASE_APP_PRIVATE_KEY`, requesting contents-write and pull-requests-write
 permissions. Using `GITHUB_TOKEN` would not trigger required checks; the
 job's ordinary GitHub token has no permissions.
 
 ## Resolve sync conflicts
 
-The automatic PR's head is `main`; do not commit conflict resolutions
-directly to that branch. Start from `next` in a clean checkout and merge
-`main` into a new branch. The example assumes `origin` points to the Zebra
-repository:
+Resolve conflicts on the sync PR's own branch. The example assumes `origin`
+points to the Zebra repository:
 
 ```sh
 git fetch origin
-git switch -c "sync/main-to-next-$(date -u +%Y%m%d-%H%M%S)" origin/next
-git merge origin/main
+git switch -C sync/main-to-next origin/sync/main-to-next
+git merge origin/next
 ```
 
-Resolve each conflict, stage the resolved files, and complete the merge
-commit. Then push and open a PR:
-
-```sh
-git push -u origin HEAD
-gh pr create --repo ZcashFoundation/zebra --base next \
-  --title "chore: sync main to next"
-```
-
-Merge that PR with a merge commit after its checks pass. Recheck the
-automatic sync PR: if it still contains newer commits from `main`, merge
-those separately; if it is redundant, close it. Do not force-push or reset
+Resolve each conflict, stage the resolved files, complete the merge commit,
+and push it with `git push`. For simple text conflicts, the PR's
+**Resolve conflicts** button makes the same merge in the browser. Merge the
+PR with a merge commit after its checks pass. Do not force-push or reset
 `next` to discard the changes under evaluation.
 
+Later pushes to `main` are merged into the branch, never force-pushed over
+your resolution. If that merge conflicts, merge `origin/main` into the
+branch the same way.
+
+## Publish a pre-release
+
+A pre-release from `next`, such as an [alpha or a beta](release-process.md#preview-releases),
+publishes what `next` runs as a GitHub pre-release with signed binaries and
+a Docker Hub image tagged with its version and `edge`, without publishing
+crates or deploying production. Release candidates are cut from `main`
+instead.
+
+1. Merge a `chore(release): set zebrad version to <version>` PR into `next`
+   that sets the `zebrad` version to a pre-release version, such as
+   `X.Y.Z-alpha.N` or `X.Y.Z-beta.N`, and updates `Cargo.lock`. Do not use
+   the `rc` identifier: it marks a release candidate from `main`. Later sync
+   PRs can conflict on that version: keep the higher one.
+2. Generate the release notes from the pending change fragments, without
+   committing them:
+
+   ```sh
+   changie batch v<version> --project zebrad --dry-run > release-notes.md
+   ```
+
+3. Publish the pre-release on the merge commit from step 1, with your own
+   GitHub credentials. A release created with a workflow's `GITHUB_TOKEN`
+   does not start the release workflows.
+
+   ```sh
+   gh release create v<version> --target <commit> --prerelease \
+     --title "Zebra <version>" --notes-file release-notes.md
+   ```
+
+Never promote it to a full release: that would make it the Latest release
+and trigger a production deployment.
 ## Compare next with main
 
 Compare nodes on the same network and zone, such as
@@ -85,3 +114,15 @@ Use the [deployment runbook](gcp-deployment-operations.md) for per-zone
 inspection and deployment. Follow its
 [disk compatibility procedure](gcp-deployment-operations.md#db-format-version-break-release)
 before testing a state-format change.
+
+## Read the next book
+
+The book from `next` is published at [zebra.zfnd.org/next](https://zebra.zfnd.org/next/),
+beside the latest release's book at [zebra.zfnd.org](https://zebra.zfnd.org/)
+and `main`'s at [zebra.zfnd.org/main](https://zebra.zfnd.org/main/). Compare
+the same page in each, for example `/main/dev/next-branch.html` and
+`/next/dev/next-branch.html`.
+
+`/next` updates after each push to `next` that changes the book. If the
+`next` book doesn't change for 90 days, `/next` is removed until its next
+change.

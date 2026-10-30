@@ -47,10 +47,21 @@ Follow the [upgrade and rollback requirements](../user/upgrading.md).
 
 ### Preview releases
 
-A beta version (`X.Y.Z-beta.0`) identifies a development prerelease; a release
-candidate (RC, `X.Y.Z-rc.0`) is selected for final testing. Package versions, tags,
-and versioned changelogs must agree. Use the normal Release PR and readiness
-process:
+Zebra publishes three kinds of pre-release:
+
+| Pre-release type | Source | Details |
+| --- | --- | --- |
+| Alpha (`X.Y.Z-alpha.N`) | [`next` branch](next-branch.md#publish-a-pre-release) | An early preview of work on `next`. |
+| Beta (`X.Y.Z-beta.N`) | `next` branch | A release under active development and testing. |
+| Release candidate (`X.Y.Z-rc.N`) | `main`, through the Release PR | A release selected for final testing. |
+
+Any other pre-release identifier also marks a release from `next`. Every
+pre-release has signed Linux binaries attached to its GitHub Release and a
+Docker Hub image tagged with its exact version; pre-releases from `next` also
+move the `edge` image tag. Pre-releases from `next` do not publish crates.
+
+For a release candidate, package versions, tags, and versioned changelogs must
+agree. Use the normal Release PR and readiness process:
 
 1. Agree on the candidate's scope and prerelease version. Check that the final
    Release PR manifests, dependency requirements, and versioned changelogs use
@@ -65,12 +76,13 @@ process:
    suffix and rejects a conflicting existing channel on recovery.
 
 Publishing a GitHub prerelease does not deploy it to production. The
-[GCP deployment workflow][deploy-workflow] and
-[binary workflow][binary-workflow] handle `release: released` for
+[binary workflow][binary-workflow] handles `release: published`, so every
+`v`-prefixed release and prerelease gets binaries and a Docker Hub image. The
+[GCP deployment workflow][deploy-workflow] handles `release: released` for
 `v`-prefixed tags: stable publication or promotion of a prerelease.
-Prereleases skip production deployment and stable Docker and binary
-distribution. Manual dispatch can still target production independently
-of the release channel.
+Prereleases, including release candidates, skip production deployment.
+Manual dispatch can still target production independently of the release
+channel.
 
 ### Distribution tags
 
@@ -259,7 +271,7 @@ fix is ready; step 6 waits for fixed crate versions to be published.
 
    Keep the release and Git tag as the record of what shipped. Do not change its
    prerelease/stable channel or convert it to a draft: channel changes conflict
-   with recovery, and promotion restarts distribution jobs. Do not run `resume`
+   with recovery, and promotion triggers a production deployment. Do not run `resume`
    for the withdrawn PR; it can restore original notes and release metadata.
 
 2. **Remove the Docker installation path.** Compare the current `latest` and

@@ -7,6 +7,14 @@ on:
   # root on the next push to `main`, or immediately through a manual run. A
   # `release` trigger would expose this workflow's caches to cache poisoning.
   workflow_dispatch:
+  # Publishes each `next` book build from `book-next.yml` at `/next`. Runs after
+  # a failed build too: it may have replaced a queued deploy from `main`.
+  # zizmor: ignore[dangerous-triggers] -- runs `main`'s copy of this file and no code
+  # from `next`; it only publishes the rendered HTML from that run's artifact
+  workflow_run:
+    workflows: ["Book (next)"]
+    types: [completed]
+    branches: [next]
 
 # GitHub Pages accepts one deployment at a time, and every run publishes the
 # whole site. One concurrency group for all triggers keeps deployments from
@@ -42,6 +50,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.book == 'true'
     permissions:
+      actions: read
       contents: read
       id-token: write
       statuses: write
@@ -138,6 +147,34 @@ jobs:
           mkdir -p target/docs/dev/bench
           git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
           git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
+
+      # `book-next.yml` builds the `next` book in a run on `next`, because its
+      # unreviewed preprocessors could otherwise write caches that `main` restores.
+      - name: Find the next branch book
+        id: next-book
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Only this repository's branches create push runs, so a fork's pull
+          # request can't stand in for `next`.
+          RUN_ID=$(gh api "repos/${REPO}/actions/workflows/book-next.yml/runs?branch=next&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+          if [[ -n "${RUN_ID}" ]] && gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?name=next-book" \
+              --jq '.artifacts[] | select(.expired | not) | .id' | grep -q .; then
+            echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::No unexpired next book build was found, so /next is not published."
+          fi
+
+      - name: Include the next branch book
+        if: steps.next-book.outputs.run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: next-book
+          path: target/docs/next
+          run-id: ${{ steps.next-book.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d #v6.0.0

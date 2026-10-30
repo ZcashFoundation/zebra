@@ -7,16 +7,18 @@ database, and no `zcashd`. Containerized nodes have the same
 
 ## Images and tags
 
-Stable releases publish to [Docker Hub](https://hub.docker.com/r/zfnd/zebra/tags)
+Releases and pre-releases publish to [Docker Hub](https://hub.docker.com/r/zfnd/zebra/tags)
 as `zfnd/zebra`; the same tag selects `linux/amd64` or `linux/arm64`.
 
 | Tag | Meaning |
 | --- | --- |
 | `7.0.0` | The image built for the `v7.0.0` release; Docker version tags omit the `v`. |
 | `latest` | Updated by stable release publication; also selected when the image reference omits a tag. |
+| `7.1.0-alpha.0` | One exact pre-release. Release candidates (`-rc.N`) are cut from `main`; other pre-releases come from the [`next` branch](../dev/next-branch.md). |
+| `edge` | The most recent pre-release from `next`; may not exist. Never a release candidate. |
 
-Release builds do not publish commit-SHA tags. Publishing workflows do not
-maintain moving `beta` or `rc` tags.
+Release builds do not publish commit-SHA tags. Pre-releases never move
+`latest`, and publishing workflows do not maintain moving `beta` or `rc` tags.
 
 Use a version tag for an explicit upgrade policy, or an image digest to pin
 exact image content. Pulling a newer image does not replace a running
