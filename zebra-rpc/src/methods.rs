@@ -553,8 +553,8 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Arguments to this RPC are currently ignored.
-    /// Long polling, block proposals, server lists, and work IDs are not supported.
+    /// Supports long polling and block proposals through the request parameters.
+    /// Server lists and work IDs are not supported.
     ///
     /// Miners can make arbitrary changes to blocks, as long as:
     /// - the data sent to `submitblock` is a valid Zcash block, and
@@ -724,7 +724,6 @@ pub trait Rpc {
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
-    /// Returns an error if `height` is less than the height of the first halving for the current network.
     /// Once NSM reissuance starts, the preceding block must exist: future reserves cannot be forecast.
     ///
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
@@ -810,7 +809,7 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Only works if the network of the running zebrad process is `Regtest`.
+    /// Only works on networks with proof of work disabled, including Regtest.
     ///
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
@@ -829,7 +828,7 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Only works if the network of the running zebrad process is `Regtest`.
+    /// Only works on networks with proof of work disabled, including Regtest.
     /// Unlike [`Self::generate`], the coinbase is paid to `address` instead of
     /// the configured `mining.miner_address`, which lets a test harness fund
     /// several wallets from one node.

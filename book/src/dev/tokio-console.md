@@ -1,38 +1,56 @@
-# `tokio-console` support
+# Tokio console
 
-`tokio-console` is a diagnostics and debugging tool for asynchronous Rust programs. This tool can be
-useful to lint runtime behavior, collect diagnostic data from processes, and debugging performance
-issues. ["it's like top(1) for tasks!"][top]
+The [Tokio console] displays asynchronous tasks, resources, and operations.
+Zebra's [subscriber][subscriber initialization] requires the
+[`tokio-console` feature](../user/install.md#cargo-features) and experimental
+`tokio_unstable` configuration.
 
-### Setup
+## Setup
 
-Support for `tokio-console` is not enabled by default for zebrad. To activate this feature, run:
+Build from the repository root with both the feature and the compiler
+configuration enabled:
 
 ```sh
-RUSTFLAGS="--cfg tokio_unstable" cargo build --no-default-features --features="tokio-console" --bin zebrad
+RUSTFLAGS="--cfg tokio_unstable" cargo build --locked -p zebrad \
+  --no-default-features --features tokio-console --bin zebrad
+cargo install --locked tokio-console
 ```
 
-Install [`tokio-console`][install].
+The `--no-default-features` option removes `release_max_level_info`. Do not
+enable any `max_level_*` or `release_max_level_*` features: they discard trace
+events that runtime filters cannot restore. Zebra already enables Tokio's
+`tracing` feature.
 
-Then start `zebrad` however you wish.
+Start the instrumented binary with the configuration for the node being
+investigated:
 
-When `zebrad` is running, run:
+```sh
+./target/debug/zebrad --config zebrad.toml start
+```
 
-```bash
+In another terminal, connect the console client:
+
+```sh
 tokio-console
 ```
 
-The default options are used, so `tokio-console` should connect to the running `zebrad` without other configuration.
+The subscriber and client use the same [default endpoint](../user/run.md#ports).
+Keep this diagnostics endpoint on loopback. Override the server address with
+`TOKIO_CONSOLE_BIND` and configure the client to match; see the
+[subscriber configuration] for other environment variables.
 
-### Example
+## Interpreting the output
 
-<img width="788" alt="image" src="https://user-images.githubusercontent.com/552961/174457604-53c6ffc6-64f6-4952-94c6-ac7eb37c3871.png">
+Inspect polling and wake activity for tasks consuming time or remaining
+pending. The resource view links tasks to synchronization primitives.
+For native call stacks and cryptographic computation, use
+[sampling profiles](profiling-and-benchmarking.md#profiling).
 
-### More
+If the console connects but shows no task data, check the build flags and
+compile-time tracing filters before changing the node's log filter. Zebra uses
+`console_subscriber::spawn()`, which installs the console's required target
+filter separately from ordinary log output.
 
-For more details, see the [`tokio` docs][enabling_tokio_instrumentation].
-
-[top]: https://github.com/tokio-rs/console#extremely-cool-and-amazing-screenshots
-
-[install]: https://github.com/tokio-rs/console#running-the-console]
-[enabling_tokio_instrumentation]: https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
+[Tokio console]: https://github.com/tokio-rs/console
+[subscriber initialization]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/tracing/component.rs
+[subscriber configuration]: https://docs.rs/console-subscriber/0.5.0/console_subscriber/fn.spawn.html

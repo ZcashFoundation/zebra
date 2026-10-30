@@ -1,3 +1,22 @@
+# Value pools
+
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: [`ValueBalance`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/value_balance.rs), [block accounting](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block.rs), and [pool persistence](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/chain.rs).
+
+- Balances include deferred funding ([NU6](https://zips.z.cash/zip-1015)), Ironwood ([NU6.3](https://zips.z.cash/zip-0258)), and the Network Sustainability Mechanism ([NSM, NU7](https://zips.z.cash/zip-0237)).
+- The NSM balance is not a chain value pool and is excluded from issued supply.
+- The [remaining transaction value](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/value_balance.rs) sums transparent, Sprout, Sapling, Orchard, and Ironwood balances.
+- Serialized value balances occupy 56 bytes, not 32.
+- The `tip_chain_value_pool` column stores the latest balance under key `()`.
+- The [transaction wrapper](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction.rs) supports versions through 6.
+- Block changes use the exact parent's pools and deferred-pool change.
+- Pool accounting includes deferred funding and NSM changes.
+- [Coinbase subsidy and fee validation](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network/subsidy/check.rs) is implemented, not future work.
+- Removing a tip [subtracts its pool change](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/non_finalized_state/chain.rs); finalizing a root leaves total pools unchanged.
+
+---
+
 - Feature Name: value_pools
 - Start Date: 2021-06-29
 - Design PR: [ZcashFoundation/zebra#2430](https://github.com/ZcashFoundation/zebra/pull/2430)

@@ -8,7 +8,7 @@
 #
 # Downstream triggers (independent workflows, not managed here):
 #   release:published -> release-binaries.yml (Docker Hub and binaries)
-#   release:published -> zfnd-deploy-nodes-gcp.yml (GCP deployment)
+#   release:released  -> zfnd-deploy-nodes-gcp.yml (GCP deployment)
 name: Release
 
 on:

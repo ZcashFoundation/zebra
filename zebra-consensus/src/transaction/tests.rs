@@ -2393,8 +2393,8 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
 }
 
 /// A non-coinbase V4/V5/V6 transaction with an expiry height in the out-of-range wire band
-/// [2^31, 2^32 - 1] is rejected: `expiry_height()` maps these values to `None`, so the check
-/// must read the raw wire value instead of treating them as "no expiry".
+/// [2^31, 2^32 - 1] is rejected. `expiry_height()` preserves these nonzero raw values rather
+/// than treating them as "no expiry".
 #[tokio::test]
 async fn transaction_with_out_of_range_expiry_height() {
     let network = Network::Mainnet;

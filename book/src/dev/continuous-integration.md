@@ -1,381 +1,280 @@
-# Zebra Continuous Integration
+# Zebra continuous integration
 
-## Overview
+Zebra uses GitHub Actions for pull-request checks, container builds, and
+stateful tests on Google Cloud Platform (GCP). See the
+[workflow inventory and dependency diagrams](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/README.md);
+workflow YAML defines triggers, permissions, and job conditions.
 
-Zebra has extensive continuous integration tests for node syncing and `lightwalletd` integration.
+## Required checks
 
-## Workflow Reference
+The [main branch ruleset](https://github.com/ZcashFoundation/zebra/rules/746379)
+requires these status contexts:
 
-For a comprehensive overview of all CI/CD workflows including architecture diagrams,
-see the [CI/CD Architecture documentation](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/README.md).
+| Required context | Producer | Purpose |
+| --- | --- | --- |
+| `lint` | [`lint.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml), job `lint` | Rust, dependency, Dockerfile, and shell checks |
+| `unit-tests` | [`tests-unit.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/tests-unit.yml), job `unit-tests` | Linux tests, Windows `zebra-test` tests, and release-only dependency checks |
+| `test-crates` | [`test-crates.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml), job `test-crates` | Per-crate builds with different features and minimum supported Rust versions |
+| `pr-gate-result` | [`pr-gate.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/pr-gate.yml), job `pr-gate-result` | Pull-request declarations, change fragments, and release readiness |
+| `merge-policy` | [`merge-policy.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/merge-policy.yml), job `merge-policy` | Rejects the `do-not-merge` label |
+| `mergefreeze` | Merge Freeze GitHub App | Release-window hold |
 
-## Integration Tests
+The first four contexts aggregate worker results. An aggregator runs with
+`if: always()` and uses `re-actors/alls-green` to interpret failures,
+cancellations, and explicitly permitted skips. A green aggregator does not
+mean every worker ran. The `pr-gate-result` aggregator also permits failures
+from `api-diff` and `changelog-gate`; review their findings separately.
 
-On every PR change, Zebra runs [these Docker tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-ci-integration-tests-gcp.yml):
+### Path filters
 
-- Zebra update syncs from a cached state Google Cloud tip image
-- lightwalletd full syncs from a cached state Google Cloud tip image
-- lightwalletd update syncs from a cached state Google Cloud tip image
-- lightwalletd integration with Zebra JSON-RPC and Light Wallet gRPC calls
+The [shared path filters](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml)
+gate lint, unit-test, and crate-build workers through `dorny/paths-filter`
+on PRs and merge groups, while retaining required status reporting.
+Pushes to `main` bypass filtering and set worker-selection outputs to `true`.
 
-When a PR is merged to the `main` branch, we also run a Zebra full sync test from genesis.
-Some of our builds and tests are repeated on the `main` branch, due to:
+The filter keys include `lint`, `hadolint`, `shellcheck`, `api_diff`,
+`unit_tests`, `test_crates`, `test_docker`, `book`, `book_links`, `coverage`,
+and `docs_check`. Edit the shared file rather than duplicating these globs in a
+new job. Each filter includes the shared file itself. GCP integration and
+node-deployment workflows instead have their own event and path filters;
+changing the shared file does not automatically run those workflows.
 
-- GitHub's cache sharing rules,
-- our cached state sharing rules, or
-- generating base coverage for PR coverage reports.
+The `unit_tests` filter also matches three book pages that unit tests compare
+with the code: the configuration reference and the network upgrade table
+(`zebrad/tests/unit/book.rs`), and the JSON-RPC method table
+(`zebra-rpc/src/methods/tests/book.rs`). A change that adds a configuration key
+or an RPC method, or changes an activation height, fails these tests until the
+book is updated.
 
-Currently, each Zebra and lightwalletd full and update sync will update cached state images,
-which are shared by all tests. Tests prefer the latest image generated from the same commit.
-But if a state from the same commit is not available, tests will use the latest image from
-any branch and commit, as long as the state version is the same.
+On PRs targeting `main`, labels other than `release` do not rerun the main
+Linux unit-test job. PRs targeting `next` run it on edits and label events
+when the path filter matches; `next` has no merge queue to rerun it.
 
-Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/tests-unit.yml) on tier 2 platforms using GitHub actions runners.
+Add gated workers to the aggregator's `needs` and legitimate skips to
+`allowed-skips`; retain `merge_group`. Require a new context only after a
+workflow produces it. The crate matrix discovers workspace crates with
+`cargo tree`; new crates need no matrix entry.
 
-## Automated Merges
+### Documentation
 
-We use [GitHub's merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
-to merge pull requests. To merge, a PR has to pass all required `main` checks and have one
-approving review, as stated by the `PR Requirements` ruleset. A maintainer's PR can be approved
-by another maintainer or by Copilot code review. Every other PR needs a maintainer's approval.
+The [Docs Check workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs-check.yml)
+runs on PRs and merge groups that change Markdown or the book: `spell-check`
+(codespell) and `markdown-lint` (markdownlint) under the `docs_check` filter,
+and `book-links` under the `book_links` filter, which builds the book and
+checks its internal links and anchors offline. It is not a required
+context. External links are checked weekly by the
+[Advisory Checks workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/advisory.yml).
 
-Once a PR is approved and green, a Zebra maintainer presses **Merge when ready**. This
-manual enrollment applies to Zebra-owned and fork PRs; authors do not need write access
-to the queue. The queue builds the PR on top of `main` plus every PR ahead of it,
-re-runs the required checks against that merged result, and merges it if they pass. A
-PR whose checks fail is dequeued, and the PRs behind it are rebuilt without it.
+The [Book workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/book.yml)
+publishes <https://zebra.zfnd.org/> on every push to `main` and on manual runs.
+The site root is the book of the latest release, so operators read the
+documentation of the version they can install; the book of `main` is under
+`/main/`, and the internal rustdoc of `main` under `/internal/`. A new release
+reaches the root on the next run. To publish another ref at the root, for
+example `main` when a documentation fix should not wait for a release, set the
+`BOOK_ROOT_REF` repository variable; delete it to return to the latest
+release.
 
-Because the queue tests the merged result, PRs do **not** have to be up to date with `main`
-before they are queued.
+### Runners and build caches
 
-Some PRs don't use the queue:
+Linux unit tests use Rust 1.97.0, `ubuntu-26.04`, `cargo nextest` with the
+`ci` profile, release mode without link-time optimization, and
+`default-release-binaries`. Windows tests cover only `zebra-test` on
+`windows-latest`.
 
-- Admin merges, which happen when there are multiple failures on the `main` branch
-  (see `Admin: Manually Merging PRs` below)
-- PRs into the [`next` branch](next-branch.md), which run the same required checks
-  except `mergefreeze`, need no approval, and merge directly
+Reuse the [build setup action](https://github.com/ZcashFoundation/zebra/blob/main/.github/actions/setup-zebra-build/action.yml)
+for Linux Rust jobs needing Clang, Protocol Buffers, or system RocksDB;
+it installs them and sets `ROCKSDB_LIB_DIR=/usr/lib/`.
 
-### Holding a Pull Request Back
+Follow the
+[Rust cache policy and inspection commands](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/README.md#5-rust-build-caching)
+when adding jobs, changing keys, or deleting caches.
 
-Two independent hold checks, both required by the ruleset:
+The reusable container builder defaults to `ubuntu-26.04` for AMD64 and
+`ubuntu-24.04-arm` for ARM64. Repository variables
+`DOCKER_BUILD_RUNNER_AMD64` and `DOCKER_BUILD_RUNNER_ARM64` override them.
+Runtime images build for both architectures; test images build for AMD64.
+The `DOCKER_BUILDER` variable selects Docker Build Cloud when set to
+`cloud`; otherwise the default is the `docker-container` driver. The
+`no_cache` dispatch input disables Docker build-cache reads, not Rust
+caches or cached blockchain state.
 
-- **`merge-policy`**: fails while a PR has the `do-not-merge` label. Remove the
-  label to release it. Label changes re-run only this small workflow.
-- **`mergefreeze`**: the [Merge Freeze](https://www.mergefreeze.com/) GitHub App
-  fails this status during a release window. Repository admins and members with
-  write access can freeze and unfreeze `main` in the Merge Freeze dashboard.
+## Integration tests
 
-The release PR passes a freeze through Merge Freeze's **Unblock 1 pull request**
-action; the `release` label controls Zebra's release checks but does not bypass a
-freeze. That action needs the project's freeze method to be _Push a status update to
-all PRs_, which is the method this installation uses.
+### GCP stateful tests
 
-That method writes a status to every open pull request, one at a time, at roughly a
-second per pull request. A freeze or a thaw therefore takes a little while to reach
-them all, and is not stuck.
+The [Integration Tests on GCP workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-ci-integration-tests-gcp.yml)
+does not run on every PR update:
 
-`do-not-merge` also reaches a pull request that is already enrolled. A merge group
-carries no pull request metadata, so `merge-policy` reads the queued numbers back out
-of the group's branch name and checks their labels: labelling an enrolled pull request
-fails the group's check and the queue drops it.
-
-Merge Freeze does not work that way. It reports on both the source PR and the merge
-group, but if `mergefreeze` has already succeeded on a group, freezing afterwards does
-not revoke that result. For an immediate freeze, remove every active non-release entry
-from GitHub's queue after freezing. GitHub rebuilds them when maintainers enroll them
-again.
-
-The initial native queue settings are merge method `MERGE`, build concurrency `5`,
-`ALLGREEN`, a 180-minute check timeout, minimum and maximum pull requests to merge of
-`1`, and a two-minute minimum wait. The merge method is what gives each pull request
-its own merge commit. The merge limits only throttle how many already-validated
-entries merge at once; they do not group `merge_group` builds, so they are not
-Mergify's CI batching. Native FIFO and manual jump-to-top replace Mergify's automatic
-enrollment and high/low priority rules.
-
-| Queue behavior | GitHub merge queue policy |
+| Event | Selection |
 | --- | --- |
-| Enrollment | A Zebra maintainer selects **Merge when ready** on an approved PR |
-| Ordering | FIFO; a maintainer can manually jump an urgent PR to the top |
-| CI concurrency | Up to five cumulative merge-group builds |
-| Final merges | One merge commit per PR |
-| Single-PR hold | `merge-policy` check and `do-not-merge` label |
-| Release freeze | Merge Freeze `mergefreeze` status |
-| Failed queue check | The PR is removed and later groups are rebuilt |
+| Pull request targeting `main` | `labeled`, `synchronize`, or `reopened`; the head must be in the repository and the PR must carry `run-stateful-tests` |
+| Push to `main` | Rust, dependency, test-data, Docker, or explicitly listed integration-workflow paths |
+| Schedule | Friday at 12:00 UTC, only in `ZcashFoundation/zebra` |
+| Manual dispatch | Selected ref and network, with optional cache-regeneration or full-sync inputs |
 
-Unlike the previous Mergify queue, the native queue does not provide automatic
-enrollment, label-based high and low priority, CI batch construction and bisection,
-or Mergify's dashboard and queue statistics. The simpler policy is intentional.
+The workflow has no `merge_group` trigger and does not gate merges.
+For fork coverage, review the code before copying it to a repository-owned
+branch and dispatching the secret-bearing workflow or labeling its PR.
+
+Run the ordinary suite on a repository-owned branch:
+
+```sh
+gh workflow run zfnd-ci-integration-tests-gcp.yml \
+  --repo ZcashFoundation/zebra --ref my-branch -f network=Mainnet
+```
+
+Select `regenerate-disks=true` to rebuild checkpoint state,
+`run-full-sync=true` to rebuild tip state for the selected network, or
+`run-lwd-sync=true` for a Mainnet lightwalletd full sync. These inputs retain
+cache prerequisites.
+
+Tests cover full validation beyond the mandatory checkpoint, tip updates,
+checkpoint generation, and RPCs. Full Zebra syncs run weekly, on request,
+or when matching tip state is missing. Mainnet lightwalletd update,
+transaction, and gRPC wallet jobs run on schedules, manual dispatches, and
+eligible labeled PRs, not `main` pushes. Both Testnet jobs pass
+`allow_failure: true` to the reusable workflow.
+
+The [test deployment workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-integration-tests-gcp.yml)
+runs tests in a GCP VM container; `test-result` uses self-hosted
+`zfnd-runners` to supervise and collect logs. Timeouts are 180 minutes,
+or 7,200 minutes for `is_long_test`. The entrypoint uses `NEXTEST_PROFILE`
+and `NEXTEST_FILTER`; `ci-stateful` and `ci-e2e` require an explicit filter.
+
+GCP jobs request `id-token: write` and authenticate through Workload
+Identity Federation using `GCP_WIF` and the appropriate service-account
+variable. Builds use `GCP_ARTIFACTS_SA`; VM and disk operations use
+`GCP_DEPLOYMENTS_SA`. Container builds receive `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN`; test supervision receives `GCP_SSH_PRIVATE_KEY`. Approving
+a fork workflow does not provide these repository secrets.
+
+### Cached blockchain state
+
+The [cached-disk workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-find-cached-disks.yml)
+searches Compute Engine images using the database major version from
+`zebra-state/src/constants.rs` and the lowercased network. It reports Zebra
+checkpoint, Zebra tip, and combined lightwalletd/Zebra tip availability.
+Tests create private disks from the selected image.
+
+When state saving is selected, `create-state-image` runs after successful
+`test-result`. It saves updated images when the height exceeds the input
+image by more than 576 blocks; full-sync images and `force_save_to_disk=true`
+bypass that threshold. See [image selection](gcp-deployment-operations.md#cache-images).
+
+### Cross-project interoperability tests
+
+The separate [Trigger Integration Tests workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/trigger-integration-tests.yml)
+sends a `zebra-interop-request` repository-dispatch event to
+[zcash/integration-tests](https://github.com/zcash/integration-tests). It runs
+on Mondays at 06:00 UTC and on manual dispatch, not automatically on PRs.
+Its GitHub App token comes from `Z3_APP_ID` and `Z3_APP_PRIVATE_KEY`.
+
+To test a PR's head commit, including a fork PR, dispatch from `main` with
+its PR number:
+
+```sh
+gh workflow run trigger-integration-tests.yml \
+  --repo ZcashFoundation/zebra --ref main -f pr_number=12345
+```
+
+Replace `12345` with the PR number; omit `pr_number` to send the selected
+ref's commit. Inspect results in the integration-tests repository: a
+successful dispatch does not mean its tests passed.
+
+## Benchmarks
+
+The [benchmark workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/benchmarks.yml)
+runs six targets listed in `BENCHES`. Register new targets there and in the
+crate's `Cargo.toml` with `[[bench]]` and `harness = false`. Manual dispatch
+runs `cargo-criterion` and publishes results to `gh-pages/dev/bench`. The
+[book workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/book.yml)
+includes that dashboard in the documentation deployment. The alert
+threshold is 150% of the previous result; alerts do not fail the job.
+
+PRs labeled `run-benchmarks` run base and head targets on label events and
+subsequent pushes, save Criterion baselines, and post the `critcmp` comparison
+to the run summary and a PR comment. Failed or missing base targets appear
+in the summary without a comparison. See
+[benchmark invocation and results](profiling-and-benchmarking.md).
+
+## Coverage
+
+The [coverage workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/coverage.yml)
+sets `PROPTEST_CASES=1` and `PROPTEST_MAX_SHRINK_ITERS=0`. These reduced runs
+do not replace [property testing](proptests.md).
+
+## Automated merges
+
+A maintainer selects **Merge when ready** after the PR meets the review and
+check requirements. GitHub's merge queue tests a cumulative merge result
+against `main`; a PR need not be up to date before enrollment. Inspect the
+`merge_group` run when a queue entry fails, not only the source PR's runs.
+PRs targeting [`next`](next-branch.md) merge directly after their required
+checks; they do not use this queue.
 
 ### Queue configuration
 
-The queue is repository configuration rather than anything in git, so it is changed in
-the `PR Requirements` ruleset, not in a pull request. It currently requires six status
-checks — `lint`, `unit-tests`, `test-crates`, `pr-gate-result`, `merge-policy` and
-`mergefreeze` — each pinned to the app that produces it, so nothing else can report a
-passing result in their name.
+The `PR Requirements` ruleset requires one approving review and resolved
+review conversations. See the
+[queue settings](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/README.md#6-queue-management)
+and [repository rules](https://github.com/ZcashFoundation/zebra/settings/rules)
+before changing policy.
 
-The queue itself uses merge method `MERGE`, build concurrency `5`, `ALLGREEN`, minimum
-and maximum pull requests to merge of `1`, a two-minute minimum wait, and a
-**180-minute check response timeout**. That last one matters: the default is 60
-minutes and unit tests take up to 69, so at the default every entry that touches Rust
-would be dropped from the queue as assumed-failed while its checks were still running.
+The `merge-policy` check rejects `do-not-merge` on both a PR and the PRs
+identified in a merge-group ref. The external `mergefreeze` status is a
+separate hold; the `release` label does not bypass it. Manage freezes and
+release exceptions through [Merge Freeze](https://docs.mergefreeze.com/github-merge-queue).
+For an immediate freeze, remove active non-release queue entries rather
+than relying on a status already reported for a merge group being revoked.
 
-Merge Freeze needs its `mergefreeze` status among the required checks, and
-`Require merge queue` selected, for the freeze to gate anything — see
-[their merge queue guide](https://docs.mergefreeze.com/github-merge-queue).
-
-Adding a required check that pull requests do not already produce blocks every open
-one until each is pushed to or rebased, so land the workflow first and require it
-afterwards.
-
-Each required status check is produced by exactly one workflow. A `changes` job uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) against [`.github/path-filters.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml) to gate worker jobs via `if:`; an aggregator job named after the workflow basename (`lint`, `unit-tests`, `test-crates`, ...) runs with `if: always()` and `re-actors/alls-green`, and is the sole producer of the required-check context. The aggregator job ID, the workflow file basename, and the ruleset context name are kept identical so `grep -r '<context>:' .github/workflows/` finds the producer in one hop.
-
-On `pull_request` and `merge_group` events, paths-filter v4 selects the event's base
-and head commits, so a queue entry costs what its changes cost rather than a full
-matrix. On `push` to `main` the filter step is skipped and every gated worker runs
-(the `|| 'true'` default on the `changes` job outputs makes this explicit).
-
-### Branch Protection Rules
-
-Branch protection rules should be added for every failure that should stop a PR merging, break a release, or cause problems for Zebra users.
-We also add branch protection rules for developer or devops features that we need to keep working, like coverage.
-
-But the following jobs don't need branch protection rules:
-
-- Testnet jobs: testnet is unreliable.
-- Optional linting jobs: some lint jobs are required, but some jobs like spelling and actions are optional.
-- Jobs that rarely run: for example, cached state rebuild jobs.
-- Setup jobs that will fail another later job which always runs, for example: Google Cloud setup jobs.
-  We have branch protection rules for build jobs, but we could remove them if we want.
-
-To add a new gated job to an existing required check, add it to the producing workflow, then add its job ID to the aggregator under both `needs:` and `allowed-skips:`. To add a brand-new required check:
-
-1. Add an entry to `.github/path-filters.yml` named after the workflow basename (use underscores in the filter key to avoid expression-syntax ambiguity).
-2. Build the workflow with a `changes` job that reads the filter, gated workers, and an aggregator job whose ID matches the workflow basename.
-3. Ask `#devops` to add the aggregator job ID to the GitHub ruleset.
-
-Adding a new Zebra crate automatically extends the `build` matrix in [test-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml); no manual step is required.
-
-#### Admin: Changing the Ruleset
-
-[Zebra repository admins](https://github.com/orgs/ZcashFoundation/teams/zebra-admins) and
-[Zcash Foundation organisation owners](https://github.com/orgs/ZcashFoundation/people?query=role%3Aowner)
-can change the `PR Requirements` ruleset in the Zebra repository.
-
-To change required checks:
-
-Any developer:
-
-1. Run a PR containing the new aggregator, so its job ID is available to autocomplete in the ruleset UI.
-
-Admin:
-
-1. Go to the [repository rules](https://github.com/ZcashFoundation/zebra/settings/rules).
-2. Open the `PR Requirements` ruleset.
-3. Edit **Require status checks to pass before merging**.
-
-To add jobs:
-
-1. Start typing the name of the job or step in the search box
-2. Select the name of the job or step to add it
-
-To remove jobs:
-
-1. Go to `Status checks that are required.`
-2. Find the job name, and click the cross on the right to remove it
-
-Finally, save the ruleset using your security key if needed.
-
-If you accidentally delete a lot of rules, and you can't remember what they were, ask a
-ZF organisation owner to send you a copy of the rules from the [audit log](https://github.com/organizations/ZcashFoundation/settings/audit-log).
-
-Organisation owners can also monitor rule changes and other security settings using this log.
-
-#### Admin: Manually Merging PRs
-
-Admins can allow merges with failing CI, to fix CI when multiple issues are causing failures.
-
-Admin merges use the ruleset's documented bypass path. Put the reason on the PR and
-restore the normal ruleset enforcement immediately after repairing `main`.
-
-### Pull Requests from Forked Repositories
-
-GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
-This means that Google Cloud CI fails on these PRs.
-
-When a fork PR requires a secret-bearing GCP integration run, we can merge it by:
-
-1. Reviewing the code to make sure it won't give our secret keys to anyone
-2. Pushing a copy of the branch to the Zebra repository
-3. Opening a PR using that branch
-4. Closing the original PR with a note that it will be merged
-5. Asking another Zebra developer to approve the new PR
-
-## Manual Testing Using Google Cloud
-
-Some Zebra developers have access to the Zcash Foundation's Google Cloud instance, which also runs our automatic CI.
-
-Please shut down large instances when they are not being used.
-
-### Automated Deletion
-
-The [Delete GCP Resources](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-delete-gcp-resources.yml)
-workflow automatically deletes test instances, instance templates, disks, and images older than a few days.
-
-If you want to keep instances, instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
-
-- deleted instances, instance templates and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
-- deleted disks and images start with `zebrad-` or `lwd-`, so use a name starting with anything else
-
-Our production Google Cloud project doesn't have automated deletion.
+Repository administrators change required contexts in the ruleset. Keep
+each context pinned to its producing app. Document any emergency bypass on
+the PR and restore normal enforcement after repairing the branch.
 
 ## Troubleshooting
 
-To improve CI performance, some Docker tests are stateful.
+Start with the earliest failed build or test, not a downstream aggregation
+or missing-output error. For stateful tests, inspect the selected image,
+VM creation, container logs, test exit status, image creation, and cleanup
+in order. Rerun the complete integration workflow when its VM has been
+removed; rerunning only a later job does not recreate its prerequisites.
 
-Tests can depend on:
+For a sync timeout, inspect peer connectivity, cached-state height, and
+recent performance changes before extending the timeout. The
+[checkpoint procedure](zebra-checkpoints.md) covers updating checkpoints.
+Do not treat a repeated test failure as a transient infrastructure error.
 
-- built Zebra and `lightwalletd` docker images
-- cached state images in Google cloud
-- jobs that launch Google Cloud instances for each test
-- multiple jobs that follow the logs from Google Cloud (to work around the 6 hour GitHub actions limit)
-- a final "Run" job that checks the exit status of the Rust acceptance test
-- the current height and user-submitted transactions on the blockchain, which changes every minute
+### Fixing duplicate dependencies in `Check deny.toml bans`
 
-To support this test state, some Docker tests depend on other tests finishing first.
-This means that the entire workflow must be re-run when a single test fails.
+The [lint workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml)
+checks bans, sources, advisories, and licenses with default features,
+`default-release-binaries`, and all features. Its all-features jobs use
+`--allow banned` because that set activates optional OpenSSL; the other
+feature sets use `--allow unmatched-skip-root`. Advisory failures are
+non-blocking.
 
-### Finding Errors
+The bans jobs are named `Check deny bans` with a feature-selection suffix.
+Use `cargo tree -d` to locate duplicate versions and
+`cargo tree -i crate@version` to find their source. Prefer compatible
+dependency updates or removing unused features over an exception.
 
-0. Check if the same failure is happening on the `main` branch or multiple PRs.
-   If it is, open a ticket and tell the Zebra team lead.
-
-1. Look for the earliest job that failed, and find the earliest failure.
-
-For example, this failure doesn't tell us what actually went wrong:
-
-> Error: The template is not valid. ZcashFoundation/zebra/.github/workflows/zfnd-build-docker-image.yml@8bbc5b21c97fafc83b70fbe7f3b5e9d0ffa19593 (Line: 52, Col: 19): Error reading JToken from JsonReader. Path '', line 0, position 0.
-
-<https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#step:41:4>
-
-But the specific failure is a few steps earlier:
-
-> #24 2117.3 error[E0308]: mismatched types
-> ...
-
-<https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#step:8:2112>
-
-1. The earliest failure can also be in another job or pull request:
-   - check the whole workflow run (use the "Summary" button on the top left of the job details, and zoom in)
-   - if the merge queue dequeued the PR, the failure is on the merge group, not on the PR: open the queue entry from the PR timeline and read the `merge_group` run. A failure there that does not reproduce on the PR alone means the PR conflicts semantically with something ahead of it in the queue.
-
-2. If that doesn't help, try looking for the latest failure. In Rust tests, the "failure:" notice contains the failed test names.
-
-### Fixing CI Sync Timeouts
-
-CI sync jobs near the tip will take different amounts of time as:
-
-- the blockchain grows, and
-- Zebra's checkpoints are updated.
-
-To fix a CI sync timeout, follow these steps until the timeouts are fixed:
-
-1. Check for recent PRs that could have caused a performance decrease
-2. [Update Zebra's checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints)
-3. If a Rust test fails with "command did not log any matches for the given regex, within the ... timeout":
-
-   a. If it's the full sync test, [increase the full sync timeout](https://github.com/ZcashFoundation/zebra/pull/5129/files)
-
-   b. If it's an update sync test, [increase the update sync timeouts](https://github.com/ZcashFoundation/zebra/commit/9fb87425b76ba3747985ea2f22043ff0276a03bd#diff-92f93c26e696014d82c3dc1dbf385c669aa61aa292f44848f52167ab747cb6f6R51)
-
-### Fixing Duplicate Dependencies in `Check deny.toml bans`
-
-Zebra's CI checks for duplicate crate dependencies: multiple dependencies on different versions of the same crate.
-If a developer or dependabot adds a duplicate dependency, the `Check deny.toml bans` CI job will fail.
-
-You can view Zebra's entire dependency tree using `cargo tree`. It can also show the active features on each dependency.
-
-To fix duplicate dependencies, follow these steps until the duplicate dependencies are fixed:
-
-1. Check for updates to the crates mentioned in the `Check deny.toml bans` logs, and try doing them in the same PR.
-   For an example, see [PR #5009](https://github.com/ZcashFoundation/zebra/pull/5009#issuecomment-1232488943).
-
-   a. Check for open dependabot PRs, and
-
-   b. Manually check for updates to those crates on <https://crates.io>.
-
-2. If there are still duplicate dependencies, try removing those dependencies by disabling crate features:
-
-   a. Check for features that Zebra activates in its `Cargo.toml` files, and try turning them off, then
-
-   b. Try adding `default-features = false` to Zebra's dependencies (see [PR #4082](https://github.com/ZcashFoundation/zebra/pull/4082/files)).
-
-3. If there are still duplicate dependencies, add or update `skip-tree` in [`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml):
-
-   a. Prefer exceptions for dependencies that are closer to Zebra in the dependency tree (sometimes this resolves other duplicates as well),
-
-   b. Add or update exceptions for the earlier version of duplicate dependencies, not the later version, and
-
-   c. Add a comment about why the dependency exception is needed: what was the direct Zebra dependency that caused it?
-
-   d. For an example, see [PR #4890](https://github.com/ZcashFoundation/zebra/pull/4890/files).
-
-4. Repeat step 3 until the dependency warnings are fixed. Adding a single `skip-tree` exception can resolve multiple warnings.
-
-#### Fixing "unmatched skip root" warnings in `Check deny.toml bans`
-
-1. Run `cargo deny --all-features check bans`, or look at the output of the latest "Check deny.toml bans --all-features" job on the `main` branch
-
-2. If there are any "skip tree root was not found in the dependency graph" warnings, delete those versions from `deny.toml`
-
-### Fixing Disk Full Errors
-
-If the Docker cached state disks are full, increase the disk sizes in:
-
-- [zfnd-deploy-integration-tests-gcp.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-integration-tests-gcp.yml)
-- [zfnd-deploy-nodes-gcp.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml)
-
-If the GitHub Actions disks are full, follow these steps until the errors are fixed:
-
-0. Check if error is also happening on the `main` branch. If it is, skip the next step.
-1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache.
-2. Clear the GitHub Actions code cache for the failing branch. Code caches are named after the compiler version.
-3. Clear the GitHub Actions code caches for all the branches and the `main` branch.
-
-These errors often happen after a new compiler version is released, because the caches can end up with files from both compiler versions.
-
-You can find a list of caches using:
+When an exception is necessary, document its cause in
+[`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml).
+Remove obsolete `skip-tree` entries when the all-features bans check
+reports an unmatched skip root:
 
 ```sh
-gh api -H "Accept: application/vnd.github+json" repos/ZcashFoundation/Zebra/actions/caches
+cargo deny --all-features check bans
 ```
 
-And delete a cache by `id` using:
+### Resource failures
 
-```sh
-gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/ZcashFoundation/Zebra/actions/caches/<id>
-```
+For full disks, distinguish GitHub runner storage, Docker build storage,
+and GCP state disks. Integration VMs request 400 GB `pd-balanced` disks.
+Changing the creation size does not resize an existing persistent disk.
 
-These commands are from the [GitHub Actions Cache API reference](https://docs.github.com/en/rest/actions/cache).
-
-### Retrying After Temporary Errors
-
-Some errors happen due to network connection issues, high load, or other rare situations.
-
-If it looks like a failure might be temporary, try re-running all the jobs on the PR using one of these methods:
-
-1. click on the failed job, and select "re-run all jobs". If the workflow hasn't finished, you might need to cancel it, and wait for it to finish.
-2. `@dependabot recreate` (for dependabot PRs only)
-
-A flaky required check costs more in the queue than on a PR: it fails the merge group, dequeues
-the PR, and rebuilds everything behind it. Queue the PR again after re-running it green. If the
-same test flakes repeatedly, quarantine it rather than re-queueing.
-
-Here are some of the rare and temporary errors that should be retried:
-
-- Docker: "buildx failed with ... cannot reuse body, request must be retried"
-- Failure in `local_listener_fixed_port_localhost_addr_v4` Rust test, mention [ticket #4999](https://github.com/ZcashFoundation/zebra/issues/4999) on the PR
-- any network connection or download failures
-
-We track some rare errors using tickets, so we know if they are becoming more common and we need to fix them.
+Inspect the failing branch's Rust cache before deleting anything. Avoid
+clearing all repository caches to address one failure. GCP resource
+retention and node recovery procedures are in the
+[deployment runbook](gcp-deployment-operations.md#daily-cleanup).

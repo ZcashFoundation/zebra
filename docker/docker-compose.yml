@@ -15,8 +15,7 @@ services:
       - zebrad-cache:/home/zebra/.cache/zebra
     # Having `tty` set to true makes Zebra use colored logs.
     tty: true
-    # ! Comment out the `configs` mapping below to use the environment variables in the
-    # ! `.env` file, instead of the default configuration file.
+    # Environment variables in `.env` override values in this configuration file.
     configs:
       - source: zebra-config
         target: /home/zebra/.config/zebrad.toml

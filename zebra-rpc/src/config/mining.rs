@@ -52,11 +52,11 @@ pub struct Config {
     /// Applies only if [`Self::miner_address`] contains a shielded component.
     pub miner_memo: Option<String>,
 
-    /// Mine blocks with Zebra's internal Equihash solver.
+    /// Mine blocks with Zebra's internal Equihash solver, without an external mining pool.
     ///
-    /// Public networks require synchronization and recently live peers. After a locally accepted
-    /// block, the miner waits for a different committed parent. Regtest and configured Testnet may
-    /// extend their own accepted blocks.
+    /// Requires the `internal-miner` build feature. Public networks require synchronization and
+    /// recently live peers. After a locally accepted block, the miner waits for a different
+    /// committed parent. Regtest and configured Testnet may extend their own accepted blocks.
     ///
     /// Disabled by default.
     #[serde(default)]
