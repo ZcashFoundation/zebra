@@ -254,7 +254,7 @@ jobs:
     needs: [set-matrix, build]
     if: >-
       ${{
-        github.repository_owner == 'ZcashFoundation' &&
+        github.repository == 'ZcashFoundation/zebra' &&
         (
           (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'next')) ||
           (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
