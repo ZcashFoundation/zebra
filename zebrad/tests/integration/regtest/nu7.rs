@@ -1576,7 +1576,6 @@ async fn nu7_funding_streams_at_boundary_activation() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn nu7_sync_from_peer_across_activation() -> Result<()> {
     use zebra_chain::parameters::testnet::{ConfiguredFundingStreams, RegtestParameters};
-    use zebra_test::net::random_known_port;
 
     const NU7: u32 = 105;
 
@@ -1684,16 +1683,17 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
             hex_literal::hex!("da1745e9b549bd0bfa1a569971c77eba30cd5a4b"),
         );
 
-        // Node A mines; its P2P port is chosen up front so node B can be configured with it.
-        let p2p_addr = format!("127.0.0.1:{}", random_known_port());
+        // Node A mines; discover its bound P2P address before configuring node B.
         let mut config_a = os_assigned_rpc_port_config(false, &network)?;
-        config_a.network.listen_addr = p2p_addr.parse()?;
+        config_a.network.listen_addr = "127.0.0.1:0".parse()?;
         config_a.network.initial_testnet_peers = [].into();
         config_a.mempool.debug_enable_at_height = Some(0);
         config_a.mining.miner_address = Some(miner.to_string().parse()?);
         let mut node_a = testdir()?
             .with_config(&mut config_a)?
             .spawn_child(args!["start"])?;
+        let p2p_addr =
+            read_listen_addr_from_logs(&mut node_a, "Opened Zcash protocol endpoint at")?;
         let rpc_a = read_listen_addr_from_logs(&mut node_a, OPENED_RPC_ENDPOINT_MSG)?;
         let a = RpcRequestClient::new(rpc_a);
         wait_for_mempool_activation(&a).await?;
@@ -1725,7 +1725,7 @@ async fn nu7_sync_from_peer_across_activation() -> Result<()> {
 
         // Node B connects only to node A, after A's chain exists, and syncs it from genesis.
         let mut config_b = os_assigned_rpc_port_config(false, &network)?;
-        config_b.network.initial_testnet_peers = [p2p_addr].into();
+        config_b.network.initial_testnet_peers = [p2p_addr.to_string()].into();
         config_b.network.peerset_initial_target_size = 1;
         let mut node_b = testdir()?
             .with_config(&mut config_b)?
