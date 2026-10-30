@@ -13,8 +13,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{CONCURRENT_ADDRESS_CHANGE_PERIOD, MAX_PEER_ACTIVE_FOR_GOSSIP},
-    meta_addr::MetaAddrChange,
+    constants::{
+        CONCURRENT_ADDRESS_CHANGE_PERIOD, MAX_PEER_ACTIVE_FOR_GOSSIP, MIN_PEER_RECONNECTION_DELAY,
+    },
+    meta_addr::{MetaAddrChange, PeerAddrState},
     protocol::{external::canonical_peer_addr, types::PeerServices},
     PeerSocketAddr,
 };
@@ -453,6 +455,137 @@ fn rtt_is_stored_correctly_in_meta_addr() {
         .expect("Failed to create MetaAddr for responded peer");
 
     assert_eq!(peer.rtt, Some(rtt));
+}
+
+/// Returns an initial peer at `address` whose only connection attempt failed at `instant_now`.
+fn failed_initial_peer(
+    address: PeerSocketAddr,
+    instant_now: Instant,
+    chrono_now: chrono::DateTime<Utc>,
+) -> MetaAddr {
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
+
+    let peer = MetaAddr::new_reconnect(address)
+        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .expect("an attempt is applied to a new initial peer");
+    let peer = MetaAddr::new_errored(address, None)
+        .apply_to_meta_addr(peer, instant_now, chrono_now)
+        .expect("a failure is applied to an attempted peer");
+
+    assert_eq!(peer.last_connection_state, PeerAddrState::Failed);
+    assert!(
+        !peer.is_probably_reachable(chrono_now),
+        "a failed initial peer has no last seen time, so it is not probably reachable",
+    );
+
+    peer
+}
+
+/// Returns a gossiped change for a node at `address`, last seen at `chrono_now`.
+fn gossiped_change(address: PeerSocketAddr, chrono_now: chrono::DateTime<Utc>) -> MetaAddrChange {
+    MetaAddr::new_gossiped_meta_addr(
+        address,
+        PeerServices::NODE_NETWORK,
+        chrono_now.try_into().expect("will succeed until 2038"),
+    )
+    .new_gossiped_change()
+    .expect("a gossiped address has services")
+}
+
+/// Test that re-adding a failed initial peer makes it eligible for another connection attempt,
+/// once the reconnection delay has passed.
+#[test]
+fn readded_failed_initial_peer_is_retried_after_reconnection_delay() {
+    let _init_guard = zebra_test::init();
+
+    let instant_now = Instant::now();
+    let chrono_now = Utc::now();
+
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer = failed_initial_peer(address, instant_now, chrono_now);
+
+    let instant_later = instant_now + CONCURRENT_ADDRESS_CHANGE_PERIOD * 3;
+    let chrono_later = chrono_now
+        + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 3)
+            .expect("constant is valid");
+
+    let readded = MetaAddr::new_initial_peer(address)
+        .apply_to_meta_addr(peer.clone(), instant_later, chrono_later)
+        .expect("re-adding a failed initial peer is applied");
+
+    assert_eq!(
+        readded.last_connection_state,
+        PeerAddrState::NeverAttemptedGossiped
+    );
+    assert_eq!(readded.last_attempt, peer.last_attempt);
+    assert_eq!(readded.last_failure, peer.last_failure);
+    assert!(
+        !readded.is_ready_for_connection_attempt(instant_later, chrono_later, &Mainnet),
+        "a re-added peer waits for the reconnection delay after its last failure",
+    );
+
+    let instant_after_delay = instant_now + MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1);
+    let chrono_after_delay = chrono_now
+        + chrono::Duration::from_std(MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1))
+            .expect("constant is valid");
+    assert!(
+        readded.is_ready_for_connection_attempt(instant_after_delay, chrono_after_delay, &Mainnet),
+        "a re-added peer is ready after the reconnection delay",
+    );
+
+    // A gossiped change for the re-added peer keeps its connection history.
+    let gossiped = gossiped_change(address, chrono_later)
+        .apply_to_meta_addr(readded.clone(), instant_later, chrono_later)
+        .expect("a gossiped change is merged into a never attempted peer");
+    assert_eq!(gossiped.last_failure, readded.last_failure);
+    assert!(!gossiped.is_ready_for_connection_attempt(instant_later, chrono_later, &Mainnet));
+}
+
+/// Test that a gossiped change, unlike re-adding an initial peer, can't make a failed peer
+/// eligible for another connection attempt.
+#[test]
+fn gossiped_change_does_not_readd_failed_peer() {
+    let _init_guard = zebra_test::init();
+
+    let instant_now = Instant::now();
+    let chrono_now = Utc::now();
+
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer = failed_initial_peer(address, instant_now, chrono_now);
+
+    let instant_later = instant_now + CONCURRENT_ADDRESS_CHANGE_PERIOD * 3;
+    let chrono_later = chrono_now
+        + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 3)
+            .expect("constant is valid");
+
+    assert_eq!(
+        gossiped_change(address, chrono_later).apply_to_meta_addr(
+            peer,
+            instant_later,
+            chrono_later
+        ),
+        None,
+    );
+}
+
+/// Test that re-adding an initial peer right after it failed is applied,
+/// but the peer still waits for the reconnection delay.
+#[test]
+fn concurrent_readd_of_failed_initial_peer_keeps_reconnection_delay() {
+    let _init_guard = zebra_test::init();
+
+    let instant_now = Instant::now();
+    let chrono_now = Utc::now();
+
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer = failed_initial_peer(address, instant_now, chrono_now);
+
+    let readded = MetaAddr::new_initial_peer(address)
+        .apply_to_meta_addr(peer, instant_now, chrono_now)
+        .expect("re-adding a failed initial peer is applied, even right after it failed");
+
+    assert!(!readded.is_ready_for_connection_attempt(instant_now, chrono_now, &Mainnet));
 }
 
 /// Proof-of-concept for GHSA-63wg-wjjj-7cp8:
