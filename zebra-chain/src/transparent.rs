@@ -7,16 +7,16 @@ mod script;
 pub(crate) mod serialize;
 mod utxo;
 
-use std::{collections::HashMap, fmt, iter, ops::AddAssign};
+use std::{collections::HashMap, fmt, ops::AddAssign};
 
+use zcash_protocol::value::Zatoshis;
 use zcash_script::{opcode::Evaluable as _, pattern::push_num};
-use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
 
 use crate::{
     amount::{Amount, NonNegative},
     block,
     parameters::Network,
-    serialization::ZcashSerialize,
+    serialization::{CompactSizeMessage, ZcashSerialize},
     transaction,
     transparent::serialize::GENESIS_COINBASE_SCRIPT_SIG,
 };
@@ -237,6 +237,7 @@ impl Input {
     /// # Panics
     ///
     /// If the provided [`Output`]s don't have this input's [`OutPoint`].
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub(crate) fn value_from_outputs(
         &self,
         outputs: &HashMap<OutPoint, Output>,
@@ -258,54 +259,22 @@ impl Input {
         }
     }
 
-    /// Get the value spent by this input, by looking up its [`OutPoint`] in
-    /// [`Utxo`]s.
+    /// Get the value spent by this input, looking up its [`OutPoint`] in plain or ordered UTXOs.
     ///
     /// This amount is added to the transaction value pool by this input.
     ///
     /// # Panics
     ///
     /// If the provided [`Utxo`]s don't have this input's [`OutPoint`].
-    pub fn value(&self, utxos: &HashMap<OutPoint, utxo::Utxo>) -> Amount<NonNegative> {
-        if let Some(outpoint) = self.outpoint() {
-            // look up the specific Output and convert it to the expected format
-            let output = utxos
+    pub fn value<U: AsRef<Utxo>>(&self, utxos: &HashMap<OutPoint, U>) -> Amount<NonNegative> {
+        self.outpoint().map_or(Amount::zero(), |outpoint| {
+            utxos
                 .get(&outpoint)
-                .expect("provided Utxos don't have spent OutPoint")
+                .unwrap_or_else(|| panic!("provided Utxos don't have spent {outpoint:?}"))
+                .as_ref()
                 .output
-                .clone();
-            self.value_from_outputs(&iter::once((outpoint, output)).collect())
-        } else {
-            // coinbase inputs don't need any UTXOs
-            self.value_from_outputs(&HashMap::new())
-        }
-    }
-
-    /// Get the value spent by this input, by looking up its [`OutPoint`] in
-    /// [`OrderedUtxo`]s.
-    ///
-    /// See [`Self::value`] for details.
-    ///
-    /// # Panics
-    ///
-    /// If the provided [`OrderedUtxo`]s don't have this input's [`OutPoint`].
-    pub fn value_from_ordered_utxos(
-        &self,
-        ordered_utxos: &HashMap<OutPoint, utxo::OrderedUtxo>,
-    ) -> Amount<NonNegative> {
-        if let Some(outpoint) = self.outpoint() {
-            // look up the specific Output and convert it to the expected format
-            let output = ordered_utxos
-                .get(&outpoint)
-                .expect("provided Utxos don't have spent OutPoint")
-                .utxo
-                .output
-                .clone();
-            self.value_from_outputs(&iter::once((outpoint, output)).collect())
-        } else {
-            // coinbase inputs don't need any UTXOs
-            self.value_from_outputs(&HashMap::new())
-        }
+                .value()
+        })
     }
 }
 
@@ -351,17 +320,35 @@ impl Output {
         self.value
     }
 
-    /// Return the destination address from a transparent output.
+    /// Return the destination of a canonical P2PKH or P2SH output without allocating.
     ///
-    /// Returns None if the address type is not valid or unrecognized.
+    /// Returns `None` for all other scripts, including nonminimal pushes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a manually constructed script exceeds the network message size limit.
     pub fn address(&self, net: &Network) -> Option<Address> {
-        match TxOut::try_from(self).ok()?.recipient_address()? {
-            TransparentAddress::PublicKeyHash(pkh) => {
-                Some(Address::from_pub_key_hash(net.t_addr_kind(), pkh))
+        let script = self.lock_script.as_raw_bytes();
+        // Preserve the owned conversion's length and value validation.
+        CompactSizeMessage::try_from(script.len())
+            .map_err(std::io::Error::from)
+            .expect("zcash_primitives and Zebra transparent output formats must be compatible");
+        Zatoshis::try_from(self.value).ok()?;
+
+        match script {
+            // OP_DUP OP_HASH160 <direct 20-byte push> OP_EQUALVERIFY OP_CHECKSIG
+            [0x76, 0xa9, 0x14, hash @ .., 0x88, 0xac] if hash.len() == 20 => {
+                Some(Address::from_pub_key_hash(
+                    net.t_addr_kind(),
+                    hash.try_into().expect("matched a 20-byte public key hash"),
+                ))
             }
-            TransparentAddress::ScriptHash(sh) => {
-                Some(Address::from_script_hash(net.t_addr_kind(), sh))
-            }
+            // OP_HASH160 <direct 20-byte push> OP_EQUAL
+            [0xa9, 0x14, hash @ .., 0x87] if hash.len() == 20 => Some(Address::from_script_hash(
+                net.t_addr_kind(),
+                hash.try_into().expect("matched a 20-byte script hash"),
+            )),
+            _ => None,
         }
     }
 

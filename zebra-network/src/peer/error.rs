@@ -90,6 +90,10 @@ pub enum PeerError {
     #[error("block adverts require the dedicated advertiser")]
     AdvertRequiresDedicatedService,
 
+    /// An inbound-only request was submitted to an outbound peer service.
+    #[error("request is only valid for inbound serving")]
+    InboundOnlyRequest,
+
     /// A queued advert lost authorization before its local write started.
     #[error("peer authorization was revoked before advert delivery")]
     AdvertAuthorizationRevoked,
@@ -161,6 +165,7 @@ impl PeerError {
             PeerError::Overloaded => "Overloaded".into(),
             PeerError::NoReadyPeers => "NoReadyPeers".into(),
             PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService".into(),
+            PeerError::InboundOnlyRequest => "InboundOnlyRequest".into(),
             PeerError::AdvertAuthorizationRevoked => "AdvertAuthorizationRevoked".into(),
             PeerError::InboundTimeout => "InboundTimeout".into(),
             PeerError::ServiceShutdown => "ServiceShutdown".into(),

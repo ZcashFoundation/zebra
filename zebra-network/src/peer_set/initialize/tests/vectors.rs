@@ -16,7 +16,10 @@
 use std::{
     collections::HashSet,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -24,7 +27,7 @@ use chrono::Utc;
 use futures::{channel::mpsc, FutureExt, StreamExt};
 use indexmap::IndexSet;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
     task::JoinHandle,
 };
@@ -66,10 +69,8 @@ const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 /// times during each test, rather than only on its first tick.
 const CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_millis(100);
 
-/// The amount of time to run the listener, before testing what it has done.
-///
-/// Using a very short time can make the listener not run at all.
-const LISTENER_TEST_DURATION: Duration = Duration::from_secs(10);
+/// The deadline for every test connection to be handshaken or rejected by the listener.
+const LISTENER_TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The amount of time to run zcashd-compat listener tests.
 const ZCASHD_COMPAT_LISTENER_TEST_DURATION: Duration = Duration::from_millis(500);
@@ -918,8 +919,13 @@ async fn listener_peer_limit_zero_handshake_panic() {
         return;
     }
 
-    let unreachable_inbound_handshaker = service_fn(|_| async {
-        unreachable!("inbound handshaker should never be called with a zero peer limit")
+    // The listener can stop before a panicking handshake task reports its panic, so also record
+    // whether the handshaker was called.
+    let handshaker_called = Arc::new(AtomicBool::new(false));
+    let called = handshaker_called.clone();
+    let unreachable_inbound_handshaker = service_fn(move |_| {
+        called.store(true, Ordering::SeqCst);
+        async { unreachable!("inbound handshaker should never be called with a zero peer limit") }
     });
 
     let (_config, mut peerset_rx) =
@@ -931,6 +937,10 @@ async fn listener_peer_limit_zero_handshake_panic() {
         // `Err(TryRecvError::Closed)` means the channel is closed.
         peer_result.is_err(),
         "unexpected peer when inbound limit is zero: {peer_result:?}",
+    );
+    assert!(
+        !handshaker_called.load(Ordering::SeqCst),
+        "inbound handshaker was called with a zero peer limit",
     );
 }
 
@@ -984,9 +994,6 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             std::mem::drop(connection_tracker);
             std::mem::drop(tcp_stream);
 
-            // Give the crawler time to get the message.
-            tokio::task::yield_now().await;
-
             Ok(fake_client)
         });
 
@@ -1034,12 +1041,15 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
             let peer_tracker_tx = peer_tracker_tx.clone();
             async move {
                 let HandshakeRequest {
-                    data_stream: tcp_stream,
+                    data_stream: mut tcp_stream,
                     connected_addr: _,
                     connection_tracker,
                 } = req;
 
                 let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+                // Signal acceptance without closing the connection.
+                tcp_stream.write_all(&[0]).await.expect("test peer is open");
 
                 // Make the connection staying open.
                 peer_tracker_tx
@@ -1717,9 +1727,6 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             std::mem::drop(connection_tracker);
             std::mem::drop(tcp_stream);
 
-            // Give the crawler time to get the message.
-            tokio::task::yield_now().await;
-
             Ok(fake_client)
         });
 
@@ -1767,12 +1774,15 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
             let peer_tracker_tx = peer_tracker_tx.clone();
             async move {
                 let HandshakeRequest {
-                    data_stream: tcp_stream,
+                    data_stream: mut tcp_stream,
                     connected_addr: _,
                     connection_tracker,
                 } = req;
 
                 let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+                // Signal acceptance without closing the connection.
+                tcp_stream.write_all(&[0]).await.expect("test peer is open");
 
                 // Make the connection staying open.
                 peer_tracker_tx
@@ -1890,7 +1900,7 @@ async fn peer_tcp_connections_disable_nagle() {
     );
 
     // Inbound side: the result from the fake handshaker, for the same connection.
-    let inbound_nodelay = tokio::time::timeout(LISTENER_TEST_DURATION, inbound_nodelay_rx.next())
+    let inbound_nodelay = tokio::time::timeout(LISTENER_TEST_TIMEOUT, inbound_nodelay_rx.next())
         .await
         .expect("the listener should hand the inbound connection to the handshaker")
         .expect("the handshaker keeps its sender until it is dropped with the listener");
@@ -2042,23 +2052,23 @@ async fn self_connections_should_fail() {
         "invalid address inserted into address book: port must be valid for inbound connections"
     );
 
-    // Wait until the crawler has tried at least one self-connection
-    tokio::time::sleep(TEST_CRAWL_NEW_PEER_INTERVAL * 3).await;
+    // Wait for the crawler's failed self-connection to reach the address book.
+    let self_connection_status = tokio::time::timeout(CRAWLER_TEST_DURATION, async {
+        loop {
+            let status = address_book
+                .lock()
+                .expect("unexpected panic in address book")
+                .get(real_self_listener.addr())
+                .expect("unexpected dropped listener address in address book");
+            if status.last_connection_state == PeerAddrState::Failed {
+                break status;
+            }
 
-    // Check that the self-connection failed
-    let self_connection_status = {
-        let mut unlocked_address_book = address_book
-            .lock()
-            .expect("unexpected panic in address book");
-
-        let self_connection_status = unlocked_address_book
-            .get(real_self_listener.addr())
-            .expect("unexpected dropped listener address in address book");
-
-        std::mem::drop(unlocked_address_book);
-
-        self_connection_status
-    };
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the crawler should finish a self-connection attempt");
 
     // Make sure we fetched from the address book correctly
     assert_eq!(
@@ -2506,6 +2516,7 @@ fn assert_listener_task_cancelled(listen_task_handle: JoinHandle<Result<(), BoxE
 ///
 /// Binds the local listener to an unused localhost port.
 /// Uses the default values for all other config fields.
+/// Fake handshakers that keep connections open must send one byte to signal completion.
 ///
 /// Returns the generated [`Config`], and the peer set receiver.
 async fn spawn_inbound_listener_with_peer_limit<S>(
@@ -2565,21 +2576,18 @@ where
             // Let other tasks run before we block on reading.
             tokio::task::yield_now().await;
 
-            if let Ok(outbound_stream) = outbound_result {
-                // Wait until the listener closes the connection.
-                // The handshaker is fake, so it never sends any data.
-                let readable_result = outbound_stream.readable().await;
-                debug!(
-                    ?readable_result,
-                    "outbound connection became readable or errored: \
-                     closing connection to test inbound listener"
-                );
+            if let Ok(mut outbound_stream) = outbound_result {
+                // A held-open handshake sends one byte; rejection or disconnection sends EOF.
+                let read_result = outbound_stream.read_exact(&mut [0]).await;
+                debug!(?read_result, "inbound listener processed test connection");
+                Some(outbound_stream)
             } else {
                 // If the connection is closed quickly, we might get errors here.
                 debug!(
                     ?outbound_result,
                     "outbound connection error in inbound listener test"
                 );
+                None
             }
         };
 
@@ -2587,20 +2595,26 @@ where
         outbound_task_handles.push(outbound_task_handle);
     }
 
-    // Let the listener run for a while.
-    tokio::time::sleep(LISTENER_TEST_DURATION).await;
+    // Keep accepted connections open until all attempts have reached the listener.
+    let _outbound_connections = tokio::time::timeout(LISTENER_TEST_TIMEOUT, async {
+        let mut connections = Vec::new();
+        for outbound_task_handle in outbound_task_handles {
+            connections.push(
+                outbound_task_handle
+                    .await
+                    .expect("outbound connection task should not panic"),
+            );
+        }
+        connections
+    })
+    .await
+    .expect("the listener should handshake or reject every test connection");
 
-    // Stop the listener and outbound tasks, and let them finish.
+    // Stop the listener and check that it did not panic or fail.
     listen_task_handle.abort();
-    for outbound_task_handle in outbound_task_handles {
-        outbound_task_handle.abort();
-    }
-    tokio::task::yield_now().await;
-
-    // Check for panics or errors in the listener.
-    let listen_result = listen_task_handle.now_or_never();
+    let listen_result = listen_task_handle.await;
     assert!(
-        listen_result.is_none() || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
+        matches!(&listen_result, Err(e) if e.is_cancelled()),
         "unexpected error or panic in inbound peer listener task: {listen_result:?}",
     );
 

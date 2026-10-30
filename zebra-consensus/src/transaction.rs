@@ -44,7 +44,7 @@ use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// A timeout applied to UTXO lookup requests.
 ///
@@ -122,7 +122,10 @@ pub struct MempoolTxVerifier<ZS, Mempool> {
 
 impl<ZS, Mempool> MempoolTxVerifier<ZS, Mempool>
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
@@ -131,6 +134,7 @@ where
     Mempool::Future: Send + 'static,
 {
     /// Creates a new mempool transaction verifier.
+    /// Read-only lookups bypass the buffered state writer.
     pub fn new(network: &Network, state: ZS, mempool_setup_rx: oneshot::Receiver<Mempool>) -> Self {
         Self {
             network: network.clone(),
@@ -148,7 +152,10 @@ impl<ZS>
         Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     >
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
 {
     /// Creates a new mempool transaction verifier for tests using a closed
@@ -300,6 +307,10 @@ where
         let known_utxos = req.known_utxos.clone();
         let nu = NetworkUpgrade::current(&network, height);
         let span = tracing::debug_span!("tx", ?tx_id);
+        let queueing = tx
+            .has_shielded_data()
+            .then(|| primitives::flush::Queueing::for_transaction(&known_utxos))
+            .flatten();
 
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
@@ -333,13 +344,20 @@ where
             tracing::trace!(?tx_id, "got state UTXOs");
 
             // Select version-specific async verification pipeline
-            let async_checks = dispatch_version_verification(
-                tx.as_ref(),
-                nu,
-                script_verifier,
-                cached_ffi_transaction.clone(),
-                tx_id,
-            )?;
+            let dispatch = || {
+                dispatch_version_verification(
+                    tx.as_ref(),
+                    nu,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    tx_id,
+                )
+            };
+            let async_checks = match queueing.as_ref() {
+                Some(queueing) => queueing.scope(dispatch),
+                None => dispatch(),
+            }?;
+            drop(queueing);
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
@@ -380,11 +398,12 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Looks up UTXOs spent by `tx` from the best chain state, also checking
-    /// `known_utxos` for UTXOs from earlier transactions in the same block.
+    /// Looks up UTXOs spent by `tx` from any chain state, concurrently for multiple external inputs,
+    /// also checking `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
     /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
     /// order as the matching inputs in `tx`.
+    /// Returns on the first lookup error, dropping the remaining lookup futures.
     async fn block_spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
@@ -400,33 +419,38 @@ where
         let mut spent_utxos = HashMap::new();
         // Pre-allocate with None so we can fill each slot by input index, preserving input order.
         let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        let mut external_inputs = inputs.iter().enumerate().filter_map(|(input_idx, input)| {
+            let outpoint = input.outpoint()?;
+            if let Some(output) = known_utxos.get(&outpoint) {
+                spent_outputs[input_idx] = Some(output.utxo.output.clone());
+                spent_utxos.insert(outpoint, output.utxo.clone());
+                None
+            } else {
+                Some((input_idx, outpoint))
+            }
+        });
 
-        for (input_idx, input) in inputs.iter().enumerate() {
-            if let transparent::Input::PrevOut { outpoint, .. } = input {
-                tracing::trace!("awaiting outpoint lookup");
+        if let Some((input_idx, outpoint)) = external_inputs.next() {
+            if let Some(second) = external_inputs.next() {
+                let mut lookups = FuturesUnordered::new();
+                for (input_idx, outpoint) in [(input_idx, outpoint), second]
+                    .into_iter()
+                    .chain(external_inputs)
+                {
+                    lookups.push(Self::lookup_utxo(state.clone(), outpoint, input_idx));
+                }
 
-                let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                    tracing::trace!("UTXO in known_utxos, discarding query");
-                    output.utxo.clone()
-                } else {
-                    let response = state
-                        .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
-                        .await
-                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
-                            Ok(_) => TransactionError::TransparentInputNotFound,
-                            Err(boxed_error) => TransactionError::from(boxed_error),
-                        })?;
-
-                    if let zebra_state::Response::Utxo(utxo) = response {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
-                    }
-                };
-                tracing::trace!(?utxo, "got UTXO");
+                while let Some(result) = lookups.next().await {
+                    let (input_idx, outpoint, utxo) = result?;
+                    spent_outputs[input_idx] = Some(utxo.output.clone());
+                    spent_utxos.insert(outpoint, utxo);
+                }
+            } else {
+                // A single external input cannot overlap another lookup, so avoid the queue.
+                let (input_idx, outpoint, utxo) =
+                    Self::lookup_utxo(state, outpoint, input_idx).await?;
                 spent_outputs[input_idx] = Some(utxo.output.clone());
-                spent_utxos.insert(*outpoint, utxo);
+                spent_utxos.insert(outpoint, utxo);
             }
         }
 
@@ -434,11 +458,39 @@ where
 
         Ok((spent_utxos, spent_outputs))
     }
+
+    /// Looks up one state UTXO, retaining its input index for out-of-order completion.
+    async fn lookup_utxo(
+        state: Timeout<ZS>,
+        outpoint: transparent::OutPoint,
+        input_idx: usize,
+    ) -> Result<(usize, transparent::OutPoint, transparent::Utxo), TransactionError> {
+        tracing::trace!(?outpoint, "awaiting outpoint lookup");
+        let response = tokio::time::timeout(
+            UTXO_LOOKUP_TIMEOUT,
+            state.oneshot(zebra_state::Request::AwaitUtxo(outpoint)),
+        )
+        .await
+        .map_err(|_| TransactionError::TransparentInputNotFound)?
+        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+            Ok(_) => TransactionError::TransparentInputNotFound,
+            Err(boxed_error) => TransactionError::from(boxed_error),
+        })?;
+
+        let zebra_state::Response::Utxo(utxo) = response else {
+            unreachable!("AwaitUtxo always responds with Utxo")
+        };
+        tracing::trace!(?utxo, "got UTXO");
+        Ok((input_idx, outpoint, utxo))
+    }
 }
 
 impl<ZS, Mempool> Service<MempoolRequest> for MempoolTxVerifier<ZS, Mempool>
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
@@ -548,14 +600,16 @@ where
                 tx_id,
             )?;
 
-            let check_anchors_and_revealed_nullifiers_query = state
-                .clone()
-                .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+            // Include service readiness in the state deadline while sibling CPU checks drain.
+            let check_anchors_and_revealed_nullifiers_query = tokio::time::timeout(
+                UTXO_LOOKUP_TIMEOUT,
+                state.clone().oneshot(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(
                     unmined_tx.clone(),
-                ))
+                )),
+            )
                 .map(|res| {
                     assert!(
-                        res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                        res?? == zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
                         "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
                     );
                     Ok(())
@@ -613,7 +667,10 @@ where
 
 impl<ZS, Mempool> MempoolTxVerifier<ZS, Mempool>
 where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZS::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
@@ -657,15 +714,16 @@ where
     ) -> Result<DateTime32, TransactionError> {
         let query = state
             .clone()
-            .oneshot(zs::Request::BestChainNextMedianTimePast);
+            .oneshot(zs::ReadRequest::BestChainNextMedianTimePast);
 
-        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = query
+        let response = tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
             .await
             .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?
-        {
+            .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?;
+        if let zebra_state::ReadResponse::BestChainNextMedianTimePast(median_time_past) = response {
             Ok(median_time_past)
         } else {
-            unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
+            unreachable!("ReadRequest::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
         }
     }
 
@@ -705,11 +763,13 @@ where
 
                 let query = state
                     .clone()
-                    .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
+                    .oneshot(zs::ReadRequest::UnspentBestChainUtxo(*outpoint));
 
-                let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
-                    .await
-                    .map_err(|_| TransactionError::TransparentInputNotFound)?
+                let zebra_state::ReadResponse::UnspentBestChainUtxo(utxo) =
+                    tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
+                        .await
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
                 else {
                     unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                 };
@@ -731,7 +791,10 @@ where
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
 
-                let output = match query.await {
+                let response = tokio::time::timeout(MEMPOOL_OUTPUT_LOOKUP_TIMEOUT, query)
+                    .await
+                    .map_err(|_| TransactionError::TransparentInputNotFound)?;
+                let output = match response {
                     Ok(mempool::Response::UnspentOutput(output)) => output,
                     Ok(_) => unreachable!("UnspentOutput always responds with UnspentOutput"),
                     Err(err) => {
@@ -766,6 +829,24 @@ where
             .collect();
 
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
+    }
+}
+
+/// Rechecks context and version rules without preparing scripts or shielded verification.
+pub(crate) fn check_cached_transaction(
+    tx: &Transaction,
+    height: block::Height,
+    time: DateTime<Utc>,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    check_common_consensus_rules(tx, height, network)?;
+    check::lock_time_has_passed(tx, height, time)?;
+    let upgrade = NetworkUpgrade::current(network, height);
+    match tx.tx_version() {
+        TxVersion::V4 => verify_v4_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V5 => verify_v5_transaction_network_upgrade(tx, upgrade),
+        TxVersion::V6 => verify_v6_transaction_network_upgrade(tx, upgrade),
+        _ => Err(TransactionError::WrongVersion),
     }
 }
 
@@ -1024,10 +1105,15 @@ fn verify_v4_transaction(
     verify_v4_transaction_network_upgrade(tx, nu)?;
 
     let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+    if tx.sprout_bundle().is_none() && sapling_bundle.is_none() {
+        return verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction);
+    }
 
     let sighash = cached_ffi_transaction
         .sighasher()
         .sighash(HashType::ALL, None);
+    #[cfg(test)]
+    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
@@ -1127,10 +1213,15 @@ fn verify_v5_transaction(
 
     let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
     let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+    if sapling_bundle.is_none() && orchard_bundle.is_none() {
+        return verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction);
+    }
 
     let sighash = cached_ffi_transaction
         .sighasher()
         .sighash(HashType::ALL, None);
+    #[cfg(test)]
+    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
@@ -1199,10 +1290,15 @@ fn verify_v6_transaction(
     let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
     let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
     let ironwood_bundle = cached_ffi_transaction.sighasher().ironwood_bundle();
+    if sapling_bundle.is_none() && orchard_bundle.is_none() && ironwood_bundle.is_none() {
+        return verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction);
+    }
 
     let sighash = cached_ffi_transaction
         .sighasher()
         .sighash(HashType::ALL, None);
+    #[cfg(test)]
+    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
 
     // The Ironwood bundle reuses the Orchard Action proof system and the NU6.3 circuit key, so
     // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
@@ -1259,10 +1355,10 @@ fn verify_transparent_inputs_and_outputs(
         // Coinbase transactions don't have any PrevOut inputs.
         Ok(AsyncChecks::new())
     } else {
-        // feed all of the inputs to the script verifier
-        let inputs = tx.inputs();
+        // Feed every native input to the script verifier without rebuilding its script.
+        let input_count = tx.transparent_bundle().map_or(0, |bundle| bundle.vin.len());
 
-        let script_checks = (0..inputs.len())
+        let script_checks = (0..input_count)
             .map(move |input_index| {
                 let request = script::Request {
                     cached_ffi_transaction: cached_ffi_transaction.clone(),
@@ -1333,14 +1429,21 @@ fn verify_sprout_shielded_data(
         //
         // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
-        let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
+        let mut ed25519_verifier = primitives::ed25519::VERIFIER.clone();
         let pub_key = zebra_chain::primitives::ed25519::VerificationKeyBytes::from(
             sprout_bundle.joinsplit_pubkey,
         );
         let sig = zebra_chain::primitives::ed25519::Signature::from(sprout_bundle.joinsplit_sig);
         let ed25519_item = (pub_key, sig, shielded_sighash).into();
 
-        checks.push(ed25519_verifier.oneshot(ed25519_item));
+        let queueing = primitives::flush::Queueing::for_request();
+        checks.push(async move {
+            let response = ed25519_verifier.ready().await?.call(ed25519_item);
+            if let Some(queueing) = queueing {
+                queueing.enqueued(primitives::flush::Verifier::Ed25519);
+            }
+            response.await
+        });
     }
 
     Ok(checks)
@@ -1405,13 +1508,14 @@ fn verify_sapling_bundle(
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     if let Some(bundle) = bundle {
-        let verifier = primitives::sapling::VERIFIER.clone();
+        #[cfg(not(test))]
+        let mut verifier = primitives::sapling::VERIFIER.clone();
         #[cfg(test)]
-        let verifier = tests::SAPLING_CACHE_VERIFIER
+        let mut verifier = tests::SAPLING_CACHE_VERIFIER
             .try_with(Clone::clone)
-            .unwrap_or(verifier);
-        async_checks
-            .push(verifier.oneshot(primitives::sapling::Item::new(bundle, *sighash, tx_id)));
+            .unwrap_or_else(|_| primitives::sapling::VERIFIER.clone());
+        // The cache is always ready; constructing its call here tracks actual queue admission.
+        async_checks.push(verifier.call(primitives::sapling::Item::new(bundle, *sighash, tx_id)));
     }
 
     async_checks
@@ -1494,12 +1598,14 @@ fn queue_orchard_bundle(
             None => primitives::halo2::Item::new(bundle, *sighash),
         };
 
-        let verifier = select_verifier().clone();
+        #[cfg(not(test))]
+        let mut verifier = select_verifier().clone();
         #[cfg(test)]
-        let verifier = tests::HALO2_CACHE_VERIFIER
+        let mut verifier = tests::HALO2_CACHE_VERIFIER
             .try_with(Clone::clone)
-            .unwrap_or(verifier);
-        async_checks.push(verifier.oneshot(item));
+            .unwrap_or_else(|_| select_verifier().clone());
+        // The cache is always ready; constructing its call here tracks actual queue admission.
+        async_checks.push(verifier.call(item));
     }
 
     async_checks
@@ -1544,17 +1650,17 @@ impl AsyncChecks {
 
     /// Wait until all checks in the set finish.
     ///
-    /// If any of the checks fail, this method immediately returns the error and cancels all other
-    /// checks by dropping them.
+    /// Preserve the first error, but drain dispatched siblings before releasing their work owner.
     async fn check(mut self) -> Result<(), BoxError> {
-        // Wait for all asynchronous checks to complete
-        // successfully, or fail verification if they error.
+        let mut first_error = None;
         while let Some(check) = self.0.next().await {
             tracing::trace!(?check, remaining = self.0.len());
-            check?;
+            if let Err(error) = check {
+                first_error.get_or_insert(error);
+            }
         }
 
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 }
 

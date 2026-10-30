@@ -43,6 +43,59 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
+### Experimental early block relay
+
+For private relay experiments, set `experimental_early_block_relay = true` in
+`[network]` on each participating Zebra node. It defaults to `false` and requires
+both ends of a connection to advertise the experimental capability during the
+handshake. Peers that have not opted in retain ordinary full-block relay.
+
+After NU5, opted-in nodes can advertise and serve an authenticated child of the
+committed best tip before transaction verification finishes. Full validation is
+still required before committing it. The cache retains one body for at most
+15 seconds, with a 2 MB wire limit and a conservative 64 MiB decoded-content
+charge. Rejection, cancellation, or expiry withdraws the body; after withdrawal,
+the admission slot stays reserved until its deadline or the next committed tip
+to bound replayed advertisements. Locally invalidated hashes are ineligible.
+At most eight authenticated, deterministic rejection hashes are remembered for
+60 seconds to suppress repeated expensive verification. Unauthenticated variants,
+timeouts, and infrastructure failures do not populate this set. Ordinary
+committed announcements are unchanged. Compatible peers do not punish one another
+for later transaction validation failures after authenticating the body against a
+current committed parent. If that context is unavailable, including historical
+or pipelined downloads, verification continues. Before assigning a punitive later
+failure, authentication retries for at most 30 seconds without publication;
+unavailable context remains non-punitive, while a failed authentication is scored.
+Withdrawn bodies are rechecked before their local wire write begins, falling back
+to committed state if necessary. Bytes already sent cannot be recalled.
+
+These connections also negotiate provisional compact encoding version 1 with
+`sendcmpct`. At most three recipients per announcement receive `cmpctblock`;
+other connections receive ordinary inventory and full blocks. Up to three opted-in
+peers are selected as compact receive sources, preferring first announcers only
+after their block is committed locally. Unvalidated inventory cannot change this
+selection, and a stalled demotion write cannot hold a source slot.
+The compact encoding includes the complete Zcash header, a nonce, six-byte SipHash-2-4 short
+IDs, and a prefilled coinbase. Short IDs use the complete witnessed identity for
+v5/v6 transactions and the transaction ID for earlier versions.
+
+Reconstruction uses the verified mempool, then one `getblocktxn`/`blocktxn`
+exchange for missing transactions. Collisions, commitment mismatches, unknown
+parents, and a two-second recovery timeout fall back to a full block without
+punishing the announcing peer. Repeated recovery responses share a block-size
+payload budget for 15 seconds after delivery, even if publication permission is withdrawn.
+The deadline also bounds backpressured recovery writes, releasing the globally
+bounded snapshot before connection cleanup. The normal consensus verifier still
+checks every reconstructed block. Coinbase-only blocks use full relay because
+compact encoding would not save bytes.
+
+This uses experimental service bit 25 from the
+[temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).
+Bit 25 avoids bit 24, which another implementation already uses for a different
+capability. This is not a production protocol
+allocation: use it only with explicitly coordinated participants. Regtest's disabled
+proof of work does not measure the cost of authenticated admission on a public network.
+
 ### Testing NU7 reissuance
 
 Use a fresh test chain and replace the activation-height section above with:

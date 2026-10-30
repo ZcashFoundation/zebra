@@ -40,6 +40,7 @@ use crate::{
 use crate::request::Spend;
 
 use self::index::TransparentTransfers;
+use super::{AddressTransfers, CreatedUtxos};
 
 pub mod index;
 
@@ -87,7 +88,9 @@ pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
-    pub(crate) blocks: BTreeMap<block::Height, ContextuallyVerifiedBlock>,
+    ///
+    /// Records are immutable once pushed, so snapshots share them.
+    pub(crate) blocks: BTreeMap<block::Height, Arc<ContextuallyVerifiedBlock>>,
 
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
@@ -103,7 +106,7 @@ pub struct ChainInner {
     /// Outputs can be spent by later transactions or blocks in the chain.
     //
     // TODO: replace OutPoint with OutputLocation?
-    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub(crate) created_utxos: CreatedUtxos,
     /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
     /// including spent outputs created by earlier transactions or blocks in the chain.
     ///
@@ -227,8 +230,8 @@ pub struct ChainInner {
     // Transparent Transfers
     // TODO: move to the transparent section
     //
-    /// Partial transparent address index data from `blocks`.
-    pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
+    /// Partial transparent address indexes, sharing unchanged partitions and histories.
+    pub(super) partial_transparent_transfers: AddressTransfers,
 
     // Chain Work
     //
@@ -369,7 +372,7 @@ impl Chain {
         self.update_chain_tip_with(&block)?;
 
         tracing::debug!(block = %block.block, "adding block to chain");
-        self.blocks.insert(block.height, block);
+        self.blocks.insert(block.height, Arc::new(block));
 
         Ok(self)
     }
@@ -377,7 +380,7 @@ impl Chain {
     /// Pops the lowest height block of the non-finalized portion of a chain,
     /// and returns it with its associated treestate.
     #[instrument(level = "debug", skip(self))]
-    pub(crate) fn pop_root(&mut self) -> (ContextuallyVerifiedBlock, Treestate) {
+    pub(crate) fn pop_root(&mut self) -> (Arc<ContextuallyVerifiedBlock>, Treestate) {
         // Obtain the lowest height.
         let block_height = self.non_finalized_root_height();
 
@@ -405,7 +408,7 @@ impl Chain {
             .expect("only called while blocks is populated");
 
         // Update cumulative data members.
-        self.revert_chain_with(&block, RevertPosition::Root);
+        self.revert_chain_with(block.as_ref(), RevertPosition::Root);
 
         (block, treestate)
     }
@@ -414,7 +417,7 @@ impl Chain {
     pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
         self.blocks
             .range(block_height..)
-            .map(|(_h, b)| b.clone())
+            .map(|(_h, block)| block.as_ref().clone())
             .collect()
     }
 
@@ -469,7 +472,7 @@ impl Chain {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.blocks.get(&height)
+        self.blocks.get(&height).map(Arc::as_ref)
     }
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in this chain.
@@ -1490,7 +1493,7 @@ impl Chain {
             "Non-finalized chains must have at least one block to be valid"
         );
 
-        self.revert_chain_with(&block, RevertPosition::Tip);
+        self.revert_chain_with(block.as_ref(), RevertPosition::Tip);
     }
 
     /// Return the non-finalized tip height for this chain.
@@ -1513,7 +1516,7 @@ impl Chain {
     /// Return the non-finalized tip block for this chain,
     /// or `None` if `self.blocks` is empty.
     pub fn tip_block(&self) -> Option<&ContextuallyVerifiedBlock> {
-        self.blocks.values().next_back()
+        self.blocks.values().next_back().map(Arc::as_ref)
     }
 
     /// Returns true if the non-finalized part of this chain is empty.
@@ -1532,11 +1535,13 @@ impl Chain {
     /// Callers should also check the finalized state for available UTXOs.
     /// If UTXOs remain unspent when a block is finalized, they are stored in the finalized state,
     /// and removed from the relevant chain(s).
+    #[cfg(test)]
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
-        let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains_key(outpoint));
-
-        unspent_utxos
+        self.created_utxos
+            .iter()
+            .filter(|(outpoint, _)| !self.spent_utxos.contains_key(*outpoint))
+            .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+            .collect()
     }
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
@@ -1696,7 +1701,10 @@ impl Chain {
     /// running note commitment tree updates in parallel with other updates.
     ///
     /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_parallel(
         &mut self,
@@ -1722,13 +1730,13 @@ impl Chain {
         // - sprout, sapling, and orchard tree updates and root calculations
         // - the rest of the Chain updates
         rayon::in_place_scope_fifo(|scope| {
-            // Spawns a separate rayon task for each note commitment tree
-            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
-
             scope.spawn_fifo(|_scope| {
                 partial_result =
                     Some(self.update_chain_tip_with_block_except_trees(contextually_valid));
             });
+
+            // Spawns a separate rayon task for each note commitment tree
+            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
         });
 
         tree_result.expect("scope has already finished")?;
@@ -1781,7 +1789,10 @@ impl Chain {
     /// except for the note commitment and history tree updates.
     ///
     /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_except_trees(
         &mut self,
@@ -1799,8 +1810,8 @@ impl Chain {
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
-            &contextually_valid.new_outputs,
-            &contextually_valid.spent_outputs,
+            contextually_valid.new_outputs.as_ref(),
+            contextually_valid.spent_outputs.as_ref(),
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
         );
@@ -1820,16 +1831,16 @@ impl Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
 
-        // for each transaction in block
-        for (transaction_index, (transaction, transaction_hash)) in block
+        // Apply fee-paying transactions before coinbase credits, preserving their original locations.
+        // Coinbase outputs cannot be spent in this block because they are immature.
+        let transactions = block
             .transactions
             .iter()
-            .zip(transaction_hashes.iter().cloned())
-            .enumerate()
+            .zip(transaction_hashes.iter().copied())
+            .enumerate();
+        for (transaction_index, (transaction, transaction_hash)) in
+            transactions.clone().skip(1).chain(transactions.take(1))
         {
-            let inputs = transaction.inputs();
-            let outputs = transaction.outputs();
-
             // Shielded-data updates run before the transparent updates and
             // the `tx_loc_by_hash` insert so that a duplicate transaction
             // (same hash → same nullifiers) is rejected with a clean
@@ -1884,10 +1895,12 @@ impl Chain {
                 "transactions must be unique within a single chain"
             );
 
-            // add the utxos this produced
-            self.update_chain_tip_with(&(&outputs, &transaction_hash, new_outputs))?;
-            // delete the utxos this consumed
-            self.update_chain_tip_with(&(&inputs, &transaction_hash, spent_outputs))?;
+            // Debit before credit so intermediate address balances remain in range.
+            self.update_chain_tip_with(&(transaction.as_ref(), &transaction_hash, spent_outputs))?;
+            let output_count = transaction
+                .transparent_bundle()
+                .map_or(0, |bundle| bundle.vout.len());
+            self.update_chain_tip_with(&(output_count, &transaction_hash, new_outputs))?;
         }
 
         // update the chain value pool balances
@@ -1944,7 +1957,10 @@ pub(crate) trait UpdateWith<T> {
 }
 
 impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
@@ -1953,7 +1969,10 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         self.update_chain_tip_with_block_parallel(contextually_valid)
     }
 
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     fn revert_chain_with(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
@@ -1971,8 +1990,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
-            &contextually_valid.new_outputs,
-            &contextually_valid.spent_outputs,
+            contextually_valid.new_outputs.as_ref(),
+            contextually_valid.spent_outputs.as_ref(),
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
         );
@@ -1992,17 +2011,40 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
 
-        // for each transaction in block
-        for (transaction, transaction_hash) in
-            block.transactions.iter().zip(transaction_hashes.iter())
-        {
-            let inputs = transaction.inputs();
-            let outputs = transaction.outputs();
+        let transactions = block.transactions.iter().zip(transaction_hashes.iter());
+        let mut transactions = transactions.clone().skip(1).chain(transactions.take(1));
+        // Finalization advances the balance baseline in application order. Tip rollback undoes
+        // application in reverse order, including removing coinbase credits before restoring fees.
+        while let Some((transaction, transaction_hash)) = match position {
+            RevertPosition::Root => transactions.next(),
+            RevertPosition::Tip => transactions.next_back(),
+        } {
+            let output_count = transaction
+                .transparent_bundle()
+                .map_or(0, |bundle| bundle.vout.len());
 
-            // remove the utxos this produced
-            self.revert_chain_with(&(&outputs, transaction_hash, new_outputs), position);
-            // reset the utxos this consumed
-            self.revert_chain_with(&(&inputs, transaction_hash, spent_outputs), position);
+            match position {
+                RevertPosition::Root => {
+                    self.revert_chain_with(
+                        &(transaction.as_ref(), transaction_hash, spent_outputs),
+                        position,
+                    );
+                    self.revert_chain_with(
+                        &(output_count, transaction_hash, new_outputs),
+                        position,
+                    );
+                }
+                RevertPosition::Tip => {
+                    self.revert_chain_with(
+                        &(output_count, transaction_hash, new_outputs),
+                        position,
+                    );
+                    self.revert_chain_with(
+                        &(transaction.as_ref(), transaction_hash, spent_outputs),
+                        position,
+                    );
+                }
+            }
 
             // TODO: move this to the history tree UpdateWith.revert...()?
             // remove `transaction.hash` from `tx_loc_by_hash`
@@ -2062,8 +2104,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 // TODO: replace arguments with a struct
 impl
     UpdateWith<(
-        // The outputs from a transaction in this block
-        &Vec<transparent::Output>,
+        // The number of outputs from a transaction in this block
+        usize,
         // The hash of the transaction that the outputs are from
         &transaction::Hash,
         // The UTXOs for all outputs created by this transaction (or block)
@@ -2073,13 +2115,13 @@ impl
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        &(created_outputs, creating_tx_hash, block_created_outputs): &(
-            &Vec<transparent::Output>,
+        &(output_count, creating_tx_hash, block_created_outputs): &(
+            usize,
             &transaction::Hash,
             &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
     ) -> Result<(), ValidateContextError> {
-        for output_index in 0..created_outputs.len() {
+        for output_index in 0..output_count {
             let outpoint = transparent::OutPoint {
                 hash: *creating_tx_hash,
                 index: output_index.try_into().expect("valid indexes fit in u32"),
@@ -2088,7 +2130,8 @@ impl
                 .get(&outpoint)
                 .expect("new_outputs contains all created UTXOs");
 
-            // Update the chain's created UTXOs
+            // Share the resolved output between the chain and address indexes.
+            let created_utxo = Arc::new(created_utxo.clone());
             let previous_entry = self.created_utxos.insert(outpoint, created_utxo.clone());
             assert_eq!(
                 previous_entry, None,
@@ -2099,10 +2142,9 @@ impl
             if let Some(receiving_address) = created_utxo.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
-                    .entry(receiving_address)
-                    .or_default();
+                    .get_or_insert_mut(receiving_address);
 
-                address_transfers.update_chain_tip_with(&(&outpoint, created_utxo))?;
+                address_transfers.update_chain_tip_with(&(&outpoint, &created_utxo))?;
             }
         }
 
@@ -2111,28 +2153,24 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(created_outputs, creating_tx_hash, block_created_outputs): &(
-            &Vec<transparent::Output>,
+        &(output_count, creating_tx_hash, _block_created_outputs): &(
+            usize,
             &transaction::Hash,
             &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
         position: RevertPosition,
     ) {
-        for output_index in 0..created_outputs.len() {
+        for output_index in 0..output_count {
             let outpoint = transparent::OutPoint {
                 hash: *creating_tx_hash,
                 index: output_index.try_into().expect("valid indexes fit in u32"),
             };
-            let created_utxo = block_created_outputs
-                .get(&outpoint)
-                .expect("new_outputs contains all created UTXOs");
 
             // Revert the chain's created UTXOs
-            let removed_entry = self.created_utxos.remove(&outpoint);
-            assert!(
-                removed_entry.is_some(),
-                "unexpected revert of created output: duplicate revert or duplicate UTXO",
-            );
+            let created_utxo = self
+                .created_utxos
+                .remove(&outpoint)
+                .expect("created output must exist because the block was previously applied");
 
             // Revert the address index for this UTXO
             if let Some(receiving_address) = created_utxo.utxo.output.address(&self.network) {
@@ -2141,7 +2179,7 @@ impl
                     .get_mut(&receiving_address)
                     .expect("block has previously been applied to the chain");
 
-                address_transfers.revert_chain_with(&(&outpoint, created_utxo), position);
+                address_transfers.revert_chain_with(&(&outpoint, &created_utxo), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {
@@ -2158,8 +2196,8 @@ impl
 // TODO: replace arguments with a struct
 impl
     UpdateWith<(
-        // The inputs from a transaction in this block
-        &Vec<transparent::Input>,
+        // The transaction whose transparent inputs are spent
+        &Transaction,
         // The hash of the transaction that the inputs are from
         // (not the transaction the spent output was created by)
         &transaction::Hash,
@@ -2169,19 +2207,13 @@ impl
 {
     fn update_chain_tip_with(
         &mut self,
-        &(spending_inputs, spending_tx_hash, spent_outputs): &(
-            &Vec<transparent::Input>,
+        &(transaction, spending_tx_hash, spent_outputs): &(
+            &Transaction,
             &transaction::Hash,
             &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
     ) -> Result<(), ValidateContextError> {
-        for spending_input in spending_inputs.iter() {
-            let spent_outpoint = if let Some(spent_outpoint) = spending_input.outpoint() {
-                spent_outpoint
-            } else {
-                continue;
-            };
-
+        for spent_outpoint in transaction.spent_outpoints() {
             #[cfg(feature = "indexer")]
             let insert_value = *spending_tx_hash;
             #[cfg(not(feature = "indexer"))]
@@ -2210,11 +2242,10 @@ impl
             if let Some(spending_address) = spent_output.utxo.output.address(&self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
-                    .entry(spending_address)
-                    .or_default();
+                    .get_or_insert_mut(spending_address);
 
                 address_transfers.update_chain_tip_with(&(
-                    spending_input,
+                    &spent_outpoint,
                     spending_tx_hash,
                     spent_output,
                 ))?;
@@ -2226,20 +2257,14 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(spending_inputs, spending_tx_hash, spent_outputs): &(
-            &Vec<transparent::Input>,
+        &(transaction, spending_tx_hash, spent_outputs): &(
+            &Transaction,
             &transaction::Hash,
             &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
         position: RevertPosition,
     ) {
-        for spending_input in spending_inputs.iter() {
-            let spent_outpoint = if let Some(spent_outpoint) = spending_input.outpoint() {
-                spent_outpoint
-            } else {
-                continue;
-            };
-
+        for spent_outpoint in transaction.spent_outpoints() {
             // Revert the spent outpoint in the chain
             let was_spent_outpoint_removed = self.spent_utxos.remove(&spent_outpoint).is_some();
             assert!(
@@ -2265,8 +2290,10 @@ impl
                     .get_mut(&receiving_address)
                     .expect("block has previously been applied to the chain");
 
-                address_transfers
-                    .revert_chain_with(&(spending_input, spending_tx_hash, spent_output), position);
+                address_transfers.revert_chain_with(
+                    &(&spent_outpoint, spending_tx_hash, spent_output),
+                    position,
+                );
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {

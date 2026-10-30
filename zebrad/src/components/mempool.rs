@@ -19,25 +19,32 @@
 //!      to peers
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     iter,
     ops::Bound,
     pin::{pin, Pin},
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use chrono::Duration;
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::{broadcast, mpsc, oneshot};
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify};
+use tower::{
+    buffer::Buffer,
+    timeout::Timeout,
+    util::{BoxCloneService, BoxService},
+    Service,
+};
 
 use zebra_chain::{
     block::{self, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    transaction::UnminedTxId,
+    serialization::TrustedPreallocate,
+    transaction::{Transaction, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
@@ -82,11 +89,12 @@ use downloads::{
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
+type ReadState = BoxCloneService<zs::ReadRequest, zs::ReadResponse, zs::BoxError>;
 type TxVerifier = Buffer<
     BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
     transaction::MempoolRequest,
 >;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, ReadState>;
 
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
@@ -293,9 +301,11 @@ pub struct Mempool {
     /// Used to construct the transaction downloader.
     outbound: Outbound,
 
-    /// Handle to the state service.
-    /// Used to construct the transaction downloader.
-    state: State,
+    /// Keeps the state writer alive until the mempool is dropped during shutdown.
+    _state: State,
+
+    /// Read-only state handle used to construct the transaction downloader.
+    read_state: ReadState,
 
     /// Handle to the transaction verifier service.
     /// Used to construct the transaction downloader.
@@ -329,6 +339,9 @@ pub struct Mempool {
     /// Only displayed after the mempool's first activation.
     #[cfg(feature = "progress-bar")]
     rejected_count_bar: Option<howudoin::Tx>,
+
+    /// Wakes the queue checker to store and announce verified transactions.
+    transaction_verified: Arc<Notify>,
 }
 
 impl Mempool {
@@ -342,15 +355,17 @@ impl Mempool {
         config: &Config,
         outbound: Outbound,
         state: State,
+        read_state: ReadState,
         tx_verifier: TxVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
-    ) -> (Self, MempoolTxSubscriber) {
+    ) -> (Self, MempoolTxSubscriber, Arc<Notify>) {
         let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
         let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
+        let transaction_verified = Arc::new(Notify::new());
 
         let mut service = Mempool {
             network: network.clone(),
@@ -361,10 +376,12 @@ impl Mempool {
             latest_chain_tip,
             chain_tip_change,
             outbound,
-            state,
+            _state: state,
+            read_state,
             tx_verifier,
             transaction_sender,
             misbehavior_sender,
+            transaction_verified: transaction_verified.clone(),
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -380,7 +397,7 @@ impl Mempool {
         let is_caught_up_to_start = service.is_caught_up_to_start();
         service.update_state(None, is_caught_up_to_start);
 
-        (service, transaction_subscriber)
+        (service, transaction_subscriber, transaction_verified)
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -424,7 +441,8 @@ impl Mempool {
         let tx_downloads = Box::pin(TxDownloads::new(
             Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
             Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.state.clone(),
+            self.read_state.clone(),
+            self.transaction_verified.clone(),
         ));
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
@@ -935,6 +953,31 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+                Request::VerifiedTransactionsForBlock {
+                    transaction_hashes,
+                    parent_hash,
+                } => {
+                    let transactions = if *last_seen_tip_hash == parent_hash
+                        && transaction_hashes.len()
+                            <= usize::try_from(Transaction::max_allocation())
+                                .expect("block transaction limit fits in usize")
+                    {
+                        let mut transactions = HashMap::with_capacity(
+                            transaction_hashes.len().min(storage.transactions().len()),
+                        );
+                        transactions.extend(transaction_hashes.iter().filter_map(|hash| {
+                            storage
+                                .transactions()
+                                .get(hash)
+                                .map(|tx| (*hash, tx.clone()))
+                        }));
+                        transactions
+                    } else {
+                        Default::default()
+                    };
+
+                    async move { Ok(Response::VerifiedTransactionsForBlock(transactions)) }.boxed()
+                }
                 Request::TransactionWithDepsByMinedId(tx_id) => {
                     trace!(?req, "got mempool request");
 
@@ -1053,7 +1096,10 @@ impl Service<Request> for Mempool {
                 Request::CheckForVerifiedTransactions => {
                     trace!(?req, "got mempool request");
 
-                    // all the work for this request is done in poll_ready
+                    // Queue checks also reap abandoned waiters when the chain tip stalls.
+                    storage.pending_outputs.prune();
+
+                    // Verified transactions were collected in poll_ready.
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
 
@@ -1139,6 +1185,9 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
+                    Request::VerifiedTransactionsForBlock { .. } => {
+                        Response::VerifiedTransactionsForBlock(Default::default())
+                    }
                     Request::TransactionWithDepsByMinedId(_)
                     | Request::AwaitOutput(_)
                     | Request::UnspentOutput(_) => {

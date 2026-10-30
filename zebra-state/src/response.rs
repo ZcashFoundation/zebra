@@ -34,11 +34,108 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Keeps early mining work alive and reserves its slot until block verification finishes.
+#[derive(Clone, Debug)]
+pub struct MiningCandidateGuard(
+    pub(crate) tokio::sync::watch::Sender<Arc<tokio::sync::OwnedSemaphorePermit>>,
+);
+
+impl PartialEq for MiningCandidateGuard {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+}
+
+impl Eq for MiningCandidateGuard {}
+
+/// A persistent early-work subscription. A default subscription never reports changes.
+#[derive(Clone, Debug)]
+pub struct MiningCandidateChanges(
+    pub(crate) tokio::sync::watch::Receiver<Option<crate::service::MiningCandidate>>,
+    pub(crate) Option<crate::ReadStateService>,
+);
+
+impl Default for MiningCandidateChanges {
+    fn default() -> Self {
+        Self(tokio::sync::watch::channel(None).1, None)
+    }
+}
+
+impl PartialEq for MiningCandidateChanges {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+}
+
+impl Eq for MiningCandidateChanges {}
+
+impl MiningCandidateChanges {
+    /// Returns whether `hash` is live, unexpired, and still extends the committed best tip.
+    ///
+    /// Check after selecting cached work: a detached chain-info response can outlive its guard.
+    pub fn is_current(&self, hash: block::Hash) -> bool {
+        self.0
+            .borrow()
+            .as_ref()
+            .is_some_and(|(parent, info, cancelled, deadline)| {
+                info.tip_hash == hash
+                    && cancelled.has_changed().is_ok()
+                    && tokio::time::Instant::now() < *deadline
+                    && self
+                        .1
+                        .as_ref()
+                        .and_then(|state| state.best_tip())
+                        .map(|(_, hash)| hash)
+                        == Some(parent.header.previous_block_hash)
+            })
+    }
+
+    /// Returns the body of a still-current candidate for speculative transaction selection.
+    ///
+    /// The block has not passed full verification. Never publish transactions selected against it
+    /// until it is committed and the mempool has processed that tip.
+    pub fn block(&self, hash: block::Hash) -> Option<Arc<Block>> {
+        if !self.is_current(hash) {
+            return None;
+        }
+        self.0
+            .borrow()
+            .as_ref()
+            .filter(|(_, info, _, _)| info.tip_hash == hash)
+            .map(|(block, _, _, _)| block.clone())
+    }
+
+    /// Marks earlier notifications as observed before reading the current candidate.
+    pub fn mark_seen(&mut self) {
+        self.0.borrow_and_update();
+    }
+
+    /// Waits for a publication or withdrawal, or indefinitely if the source closes.
+    pub async fn changed(&mut self) {
+        if self.0.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
-    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] and [`Request::CommitCheckpointVerifiedBlock`]
-    /// indicating that a block was successfully committed to the state.
+    /// Authenticated NU5-or-later body admission, optionally published for early relay.
+    ///
+    /// A missing guard means no authentication: disabled optional admission, unsupported pre-NU5
+    /// commitments, or unavailable parent context. Errors preserve contextual failure details.
+    /// Keep the guard until commit completes or verification rejects/cancels the block.
+    EarlyRelay(Option<crate::EarlyRelayGuard>),
+
+    /// Response to [`Request::MiningCandidate`], absent if mining is inactive or its worker is busy.
+    /// Dropping the guard withdraws early work.
+    MiningCandidate(Option<MiningCandidateGuard>),
+
+    /// Response to a block commit request indicating successful insertion into the state.
+    ///
+    /// For [`Request::CommitMinedBlock`] and [`Request::CommitMinedCheckpointVerifiedBlock`],
+    /// the state writer sends the committed notification before this response, even for side chains.
     Committed(block::Hash),
 
     /// Response to [`Request::InvalidateBlock`] indicating that a block was found and
@@ -115,7 +212,7 @@ pub enum Response {
     KnownBlock(Option<KnownBlock>),
 
     /// Response to [`Request::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,7 +349,13 @@ impl NonFinalizedBlocksListener {
         let new_blocks = non_finalized_state.chain_iter().flat_map(move |chain| {
             // Take blocks from the chain in reverse height order until we reach a block the
             // listener already has, then restore ascending height order.
-            let mut blocks: Vec<_> = chain.blocks.values().rev().take_while(take_cond).collect();
+            let mut blocks: Vec<_> = chain
+                .blocks
+                .values()
+                .map(Arc::as_ref)
+                .rev()
+                .take_while(take_cond)
+                .collect();
             blocks.reverse();
             blocks
         });
@@ -375,6 +478,21 @@ impl Eq for NonFinalizedBlocksListener {}
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
+    /// The currently verified mining parent's child context, if it extends the best tip.
+    MiningCandidate(Option<Arc<GetBlockTemplateChainInfo>>),
+
+    /// Response to [`ReadRequest::MiningCandidateChanges`].
+    MiningCandidateChanges(MiningCandidateChanges),
+
+    /// Shared authenticated early block retention, from [`ReadRequest::EarlyRelayCache`].
+    EarlyRelayCache(crate::EarlyRelayCache),
+
+    /// Successful contextual screening from [`ReadRequest::CheckBestTipHeader`].
+    ValidBestTipHeader,
+
+    /// Successful body authentication from [`ReadRequest::CheckBestTipBlockCommitments`].
+    ValidBestTipBlockCommitments,
+
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
@@ -536,7 +654,7 @@ pub enum ReadResponse {
     SolutionRate(Option<u128>),
 
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
-    ValidBlockProposal,
+    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
 
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
@@ -651,6 +769,11 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
+            | ReadResponse::MiningCandidate(_)
+            | ReadResponse::MiningCandidateChanges(_)
+            | ReadResponse::EarlyRelayCache(_)
+            | ReadResponse::ValidBestTipHeader
+            | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {
@@ -660,7 +783,7 @@ impl TryFrom<ReadResponse> for Response {
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
+            ReadResponse::ValidBlockProposal(block) => Ok(Response::ValidBlockProposal(block)),
 
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")

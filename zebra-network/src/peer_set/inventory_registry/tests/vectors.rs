@@ -463,3 +463,141 @@ async fn repeated_failure_refreshes_peer_eviction_order() {
     );
     assert!(failed.contains(&peer(MAX_PEERS_PER_INV)));
 }
+
+/// Missing inventory cannot erase the first announcer credited when a block is committed.
+#[tokio::test]
+async fn first_compact_source_announcement_is_promoted_only_after_commit() {
+    for rotate in [false, true] {
+        let (mut registry, _sender) = new_inv_registry();
+        let peers: Vec<PeerSocketAddr> = (1..=4)
+            .map(|ip| SocketAddr::from(([127, 0, 0, ip], 8233)).into())
+            .collect();
+        let mut preferences = Vec::new();
+        for peer in &peers {
+            let (sender, receiver) = tokio::sync::watch::channel(None);
+            registry.add_compact_source(*peer, sender);
+            preferences.push(receiver);
+        }
+        registry.select_compact_sources(None, |_| true);
+        assert!(preferences[3].borrow().is_none());
+
+        let hash = InventoryHash::Block(block::Hash([1; 32]));
+        registry.register(InventoryStatus::new_missing(hash, peers[0]));
+        registry.register(InventoryStatus::new_available(hash, peers[3]));
+        registry.select_compact_sources(None, |_| true);
+        assert!(preferences[3].borrow().is_none());
+        registry.register(InventoryStatus::new_available(hash, peers[2]));
+        if rotate {
+            registry.rotate();
+        }
+        registry.select_compact_sources(Some(block::Hash([1; 32])), |_| true);
+        assert!(preferences[3].borrow().is_some());
+        assert!(preferences[2].borrow().is_none());
+        assert_eq!(
+            registry.missing_peers(hash).copied().collect::<Vec<_>>(),
+            vec![peers[0]]
+        );
+
+        // A missing status cannot erase an announcement in either registry generation.
+        if rotate {
+            registry.rotate();
+        }
+        registry.register(InventoryStatus::new_missing(hash, peers[3]));
+        registry.register(InventoryStatus::new_available(hash, peers[2]));
+        registry.select_compact_sources(Some(block::Hash([1; 32])), |_| true);
+        assert!(preferences[2].borrow().is_none());
+
+        // Sticky missing status must not give repeated announcements fresh source-selection credit.
+        let missing_hash = InventoryHash::Block(block::Hash([2; 32]));
+        registry.register(InventoryStatus::new_missing(missing_hash, peers[2]));
+        registry.register(InventoryStatus::new_available(missing_hash, peers[2]));
+        registry.select_compact_sources(Some(block::Hash([2; 32])), |_| true);
+        assert!(preferences[2].borrow().is_some());
+        for index in [0, 1, 3] {
+            let hash = block::Hash([u8::try_from(index + 3).unwrap(); 32]);
+            registry.register(InventoryStatus::new_available(
+                InventoryHash::Block(hash),
+                peers[index],
+            ));
+            registry.select_compact_sources(Some(hash), |_| true);
+        }
+        assert!(preferences[2].borrow().is_none());
+        registry.register(InventoryStatus::new_available(missing_hash, peers[2]));
+        registry.select_compact_sources(Some(block::Hash([6; 32])), |_| true);
+        assert!(preferences[2].borrow().is_none());
+        assert_eq!(
+            registry
+                .missing_peers(missing_hash)
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![peers[2]]
+        );
+    }
+}
+
+/// Announcement history has the registry's hash cap and survives at most two idle generations.
+#[tokio::test]
+async fn compact_announcement_history_is_bounded_and_rotates() {
+    let (mut registry, _sender) = new_inv_registry();
+    let peer = "1.1.1.1:1".parse().unwrap();
+    let hash = |index: usize| {
+        let mut bytes = [0; 32];
+        bytes[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        block::Hash(bytes)
+    };
+    for index in 0..=MAX_INV_PER_MAP {
+        registry.register(InventoryStatus::new_available(
+            InventoryHash::Block(hash(index)),
+            peer,
+        ));
+    }
+    assert_eq!(registry.announced_current.len(), MAX_INV_PER_MAP);
+    assert!(!registry.announced_current.contains_key(&hash(0)));
+    registry.rotate();
+    assert!(registry.announced_current.is_empty());
+    assert_eq!(registry.announced_prev.len(), MAX_INV_PER_MAP);
+
+    // Repeated announcements remain remembered through the next interval without earning credit.
+    registry.register(InventoryStatus::new_available(
+        InventoryHash::Block(hash(MAX_INV_PER_MAP)),
+        peer,
+    ));
+    registry.rotate();
+    assert!(registry.announced_current.is_empty());
+    assert_eq!(registry.announced_prev.len(), 1);
+    assert!(registry.announced_prev.contains_key(&hash(MAX_INV_PER_MAP)));
+    registry.rotate();
+    assert!(registry.announced_current.is_empty());
+    assert!(registry.announced_prev.is_empty());
+}
+
+#[tokio::test]
+async fn arbitrary_inventory_cannot_replace_compact_sources() {
+    let (mut registry, _sender) = new_inv_registry();
+    let peers: Vec<PeerSocketAddr> = (1..=6)
+        .map(|ip| SocketAddr::from(([127, 0, 0, ip], 8233)).into())
+        .collect();
+    let mut preferences = Vec::new();
+    for peer in &peers {
+        let (sender, receiver) = tokio::sync::watch::channel(None);
+        registry.add_compact_source(*peer, sender);
+        preferences.push(receiver);
+    }
+    registry.select_compact_sources(None, |_| true);
+    for index in 0..=MAX_INV_PER_MAP {
+        let mut hash = [0; 32];
+        hash[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        registry.register(InventoryStatus::new_available(
+            InventoryHash::Block(block::Hash(hash)),
+            peers[3 + index % 3],
+        ));
+        registry.select_compact_sources(None, |_| true);
+        assert_eq!(
+            preferences
+                .iter()
+                .map(|source| source.borrow().is_some())
+                .collect::<Vec<_>>(),
+            vec![true, true, true, false, false, false],
+        );
+    }
+}

@@ -51,6 +51,8 @@ use InventoryResponse::*;
 ///
 /// These tests run the download task in parallel with the test, so machines under heavy load need a
 /// longer delay.
+///
+/// Mock-only tests pause Tokio time to retain this window without idle wall time.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// Upper bound on a real state commit finishing, for tests that use a real state and verifier.
@@ -177,11 +179,12 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             .expect("valid prefix checkpoint commits");
     }
 
-    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height) =
+    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height, _prepared_blocks) =
         zebra_consensus::router::init_test(
             zebra_consensus::Config::default(),
             &network,
             state_service.clone(),
+            read_state.clone(),
         )
         .await;
     assert_eq!(max_checkpoint_height, Height(8));
@@ -438,6 +441,60 @@ fn mock_downloads(
     (downloads, network, verifier, state)
 }
 
+/// Negotiated sync downloads select authenticated validation without losing serving attribution.
+#[tokio::test]
+async fn early_relay_download_preserves_validation_and_source() {
+    let _init_guard = zebra_test::init();
+    for (early, admitted) in [(false, false), (true, false), (true, true)] {
+        let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
+        let block = block_1();
+        let hash = block.hash();
+        let peer: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+        downloads.download_and_verify(hash).await.unwrap();
+        let blocks = vec![Available((block.clone(), Some(peer)))];
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await
+            .respond(if early {
+                zn::Response::EarlyBlocks(blocks)
+            } else {
+                zn::Response::Blocks(blocks)
+            });
+        let request = if early {
+            zebra_consensus::Request::CommitEarlyRelay(block)
+        } else {
+            zebra_consensus::Request::Commit(block)
+        };
+        let error = zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::Groth16("invalid proof".into()),
+        );
+        let error = if admitted {
+            zebra_consensus::VerifyBlockError::EarlyRelay(Box::new(error))
+        } else {
+            error
+        };
+        verifier
+            .expect_request(request)
+            .await
+            .respond_error(zebra_consensus::RouterError::from(error).into());
+        let error = downloads.next().await.unwrap().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                BlockDownloadVerifyError::Invalid {
+                    error,
+                    advertiser_addr: Some(source),
+                    ..
+                } if source == peer && error.misbehavior_score() == if admitted { 0 } else { 100 }
+            ),
+            "only authenticated early-relay transaction failures are non-punitive"
+        );
+    }
+}
+
 /// Load the mainnet block 1 vector, which these tests use as a low-height block body.
 fn block_1() -> Arc<Block> {
     zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -562,7 +619,7 @@ async fn logical_download_limit_holds_until_completion_or_cancellation() {
 /// A peer can answer with a canonical header and rewritten coinbase height because the initial hash
 /// check does not recompute the header's commitment to the body's authorizing data. The parent is
 /// the proof: a block's height is one more than its parent's.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -651,7 +708,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
 /// The syncer tolerates an out-of-order first hash in `FindBlocks` responses, so a requested hash
 /// can resolve to an old block that an honest peer still holds. Its height agrees with its parent's,
 /// so there is no proof of misbehaviour and the drop must stay anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_old_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -719,7 +776,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
 
 /// A peer whose old block has a parent we do not hold is not attributed either: without the parent
 /// there is no proof the height was rewritten.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     let _init_guard = zebra_test::init();
 
@@ -831,7 +888,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `min_accepted_height` is the boundary, and the behind-tip comparison is strict, so a block
 /// exactly on it is a normal download and the state is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 
@@ -944,4 +1001,117 @@ async fn download_deadline_includes_readiness_and_response() {
         }
         assert_eq!(Instant::now() - started, budget);
     }
+}
+
+/// Checkpoint and orphan admission pressure retry the body without another peer request.
+#[tokio::test(start_paused = true)]
+async fn checkpoint_and_orphan_pressure_retry_without_redownload() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let block = block_1();
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+
+    for error in [
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::QueuedLimit),
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyBlockError::Commit(
+            zs::CommitBlockError::OrphanQueueFull,
+        )),
+    ] {
+        assert!(error.is_resource_pressure());
+        assert_eq!(error.misbehavior_score(), 0);
+        verifier
+            .expect_request(zebra_consensus::Request::Commit(block.clone()))
+            .await
+            .respond_error(error.into());
+    }
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await
+        .respond(hash);
+    assert_eq!(downloads.next().await.unwrap().unwrap(), (Height(1), hash));
+    assert!(downloads.is_empty());
+    network.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
+
+/// Retrying admission must not grant another full verification deadline.
+#[tokio::test(start_paused = true)]
+async fn resource_pressure_retry_keeps_original_verify_deadline() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
+    let block = block_1();
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+    let first_request = verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await;
+    let started = tokio::time::Instant::now();
+    first_request.respond_error(
+        zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::QueuedLimit)
+            .into(),
+    );
+    let pending = verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await;
+    let error = downloads.next().await.unwrap().unwrap_err();
+    assert!(matches!(
+        error,
+        BlockDownloadVerifyError::ValidationRequestError { error, .. }
+            if error.is::<tower::timeout::error::Elapsed>()
+    ));
+    assert_eq!(started.elapsed(), super::BLOCK_VERIFY_TIMEOUT);
+    pending.respond(hash);
+    network.expect_no_requests().await;
+}
+
+/// Cancellation removes the existing download task, including its pressure backoff and body.
+#[tokio::test(start_paused = true)]
+async fn cancelling_pressure_retry_releases_downloaded_body() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
+    let block = block_1();
+    let body = Arc::downgrade(&block);
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+    verifier
+        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .await
+        .respond_error(
+            zebra_consensus::RouterError::from(zebra_consensus::VerifyCheckpointError::QueuedLimit)
+                .into(),
+        );
+    drop(block);
+    downloads.cancel_all();
+    tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, async {
+        while body.strong_count() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelling pressure retries must release their retained downloaded body");
+    assert!(downloads.is_empty());
+    verifier.expect_no_requests().await;
+    network.expect_no_requests().await;
 }

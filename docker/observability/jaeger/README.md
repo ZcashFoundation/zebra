@@ -60,10 +60,8 @@ The Monitor tab provides RED metrics (Rate, Errors, Duration) aggregated from tr
 │  Operations metrics                                                 │
 │  ┌────────────────────────────────────────────────────────────────┐│
 │  │ Name                      P95 Latency   Request rate   Error   ││
-│  │ state                     10s           10.27 req/s    < 0.1%  ││
 │  │ connector                 4.52s         0.24 req/s     < 0.1%  ││
 │  │ checkpoint                95.88ms       6.69 req/s     < 0.1%  ││
-│  │ best_tip_height           4.75ms        58.84 req/s    < 0.1%  ││
 │  │ download_and_verify       2.32s         0.11 req/s     < 0.1%  ││
 │  └────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
@@ -95,14 +93,16 @@ The "Span Kind" dropdown filters which operations you see:
 
 | Operation | Description | Normal Latency |
 |-----------|-------------|----------------|
-| `state` | State database operations | 1-10s during sync |
 | `connector` | Peer connection establishment | 1-5s |
 | `dial` | Network dial attempts | 1-5s |
 | `checkpoint` | Checkpoint verification | 50-200ms |
-| `best_tip_height` | Chain tip queries | < 10ms |
 | `download_and_verify` | Block download + verification | 1-5s |
 | `block_commitment_is_valid_for_chain_history` | Block validation | 50-200ms |
 | `rpc_request` | JSON-RPC handler (SERVER span) | Method-dependent |
+
+The state service (`state`, `read_state`) and chain tip query (`best_tip_height` and similar) spans are
+DEBUG and TRACE, so they require a matching tracing filter. The `release_max_level_info` feature
+disables these spans only in release builds (without debug assertions).
 
 ## Search Tab
 

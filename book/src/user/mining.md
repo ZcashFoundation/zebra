@@ -103,6 +103,19 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 listen_addr = "127.0.0.1:8232"
 ```
 
+Submitted blocks are advertised early only when they exactly match a successful local proposal
+verdict, except for the nonce and Equihash solution. Solved proof of work, size, current time, live
+parent eligibility and local invalidation are checked before the body becomes available to peers.
+Changed or uncached proposals undergo normal full validation; checkpoint-era blocks wait for commit.
+Early advertisements use ordinary block gossip; all-peer advertisements are reserved for committed
+submissions. The RPC response still waits for verification and commit.
+
+Committed notifications belong to the state writer, so cancelling an RPC does not discard a later
+successful commit notification. The default notification channel holds at most 10,000 messages.
+A full or closed channel produces an operational error before committing a mined block, without
+blocking ordinary state writes. Notification insertion does not guarantee delivery to peers.
+Restrict RPC access to trusted miners.
+
 ## Running zebra
 
 [#running-zebra]: #running-zebra
@@ -120,6 +133,31 @@ Wait until Zebra is in sync. You will see the sync at 100% when this happens:
 ```console
 INFO zebrad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(...) network_upgrade=Nu6 remaining_sync_blocks=1 time_since_last_state_block=0s
 ```
+
+## Reusing proposal validation
+
+Zebra validates transaction-bearing templates in the background. If you change the coinbase,
+transactions, timestamp or another header field, submit the modified block with
+`getblocktemplate` parameters `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it.
+A successful proposal lets a later `submitblock` reuse verification when only the nonce and
+Equihash solution differ. Proof of work, current time, size and state application are still checked.
+The cache holds up to eight recent successful proposals within a 576 MiB retained-content budget,
+including spent-output scripts. This uses a conservative retention charge, not measured heap usage.
+It keeps eight representative full-size proposals with 19,215 transactions using 104-byte
+one-input/one-P2PKH-output payments, charged at about 66.2 MB per proposal. Proposals packed with
+smaller consensus-valid transactions or large spent-output scripts can retain fewer entries.
+An evicted or changed proposal is verified normally: eviction loses cache hits, not correctness.
+
+Template requests share the updater's work during startup and refreshes, rather than starting a
+separate coinbase proof for each waiting miner. On-demand construction runs off the async executor
+and rechecks the committed parent, synchronization, timestamp range and difficulty before returning.
+Long polls also recheck synchronization after waking. Expanding a clock-capped timestamp range does
+not cancel still-valid work; a genuine difficulty-boundary transition still replaces it.
+New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
+If the updater stops, cached work is refreshed at the normal mempool polling interval.
+Long polls continue observing shared template publications after switching to on-demand refresh.
+When no usable work exists, snapshot failures are returned to the RPC caller rather than hidden
+behind an indefinite cache wait.
 
 ## Testing the setup
 

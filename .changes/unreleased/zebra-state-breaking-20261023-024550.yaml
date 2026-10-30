@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added authenticated early-relay admission requests, responses, guards, a bounded expiring `EarlyRelayCache`, and hash-only suppression of authenticated deterministic rejections, including immediate replays after failed commits. Checkpoint completion notifications follow tip publication so immediate children can authenticate. `FinalizedState::commit_finalized` now takes a `CheckpointVerifiedBlock` and optional previous trees instead of a queued block and committed-notification permit; callers must send completion notifications themselves. Handle the new request and response variants in exhaustive matches; use `Request::AuthenticateEarlyRelay` to authenticate without publication. Cached bodies are not fully verified state blocks.
+time: 2026-10-23T02:45:50.909649991+02:00

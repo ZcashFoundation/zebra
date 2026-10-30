@@ -30,8 +30,8 @@ use InventoryResponse::*;
 
 /// Maximum time to wait for a request to any test service.
 ///
-/// These tests run the download task in parallel with the test, so machines under heavy load need a
-/// longer delay.
+/// These tests use only in-process mocks and pause Tokio time, preserving the full no-request
+/// observation window without spending that time idle.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// A peer address used to check whether the supplying peer can be scored.
@@ -80,6 +80,65 @@ fn mock_downloads(
     (downloads, network, verifier, state)
 }
 
+/// Negotiated downloads preserve both the verification contract and the actual serving address.
+#[tokio::test]
+async fn early_relay_download_preserves_validation_and_source() {
+    let _init_guard = zebra_test::init();
+    for (early, admitted) in [(false, false), (true, false), (true, true)] {
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let block = block_1();
+        let hash = block.hash();
+        let peer: PeerSocketAddr = ADVERTISER.parse().unwrap();
+        assert!(matches!(
+            downloads.download_and_verify(hash, Some(peer)),
+            DownloadAction::AddedToQueue
+        ));
+        state
+            .expect_request(zs::Request::KnownBlock(hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+        let blocks = vec![Available((block.clone(), Some(peer)))];
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: Some(peer),
+            })
+            .await
+            .respond(if early {
+                zn::Response::EarlyBlocks(blocks)
+            } else {
+                zn::Response::Blocks(blocks)
+            });
+        let request = if early {
+            zebra_consensus::Request::CommitEarlyRelay(block)
+        } else {
+            zebra_consensus::Request::Commit(block)
+        };
+        let error = zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::Groth16("invalid proof".into()),
+        );
+        let error = if admitted {
+            zebra_consensus::VerifyBlockError::EarlyRelay(Box::new(error))
+        } else {
+            error
+        };
+        verifier
+            .expect_request(request)
+            .await
+            .respond_error(zebra_consensus::RouterError::from(error).into());
+        let (error, source) = downloads.next().await.unwrap().unwrap_err();
+        assert_eq!(source, Some(peer));
+        assert_eq!(
+            error
+                .downcast_ref::<zebra_consensus::RouterError>()
+                .unwrap()
+                .misbehavior_score(),
+            if admitted { 0 } else { 100 },
+            "only authenticated early-relay transaction failures are non-punitive",
+        );
+    }
+}
+
 /// Load the mainnet block 1 vector, which these tests use as a low-height block body.
 fn block_1() -> Arc<Block> {
     zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -122,7 +181,7 @@ fn lookahead_boundary_tip() -> Height {
 /// A peer can answer with a canonical header and rewritten coinbase height because the initial hash
 /// check does not recompute the header's commitment to the body's authorizing data. The parent is
 /// the proof: a block's height is one more than its parent's.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -219,7 +278,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
 ///
 /// Its height agrees with its parent's, so there is no proof of misbehaviour and the drop must stay
 /// anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_old_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -296,7 +355,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
 
 /// A peer whose old block has a parent we do not hold is not attributed either: without the parent
 /// there is no proof the height was rewritten.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     let _init_guard = zebra_test::init();
 
@@ -426,7 +485,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `min_accepted_height` is the boundary, and the behind-tip comparison is strict, so a block
 /// exactly on it is a normal download and the parent is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 
@@ -490,7 +549,7 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
 /// the serving peer did not choose the height of a genuine block. Here the parent is the proof, so
 /// scoring is safe: a genuine block whose parent we hold is at most one above the tip, so its real
 /// height is never far ahead.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -583,7 +642,7 @@ async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
 ///
 /// This is the common case while Zebra is catching up: the block's parent is not in the state yet,
 /// so there is no proof of misbehaviour and the drop must stay anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -652,7 +711,7 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block exactly
 /// on it is a normal download and the parent is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 

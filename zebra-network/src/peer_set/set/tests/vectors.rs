@@ -58,6 +58,9 @@ mod failure_reviews;
 #[path = "eligibility_reviews.rs"]
 mod eligibility_reviews;
 
+#[path = "early_relay.rs"]
+mod early_relay;
+
 #[test]
 fn peer_set_ready_single_connection() {
     // We are going to use just one peer version in this test
@@ -962,6 +965,7 @@ fn real_advert_peer(
 ) {
     real_advert_peer_with_authorization(
         version,
+        false,
         MinimumPeerVersion::new(zebra_chain::chain_tip::NoChainTip, &Network::Mainnet),
         watch::channel(crate::BanList::default()).1,
     )
@@ -969,6 +973,7 @@ fn real_advert_peer(
 
 fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Send + 'static>(
     version: Version,
+    early_block_relay: bool,
     minimum: MinimumPeerVersion<C>,
     bans: watch::Receiver<crate::BanList>,
 ) -> (
@@ -982,6 +987,11 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
         .with_version(version)
         .with_connected_addr(ConnectedAddr::InboundDirect { addr })
         .finish();
+    let info = std::sync::Arc::make_mut(&mut client.connection_info);
+    info.early_block_relay = early_block_relay;
+    info.remote
+        .services
+        .set(PeerServices::NODE_EARLY_BLOCK_RELAY, early_block_relay);
     let (client_tx, client_rx) = mpsc::channel(1);
     client.server_tx = client_tx;
     let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(4);
@@ -989,7 +999,13 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
     let (wire_tx, wire_rx) = mpsc::channel(0);
     let connection = Connection::new(
         tower::service_fn(|_: Request| async { Ok::<_, BoxError>(Response::Nil) }),
-        (client_rx, advert_rx, minimum, bans),
+        (
+            client_rx,
+            advert_rx,
+            client.compact_receive_tx.subscribe(),
+            minimum,
+            bans,
+        ),
         client.error_slot.clone(),
         wire_tx.sink_map_err(|_| {
             SerializationError::from(std::io::Error::new(
@@ -1002,6 +1018,89 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
         Vec::new(),
     );
     (client, harness, connection.run(stream::pending()), wire_rx)
+}
+
+/// Early inventory reaches a busy negotiated peer, not a non-negotiated sidecar.
+#[tokio::test(start_paused = true)]
+async fn early_block_advert_restricts_delivery_to_negotiated_peers() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        let (minimum, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+        let (early, _early_harness, early_connection, mut early_messages) =
+            real_advert_peer_with_authorization(
+                CURRENT_NETWORK_PROTOCOL_VERSION,
+                true,
+                minimum.clone(),
+                watch::channel(crate::BanList::default()).1,
+            );
+        let (mut legacy, _legacy_harness, legacy_connection, mut legacy_messages) =
+            real_advert_peer(CURRENT_NETWORK_PROTOCOL_VERSION);
+        let early_addr: PeerSocketAddr = "127.0.0.1:1".parse().unwrap();
+        let legacy_addr: PeerSocketAddr = "127.0.0.2:1".parse().unwrap();
+        let legacy_info = std::sync::Arc::make_mut(&mut legacy.connection_info);
+        legacy_info.connected_addr = ConnectedAddr::new_inbound_direct(legacy_addr);
+        // A remote service signal alone must not authorize delivery.
+        legacy_info
+            .remote
+            .services
+            .insert(PeerServices::NODE_EARLY_BLOCK_RELAY);
+        let discover = stream::iter([
+            Ok::<_, BoxError>(Change::Insert(early_addr, early.into())),
+            Ok(Change::Insert(legacy_addr, legacy.into())),
+        ])
+        .chain(stream::pending());
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(discover)
+            .with_minimum_peer_version(minimum)
+            .with_block_gossip_peer_ips(vec![legacy_addr.ip()])
+            .build();
+        peer_set.ready().await.unwrap();
+        let early_task = tokio::spawn(early_connection);
+        let legacy_task = tokio::spawn(legacy_connection);
+        assert_eq!(
+            early_messages.next().await,
+            Some(Message::SendCompact {
+                high_bandwidth: true,
+                version: 1
+            })
+        );
+        let mut busy = peer_set.take_ready_service(&early_addr).unwrap();
+        let _pending_request = busy.call(Request::Peers);
+        peer_set.push_unready(early_addr, busy);
+        assert_eq!(early_messages.next().await, Some(Message::GetAddr));
+
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let hash = block::Hash([25; 32]);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseEarlyBlock(hash));
+        let (result, message) = tokio::join!(advert, early_messages.next());
+        assert_eq!(result.unwrap(), Response::Nil);
+        assert_eq!(
+            message,
+            Some(Message::Inv(vec![InventoryHash::Block(hash)]))
+        );
+        assert!(legacy_messages.try_recv().is_err());
+
+        // Committed relay still includes the legacy peer, while the early peer stays busy.
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        let (result, early, legacy) =
+            tokio::join!(advert, early_messages.next(), legacy_messages.next());
+        assert_eq!(result.unwrap(), Response::Nil);
+        assert_eq!(early, Some(Message::Inv(vec![InventoryHash::Block(hash)])));
+        assert_eq!(legacy, Some(Message::Inv(vec![InventoryHash::Block(hash)])));
+        early_task.abort();
+        legacy_task.abort();
+    })
+    .await
+    .expect("early inventory must bypass a busy request without reaching legacy peers");
 }
 
 /// Channel admission is not evidence that the connection has written an inventory message.
@@ -1193,8 +1292,12 @@ async fn queued_block_advert_revocation(upgrade: bool, busy: bool) {
     let version = Version::min_specified_for_upgrade(&network, NetworkUpgrade::Nu6_2);
     let (minimum_peer_version, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
     let (bans_tx, bans_rx) = watch::channel(crate::BanList::default());
-    let (client, _harness, connection, mut messages) =
-        real_advert_peer_with_authorization(version, minimum_peer_version.clone(), bans_rx.clone());
+    let (client, _harness, connection, mut messages) = real_advert_peer_with_authorization(
+        version,
+        false,
+        minimum_peer_version.clone(),
+        bans_rx.clone(),
+    );
     let mut connection = Box::pin(connection);
     let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
     let discover = stream::iter([Ok::<_, BoxError>(Change::Insert(addr, client.into()))])

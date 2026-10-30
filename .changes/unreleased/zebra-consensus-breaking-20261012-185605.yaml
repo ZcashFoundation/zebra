@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: The checkpoint verifier sends `CheckpointVerifiedBlock`s with a precomputed authorizing data root. `zebra-state` types appear in the public API, so upgrade it together with the `zebra-state` release that seals `CheckpointVerifiedBlock`.
+time: 2026-10-12T18:56:05.7131789+02:00

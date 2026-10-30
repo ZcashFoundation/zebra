@@ -1,17 +1,25 @@
 //! Parameter and response types for the `submitblock` RPC.
 
-use tokio::sync::mpsc;
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
-use zebra_chain::block;
+use tokio::{
+    sync::{mpsc, watch},
+    time::Instant,
+};
+
+use zebra_chain::block::{self, Block};
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
 use crate::methods::GetBlockTemplateHandler;
 
-/// Optional argument `jsonparametersobject` for `submitblock` RPC request
+/// Optional ignored argument `jsonparametersobject` for the `submitblock` RPC.
+///
+/// Any JSON value is accepted. A string `workid` in an object is retained but unused.
 ///
 /// See the notes for the [`submit_block`](crate::methods::RpcServer::submit_block) RPC.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(from = "serde_json::Value")]
 pub struct SubmitBlockParameters {
     /// The workid for the block template. Currently unused.
     ///
@@ -25,8 +33,18 @@ pub struct SubmitBlockParameters {
     /// > Therefore, using a "workid" is a very cheap solution to enable more mutations.
     ///
     /// <https://en.bitcoin.it/wiki/BIP_0022#Rationale>
-    #[serde(rename = "workid")]
     pub _work_id: Option<String>,
+}
+
+impl From<serde_json::Value> for SubmitBlockParameters {
+    fn from(mut value: serde_json::Value) -> Self {
+        Self {
+            _work_id: match value.get_mut("workid") {
+                Some(serde_json::Value::String(work_id)) => Some(std::mem::take(work_id)),
+                _ => None,
+            },
+        }
+    }
 }
 
 /// Response to a `submitblock` RPC request.
@@ -69,7 +87,76 @@ impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
     }
 }
 
-/// A submit block channel, used to inform the gossip task about mined blocks.
+/// Up to four locally validated pending submissions, available to inbound peers for 90 seconds.
+#[derive(Clone, Debug)]
+pub struct SubmittedBlockCache {
+    entries: Arc<watch::Sender<VecDeque<(block::Hash, block::Height, Arc<Block>, Instant)>>>,
+    pending: Arc<watch::Sender<Option<(block::Hash, block::Height)>>>,
+}
+
+impl Default for SubmittedBlockCache {
+    fn default() -> Self {
+        Self {
+            entries: Arc::new(watch::Sender::new(VecDeque::new())),
+            pending: Arc::new(watch::Sender::new(None)),
+        }
+    }
+}
+
+impl SubmittedBlockCache {
+    /// Returns an unexpired, validated body unless its commit definitively failed.
+    pub fn get(&self, hash: &block::Hash) -> Option<Arc<Block>> {
+        let now = Instant::now();
+        self.entries
+            .borrow()
+            .iter()
+            .find(|(key, _, _, expires)| key == hash && *expires > now)
+            .map(|(_, _, block, _)| block.clone())
+    }
+
+    /// Subscribes to pending advertisements, including the current one.
+    pub fn subscribe(&self) -> watch::Receiver<Option<(block::Hash, block::Height)>> {
+        let mut receiver = self.pending.subscribe();
+        receiver.mark_changed();
+        receiver
+    }
+
+    pub(crate) fn insert(&self, hash: block::Hash, height: block::Height, block: Arc<Block>) {
+        // ponytail: scan four bodies in the shared snapshot; index only if the bound grows.
+        self.entries.send_if_modified(|entries| {
+            let now = Instant::now();
+            entries.retain(|(_, _, _, expires)| *expires > now);
+            if entries.iter().any(|(key, _, _, _)| *key == hash) {
+                return false;
+            }
+            if entries.len() == 4 {
+                entries.pop_front();
+            }
+            entries.push_back((hash, height, block, now + Duration::from_secs(90)));
+            // Publish under the entries lock so concurrent removals cannot leave a stale advert.
+            self.pending.send_replace(Some((hash, height)));
+            true
+        });
+    }
+
+    /// Withdraws a definitively rejected body, without coupling its lifetime to any RPC caller.
+    pub(crate) fn remove(&self, hash: block::Hash) {
+        self.entries.send_modify(|entries| {
+            let now = Instant::now();
+            entries.retain(|(key, _, _, expires)| *key != hash && *expires > now);
+            self.pending.send_if_modified(|pending| {
+                if pending.is_some_and(|(key, _)| key == hash) {
+                    *pending = entries.back().map(|(key, height, _, _)| (*key, *height));
+                    true
+                } else {
+                    false
+                }
+            });
+        });
+    }
+}
+
+/// Bounded state-owned committed notifications, independent of the submitting RPC's lifetime.
 pub struct SubmitBlockChannel {
     /// The channel sender
     sender: mpsc::Sender<(block::Hash, block::Height)>,
@@ -80,12 +167,12 @@ pub struct SubmitBlockChannel {
 impl SubmitBlockChannel {
     /// Creates a new submit block channel
     pub fn new() -> Self {
-        /// How many unread messages the submit block channel should buffer before rejecting sends.
+        /// Maximum queued committed notifications, before commit-ready mined requests fail admission.
         ///
-        /// This should be large enough to usually avoid rejecting sends. This channel is used by
-        /// the block hash gossip task, which waits for a ready peer in the peer set while
-        /// processing messages from this channel and could be much slower to gossip block hashes
-        /// than it is to commit blocks and produce new block templates.
+        /// State reserves without waiting immediately before mutation, not while waiting for an
+        /// absent parent. A full or closed channel leaves the block uncommitted and ordinary state
+        /// writes unaffected. Once reserved, a successful commit inserts its notification before
+        /// replying; insertion is not a guarantee of gossip consumption or peer delivery.
         const SUBMIT_BLOCK_CHANNEL_CAPACITY: usize = 10_000;
 
         let (sender, receiver) = mpsc::channel(SUBMIT_BLOCK_CHANNEL_CAPACITY);

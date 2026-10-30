@@ -40,8 +40,7 @@
 //!  * Old State Version Cleanup Task
 //!    * deletes outdated state versions
 //!  * Block Gossip Task
-//!    * runs in the background and continuously queries the state for
-//!      newly committed blocks to be gossiped to peers
+//!    * gossips committed tips and authenticated pending submissions to peers
 //!  * Block Notify Task
 //!    * if the user has configured a `notify.block_notify_command`, runs that command
 //!      whenever the best chain tip changes (Zebra's equivalent of zcashd's `-blocknotify`)
@@ -94,7 +93,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
-use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
+use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
@@ -259,6 +258,15 @@ impl StartCmd {
         false
     }
 
+    /// Keeps Zebra running after key preload succeeds, but propagates a failed startup task.
+    pub(super) fn halo2_key_preload_should_exit(
+        result: Result<(), tokio::task::JoinError>,
+    ) -> bool {
+        result.expect("Halo2 verifying key construction must succeed");
+        info!("finished Halo2 verifying key preload");
+        false
+    }
+
     async fn start(&self) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
@@ -359,6 +367,20 @@ impl StartCmd {
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
+        let early_blocks = if config.network.experimental_early_block_relay {
+            match read_only_state_service
+                .clone()
+                .oneshot(zebra_state::ReadRequest::EarlyRelayCache)
+                .await
+                .map_err(|error| eyre!(error))?
+            {
+                zebra_state::ReadResponse::EarlyRelayCache(cache) => Some(cache),
+                _ => unreachable!("state returns the early-relay cache for its cache request"),
+            }
+        } else {
+            None
+        };
+
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
             .service(state_service);
@@ -375,14 +397,20 @@ impl StartCmd {
         //
         // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
+        let submitted_blocks = SubmittedBlockCache::default();
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(Inbound::new(
-                config.sync.full_verify_concurrency_limit,
-                setup_rx,
-            ));
+            .service(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
+                    .with_submitted_blocks(submitted_blocks.clone())
+                    .with_early_blocks(early_blocks.clone())
+                    .with_compact_relay(
+                        config.network.network.clone(),
+                        read_only_state_service.clone(),
+                    ),
+            );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
@@ -398,14 +426,22 @@ impl StartCmd {
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
-        let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
-            zebra_consensus::router::init(
-                config.consensus.clone(),
-                &config.network.network,
-                state.clone(),
-                tx_verifier_setup_rx,
-            )
-            .await;
+        let (block_verifier_setup_tx, block_verifier_setup_rx) = oneshot::channel();
+        let (
+            block_verifier_router,
+            tx_verifier,
+            consensus_task_handles,
+            max_checkpoint_height,
+            prepared_blocks,
+        ) = zebra_consensus::router::init(
+            config.consensus.clone(),
+            &config.network.network,
+            state.clone(),
+            read_only_state_service.clone(),
+            tx_verifier_setup_rx,
+            Some(block_verifier_setup_rx),
+        )
+        .await;
 
         info!("initializing syncer");
         let (mut syncer, sync_status) = ChainSync::new(
@@ -420,11 +456,12 @@ impl StartCmd {
         );
 
         info!("initializing mempool");
-        let (mempool, mempool_transaction_subscriber) = Mempool::new(
+        let (mempool, mempool_transaction_subscriber, mempool_transaction_verified) = Mempool::new(
             &config.network.network,
             &config.mempool,
             peer_set.background_service(),
             state.clone(),
+            tower::util::BoxCloneService::new(read_only_state_service.clone()),
             tx_verifier,
             sync_status.clone(),
             latest_chain_tip.clone(),
@@ -443,6 +480,12 @@ impl StartCmd {
         if tx_verifier_setup_tx.send(mempool.clone()).is_err() {
             warn!("error setting up the transaction verifier with a handle to the mempool service");
         };
+        if block_verifier_setup_tx
+            .send(tower::util::BoxCloneService::new(mempool.clone()))
+            .is_err()
+        {
+            warn!("error setting up the block verifier with a handle to the mempool service");
+        }
 
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
@@ -481,6 +524,9 @@ impl StartCmd {
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
         );
+        let rpc_impl = rpc_impl
+            .with_submitted_blocks(submitted_blocks.clone())
+            .with_prepared_blocks(prepared_blocks);
         let rpc_impl = rpc_impl.with_end_of_support_height(
             sync::end_of_support::end_of_support_height(&config.network.network),
         );
@@ -497,7 +543,7 @@ impl StartCmd {
         let block_template_task_handle =
             if config.rpc.listen_addr.is_some() || is_internal_miner_enabled {
                 rpc_impl
-                    .spawn_block_template_updater()
+                    .spawn_block_template_updater(&mempool_transaction_subscriber)
                     .inspect(|_| info!("spawned block template updater task"))
             } else {
                 None
@@ -597,13 +643,19 @@ impl StartCmd {
 
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
+        let committed_gossip = sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change.clone(),
+            block_advertiser.clone(),
+            Some(submit_block_channel.receiver()),
+            submitted_blocks,
+        );
+        let early_gossip = sync::gossip_early_blocks(early_blocks, block_advertiser);
         let block_gossip_task_handle = tokio::spawn(
-            sync::gossip_best_tip_block_hashes(
-                sync_status.clone(),
-                chain_tip_change.clone(),
-                block_advertiser,
-                Some(submit_block_channel.receiver()),
-            )
+            async move {
+                tokio::try_join!(committed_gossip, early_gossip)?;
+                Ok::<_, sync::BlockGossipError>(())
+            }
             .in_current_span(),
         );
 
@@ -623,7 +675,8 @@ impl StartCmd {
             };
 
         info!("spawning mempool queue checker task");
-        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
+        let mempool_queue_checker_task_handle =
+            mempool::QueueChecker::spawn(mempool.clone(), mempool_transaction_verified);
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
@@ -746,10 +799,14 @@ impl StartCmd {
         // startup tasks
         let BackgroundTaskHandles {
             mut state_checkpoint_verify_handle,
+            mut halo2_key_preload_handle,
         } = consensus_task_handles;
 
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
+
+        let halo2_key_preload_handle_fused = (&mut halo2_key_preload_handle).fuse();
+        pin!(halo2_key_preload_handle_fused);
 
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
@@ -844,6 +901,12 @@ impl StartCmd {
                     Ok(())
                 }
 
+                halo2_key_preload_result = &mut halo2_key_preload_handle_fused => {
+                    exit_when_task_finishes =
+                        Self::halo2_key_preload_should_exit(halo2_key_preload_result);
+                    Ok(())
+                }
+
                 // And the old databases task should finish while Zebra is running.
                 old_databases_result = &mut old_databases_task_handle_fused => {
                     old_databases_result
@@ -935,6 +998,8 @@ impl StartCmd {
 
         // startup tasks
         state_checkpoint_verify_handle.abort();
+        // This only cancels queued work; an already running blocking task finishes at shutdown.
+        halo2_key_preload_handle.abort();
         old_databases_task_handle.abort();
 
         info!(
@@ -950,6 +1015,7 @@ impl StartCmd {
         let config = APPLICATION.config();
 
         // Ignore the checkpoint verify limit, because it is very large.
+        // Mempool reads bypass the state writer's buffer.
         //
         // TODO: do we also need to account for concurrent use across services?
         //       we could multiply the maximum by 3/2, or add a fixed constant
@@ -957,7 +1023,6 @@ impl StartCmd {
             config.sync.download_concurrency_limit,
             config.sync.full_verify_concurrency_limit,
             inbound::downloads::MAX_INBOUND_CONCURRENCY,
-            mempool::downloads::MAX_INBOUND_CONCURRENCY,
         ]
         .into_iter()
         .max()

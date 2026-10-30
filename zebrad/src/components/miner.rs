@@ -1,17 +1,21 @@
 //! Internal mining in Zebra.
 //!
 //! # TODO
-//! - pause mining if we have no peers, like `zcashd` does,
-//!   and add a developer config that mines regardless of how many peers we have.
-//!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
-use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{
+    cmp::min, ops::RangeInclusive, sync::Arc, thread::available_parallelism, time::Duration,
+};
 
 use color_eyre::Report;
 use futures::{stream::FuturesUnordered, StreamExt};
 use thread_priority::{ThreadBuilder, ThreadPriority};
-use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
+use tokio::{
+    select,
+    sync::watch,
+    task::JoinHandle,
+    time::{sleep, timeout},
+};
 use tower::Service;
 use tracing::{Instrument, Span};
 
@@ -20,26 +24,31 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
+    parameters::Network,
     serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
 };
+use zebra_consensus::router::service_trait::BlockVerifierService;
 use zebra_network::AddressBookPeers;
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::{self, MempoolService};
 use zebra_rpc::{
     client::{
         BlockTemplateTimeSource,
         GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
         GetBlockTemplateParameters,
         GetBlockTemplateRequestMode::Template,
-        HexData,
+        HexData, SubmitBlockResponse,
     },
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
 };
-use zebra_state::WatchReceiver;
+use zebra_state::{ReadState as ReadStateService, State as StateService, WatchReceiver};
 
 use crate::components::metrics::Config;
+
+#[cfg(test)]
+mod tests;
 
 /// The amount of time we wait between block template retries.
 pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
@@ -52,6 +61,72 @@ pub const BLOCK_TEMPLATE_REFRESH_LIMIT: Duration = Duration::from_secs(2);
 /// This should be slightly longer than `BLOCK_TEMPLATE_REFRESH_LIMIT` to allow for template
 /// generation.
 pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
+
+/// Keeps potentially valid work across mempool refreshes without retaining a stale parent or time.
+fn update_mining_template(
+    current: &mut Option<Arc<Block>>,
+    replacement: Block,
+    submit_old: Option<bool>,
+    valid_times: RangeInclusive<chrono::DateTime<chrono::Utc>>,
+) -> bool {
+    if let Some(current) = current {
+        if current.header == replacement.header
+            || (submit_old == Some(true)
+                && current.header.previous_block_hash == replacement.header.previous_block_hash
+                && current.coinbase_height() == replacement.coinbase_height()
+                && current.header.difficulty_threshold == replacement.header.difficulty_threshold
+                && valid_times.contains(&current.header.time))
+        {
+            return false;
+        }
+    }
+    *current = Some(Arc::new(replacement));
+    true
+}
+
+/// Public networks do not extend the previous locally accepted block.
+fn mining_parent_is_allowed(
+    network: &Network,
+    parent: &block::Hash,
+    last_accepted: Option<&block::Hash>,
+) -> bool {
+    last_accepted != Some(parent)
+        || (!matches!(network, Network::Mainnet) && !network.is_default_testnet())
+}
+
+/// Compares an observed template update with the solver's current header.
+fn mining_template_changed(
+    receiver: &mut WatchReceiver<Option<Arc<Block>>>,
+    observed_change: bool,
+    old_header: &block::Header,
+) -> bool {
+    if !observed_change {
+        return false;
+    }
+
+    receiver.mark_as_seen();
+    receiver.borrow_mapped(|template| {
+        template.as_ref().map(|block| block.header.as_ref()) != Some(old_header)
+    })
+}
+
+/// Waits for new work or channel closure, with periodic shutdown checks.
+async fn wait_for_mining_template_change(receiver: &mut WatchReceiver<Option<Arc<Block>>>) {
+    let _ = timeout(BLOCK_TEMPLATE_WAIT_TIME, receiver.changed()).await;
+}
+
+/// Waits for new work, or until the committed tip should be checked again.
+///
+/// Retained work isn't republished when its parent commits, so the tip must be rechecked even
+/// if the template doesn't change.
+async fn wait_for_committed_parent(
+    receiver: &mut WatchReceiver<Option<Arc<Block>>>,
+) -> Result<(), Report> {
+    match timeout(BLOCK_TEMPLATE_REFRESH_LIMIT, receiver.changed()).await {
+        Ok(changed) => changed.map_err(Into::into),
+        Err(_elapsed) => Ok(()),
+    }
+}
 
 /// Initialize the miner based on its config, and spawn a task for it.
 ///
@@ -154,7 +229,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
+    // ponytail: one solver; share its accepted-block guard before enabling parallel solvers.
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -279,7 +354,29 @@ where
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
-        let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
+        if !rpc.internal_mining_is_enabled() {
+            template_sender.send_replace(None);
+            // Recovery must request fresh work, not wait on the withdrawn template's long poll.
+            parameters = GetBlockTemplateParameters::new(
+                Template,
+                None,
+                vec![LongPoll, CoinbaseTxn],
+                None,
+                None,
+            );
+            sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+            continue;
+        }
+
+        // Recheck eligibility even while a long poll is pending.
+        let Ok(template) = timeout(
+            BLOCK_TEMPLATE_WAIT_TIME,
+            rpc.get_block_template(Some(parameters.clone())),
+        )
+        .await
+        else {
+            continue;
+        };
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
@@ -302,12 +399,6 @@ where
             .try_into_template()
             .expect("invalid RPC response: proposal in response to a template request");
 
-        info!(
-            height = ?template.height(),
-            transactions = ?template.transactions().len(),
-            "mining with an updated block template",
-        );
-
         // Tell the next get_block_template() call to wait until the template has changed.
         parameters = GetBlockTemplateParameters::new(
             Template,
@@ -323,14 +414,21 @@ where
             rpc.network(),
         )?;
 
-        // If the template has actually changed, send an updated template.
-        template_sender.send_if_modified(|old_block| {
-            if old_block.as_ref().map(|b| *b.header) == Some(*block.header) {
-                return false;
-            }
-            *old_block = Some(Arc::new(block));
-            true
-        });
+        // Mempool-only refreshes need not discard an in-progress Equihash solve.
+        if template_sender.send_if_modified(|current| {
+            update_mining_template(
+                current,
+                block,
+                template.submit_old(),
+                template.min_time().into()..=template.max_time().into(),
+            )
+        }) {
+            info!(
+                height = ?template.height(),
+                transactions = ?template.transactions().len(),
+                "mining with an updated block template",
+            );
+        }
 
         // If the blockchain is changing rapidly, limit how often we'll update the template.
         // But if we're shutting down, do that immediately.
@@ -400,12 +498,16 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
+    let mut last_accepted = None;
+
     // Shut down the task when the template sender is dropped, or Zebra shuts down.
     while template_receiver.has_changed().is_ok() && !is_shutting_down() {
         // Get the latest block template, and mark the current value as seen.
         // We mark the value first to avoid missed updates.
         template_receiver.mark_as_seen();
-        let template = template_receiver.cloned_watch_data();
+        let template = template_receiver
+            .cloned_watch_data()
+            .filter(|_| rpc.internal_mining_is_enabled());
 
         let Some(template) = template else {
             if solver_id == 0 {
@@ -424,28 +526,43 @@ where
 
             // Skip the wait if we didn't get a template because we are shutting down.
             if !is_shutting_down() {
-                sleep(BLOCK_TEMPLATE_WAIT_TIME).await;
+                wait_for_mining_template_change(&mut template_receiver).await;
             }
 
             continue;
         };
 
+        let Ok(tip) = timeout(BLOCK_TEMPLATE_WAIT_TIME, rpc.read_committed_tip()).await else {
+            sleep(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+            continue;
+        };
+        if tip? != Some(template.header.previous_block_hash)
+            || !mining_parent_is_allowed(
+                rpc.network(),
+                &template.header.previous_block_hash,
+                last_accepted.as_ref(),
+            )
+        {
+            // Wait for a committed parent; public work must also leave our last accepted block.
+            wait_for_committed_parent(&mut template_receiver).await?;
+            continue;
+        }
+
         let height = template.coinbase_height().expect("template is valid");
 
         // Set up the cancellation conditions for the miner.
         let mut cancel_receiver = template_receiver.clone();
+        let cancel_rpc = rpc.clone();
         let old_header = *template.header;
         let cancel_fn = move || match cancel_receiver.has_changed() {
             // Guard against get_block_template() providing an identical header. This could happen
             // if something irrelevant to the block data changes, the time was within 1 second, or
             // there is a spurious channel change.
             Ok(has_changed) => {
-                cancel_receiver.mark_as_seen();
-
                 // We only need to check header equality, because the block data is bound to the
                 // header.
-                if has_changed
-                    && Some(old_header) != cancel_receiver.cloned_watch_data().map(|b| *b.header)
+                if !cancel_rpc.internal_mining_is_enabled()
+                    || mining_template_changed(&mut cancel_receiver, has_changed, &old_header)
                 {
                     Err(SolverCancelled)
                 } else {
@@ -487,26 +604,19 @@ where
         };
 
         // Submit the newly mined blocks to the verifiers.
-        //
-        // TODO: if there is a new template (`cancel_fn().is_err()`), and
-        //       GetBlockTemplate.submit_old is false, return immediately, and skip submitting the
-        //       blocks.
         let mut any_success = false;
         for block in blocks {
-            let data = block
-                .zcash_serialize_to_vec()
-                .expect("serializing to Vec never fails");
-
-            match rpc.submit_block(HexData(data), None).await {
-                Ok(success) => {
+            match submit_mined_block(&block, &rpc, &mut last_accepted).await {
+                Ok(None) => continue,
+                Ok(Some((hash, success))) => {
                     info!(
                         ?height,
-                        hash = ?block.hash(),
+                        ?hash,
                         ?solver_id,
                         ?success,
                         "successfully mined a new block",
                     );
-                    any_success = true;
+                    any_success |= matches!(success, SubmitBlockResponse::Accepted);
                 }
                 Err(error) => info!(
                     ?height,
@@ -539,6 +649,49 @@ where
     }
 
     Ok(())
+}
+
+/// Submits a solved block, returning its hash and RPC outcome, or `None` for ineligible work.
+///
+/// Only acceptance updates `last_accepted`; rejection must not prevent another attempt.
+pub async fn submit_mined_block<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>(
+    block: &Block,
+    rpc: &RpcImpl<Mempool, State, ReadState, Tip, AddressBook, Verifier, SyncStatus>,
+    last_accepted: &mut Option<block::Hash>,
+) -> Result<Option<(block::Hash, SubmitBlockResponse)>, Report>
+where
+    Mempool: MempoolService,
+    State: StateService,
+    ReadState: ReadStateService,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+    Verifier: BlockVerifierService,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+{
+    let Ok(tip) = timeout(BLOCK_TEMPLATE_WAIT_TIME, rpc.read_committed_tip()).await else {
+        return Ok(None);
+    };
+    if tip? != Some(block.header.previous_block_hash)
+        || !rpc.internal_mining_is_enabled()
+        || !mining_parent_is_allowed(
+            rpc.network(),
+            &block.header.previous_block_hash,
+            last_accepted.as_ref(),
+        )
+    {
+        return Ok(None);
+    }
+
+    let data = block
+        .zcash_serialize_to_vec()
+        .expect("serializing to Vec never fails");
+
+    let response = rpc.submit_block(HexData(data), None).await?;
+    let hash = block.hash();
+    if matches!(response, SubmitBlockResponse::Accepted) {
+        *last_accepted = Some(hash);
+    }
+    Ok(Some((hash, response)))
 }
 
 /// Mines one or more blocks based on `template`. Calculates equihash solutions, checks difficulty,

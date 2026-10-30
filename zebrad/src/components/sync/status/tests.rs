@@ -37,9 +37,13 @@ proptest! {
     #[test]
     fn waits_until_close_to_tip(sync_lengths in any::<Vec<usize>>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
-        let _guard = runtime.enter();
 
-        runtime.block_on(timeout(MAX_TEST_EXECUTION, root_task(sync_lengths)))??;
+        runtime.block_on(async {
+            // Only in-process watch channels and semaphores are used, so absence windows can
+            // elapse on the runtime's virtual clock without dropping any update scenarios.
+            tokio::time::pause();
+            timeout(MAX_TEST_EXECUTION, root_task(sync_lengths)).await
+        })??;
 
         /// The root task that the runtime executes.
         ///

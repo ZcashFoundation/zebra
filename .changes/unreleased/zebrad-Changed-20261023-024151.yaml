@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduced mining memory use by sharing mempool transactions with the validated proposal cache.
+time: 2026-10-23T02:41:51.857472385+02:00

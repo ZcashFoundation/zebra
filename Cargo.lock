@@ -1565,14 +1565,14 @@ dependencies = [
 
 [[package]]
 name = "equihash"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "306286e8dcc39ab3dfceb74c792ce8baffdab90591321d3ffaae64829734c37f"
+checksum = "49eac9289a160ac92d99537b3434a1a3696df0177fe2c66818bdb9a33b6d5770"
 dependencies = [
  "blake2b_simd",
- "cc",
  "corez",
  "document-features",
+ "libc",
 ]
 
 [[package]]
@@ -7421,6 +7421,7 @@ dependencies = [
  "num-integer",
  "once_cell",
  "orchard",
+ "parking_lot",
  "proptest",
  "proptest-derive",
  "rand 0.10.2",
@@ -7430,6 +7431,7 @@ dependencies = [
  "spandoc",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tower 0.4.13",
  "tower-batch-control",
  "tower-fallback",
@@ -7475,6 +7477,8 @@ dependencies = [
  "regex",
  "schemars 1.2.1",
  "serde",
+ "sha2 0.10.9",
+ "siphasher",
  "static_assertions",
  "tempfile",
  "thiserror 2.0.18",
@@ -7547,6 +7551,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -7602,6 +7607,7 @@ dependencies = [
  "elasticsearch",
  "futures",
  "halo2_proofs",
+ "hashbrown 0.16.1",
  "hex",
  "hex-literal",
  "howudoin",

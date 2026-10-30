@@ -107,6 +107,8 @@ where
     ///   If this is `None`, we use the current number of [`rayon`] threads.
     ///   The number of batches in the queue is also limited by [`QUEUE_BATCH_LIMIT`].
     /// * `max_latency` gives the maximum latency for a batch item to start verifying.
+    /// * The `max_idle` duration bounds idle time after the most recent batch item.
+    ///   The batch flushes at the earlier of this idle deadline and `max_latency`.
     ///
     /// The default Tokio executor is used to run the given service, which means
     /// that this method must be called while on the Tokio runtime.
@@ -115,6 +117,7 @@ where
         max_items_weight_in_batch: usize,
         max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
+        max_idle: std::time::Duration,
     ) -> Self
     where
         T: Send + 'static,
@@ -123,8 +126,13 @@ where
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        let (mut batch, worker) =
-            Self::pair(service, max_items_weight_in_batch, max_batches, max_latency);
+        let (mut batch, worker) = Self::pair(
+            service,
+            max_items_weight_in_batch,
+            max_batches,
+            max_latency,
+            max_idle,
+        );
 
         let span = info_span!("batch worker", kind = std::any::type_name::<T>());
 
@@ -155,11 +163,14 @@ where
     /// This is useful if you do not want to spawn directly onto the `tokio`
     /// runtime but instead want to use your own executor. This will return the
     /// `Batch` and the background `Worker` that you can then spawn.
+    ///
+    /// See [`Batch::new()`] for the batching policy parameters.
     pub fn pair(
         service: T,
         max_items_weight_in_batch: usize,
         max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
+        max_idle: std::time::Duration,
     ) -> (Self, Worker<T, Request>)
     where
         T: Send + 'static,
@@ -194,6 +205,7 @@ where
             max_items_weight_in_batch,
             max_batches,
             max_latency,
+            max_idle,
             semaphore.clone(),
         );
 
@@ -217,6 +229,31 @@ where
             .lock()
             .expect("previous task panicked while holding the worker handle mutex") =
             Some(worker_handle);
+    }
+
+    /// Queues an explicit flush after all requests already sent through this batch service.
+    ///
+    /// Returns `Ok(false)` if the bounded queue is full, or an error if its worker has stopped.
+    /// A full queue continues to flush on the normal size and timer bounds. This does not wait
+    /// for verification: callers must still await every request's response.
+    pub fn try_flush(&mut self) -> Result<bool, crate::BoxError> {
+        // A separate permit: `self.permit` may be a caller's reservation from `poll_ready`, which
+        // its next `call` needs.
+        let permit = match self.semaphore.clone_inner().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => return Ok(false),
+            Err(tokio::sync::TryAcquireError::Closed) => return Err(self.get_worker_error()),
+        };
+
+        self.tx
+            .send(Message {
+                request: BatchControl::Flush,
+                tx: None,
+                span: tracing::Span::current(),
+                _permit: permit,
+            })
+            .map_err(|_| self.get_worker_error())?;
+        Ok(true)
     }
 
     /// Returns the error from the batch worker's `error_handle`.
@@ -331,8 +368,8 @@ where
         let (tx, rx) = oneshot::channel();
 
         match self.tx.send(Message {
-            request,
-            tx,
+            request: BatchControl::Item(request),
+            tx: Some(tx),
             span,
             _permit,
         }) {

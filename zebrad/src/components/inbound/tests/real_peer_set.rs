@@ -760,7 +760,7 @@ async fn setup(
     // State
     // UTXO verification doesn't matter for these tests.
     let state_config = StateConfig::ephemeral();
-    let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
@@ -814,11 +814,12 @@ async fn setup(
     // Mempool
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
-    let (mut mempool_service, transaction_subscriber) = Mempool::new(
+    let (mut mempool_service, transaction_subscriber, _transaction_verified) = Mempool::new(
         &network,
         &mempool_config,
         peer_set.background_service(),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         buffered_tx_verifier.clone(),
         sync_status.clone(),
         latest_chain_tip.clone(),
@@ -857,6 +858,7 @@ async fn setup(
         chain_tip_change,
         block_advertiser,
         Some(submitblock_channel.receiver()),
+        Default::default(),
     ));
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
@@ -912,45 +914,16 @@ async fn setup(
 }
 
 mod submitblock_test {
-    use std::io;
-    use std::sync::{Arc, Mutex};
-    use tracing::{Instrument, Level};
-    use tracing_subscriber::fmt;
+    use std::time::Duration;
+    use tracing::Instrument;
     use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 
-    use crate::components::sync::PEER_GOSSIP_DELAY;
-
-    // Custom in-memory writer to capture logs
-    struct TestWriter(Arc<Mutex<Vec<u8>>>);
-
-    impl io::Write for TestWriter {
-        #[allow(clippy::unwrap_in_result)]
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let mut logs = self.0.lock().unwrap();
-            logs.extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
+    const MINED_BLOCK_BROADCAST_DEADLINE: Duration = Duration::from_secs(7);
 
     #[tokio::test]
     async fn submitblock_channel() -> Result<(), crate::BoxError> {
-        let logs = Arc::new(Mutex::new(Vec::new()));
-        let log_sink = logs.clone();
-
-        // Set up a tracing subscriber with a custom writer
-        let subscriber = fmt()
-            .with_max_level(Level::INFO)
-            .with_writer(move || TestWriter(log_sink.clone())) // Write logs to an in-memory buffer
-            .finish();
-
-        let _guard = tracing::subscriber::set_default(subscriber);
-
         let (sync_status, _recent_syncs) = SyncStatus::new();
 
         // State
@@ -991,9 +964,9 @@ mod submitblock_test {
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();
+        let sender = submitblock_channel.sender();
         // Send a block to the channel
-        submitblock_channel
-            .sender()
+        sender
             .send((block::Hash([1; 32]), block::Height(1)))
             .await
             .unwrap();
@@ -1003,21 +976,26 @@ mod submitblock_test {
                 chain_tip_change,
                 block_advertiser,
                 Some(submitblock_channel.receiver()),
+                Default::default(),
             )
             .in_current_span(),
         );
 
-        // Wait for the block gossip task to process the block
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Wait for channel consumption, even when the peer set has no ready peers.
+        tokio::time::timeout(MINED_BLOCK_BROADCAST_DEADLINE, async {
+            while sender.capacity() < sender.max_capacity() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the gossip task consumes the mined block notification");
+        // A dropped receiver also frees capacity, so the task must still hold the channel open.
+        assert!(
+            !sender.is_closed(),
+            "the gossip task keeps running after consuming the notification"
+        );
 
-        // Check that the block was processed as a mnined block by the gossip task
-        let captured_logs = logs.lock().unwrap();
-        let log_output = String::from_utf8(captured_logs.clone()).unwrap();
-
-        assert!(log_output.contains("initializing block gossip task"));
-        assert!(log_output.contains("sending mined block broadcast"));
-
-        std::mem::drop(gossip_task_handle);
+        gossip_task_handle.abort();
 
         Ok(())
     }

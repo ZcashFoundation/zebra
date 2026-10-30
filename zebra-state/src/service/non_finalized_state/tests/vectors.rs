@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
@@ -58,6 +58,793 @@ fn construct_single() -> Result<()> {
 
     assert_eq!(1, chain.blocks.len());
 
+    Ok(())
+}
+
+#[test]
+fn chain_snapshots_share_records_and_outputs_until_finalization() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+    let root_chain = Chain::new(
+        &Network::Mainnet,
+        Height(434_872),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    )
+    .push(block.clone().prepare().test_with_zero_spent_utxos())?;
+    let mut chain = root_chain.clone().push(
+        block
+            .make_fake_child()
+            .prepare()
+            .test_with_zero_spent_utxos(),
+    )?;
+    let snapshot = chain.clone();
+    for (current, retained) in chain.blocks.values().zip(snapshot.blocks.values()) {
+        assert!(Arc::ptr_eq(current, retained));
+    }
+    for (outpoint, utxo) in chain.created_utxos.iter() {
+        assert!(Arc::ptr_eq(
+            utxo,
+            snapshot.created_utxos.get(outpoint).unwrap()
+        ));
+    }
+
+    let outpoint = *root_chain.created_utxos.iter().next().unwrap().0;
+    let mut owned = chain.created_utxo(&outpoint).unwrap();
+    owned.output.lock_script = transparent::Script::new(&[0; 4096]);
+    assert_ne!(owned, snapshot.created_utxo(&outpoint).unwrap());
+    let forked = chain.fork(block.hash()).unwrap();
+    assert!(forked.eq_internal_state(&root_chain));
+    assert!(chain.eq_internal_state(&snapshot));
+    drop(forked);
+    drop(root_chain);
+
+    let root_record = Arc::downgrade(chain.blocks.values().next().unwrap());
+    let output = Arc::downgrade(chain.created_utxos.get(&outpoint).unwrap());
+    let (finalized, _) = chain.pop_root();
+    assert_eq!(finalized.hash, block.hash());
+    assert!(snapshot.created_utxo(&outpoint).is_some());
+    assert!(chain.created_utxo(&outpoint).is_none());
+    assert!(root_record.upgrade().is_some());
+    drop(finalized);
+    assert!(root_record.upgrade().is_some());
+    drop(snapshot);
+    assert!(root_record.upgrade().is_none());
+    assert!(output.upgrade().is_none());
+    Ok(())
+}
+
+/// Build value-conserving transfers with complete spent-output maps, including intra-block spends.
+/// This exercises chain indexing, not proof-of-work, script, or subsidy verification.
+fn large_transfer_chain(
+    destinations: &[&[usize]],
+) -> Result<(
+    Chain,
+    Vec<crate::ContextuallyVerifiedBlock>,
+    [transparent::Address; 2],
+    Amount<NonNegative>,
+)> {
+    use std::collections::HashMap;
+    use zebra_chain::{
+        amount::{DeferredPoolBalanceChange, MAX_MONEY},
+        parameters::NetworkKind,
+        transaction::{self, LockTime, Transaction},
+    };
+
+    let network = Network::Mainnet;
+    let finalized_height = Height(600_000);
+    let value: Amount<NonNegative> = (MAX_MONEY / 2 + 1).try_into()?;
+    let pools = ValueBalance::from_transparent_amount(value);
+    let addresses = [
+        transparent::Address::from_script_hash(NetworkKind::Mainnet, [0x41; 20]),
+        transparent::Address::from_script_hash(NetworkKind::Mainnet, [0x42; 20]),
+    ];
+    let chain = Chain::new(
+        &network,
+        finalized_height,
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        pools,
+    );
+    let mut outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0x11; 32]),
+        index: 0,
+    };
+    let mut utxo = transparent::OrderedUtxo::new(
+        transparent::Output::new(value, addresses[0].script()),
+        finalized_height,
+        1,
+    );
+    let mut parent = block::Hash([0x22; 32]);
+    let mut blocks = Vec::new();
+    for (block_index, destinations) in destinations.iter().enumerate() {
+        let height = (finalized_height + i64::try_from(block_index + 1)?)
+            .expect("the fixture heights are below the maximum");
+        let mut transactions = vec![Arc::new(Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output::new(
+                Amount::zero(),
+                transparent::Script::new(&[]),
+            )],
+            LockTime::unlocked(),
+            Height(0),
+        ))];
+        let mut spent = HashMap::new();
+        for &destination in *destinations {
+            let transaction = Arc::new(Transaction::test_v4(
+                vec![transparent::Input::PrevOut {
+                    outpoint,
+                    unlock_script: transparent::Script::new(&[0; 107]),
+                    sequence: u32::MAX,
+                }],
+                vec![transparent::Output::new(
+                    value,
+                    addresses[destination].script(),
+                )],
+                LockTime::unlocked(),
+                Height(0),
+            ));
+            assert!(spent.insert(outpoint, utxo).is_none());
+            outpoint = transparent::OutPoint {
+                hash: transaction.hash(),
+                index: 0,
+            };
+            utxo = transparent::OrderedUtxo::new(
+                transaction.outputs()[0].clone(),
+                height,
+                transactions.len(),
+            );
+            transactions.push(transaction);
+        }
+        let mut header: block::Header =
+            zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?;
+        header.previous_block_hash = parent;
+        header.merkle_root = transactions
+            .iter()
+            .map(|transaction| transaction.hash())
+            .collect();
+        let block = Arc::new(Block {
+            header: Arc::new(header),
+            transactions,
+        })
+        .set_work(10);
+        assert_eq!(
+            block.transaction_fees(&spent)?,
+            Amount::<NonNegative>::zero()
+        );
+        let contextual = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block.prepare(),
+            spent,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            pools,
+        )?;
+        assert_eq!(contextual.chain_value_pool_change, ValueBalance::zero());
+        parent = contextual.hash;
+        blocks.push(contextual);
+    }
+    Ok((chain, blocks, addresses, value))
+}
+
+/// Opt in with `ZEBRA_STATE_APPEND_BENCH=1` and run alone with
+/// `--ignored --nocapture --test-threads=1`; fixture setup is excluded from timings.
+#[test]
+#[ignore = "microbenchmark"]
+#[allow(
+    clippy::print_stdout,
+    reason = "emit machine-readable benchmark samples"
+)]
+fn transparent_chain_push_microbenchmark() -> Result<()> {
+    use crate::service::read::tests::spent_outputs::count_allocations;
+    use std::{hint::black_box, time::Instant};
+    use zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
+    use zebra_chain::serialization::ZcashSerialize;
+
+    if std::env::var("ZEBRA_STATE_APPEND_BENCH").as_deref() != Ok("1") {
+        println!("Skipping append benchmark; set ZEBRA_STATE_APPEND_BENCH=1 to run it.");
+        return Ok(());
+    }
+
+    let _init_guard = zebra_test::init();
+    for (history_blocks, history_outputs, new_outputs) in [
+        (0, 0, 1),
+        (1, 1, 1),
+        (10, 1, 1),
+        (100, 1, 1),
+        (1, 9_000, 1),
+        (100, 90, 1),
+        (0, 0, 9_000),
+    ] {
+        let history: Vec<_> = (0..history_outputs).map(|index| index % 2).collect();
+        let destinations: Vec<_> = (0..new_outputs).map(|index| index % 2).collect();
+        let block_destinations: Vec<_> = std::iter::repeat_n(history.as_slice(), history_blocks)
+            .chain(std::iter::once(destinations.as_slice()))
+            .collect();
+        let (mut chain, blocks, _, _) = large_transfer_chain(&block_destinations)?;
+        for block in &blocks[..history_blocks] {
+            chain = chain.push(block.clone())?;
+        }
+        let block = &blocks[history_blocks];
+        let mut samples = Vec::new();
+        for iteration in 0..25 {
+            let chain = chain.clone();
+            let block = block.clone();
+            let start = Instant::now();
+            let pushed = black_box(chain.push(block)?);
+            let elapsed = start.elapsed().as_secs_f64() * 1_000.0;
+            if iteration >= 5 {
+                samples.push(elapsed);
+            }
+            drop(pushed);
+        }
+        samples.sort_by(f64::total_cmp);
+        tracing::info!(
+            history_blocks,
+            history_outputs,
+            transactions = block.block.transactions.len(),
+            bytes = block.block.zcash_serialized_size(),
+            min_ms = samples[0],
+            median_ms = (samples[9] + samples[10]) / 2.0,
+            max_ms = samples[19],
+            ?samples,
+            "transparent chain push microbenchmark",
+        );
+    }
+
+    let window = usize::try_from(MAX_BLOCK_REORG_HEIGHT)?;
+    const WARMUP: usize = 10;
+    const SAMPLES: usize = 100;
+    for outputs_per_height in [1, 50] {
+        // Concentrate every output at one address throughout the full non-finalized window.
+        let destinations = vec![1; outputs_per_height];
+        let block_destinations = vec![destinations.as_slice(); window + WARMUP + SAMPLES];
+        let (mut chain, blocks, _, _) = large_transfer_chain(&block_destinations)?;
+        for block in &blocks[..window] {
+            chain = chain.push(block.clone())?;
+        }
+        let mut samples = Vec::with_capacity(SAMPLES);
+        for (iteration, block) in blocks[window..].iter().enumerate() {
+            // Keep the old reader alive across both append and finalization to force copy-on-write.
+            let retained = chain.clone();
+            let timed_block = block.clone();
+            let start = Instant::now();
+            chain = black_box(chain.push(timed_block)?);
+            let append_ns = start.elapsed().as_nanos();
+            let start = Instant::now();
+            let finalized = black_box(chain.pop_root());
+            let pop_ns = start.elapsed().as_nanos();
+
+            // Count separately so atomic accounting does not inflate the timed operations.
+            let counted_chain = retained.clone();
+            let counted_block = block.clone();
+            let (counted_chain, append_allocations) =
+                count_allocations(|| counted_chain.push(counted_block));
+            let mut counted_chain = counted_chain?;
+            let (counted_finalized, pop_allocations) =
+                count_allocations(|| counted_chain.pop_root());
+            assert_eq!(finalized.0.hash, blocks[iteration].hash);
+            assert_eq!(counted_finalized.0.hash, finalized.0.hash);
+            assert_eq!(retained.blocks.len(), window);
+            assert_eq!(chain.blocks.len(), window);
+            assert!(counted_chain.eq_internal_state(&chain));
+            if iteration >= WARMUP {
+                samples.push((append_ns, pop_ns, append_allocations, pop_allocations));
+            }
+        }
+        // Emit raw samples too, so the runner can aggregate percentiles across alternating runs.
+        for (sample, (append_ns, pop_ns, append_allocations, pop_allocations)) in
+            samples.iter().enumerate()
+        {
+            println!(
+                "APPEND_SAMPLE shape=window{window}_outputs{outputs_per_height} sample={sample} \
+                 append_ns={append_ns} pop_ns={pop_ns} \
+                 append_allocations={append_allocations} pop_allocations={pop_allocations}"
+            );
+        }
+        let mut append_times: Vec<_> = samples.iter().map(|sample| sample.0).collect();
+        let mut pop_times: Vec<_> = samples.iter().map(|sample| sample.1).collect();
+        let mut append_counts: Vec<_> = samples.iter().map(|sample| sample.2).collect();
+        let mut pop_counts: Vec<_> = samples.iter().map(|sample| sample.3).collect();
+        append_times.sort_unstable();
+        pop_times.sort_unstable();
+        append_counts.sort_unstable();
+        pop_counts.sort_unstable();
+        println!(
+            "APPEND_BENCH shape=window{window}_outputs{outputs_per_height} samples={SAMPLES} \
+             append_median_ns={} append_p90_ns={} pop_median_ns={} pop_p90_ns={} \
+             append_allocations_median={} append_allocations_p90={} \
+             pop_allocations_median={} pop_allocations_p90={}",
+            (append_times[49] + append_times[50]) / 2,
+            append_times[89],
+            (pop_times[49] + pop_times[50]) / 2,
+            pop_times[89],
+            (append_counts[49] + append_counts[50]) / 2,
+            append_counts[89],
+            (pop_counts[49] + pop_counts[50]) / 2,
+            pop_counts[89],
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn transparent_indexes_match_legacy_push_and_rollback() -> Result<()> {
+    use crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes;
+
+    let _init_guard = zebra_test::init();
+    let (mut chain, mut blocks, _, _) = large_transfer_chain(&[&[1, 0, 1], &[1, 1, 0], &[0, 1]])?;
+    // Contextual maps may contain unrelated outputs; they must not become chain entries.
+    let unrelated = transparent::OutPoint {
+        hash: zebra_chain::transaction::Hash([0x88; 32]),
+        index: 17,
+    };
+    let unrelated_output = transparent::OrderedUtxo::new(
+        transparent::Output::new(Amount::zero(), transparent::Script::new(&[])),
+        Height(1),
+        1,
+    );
+    for block in &mut blocks {
+        Arc::make_mut(&mut block.new_outputs).insert(unrelated, unrelated_output.clone());
+        Arc::make_mut(&mut block.spent_outputs).insert(unrelated, unrelated_output.clone());
+    }
+    let mut snapshots = Vec::new();
+    for block in &blocks {
+        chain = chain.push(block.clone())?;
+        assert_legacy_indexes(&chain);
+        snapshots.push(chain.clone());
+    }
+    for (block, snapshot) in blocks.iter().zip(&snapshots) {
+        let forked = chain.fork(block.hash).unwrap();
+        assert!(forked.eq_internal_state(snapshot));
+        assert_legacy_indexes(&forked);
+    }
+    for block in &blocks {
+        assert_eq!(chain.pop_root().0.hash, block.hash);
+        assert_legacy_indexes(&chain);
+        for snapshot in &snapshots {
+            assert_legacy_indexes(snapshot);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn mixed_shielded_indexes_match_legacy_push_and_rollback() -> Result<()> {
+    use crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes;
+
+    let _init_guard = zebra_test::init();
+    for bytes in [
+        &*zebra_test::vectors::BLOCK_MAINNET_396_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_434873_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES,
+    ] {
+        let shielded: Block = bytes.zcash_deserialize_into()?;
+        let (mut chain, blocks, _, _) = large_transfer_chain(&[&[1], &[0, 1]])?;
+        chain.chain_value_pools = ValueBalance::fake_populated_pool();
+        let root = chain.push(blocks[0].clone())?;
+        let mut mixed = blocks[1].block.as_ref().clone();
+        mixed
+            .transactions
+            .extend(shielded.transactions.into_iter().skip(1));
+        Arc::make_mut(&mut mixed.header).merkle_root = mixed
+            .transactions
+            .iter()
+            .map(|transaction| transaction.hash())
+            .collect();
+        let mut mixed = Arc::new(mixed).prepare().test_with_zero_spent_utxos();
+        Arc::make_mut(&mut mixed.spent_outputs).extend(
+            blocks[1]
+                .spent_outputs
+                .iter()
+                .map(|(key, value)| (*key, value.clone())),
+        );
+        // These fixtures exercise index updates, not cross-upgrade value-pool validation.
+        mixed.chain_value_pool_change = ValueBalance::zero();
+        let mut chain = root.clone().push(mixed.clone())?;
+        assert_legacy_indexes(&chain);
+        let reverted = chain.fork(blocks[0].hash).unwrap();
+        assert!(reverted.eq_internal_state(&root));
+        assert!(reverted.push(mixed)?.eq_internal_state(&chain));
+        chain.pop_root();
+        assert_legacy_indexes(&chain);
+        chain.pop_root();
+        assert_legacy_indexes(&chain);
+        assert_legacy_indexes(&root);
+    }
+    Ok(())
+}
+
+#[test]
+fn multi_output_and_interleaved_shielded_indexes_match_legacy() -> Result<()> {
+    use std::collections::{HashMap, HashSet};
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        transaction::{self, LockTime, Transaction},
+    };
+
+    use crate::{
+        service::non_finalized_state::chain::index::tests::assert_legacy_indexes,
+        ContextuallyVerifiedBlock, TransactionLocation,
+    };
+
+    let _init_guard = zebra_test::init();
+    let (mut chain, blocks, addresses, value) = large_transfer_chain(&[&[1], &[1]])?;
+    chain.chain_value_pools = ValueBalance::fake_populated_pool();
+    let root = chain.push(blocks[0].clone())?;
+    let value = u64::from(value);
+    let signed_value = i64::try_from(value)?;
+    let height = blocks[1].height;
+    let mut block = blocks[1].block.as_ref().clone();
+    block.transactions.truncate(1);
+    let mut outpoint = transparent::OutPoint {
+        hash: blocks[0].transaction_hashes[1],
+        index: 0,
+    };
+    let mut spent_output = blocks[0].new_outputs[&outpoint].clone();
+    let mut spent = HashMap::new();
+    let mut expected_transactions = vec![(
+        TransactionLocation::from_usize(blocks[0].height, 1),
+        outpoint.hash,
+    )];
+
+    let shielded_only = [
+        &*zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES,
+        &*zebra_test::vectors::BLOCK_MAINNET_1687121_BYTES,
+    ]
+    .into_iter()
+    .map(|bytes| {
+        bytes
+            .zcash_deserialize_into::<Block>()
+            .unwrap()
+            .transactions
+            .into_iter()
+            .find(|transaction| {
+                !transaction.has_transparent_inputs_or_outputs() && transaction.has_shielded_data()
+            })
+            .expect("the fixture contains a shielded-only transaction")
+    })
+    .collect::<Vec<_>>();
+    // The first transaction repeats address B; later transactions pay both A and B again.
+    // The second transaction spends the first transaction's middle output, not output zero.
+    for (index, outputs) in [
+        vec![(3, 0), (value - 7, 1), (4, 1)],
+        vec![(value - 9, 1), (2, 0)],
+        vec![(value - 10, 0), (1, 1)],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let outputs: Vec<_> = outputs
+            .into_iter()
+            .map(|(value, address)| {
+                transparent::Output::new(value.try_into().unwrap(), addresses[address].script())
+            })
+            .collect();
+        let transaction = Arc::new(Transaction::test_v4(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            outputs.clone(),
+            LockTime::unlocked(),
+            Height(0),
+        ));
+        assert!(spent.insert(outpoint, spent_output).is_none());
+        let transaction_index = block.transactions.len();
+        expected_transactions.push((
+            TransactionLocation::from_usize(height, transaction_index),
+            transaction.hash(),
+        ));
+        let output_index = usize::from(index == 0);
+        outpoint = transparent::OutPoint {
+            hash: transaction.hash(),
+            index: output_index.try_into()?,
+        };
+        spent_output =
+            transparent::OrderedUtxo::new(outputs[output_index].clone(), height, transaction_index);
+        block.transactions.push(transaction);
+        if let Some(shielded) = shielded_only.get(index) {
+            block.transactions.push(shielded.clone());
+        }
+    }
+    assert_eq!(block.transactions.len(), 6);
+    Arc::make_mut(&mut block.header).merkle_root = block
+        .transactions
+        .iter()
+        .map(|transaction| transaction.hash())
+        .collect();
+    let mixed = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        Arc::new(block).prepare(),
+        spent,
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        root.chain_value_pools,
+    )?;
+
+    let assert_queries =
+        |chain: &Chain,
+         balances_and_received: [(i64, u64); 2],
+         transactions: &[(TransactionLocation, transaction::Hash)]| {
+            assert_legacy_indexes(chain);
+            for (address, (balance, received)) in addresses.into_iter().zip(balances_and_received) {
+                let selected = HashSet::from([address]);
+                assert_eq!(
+                    chain.partial_transparent_balance_change(&selected),
+                    (balance.try_into().unwrap(), received),
+                );
+                assert_eq!(
+                    chain
+                        .partial_transparent_tx_ids(&selected, blocks[0].height..=height)
+                        .into_iter()
+                        .collect::<Vec<_>>(),
+                    transactions,
+                );
+            }
+        };
+    assert_queries(
+        &root,
+        [(-signed_value, 0), (signed_value, value)],
+        &expected_transactions[..1],
+    );
+    let mut chain = root.clone().push(mixed.clone())?;
+    assert_queries(
+        &chain,
+        [(-5, value - 5), (5, 3 * value - 11)],
+        &expected_transactions,
+    );
+    let snapshot = chain.clone();
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert_queries(
+        &reverted,
+        [(-signed_value, 0), (signed_value, value)],
+        &expected_transactions[..1],
+    );
+    assert!(reverted.push(mixed)?.eq_internal_state(&snapshot));
+    chain.pop_root();
+    assert_queries(
+        &chain,
+        [
+            (signed_value - 5, value - 5),
+            (5 - signed_value, 2 * value - 11),
+        ],
+        &expected_transactions[1..],
+    );
+    chain.pop_root();
+    assert_queries(&chain, [(0, 0); 2], &[]);
+    assert_queries(
+        &snapshot,
+        [(-5, value - 5), (5, 3 * value - 11)],
+        &expected_transactions,
+    );
+    Ok(())
+}
+
+#[test]
+fn large_self_transfers_preserve_non_finalized_indexes() -> Result<()> {
+    use std::collections::HashSet;
+
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, addresses, value) = large_transfer_chain(&[&[1], &[1, 1]])?;
+    let root = chain.push(blocks[0].clone())?;
+    let chain = root.clone().push(blocks[1].clone())?;
+    let selected = HashSet::from([addresses[1]]);
+    assert_eq!(
+        chain.partial_transparent_balance_change(&selected).0,
+        value.constrain::<NegativeAllowed>()?
+    );
+    let (created, spent) = chain.partial_transparent_utxo_changes(&selected);
+    assert_eq!(created.len(), 3);
+    assert_eq!(spent.len(), 2);
+    assert_eq!(
+        created
+            .iter()
+            .filter(|(location, _)| !spent.contains(location))
+            .count(),
+        1
+    );
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert!(reverted.push(blocks[1].clone())?.eq_internal_state(&chain));
+    Ok(())
+}
+
+#[test]
+fn reverting_intra_block_transfers_preserves_non_finalized_indexes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, _, _) = large_transfer_chain(&[&[1], &[0, 1]])?;
+    let root = chain.push(blocks[0].clone())?;
+    let chain = root.clone().push(blocks[1].clone())?;
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert!(reverted.push(blocks[1].clone())?.eq_internal_state(&chain));
+    Ok(())
+}
+
+#[test]
+fn finalizing_self_transfers_preserves_non_finalized_indexes() -> Result<()> {
+    use std::collections::HashSet;
+
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, addresses, value) = large_transfer_chain(&[&[0, 0], &[1]])?;
+    let mut chain = chain.push(blocks[0].clone())?.push(blocks[1].clone())?;
+    let (finalized, _) = chain.pop_root();
+    assert_eq!(finalized.hash, blocks[0].hash);
+    let selected = HashSet::from([addresses[0]]);
+    assert_eq!(
+        chain.partial_transparent_balance_change(&selected).0,
+        (Amount::<NegativeAllowed>::zero() - value.constrain::<NegativeAllowed>()?)?
+    );
+    let (created, spent) = chain.partial_transparent_utxo_changes(&selected);
+    assert!(created.is_empty());
+    assert_eq!(spent.len(), 1);
+    let (finalized, _) = chain.pop_root();
+    assert_eq!(finalized.hash, blocks[1].hash);
+    assert_eq!(
+        chain.partial_transparent_balance_change(&HashSet::from(addresses)),
+        (Amount::<NegativeAllowed>::zero(), 0)
+    );
+    assert_eq!(chain.partial_transparent_transfers.len(), 0);
+    Ok(())
+}
+
+#[test]
+fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
+    use std::collections::HashSet;
+    use zebra_chain::amount::DeferredPoolBalanceChange;
+
+    let _init_guard = zebra_test::init();
+    let (chain, blocks, addresses, value) = large_transfer_chain(&[&[1], &[1]])?;
+    let root = chain.push(blocks[0].clone())?;
+    let mut block = blocks[1].block.as_ref().clone();
+    block.transactions[0] = Arc::new(
+        block.transactions[0]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(vec![transparent::Output::new(value, addresses[1].script())]),
+    );
+    block.transactions[1] = Arc::new(
+        block.transactions[1]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(vec![transparent::Output::new(
+                Amount::zero(),
+                transparent::Script::new(&[]),
+            )]),
+    );
+    Arc::make_mut(&mut block.header).merkle_root = block
+        .transactions
+        .iter()
+        .map(|transaction| transaction.hash())
+        .collect();
+    assert_eq!(block.transaction_fees(&blocks[1].spent_outputs)?, value);
+    let block = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        Arc::new(block).prepare(),
+        blocks[1].spent_outputs.as_ref().clone(),
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        root.chain_value_pools,
+    )?;
+    assert_eq!(block.chain_value_pool_change, ValueBalance::zero());
+    let chain = root.clone().push(block.clone())?;
+    assert_eq!(
+        chain
+            .partial_transparent_balance_change(&HashSet::from([addresses[1]]))
+            .0,
+        value.constrain::<NegativeAllowed>()?
+    );
+    let reverted = chain.fork(blocks[0].hash).unwrap();
+    assert!(reverted.eq_internal_state(&root));
+    assert!(reverted.push(block)?.eq_internal_state(&chain));
+    Ok(())
+}
+
+#[test]
+fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
+    use crate::{ContextuallyVerifiedBlock, SemanticallyVerifiedBlock};
+    use std::collections::HashMap;
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::testnet::ConfiguredActivationHeights,
+        transaction::{LockTime, Transaction},
+    };
+
+    let height = Height(1_000);
+    let output = |value: u64| {
+        transparent::Output::new(
+            value.try_into().unwrap(),
+            transparent::Script::new(&[0; 1024]),
+        )
+    };
+    let coinbase = Arc::new(Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![output(10)],
+        LockTime::unlocked(),
+    ));
+    let mut transactions = vec![coinbase];
+    let mut spent = HashMap::new();
+    for value in [9, 8] {
+        let previous = transactions.last().unwrap();
+        let outpoint = transparent::OutPoint {
+            hash: previous.hash(),
+            index: 0,
+        };
+        spent.insert(
+            outpoint,
+            transparent::OrderedUtxo::new(
+                previous.outputs()[0].clone(),
+                height,
+                transactions.len() - 1,
+            ),
+        );
+        transactions.push(Arc::new(Transaction::test_v1(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            vec![output(value)],
+            LockTime::unlocked(),
+        )));
+    }
+    let block = Arc::new(Block {
+        header: Arc::new(zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?),
+        transactions,
+    });
+    let plain = transparent::utxos_from_ordered_utxos(spent.clone());
+    let nu7 = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(height.0),
+            ..Default::default()
+        }
+        .into(),
+    );
+    for network in [Network::Mainnet, nu7] {
+        let expected = block.chain_value_pool_change_and_fees(
+            &plain,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )?;
+        let (contextual, fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            block.clone().prepare(),
+            spent.clone(),
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )?;
+        assert_eq!((contextual.chain_value_pool_change, fees), expected);
+        assert_eq!(contextual.spent_outputs.as_ref(), &spent);
+        assert_eq!(block.transaction_fees(&spent)?.zatoshis(), 2);
+        let cloned = contextual.clone();
+        assert_eq!(cloned, contextual);
+        assert!(Arc::ptr_eq(&contextual.new_outputs, &cloned.new_outputs));
+        assert!(Arc::ptr_eq(
+            &contextual.spent_outputs,
+            &cloned.spent_outputs
+        ));
+        let semantic = SemanticallyVerifiedBlock::from(cloned);
+        assert_eq!(&semantic.new_outputs, contextual.new_outputs.as_ref());
+        let unique = contextual;
+        let expected_outputs = unique.new_outputs.as_ref().clone();
+        assert_eq!(Arc::strong_count(&unique.new_outputs), 1);
+        assert_eq!(
+            SemanticallyVerifiedBlock::from(unique).new_outputs,
+            expected_outputs
+        );
+    }
     Ok(())
 }
 
@@ -329,6 +1116,116 @@ fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, Finalized
     .expect("opening an ephemeral database should succeed");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
     (state, finalized_state)
+}
+
+#[test]
+fn cached_proposal_respects_block_and_parent_invalidation() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = Arc::new(network.test_block(653599, 583999).unwrap());
+    let mut solved = parent.make_fake_child().set_work(10);
+    Arc::make_mut(&mut Arc::make_mut(&mut solved).header).nonce = [1; 32].into();
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(parent.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    // Retain the successful proposal payload before committing its solved counterpart.
+    let mut proposal = (*solved).clone();
+    Arc::make_mut(&mut proposal.header).nonce = [0; 32].into();
+    let mut proposal_state = state.clone();
+    proposal_state.disable_metrics();
+    proposal_state
+        .commit_block(Arc::new(proposal).prepare(), &finalized_state)
+        .unwrap();
+    let mut cached = proposal_state.best_tip_block().unwrap().clone();
+    assert_ne!(cached.hash, solved.hash());
+    cached.rebind(solved.clone(), std::time::Instant::now());
+    state
+        .commit_block(solved.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(solved.hash()).unwrap();
+
+    let (committed, _commits) = tokio::sync::mpsc::channel(1);
+    let (validated, bodies) = tokio::sync::watch::channel(None);
+    let notifications = crate::MinedBlockNotifications::new(committed, validated);
+
+    let normal_error = state
+        .commit_block(solved.clone().prepare(), &finalized_state)
+        .unwrap_err();
+    assert_eq!(
+        normal_error,
+        crate::ValidateContextError::BlockPreviouslyInvalidated {
+            block_hash: solved.hash(),
+        }
+    );
+    assert_eq!(
+        state.commit_prevalidated_contextual(
+            cached.clone(),
+            &finalized_state,
+            Some(&notifications),
+        ),
+        Err(normal_error),
+    );
+    assert_eq!(state.best_tip().unwrap().1, parent.hash());
+    assert!(!state.any_chain_contains(&solved.hash()));
+    assert!(bodies.borrow().is_none());
+
+    // A different solved hash is not itself invalidated, but cannot restore its removed parent.
+    let mut sibling = (*solved).clone();
+    Arc::make_mut(&mut sibling.header).nonce = [2; 32].into();
+    let sibling = Arc::new(sibling);
+    cached.rebind(sibling.clone(), std::time::Instant::now());
+    // Keep another root live: invalidating the only non-finalized root is rejected.
+    let other_root = parent.clone().set_work(20);
+    state
+        .commit_new_chain(other_root.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(parent.hash()).unwrap();
+    let normal_error = state
+        .commit_block(sibling.prepare(), &finalized_state)
+        .unwrap_err();
+    assert_eq!(
+        normal_error,
+        crate::ValidateContextError::NotReadyToBeCommitted
+    );
+    assert_eq!(
+        state.commit_prevalidated_contextual(cached, &finalized_state, Some(&notifications)),
+        Err(normal_error),
+    );
+    assert_eq!(state.best_tip().unwrap().1, other_root.hash());
+    assert!(!state.any_chain_contains(&parent.hash()));
+    assert!(bodies.borrow().is_none());
+}
+
+#[test]
+fn compact_header_screening_respects_local_invalidation() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = Arc::new(network.test_block(653599, 583999).unwrap());
+    let child = parent.make_fake_child();
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(parent.prepare(), &finalized_state)
+        .unwrap();
+    state
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(child.hash()).unwrap();
+    assert_eq!(
+        crate::service::read::difficulty::candidate_header_context(
+            &state,
+            &finalized_state.db,
+            &network,
+            &child.header,
+            child.coinbase_height().unwrap(),
+            true,
+        )
+        .unwrap_err(),
+        crate::ValidateContextError::BlockPreviouslyInvalidated {
+            block_hash: child.hash()
+        },
+    );
 }
 
 /// Reject invalidating the only root before changing either live chains or invalidation records.
@@ -1066,12 +1963,29 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         .send(non_finalized_state.clone())
         .expect("backup task should have a receiver, channel should be open");
 
-    // Wait for the minimum update time
-    tokio::time::sleep(Duration::from_secs(1) + MIN_DURATION_BETWEEN_BACKUP_UPDATES).await;
-
-    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
-        .with_backup(Some(backup_dir_path), &finalized_state.db, true, false)
-        .await;
+    // Poll restoration until the rate-limited writer has finished writing a readable backup.
+    let non_finalized_state = tokio::time::timeout(
+        MIN_DURATION_BETWEEN_BACKUP_UPDATES + Duration::from_secs(30),
+        async {
+            loop {
+                let (restored_state, _sender, _receiver) = NonFinalizedState::new(&network)
+                    .with_backup(
+                        Some(backup_dir_path.clone()),
+                        &finalized_state.db,
+                        true,
+                        // Only the original state should write backups while restoration is polled.
+                        true,
+                    )
+                    .await;
+                if restored_state.best_chain_len().is_some() {
+                    break restored_state;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        },
+    )
+    .await
+    .expect("the backup task should write a restorable non-finalized block");
 
     assert_eq!(
         non_finalized_state.best_chain_len(),

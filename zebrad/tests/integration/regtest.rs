@@ -19,12 +19,14 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{
-        default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir,
+        default_test_config, os_assigned_rpc_port_config, random_known_rpc_port_config,
+        read_listen_addr_from_logs, testdir,
     },
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
 };
 
+mod compact_relay;
 mod nu7;
 
 /// Checks that the Regtest genesis block can be validated.
@@ -33,14 +35,20 @@ async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(Default::default());
-    let state = zebra_state::init_test(&network).await;
+    let (state, read_state, _, _) = zebra_state::init_test_services(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init_test(zebra_consensus::Config::default(), &network, state)
-        .await;
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state,
+        read_state,
+    )
+    .await;
 
     let genesis_hash = block_verifier_router
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
@@ -107,47 +115,75 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         .into(),
     );
 
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    // All-features builds compile out INFO logs, including the OS-assigned-port announcement.
+    // Use the existing known-unused-port fixture rather than blocking on that diagnostic.
+    let mut config = random_known_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
+    let rpc_address = config
+        .rpc
+        .listen_addr
+        .expect("the RPC fixture configures a listener");
 
     let mut zebrad = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
 
-    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
-
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
 
     // Get an initial template, and take the long poll id a miner would hold work against.
-    let initial_template: BlockTemplateResponse = client
-        .json_result_from_call("getblocktemplate", "[]")
-        .await
-        .map_err(|err| eyre!(err))?;
-    let initial_long_poll_id = initial_template.long_poll_id();
+    let mut initial_template: BlockTemplateResponse = tokio::time::timeout(
+        LONG_POLL_RESPONSE_TIMEOUT,
+        client.json_result_from_call("getblocktemplate", "[]"),
+    )
+    .await
+    .map_err(|_| eyre!("initial getblocktemplate stalled before any block was generated"))?
+    .map_err(|err| eyre!(err))?;
 
-    // Start a long poll against that id. It must block until the template is invalidated.
-    let long_poll_client = client.clone();
-    let long_poll = tokio::spawn(async move {
-        long_poll_client
-            .json_result_from_call::<BlockTemplateResponse>(
-                "getblocktemplate",
-                format!(r#"[{{"longpollid":"{initial_long_poll_id}"}}]"#),
-            )
-            .await
-            .map_err(|err| eyre!(err))
-    });
+    // The template updater can replace the startup template without a tip change, for example
+    // when its first build raced the genesis block commit. A long poll may return for such a
+    // replacement, but never for an unchanged template, so hold the first one that keeps waiting.
+    let mut replacements = 0;
+    let long_poll = loop {
+        let initial_long_poll_id = initial_template.long_poll_id().to_string();
+        let long_poll_client = client.clone();
+        let params = format!(r#"[{{"longpollid":"{initial_long_poll_id}"}}]"#);
+        let long_poll = tokio::spawn(async move {
+            long_poll_client
+                .json_result_from_call::<BlockTemplateResponse>("getblocktemplate", params)
+                .await
+                .map_err(|err| eyre!(err))
+        });
 
-    // Let the long poll reach the RPC and start waiting before the tip moves under it.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    assert!(
-        !long_poll.is_finished(),
-        "long poll must keep waiting while the template is still valid",
-    );
+        // Let the long poll reach the RPC and start waiting before the tip moves under it.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if !long_poll.is_finished() {
+            break long_poll;
+        }
+
+        let replacement = long_poll.await??;
+        assert_ne!(
+            replacement.long_poll_id().to_string(),
+            initial_long_poll_id,
+            "long poll must keep waiting while the template is still valid",
+        );
+        assert_eq!(
+            replacement.height(),
+            initial_template.height(),
+            "the tip must not move before the test advances it",
+        );
+        replacements += 1;
+        assert!(
+            replacements < 3,
+            "the startup template must settle, it was replaced {replacements} times",
+        );
+        initial_template = replacement;
+    };
 
     // Invalidate the template by advancing the tip from a second client.
-    client.generate(1).await?;
+    tokio::time::timeout(LONG_POLL_RESPONSE_TIMEOUT, client.generate(1))
+        .await
+        .map_err(|_| eyre!("generate stalled before advancing the chain tip"))??;
     let tip_changed_at = std::time::Instant::now();
 
     let new_template = tokio::time::timeout(LONG_POLL_RESPONSE_TIMEOUT, long_poll)
@@ -182,13 +218,16 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         let proposal_block = proposal_block_from_template(&new_template, time_source, &network)?;
         let proposal_data = hex::encode(proposal_block.zcash_serialize_to_vec()?);
 
-        let proposal_result: BlockProposalResponse = client
-            .json_result_from_call(
+        let proposal_result: BlockProposalResponse = tokio::time::timeout(
+            LONG_POLL_RESPONSE_TIMEOUT,
+            client.json_result_from_call(
                 "getblocktemplate",
                 format!(r#"[{{"mode":"proposal","data":"{proposal_data}"}}]"#),
-            )
-            .await
-            .map_err(|err| eyre!(err))?;
+            ),
+        )
+        .await
+        .map_err(|_| eyre!("proposal validation stalled for time source {time_source:?}"))?
+        .map_err(|err| eyre!(err))?;
 
         assert_eq!(
             proposal_result,
@@ -300,9 +339,8 @@ async fn block_template_includes_mempool_transactions_in_dependency_order() -> R
 
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
 
     // Mine a coinbase to our key at height 1, then enough blocks for it to mature.
     client.generate(COINBASE_MATURITY + 1).await?;
@@ -471,9 +509,8 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     let mut blocks = Vec::new();
     for expected_height in 1..=4 {
         let (block, height) = client.block_from_template(&network).await?;
@@ -491,9 +528,8 @@ async fn rejected_block_does_not_reject_same_hash_block_children() -> Result<()>
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     client.submit_block(blocks[0].clone()).await?;
     client.submit_block(blocks[1].clone()).await?;
 
@@ -595,9 +631,8 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     let mut blocks = Vec::new();
     for expected_height in 1..=4 {
         let (block, height) = client.block_from_template(&network).await?;
@@ -612,15 +647,20 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
 
     // Replay the chain into a fresh in-process verifier and state, which is the stack the
     // syncer drives, so the error the syncer classifies on is the one asserted below.
-    let state = zebra_state::init_test(&network);
-    let state = state.await;
-    let (block_verifier_router, _tx_verifier, _download_handles, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(
-            zebra_consensus::Config::default(),
-            &network,
-            state.clone(),
-        )
-        .await;
+    let (state, read_state, _, _) = zebra_state::init_test_services(&network).await;
+    let (
+        block_verifier_router,
+        _tx_verifier,
+        _download_handles,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+        read_state,
+    )
+    .await;
 
     let commit = |block: Arc<Block>| {
         let router = block_verifier_router.clone();
@@ -764,9 +804,8 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut block_builder, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     let mut blocks = Vec::new();
     for expected_height in 1..=3 {
         let (block, height) = client.block_from_template(&network).await?;
@@ -784,9 +823,8 @@ async fn rejected_block_is_not_known_as_sent() -> Result<()> {
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&client).await?;
     client.submit_block(blocks[0].clone()).await?;
     client.submit_block(blocks[1].clone()).await?;
 
@@ -848,12 +886,11 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
         .spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     // Use a longer timeout because generating MAX_BLOCK_REORG_HEIGHT + 10 blocks
     // in a single RPC call takes ~400s at ~400ms per block.
     let client =
         RpcRequestClient::new_with_timeout(rpc_address, std::time::Duration::from_secs(15 * 60));
+    wait_for_mempool_activation(&client).await?;
 
     // Mine enough blocks to push the first few blocks into the finalized state.
     // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT (= 1002).
@@ -981,10 +1018,12 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -1338,10 +1377,12 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
+        read_state.clone(),
     )
     .await;
 
@@ -1459,11 +1500,10 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     let mut child = test_dir.spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tracing::info!("waiting for Zebra state cache to be opened");
-
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    tracing::info!("waiting for the genesis block and mempool");
 
     let rpc_client = RpcRequestClient::new(rpc_address);
+    wait_for_mempool_activation(&rpc_client).await?;
     let mut blocks = Vec::new();
     for _ in 0..50 {
         let (block, _) = rpc_client.block_from_template(&net).await?;
@@ -1562,4 +1602,232 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     output.assert_failure()?;
 
     Ok(())
+}
+
+#[cfg(feature = "internal-miner")]
+#[tokio::test(start_paused = true)]
+async fn internal_miner_discards_stale_solution() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_rpc::methods::RpcImpl;
+    use zebra_test::mock_service::MockService;
+    use zebrad::components::miner::{submit_mined_block, BLOCK_TEMPLATE_WAIT_TIME};
+
+    let block = regtest_genesis_block();
+    let (_template_sender, template_receiver) = tokio::sync::watch::channel(Some(block.clone()));
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_hash(block.header.previous_block_hash);
+    let mut verifier = MockService::build().for_unit_tests();
+    let mut read_state = MockService::build().for_unit_tests();
+    let mut sync_status = MockSyncStatus::default();
+    let mut peers = MockAddressBookPeers::default();
+    peers.add_peer("127.0.0.1:8233".parse().unwrap());
+    let (_log_sender, log_receiver) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Network::Mainnet,
+        Default::default(),
+        false,
+        "0.0.1",
+        "Zebra tests",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        read_state.clone(),
+        verifier.clone(),
+        sync_status.clone(),
+        tip,
+        peers,
+        log_receiver,
+        None,
+    );
+
+    // Neither notification changes: reject an advanced state tip, lost sync, or a timed-out read.
+    for (state_tip, lose_sync) in [
+        (Some(block.hash()), false),
+        (Some(block.header.previous_block_hash), true),
+        (None, false),
+    ] {
+        sync_status.set_is_close_to_tip(true);
+        let rpc = rpc.clone();
+        let old_template = template_receiver.borrow().clone().unwrap();
+        let submission = tokio::spawn(async move {
+            let mut last_accepted = None;
+            submit_mined_block(&old_template, &rpc, &mut last_accepted).await
+        });
+        let request = read_state
+            .expect_request(zebra_state::ReadRequest::Tip)
+            .await;
+        if lose_sync {
+            sync_status.set_is_close_to_tip(false);
+        }
+        if let Some(hash) = state_tip {
+            request.respond(zebra_state::ReadResponse::Tip(Some((Height(1), hash))));
+        } else {
+            tokio::time::advance(BLOCK_TEMPLATE_WAIT_TIME).await;
+            tokio::task::yield_now().await;
+            drop(request);
+        }
+        verifier.expect_no_requests().await;
+        assert!(tokio::time::timeout(Duration::from_secs(1), submission)
+            .await
+            .expect("ineligible work must be discarded without waiting for verification")
+            .unwrap()
+            .unwrap()
+            .is_none());
+    }
+    queue.abort();
+}
+
+#[cfg(feature = "internal-miner")]
+#[tokio::test(start_paused = true)]
+async fn internal_miner_withdraws_work_while_public_sync_is_behind() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_rpc::methods::RpcImpl;
+    use zebra_test::mock_service::MockService;
+    use zebrad::components::miner::generate_block_templates;
+
+    let configured_testnet = zebra_chain::parameters::testnet::Parameters::build()
+        .with_network_name("MinerTest")
+        .unwrap()
+        .to_network()
+        .unwrap();
+    for (network, close_to_tip, has_peers, should_pause) in [
+        (Network::Mainnet, false, true, true),
+        (Network::new_default_testnet(), false, true, true),
+        (Network::Mainnet, true, false, true),
+        (Network::new_default_testnet(), true, false, true),
+        (
+            Network::new_regtest(Default::default()),
+            false,
+            false,
+            false,
+        ),
+        (configured_testnet, true, false, false),
+    ] {
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(Height(1));
+        tip_sender.send_best_tip_hash(network.genesis_hash());
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut peers = MockAddressBookPeers::default();
+        if has_peers {
+            peers.add_peer("127.0.0.1:8233".parse().unwrap());
+        }
+        let mut sync_status = MockSyncStatus::default();
+        sync_status.set_is_close_to_tip(close_to_tip);
+        let mut mempool = MockService::build().for_unit_tests();
+        let mut read_state = MockService::build().for_unit_tests();
+        let (_log_sender, log_receiver) = tokio::sync::watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            network.clone(),
+            default_test_config(&network).mining,
+            false,
+            "0.0.1",
+            "Zebra tests",
+            mempool.clone(),
+            MockService::build().for_unit_tests(),
+            read_state.clone(),
+            MockService::build().for_unit_tests(),
+            sync_status,
+            tip,
+            peers,
+            log_receiver,
+            None,
+        );
+        let (sender, mut receiver) = tokio::sync::watch::channel(Some(regtest_genesis_block()));
+        let generator = tokio::spawn(generate_block_templates(rpc, sender));
+
+        if should_pause {
+            tokio::time::timeout(Duration::from_secs(1), receiver.changed())
+                .await
+                .expect("ineligible public mining must withdraw work")
+                .unwrap();
+            assert!(receiver.borrow().is_none());
+            mempool.expect_no_requests().await;
+            read_state.expect_no_requests().await;
+        } else {
+            let request = read_state
+                .expect_request(zebra_state::ReadRequest::ChainInfo)
+                .await;
+            drop(request);
+        }
+        generator.abort();
+        queue.abort();
+    }
+}
+
+#[cfg(feature = "internal-miner")]
+#[tokio::test(start_paused = true)]
+async fn internal_miner_retries_timed_out_tip_then_rechecks_committed_parent() {
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_rpc::methods::RpcImpl;
+    use zebra_test::mock_service::MockService;
+    use zebrad::components::miner::{
+        run_mining_solver, BLOCK_TEMPLATE_REFRESH_LIMIT, BLOCK_TEMPLATE_WAIT_TIME,
+    };
+
+    let block = regtest_genesis_block();
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_hash(block.header.previous_block_hash);
+    let mut read_state = MockService::build().for_unit_tests();
+    let (_log_sender, log_receiver) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Network::new_regtest(Default::default()),
+        Default::default(),
+        false,
+        "0.0.1",
+        "Zebra tests",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        read_state.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        log_receiver,
+        None,
+    );
+    let (_template_sender, template_receiver) = tokio::sync::watch::channel(Some(block.clone()));
+    let solver = tokio::spawn(run_mining_solver(
+        0,
+        zebra_state::WatchReceiver::new(template_receiver),
+        rpc,
+    ));
+    let stalled = read_state
+        .expect_request(zebra_state::ReadRequest::Tip)
+        .await;
+    tokio::time::advance(BLOCK_TEMPLATE_WAIT_TIME).await;
+    tokio::task::yield_now().await;
+    assert!(
+        !solver.is_finished(),
+        "a tip-read timeout must not stop the miner"
+    );
+    drop(stalled);
+    tokio::time::advance(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+    read_state
+        .expect_request(zebra_state::ReadRequest::Tip)
+        .await
+        .respond(zebra_state::ReadResponse::Tip(Some((
+            Height(1),
+            block.hash(),
+        ))));
+    tokio::task::yield_now().await;
+
+    // A retained template isn't republished when its parent commits, so the parked solver
+    // rechecks the committed tip instead of waiting only for a new template.
+    tokio::time::advance(BLOCK_TEMPLATE_REFRESH_LIMIT).await;
+    read_state
+        .expect_request(zebra_state::ReadRequest::Tip)
+        .await
+        .respond(zebra_state::ReadResponse::Tip(Some((
+            Height(1),
+            block.hash(),
+        ))));
+    tokio::task::yield_now().await;
+    assert!(
+        !solver.is_finished(),
+        "keep waiting for the committed parent"
+    );
+    solver.abort();
+    queue.abort();
 }

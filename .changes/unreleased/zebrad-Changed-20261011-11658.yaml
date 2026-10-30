@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Avoid repeated transaction and contextual validation when submitted blocks exactly match validated mining proposals apart from nonce and solution. Retain at most eight proposals within a conservative 576 MiB content charge, including spent-output scripts, rather than measured heap usage. Eight representative full-size proposals of 104-byte one-input/one-P2PKH-output payments fit; smaller valid transactions or large spent-output scripts can cause earlier eviction and normal revalidation. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+time: 2026-10-11T00:00:00Z

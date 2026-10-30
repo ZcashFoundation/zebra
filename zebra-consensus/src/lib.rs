@@ -49,10 +49,17 @@ pub mod error;
 pub mod router;
 pub mod transaction;
 
+pub use block::check::{
+    coinbase_is_first, difficulty_is_valid, difficulty_threshold_is_valid,
+    equihash_solution_is_valid, merkle_root_validity,
+};
 #[cfg(any(test, feature = "proptest-impl"))]
-pub use block::check::difficulty_is_valid;
+pub use block::SemanticBlockVerifier;
 
-pub use block::{Request, ShieldedActionCounts, VerifyBlockError, MAX_BLOCK_SIGOPS};
+pub use block::{
+    DecodedBlock, PreparedBlockCache, Request, ShieldedActionCounts, VerifyBlockError,
+    MAX_BLOCK_SIGOPS,
+};
 pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
 pub use error::BlockError;

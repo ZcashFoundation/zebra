@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     ops::RangeInclusive,
+    sync::Arc,
 };
 
 use mset::MultiSet;
@@ -37,11 +38,9 @@ pub struct TransparentTransfers {
     /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
     /// but it might in future. So Zebra does it anyway.
     ///
-    /// Optional TODOs:
-    /// - store `Utxo`s in the chain, and just store the created locations for this address
-    /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
-    ///   and use the inner OutputLocation to sort Utxos in chain order
-    created_utxos: BTreeMap<OutputLocation, transparent::Output>,
+    /// Outputs are shared with the chain index and retained snapshots. Per-height buckets share
+    /// index entries, keeping singleton outputs inline rather than allocating an inner tree.
+    created_utxos: BTreeMap<Height, Arc<CreatedOutputs>>,
 
     /// The partial list of UTXOs spent by a transparent address.
     ///
@@ -54,6 +53,89 @@ pub struct TransparentTransfers {
     spent_utxos: BTreeSet<OutputLocation>,
 }
 
+/// A shared height bucket that only allocates a tree when it contains multiple outputs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CreatedOutputs {
+    Single(OutputLocation, Arc<transparent::OrderedUtxo>),
+    Multiple(BTreeMap<OutputLocation, Arc<transparent::OrderedUtxo>>),
+}
+
+impl Default for CreatedOutputs {
+    fn default() -> Self {
+        Self::Multiple(BTreeMap::new())
+    }
+}
+
+impl CreatedOutputs {
+    fn insert(
+        &mut self,
+        location: OutputLocation,
+        utxo: Arc<transparent::OrderedUtxo>,
+    ) -> Option<Arc<transparent::OrderedUtxo>> {
+        match self {
+            Self::Single(previous, value) if *previous == location => {
+                Some(std::mem::replace(value, utxo))
+            }
+            Self::Single(..) => {
+                let Self::Single(previous, value) = std::mem::take(self) else {
+                    unreachable!("the bucket contains a single output");
+                };
+                let mut outputs = BTreeMap::new();
+                outputs.insert(previous, value);
+                outputs.insert(location, utxo);
+                *self = Self::Multiple(outputs);
+                None
+            }
+            Self::Multiple(outputs) if outputs.is_empty() => {
+                *self = Self::Single(location, utxo);
+                None
+            }
+            Self::Multiple(outputs) => outputs.insert(location, utxo),
+        }
+    }
+
+    fn remove(&mut self, location: &OutputLocation) -> bool {
+        match self {
+            Self::Single(previous, _) if previous == location => {
+                *self = Self::default();
+                true
+            }
+            Self::Single(..) => false,
+            Self::Multiple(outputs) => {
+                let removed = outputs.remove(location).is_some();
+                if outputs.len() == 1 {
+                    let (location, value) = outputs.pop_first().expect("one output remains");
+                    *self = Self::Single(location, value);
+                }
+                removed
+            }
+        }
+    }
+
+    fn get(&self, location: &OutputLocation) -> Option<&Arc<transparent::OrderedUtxo>> {
+        match self {
+            Self::Single(previous, value) => (previous == location).then_some(value),
+            Self::Multiple(outputs) => outputs.get(location),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Single(..) => 1,
+            Self::Multiple(outputs) => outputs.len(),
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&OutputLocation, &Arc<transparent::OrderedUtxo>)> {
+        match self {
+            Self::Single(location, value) => {
+                itertools::Either::Left(std::iter::once((location, value)))
+            }
+            Self::Multiple(outputs) => itertools::Either::Right(outputs.iter()),
+        }
+    }
+}
+
 // A created UTXO
 //
 // TODO: replace arguments with a struct
@@ -63,13 +145,13 @@ impl
         &transparent::OutPoint,
         // The UTXO data
         // Includes the location of the transaction that created the output
-        &transparent::OrderedUtxo,
+        &Arc<transparent::OrderedUtxo>,
     )> for TransparentTransfers
 {
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
+        &(outpoint, created_utxo): &(&transparent::OutPoint, &Arc<transparent::OrderedUtxo>),
     ) -> Result<(), ValidateContextError> {
         self.balance = (self.balance
             + created_utxo
@@ -83,9 +165,12 @@ impl
         let transaction_location = transaction_location(created_utxo);
         let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
 
-        let previous_entry = self
+        let height_outputs = self
             .created_utxos
-            .insert(output_location, created_utxo.utxo.output.clone());
+            .entry(transaction_location.height)
+            .or_default();
+        let previous_entry =
+            Arc::make_mut(height_outputs).insert(output_location, created_utxo.clone());
         assert_eq!(
             previous_entry, None,
             "unexpected created output: duplicate update or duplicate UTXO",
@@ -98,7 +183,7 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
+        &(outpoint, created_utxo): &(&transparent::OutPoint, &Arc<transparent::OrderedUtxo>),
         _position: RevertPosition,
     ) {
         self.balance = (self.balance
@@ -113,9 +198,21 @@ impl
         let transaction_location = transaction_location(created_utxo);
         let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
 
-        let removed_entry = self.created_utxos.remove(&output_location);
+        let height_outputs = self
+            .created_utxos
+            .get_mut(&transaction_location.height)
+            .expect("created output height exists because the block was previously applied");
+        // Drop a complete bucket without copying it solely to remove its last entry.
+        let output_was_removed =
+            if height_outputs.len() == 1 && height_outputs.get(&output_location).is_some() {
+                self.created_utxos
+                    .remove(&transaction_location.height)
+                    .is_some()
+            } else {
+                Arc::make_mut(height_outputs).remove(&output_location)
+            };
         assert!(
-            removed_entry.is_some(),
+            output_was_removed,
             "unexpected revert of created output: duplicate update or duplicate UTXO",
         );
 
@@ -133,8 +230,8 @@ impl
 // TODO: replace arguments with a struct
 impl
     UpdateWith<(
-        // The transparent input data
-        &transparent::Input,
+        // The spent outpoint
+        &transparent::OutPoint,
         // The hash of the transaction the input is from
         // (not the transaction the spent output was created by)
         &transaction::Hash,
@@ -146,8 +243,8 @@ impl
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        &(spending_input, spending_tx_hash, spent_output): &(
-            &transparent::Input,
+        &(spent_outpoint, spending_tx_hash, spent_output): &(
+            &transparent::OutPoint,
             &transaction::Hash,
             &transparent::OrderedUtxo,
         ),
@@ -162,10 +259,8 @@ impl
                 .expect("NonNegative values are always valid NegativeAllowed values"))
         .expect("total UTXO value has already been checked");
 
-        let spent_outpoint = spending_input.outpoint().expect("checked by caller");
-
         let spent_output_tx_loc = transaction_location(spent_output);
-        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, &spent_outpoint);
+        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, spent_outpoint);
         let spend_was_inserted = self.spent_utxos.insert(output_location);
         assert!(
             spend_was_inserted,
@@ -179,8 +274,8 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(spending_input, spending_tx_hash, spent_output): &(
-            &transparent::Input,
+        &(spent_outpoint, spending_tx_hash, spent_output): &(
+            &transparent::OutPoint,
             &transaction::Hash,
             &transparent::OrderedUtxo,
         ),
@@ -195,10 +290,8 @@ impl
                 .expect("NonNegative values are always valid NegativeAllowed values"))
         .expect("reversing previous balance changes is always valid");
 
-        let spent_outpoint = spending_input.outpoint().expect("checked by caller");
-
         let spent_output_tx_loc = transaction_location(spent_output);
-        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, &spent_outpoint);
+        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, spent_outpoint);
         let spend_was_removed = self.spent_utxos.remove(&output_location);
         assert!(
             spend_was_removed,
@@ -238,9 +331,8 @@ impl TransparentTransfers {
     /// bounded, so the sum saturates rather than overflowing, matching the finalized path. See
     /// #10556.
     pub fn received(&self) -> u64 {
-        self.created_utxos
-            .values()
-            .map(|out| u64::from(out.value()))
+        self.created_utxos()
+            .map(|(_, output)| u64::from(output.value()))
             .fold(0, u64::saturating_add)
     }
 
@@ -286,8 +378,11 @@ impl TransparentTransfers {
     /// Some of these outputs might already be spent.
     /// [`TransparentTransfers::spent_utxos`] returns spent UTXOs.
     #[allow(dead_code)]
-    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::Output> {
-        &self.created_utxos
+    pub fn created_utxos(&self) -> impl Iterator<Item = (&OutputLocation, &transparent::Output)> {
+        self.created_utxos
+            .values()
+            .flat_map(|outputs| outputs.iter())
+            .map(|(location, utxo)| (location, &utxo.utxo.output))
     }
 
     /// Returns the [`OutputLocation`]s of the spent transparent outputs sent to this address,
@@ -315,41 +410,4 @@ pub fn transaction_location(ordered_utxo: &transparent::OrderedUtxo) -> Transact
 }
 
 #[cfg(test)]
-mod tests {
-    use zebra_chain::{
-        amount::MAX_MONEY,
-        transparent::{Output, Script},
-    };
-
-    use super::*;
-
-    /// Regression test for #10556: the cumulative non-finalized `received` total for a
-    /// transparent address must saturate at `u64::MAX` rather than overflow.
-    ///
-    /// `received()` sums every UTXO ever created for the address in this partial chain, and
-    /// spent UTXOs are not removed from that set, so a high-churn self-transfer address can push
-    /// the total past `u64::MAX` while its balance stays bounded. Before the fix the plain
-    /// `.sum()` panicked in debug builds and wrapped in release builds.
-    #[test]
-    fn received_saturates_past_u64_max() {
-        let max_money = Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid amount");
-        let output = Output::new(max_money, Script::new(&[]));
-
-        // `u64::MAX / MAX_MONEY` is ~8784, so 8786 max-money UTXOs overflow a plain sum.
-        let utxo_count = 8786;
-        assert!(
-            (utxo_count as u128) * (MAX_MONEY as u128) > u64::MAX as u128,
-            "test must actually exceed u64::MAX when summed exactly",
-        );
-
-        let mut transfers = TransparentTransfers::default();
-        for output_index in 0..utxo_count {
-            let output_location = OutputLocation::from_usize(Height(0), 0, output_index);
-            transfers
-                .created_utxos
-                .insert(output_location, output.clone());
-        }
-
-        assert_eq!(transfers.received(), u64::MAX);
-    }
-}
+pub(in crate::service::non_finalized_state) mod tests;

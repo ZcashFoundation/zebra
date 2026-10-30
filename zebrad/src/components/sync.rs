@@ -31,6 +31,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
 use zebra_network as zn;
+use zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 use zebra_state as zs;
 
 use crate::{
@@ -52,7 +53,7 @@ use downloads::Downloads;
 use hedge::SuccessHedge;
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
-pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
+pub use gossip::{gossip_best_tip_block_hashes, gossip_early_blocks, BlockGossipError};
 pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
@@ -112,24 +113,10 @@ const MIN_UTXO_RACE_DROPS_BEFORE_RESTART: usize = 4;
 /// ObtainTips with a new set of peers.
 pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
-/// The default for the user-specified lookahead limit.
-///
-/// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
-pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize = MAX_TIPS_RESPONSE_HASH_COUNT * 2;
-
 /// A lower bound on the user-specified concurrency limit.
 ///
 /// If the concurrency limit is 0, Zebra can't download or verify any blocks.
 pub const MIN_CONCURRENCY_LIMIT: usize = 1;
-
-/// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
-///
-/// This is used to allow block heights that are slightly beyond the lookahead limit,
-/// but still limit the number of blocks in the pipeline between the downloader and
-/// the state.
-///
-/// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
-pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 
 /// Controls how long we wait for a tips response to return.
 ///
@@ -140,16 +127,6 @@ pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
 pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
-
-/// Controls how long we wait between gossiping successive blocks or transactions.
-///
-/// ## Correctness
-///
-/// If this timeout is set too high, blocks and transactions won't propagate through
-/// the network efficiently.
-///
-/// If this timeout is set too low, the peer set and remote peers can get overloaded.
-pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 
 /// The per-peer wire-response budget used to derive complete download deadlines.
 ///
@@ -914,13 +891,20 @@ where
 
         debug!(?self.prospective_tips);
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
+        // State can advance during fanout. Compact unknown hashes in place, preserving download
+        // order.
+        let mut retained = 0;
+        for index in 0..download_set.len() {
+            let hash = download_set[index];
             debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+            if !self.state_contains(hash).await? {
+                if retained != index {
+                    download_set.swap_indices(retained, index);
+                }
+                retained += 1;
             }
         }
+        download_set.truncate(retained);
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");

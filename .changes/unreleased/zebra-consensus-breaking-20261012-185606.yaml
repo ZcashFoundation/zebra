@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: 'Builds against the `zebra-chain` value-balance methods that take `HashMap<OutPoint, U: AsRef<Utxo>>`; `zebra-chain` types appear in the public API, so upgrade both together.'
+time: 2026-10-12T18:56:05.794068256+02:00
