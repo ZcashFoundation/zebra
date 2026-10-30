@@ -523,7 +523,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings
         .bind(|| insta::assert_json_snapshot!("getrawtransaction_verbosity=0".to_string(), rsp));
-    mempool.expect_no_requests().await;
 
     // `getrawtransaction` verbosity=1
     let mempool_req = mempool
@@ -538,7 +537,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings
         .bind(|| insta::assert_json_snapshot!("getrawtransaction_verbosity=1".to_string(), rsp));
-    mempool.expect_no_requests().await;
 
     // `getrawtransaction` with unknown txid
     let mempool_req = mempool
@@ -554,7 +552,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings
         .bind(|| insta::assert_json_snapshot!("getrawtransaction_unknown_txid".to_string(), rsp));
-    mempool.expect_no_requests().await;
 
     // `getrawtransaction` with an invalid TXID
     let rsp = rpc
@@ -562,6 +559,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .await;
     settings
         .bind(|| insta::assert_json_snapshot!("getrawtransaction_invalid_txid".to_string(), rsp));
+    // Every RPC above has completed. Extra requests remain queued, so one full absence window
+    // checks the whole sequence without repeating the same idle wait after each response.
     mempool.expect_no_requests().await;
 
     // `getaddresstxids`

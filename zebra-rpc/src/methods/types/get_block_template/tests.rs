@@ -562,10 +562,13 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     let fake_coinbase = make_coinbase(zero_fee);
     cache.store(height, zero_fee, None, fake_coinbase.clone());
 
-    // Fill to capacity with distinct fee values (simulating mempool fee churn).
+    // Reuse one shielded coinbase transaction across distinct fee keys to avoid generating
+    // a proof for each entry. Eviction depends only on the keys, so the transaction's fee
+    // need not match each key. Keep it distinct from the zero-fee entry to detect replacement.
+    let paid_coinbase = make_coinbase(Amount::try_from(1_000).expect("valid amount"));
     for i in 1..=5u64 {
         let fee = Amount::try_from(i * 1_000).expect("valid amount");
-        cache.store(height, fee, None, make_coinbase(fee));
+        cache.store(height, fee, None, paid_coinbase.clone());
         assert!(
             cache
                 .0

@@ -1066,12 +1066,29 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         .send(non_finalized_state.clone())
         .expect("backup task should have a receiver, channel should be open");
 
-    // Wait for the minimum update time
-    tokio::time::sleep(Duration::from_secs(1) + MIN_DURATION_BETWEEN_BACKUP_UPDATES).await;
-
-    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
-        .with_backup(Some(backup_dir_path), &finalized_state.db, true, false)
-        .await;
+    // Poll restoration until the rate-limited writer has finished writing a readable backup.
+    let non_finalized_state = tokio::time::timeout(
+        MIN_DURATION_BETWEEN_BACKUP_UPDATES + Duration::from_secs(30),
+        async {
+            loop {
+                let (restored_state, _sender, _receiver) = NonFinalizedState::new(&network)
+                    .with_backup(
+                        Some(backup_dir_path.clone()),
+                        &finalized_state.db,
+                        true,
+                        // Only the original state should write backups while restoration is polled.
+                        true,
+                    )
+                    .await;
+                if restored_state.best_chain_len().is_some() {
+                    break restored_state;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        },
+    )
+    .await
+    .expect("the backup task should write a restorable non-finalized block");
 
     assert_eq!(
         non_finalized_state.best_chain_len(),

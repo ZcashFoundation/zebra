@@ -78,9 +78,11 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
 /// This test also:
 /// - checks `PeerTransport` support, and
 /// - runs even if network tests are disabled.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn connect_isolated_sends_anonymised_version_message_mem() {
     let _init_guard = zebra_test::init();
+    // The transport is entirely in memory, so the no-service observation uses virtual time.
+
     for network in Network::iter() {
         connect_isolated_sends_anonymised_version_message_mem_net(network).await;
     }

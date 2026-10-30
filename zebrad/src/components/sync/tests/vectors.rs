@@ -35,10 +35,8 @@ use InventoryResponse::*;
 
 /// Maximum time to wait for a request to any test service.
 ///
-/// The default [`MockService`] value can be too short for some of these tests that take a little
-/// longer than expected to actually send the request.
-///
-/// Increasing this value causes the tests to take longer to complete, so it can't be too large.
+/// Mock-only tests pause Tokio time, preserving the full no-request observation window without
+/// spending that time idle.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
@@ -293,7 +291,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 }
 
 /// Test that the syncer downloads a singleton unknown hash returned by obtain_tips.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -415,7 +413,7 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 /// stay there, so a peer response can contain a missing parent followed by its queued children.
 /// If queued blocks were treated as present, obtain_tips would reject every such download set with
 /// "queued download of hash behind our chain tip", and the sync would stall forever.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -539,7 +537,7 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 }
 
 /// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -993,7 +991,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 }
 
 /// Test that zebra-network rejects blocks that are a long way ahead of the state tip.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1054,7 +1052,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in obtain_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1227,7 +1225,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in extend_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -2394,9 +2392,8 @@ fn setup() -> (
         ..Default::default()
     };
 
-    // These tests run multiple tasks in parallel.
-    // So machines under heavy load need a longer delay.
-    // (For example, CI machines with limited cores.)
+    // All services are in-process mocks, so paused Tokio time cannot race real I/O.
+    // Keep the full observation windows for absence assertions.
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();
