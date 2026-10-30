@@ -32,4 +32,4 @@ Merge it with a merge commit. GitHub then marks the automatic sync pull request 
 
 The book from `next` is published at [zebra.zfnd.org/next](https://zebra.zfnd.org/next/), beside the book from `main` at [zebra.zfnd.org](https://zebra.zfnd.org/). Compare the same page in both, for example `/dev/next-branch.html` and `/next/dev/next-branch.html`.
 
-A push to `next` that changes the book builds it in `book-next.yml`. When that build succeeds, `book.yml` on `main` publishes it, because GitHub Pages publishes the whole site in one deployment and only `main` may deploy it. Every later docs deploy from `main` keeps the newest `next` build at `/next`. If a `next` build fails, `/next` keeps the previous one. GitHub deletes a build 90 days after it runs, so `/next` disappears if the `next` book doesn't change for 90 days, until its next change.
+`/next` updates after each push to `next` that changes the book. If the `next` book doesn't change for 90 days, `/next` is removed until its next change.
