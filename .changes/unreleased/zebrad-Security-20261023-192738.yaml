@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: Update tokio to 1.54.1 to fix RUSTSEC-2026-0386, safe `AsyncFd` constructors that violate I/O safety. Zebra doesn't use `AsyncFd`.
-time: 2026-10-23T19:27:38.464939355+02:00

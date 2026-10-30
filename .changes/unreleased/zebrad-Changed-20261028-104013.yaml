@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Updated the `pulldown-cmark` build dependency to 0.13.5, clearing RUSTSEC-2026-0414. Zebra isn't affected; it only runs the crate at build time, on the doc comments of its own protobuf files.
-time: 2026-10-28T10:40:13.3523122-05:00

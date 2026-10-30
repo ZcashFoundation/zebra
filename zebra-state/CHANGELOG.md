@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.0.1] - 2026-10-30
+
+### Changed
+
+- An ephemeral database keeps its format version file in its own temporary directory and creates no other temporary directories. `database_format_version_on_disk` returns `Ok(None)` for an ephemeral config, since its database is only created when opened.
+
 ## [16.0.0] - 2026-10-22
 
 ### Breaking Changes

@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [6.0.0] - 2026-10-30
+
+### Breaking Changes
+
+- A `Transcript` now checks the request of entries that expect an error, and fails a step that takes longer than 60 seconds.
+- A `MockService` now panics when its request queue overflows instead of silently dropping requests, and expected requests get up to 10 seconds by default; absence checks keep the 300 ms window, now named `DEFAULT_REQUEST_OBSERVATION_TIMEOUT` instead of `DEFAULT_MAX_REQUEST_DELAY`.
+- Removed the `zebra_test::net::random_known_port` helper, which released its port before callers bound it. Bind to port 0 and read the bound address instead.
+
+### Changed
+
+- Each child spawned by `CommandExt::spawn2` or `TestDirExt::spawn_child_with_command` gets its own temporary directory in `TMPDIR`, `TMP` and `TEMP`, removed when its `TestChild` is dropped, so killed children no longer leave temporary files behind.
+
 ## [5.0.0] - 2026-10-22
 
 ### Breaking Changes
