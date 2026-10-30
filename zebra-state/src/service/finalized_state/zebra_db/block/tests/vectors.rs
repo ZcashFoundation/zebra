@@ -212,6 +212,13 @@ fn test_block_db_round_trip_with(
         }
 
         assert_eq!(stored_block, original_block);
+        for transaction in &original_block.transactions {
+            assert_eq!(
+                state.transaction_version(transaction.hash()),
+                Some(transaction.version()),
+                "the stored header must return the version without the Overwinter flag",
+            );
+        }
     }
 }
 

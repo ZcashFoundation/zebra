@@ -32,6 +32,13 @@ This page describes Zebra 7.0.0-rc.0 and Zallet 0.1.0-beta.3. Zallet releases af
 84 of the 135 methods (62%) have a working path today: the method itself, or a
 replacement that does the same job.
 
+### Pruned output versions
+
+For `gettxout`, Zebra returns `"version": null` when the unspent output exists but its creating
+transaction body has been pruned. The value, script, confirmations, and coinbase flag remain available
+from the UTXO set. Retained and mempool transactions still return their exact numeric version.
+This differs from zcashd, which persists transaction versions in its coins database.
+
 ## How to read the table
 
 ### Method
@@ -139,7 +146,7 @@ owners' current releases and the version line at the top is updated.
 | [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)             | Zebra | Partial | The regtest-only key is spelled `fully_notified`; zcashd spells it `fullyNotified`.                                                                                                                                                                                                                                                        |
 | [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)               | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
 | [`getspentinfo`](https://zcash.github.io/rpc/getspentinfo.html)                 | Zebra | Planned | Will use the spending-transaction index from Zebra's `indexer` build feature.                                                                                                                                                                                                                                                              |
-| [`gettxout`](https://zcash.github.io/rpc/gettxout.html)                         | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
+| [`gettxout`](https://zcash.github.io/rpc/gettxout.html)                         | Zebra | Partial | See [pruned output versions](#pruned-output-versions). |
 | [`gettxoutproof`](https://zcash.github.io/rpc/gettxoutproof.html)               | Zebra | Planned | [Decision][11022-decisions]                                                                                                                                                                                                                                                                                                                |
 | [`gettxoutsetinfo`](https://zcash.github.io/rpc/gettxoutsetinfo.html)           | —     | Retired | Block-explorer index, out of scope for a validator node. Build on the indexer gRPC service instead.                                                                                                                                                                                                                                        |
 | [`verifychain`](https://zcash.github.io/rpc/verifychain.html)                   | —     | Retired | Out of scope for a validator node.                                                                                                                                                                                                                                                                                                         |

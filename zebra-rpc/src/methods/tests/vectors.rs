@@ -7222,6 +7222,143 @@ async fn rpc_addnode() {
     mempool.expect_no_requests().await;
 }
 
+#[test]
+fn rpc_gettxout_nullable_version() {
+    let response = serde_json::json!({
+        "bestblock": "00".repeat(32),
+        "confirmations": 42,
+        "value": 1.0,
+        "scriptPubKey": {"asm": "", "hex": "", "type": "nonstandard"},
+        "version": null,
+        "coinbase": true,
+    });
+    let output: GetTxOutResponse =
+        serde_json::from_value(response.clone()).expect("a pruned creating version is unknown");
+    assert_eq!(serde_json::to_value(output).unwrap(), response);
+}
+
+/// Output metadata does not require a transaction response, and mempool spends take precedence.
+#[tokio::test]
+async fn rpc_gettxout_without_history_and_mempool_overlay() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let tx = &block.transactions[0];
+    let outpoint = transparent::OutPoint {
+        hash: tx.hash(),
+        index: 0,
+    };
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (_sender, receiver) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        receiver,
+        None,
+    );
+
+    for (version, coinbase, include_mempool) in [(None, true, None), (Some(5), false, Some(false))]
+    {
+        let rpc = rpc.clone();
+        let request = tokio::spawn(async move {
+            rpc.get_tx_out(outpoint.hash.to_string(), outpoint.index, include_mempool)
+                .await
+        });
+        if include_mempool.unwrap_or(true) {
+            mempool
+                .expect_request(mempool::Request::UnspentOutput(outpoint))
+                .await
+                .respond(mempool::Response::TransparentOutput(None));
+        }
+        read_state
+            .expect_request(ReadRequest::UnspentOutput(outpoint))
+            .await
+            .respond(ReadResponse::UnspentOutput(Some(
+                zebra_state::OutputWithMetadata {
+                    utxo: transparent::Utxo::new(tx.outputs()[0].clone(), Height(1), coinbase),
+                    transaction_version: version,
+                    confirmations: 42,
+                    best_chain_tip_hash: block.hash(),
+                },
+            )));
+        let response = request.await.unwrap().unwrap();
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["version"], serde_json::to_value(version).unwrap());
+        let output = response.0.unwrap();
+        assert_eq!(output.version(), version);
+        assert_eq!(output.coinbase(), coinbase);
+        assert_eq!(output.confirmations(), 42);
+        assert_eq!(output.best_block(), &block.hash().to_string());
+        assert_eq!(
+            output.value(),
+            crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
+        );
+        assert_eq!(
+            output.script_pub_key().hex().as_raw_bytes(),
+            tx.outputs()[0].lock_script.as_raw_bytes()
+        );
+    }
+
+    let request_rpc = rpc.clone();
+    let request = tokio::spawn(async move {
+        request_rpc
+            .get_tx_out(outpoint.hash.to_string(), 0, Some(false))
+            .await
+    });
+    read_state
+        .expect_request(ReadRequest::UnspentOutput(outpoint))
+        .await
+        .respond(ReadResponse::UnspentOutput(None));
+    assert!(
+        request.await.unwrap().unwrap().0.is_none(),
+        "spent or unknown outputs are null"
+    );
+
+    for spent in [false, true] {
+        let rpc = rpc.clone();
+        let request =
+            tokio::spawn(async move { rpc.get_tx_out(outpoint.hash.to_string(), 0, None).await });
+        let output = if spent {
+            CreatedOrSpent::Spent
+        } else {
+            CreatedOrSpent::Created {
+                output: tx.outputs()[0].clone(),
+                tx_version: 5,
+                last_seen_hash: block.hash(),
+            }
+        };
+        mempool
+            .expect_request(mempool::Request::UnspentOutput(outpoint))
+            .await
+            .respond(mempool::Response::TransparentOutput(Some(output)));
+        let response = request.await.unwrap().unwrap();
+        if spent {
+            assert!(response.0.is_none());
+        } else {
+            let output = response.0.unwrap();
+            assert_eq!(output.confirmations(), 0);
+            assert_eq!(output.version(), Some(5));
+            assert!(!output.coinbase());
+        }
+    }
+    read_state.expect_no_requests().await;
+    mempool.expect_no_requests().await;
+    assert!(queue.now_or_never().is_none());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_gettxout() {
     let _init_guard = zebra_test::init();
@@ -7257,8 +7394,6 @@ async fn rpc_gettxout() {
         None,
     );
 
-    // TODO: Create a mempool test
-
     // Build a state test for all transactions
     let run_test_case = |_block_idx: usize, _block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
@@ -7280,6 +7415,8 @@ async fn rpc_gettxout() {
                 output_object.script_pub_key().hex().as_raw_bytes(),
                 tx.outputs()[0].lock_script.as_raw_bytes()
             );
+            assert_eq!(output_object.version(), Some(tx.version()));
+            assert_eq!(output_object.coinbase(), tx.is_coinbase());
             let depth_response = read_state
                 .oneshot(zebra_state::ReadRequest::Depth(_block.hash()))
                 .await

@@ -858,6 +858,10 @@ pub trait Rpc {
     fn openrpc(&self) -> openrpsee::openrpc::Response;
     /// Returns details about an unspent transaction output.
     ///
+    /// The value, script, confirmations, and coinbase flag remain available without the creating
+    /// transaction body. The `version` field is `null` when that body has been pruned.
+    /// Unlike Zebra, zcashd persists the version in its coins database.
+    ///
     /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
     /// method: post
     /// tags: transaction
@@ -4004,7 +4008,7 @@ where
                             &output,
                             last_seen_hash.to_string(),
                             0,
-                            tx_version,
+                            Some(tx_version),
                             false,
                             self.network(),
                         ),
@@ -4018,64 +4022,27 @@ where
             };
         }
 
-        // Issue the Transaction query first and reuse the best-chain tip hash
-        // captured in that same chain snapshot, instead of doing a separate Tip
-        // query that re-samples the chain. The follow-up IsTransparentOutputSpent
-        // query may still observe a later tip, but the response's `bestblock`
-        // field is now anchored to the same view used to compute confirmations.
-        // See issue #10550.
+        // Read spentness, the output, and its tip metadata together.
         let rsp = self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .oneshot(zebra_state::ReadRequest::UnspentOutput(outpoint))
             .await
             .map_misc_error()?;
 
         match rsp {
-            zebra_state::ReadResponse::Transaction(Some(tx)) => {
-                let best_block_hash = tx.best_chain_tip_hash;
-                let outputs = tx.tx.outputs();
-                let index: usize = n.try_into().expect("u32 always fits in usize");
-                let output = match outputs.get(index) {
-                    Some(output) => output,
-                    // return null if the output is not found
-                    None => return Ok(GetTxOutResponse(None)),
-                };
-
-                // Prune state outputs that are spent
-                let is_spent = {
-                    let rsp = self
-                        .read_state
-                        .clone()
-                        .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
-                        .await
-                        .map_misc_error()?;
-
-                    match rsp {
-                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
-                        _ => unreachable!(
-                            "unmatched response to an `IsTransparentOutputSpent` request"
-                        ),
-                    }
-                };
-
-                if is_spent {
-                    return Ok(GetTxOutResponse(None));
-                }
-
-                Ok(GetTxOutResponse(Some(
-                    types::transaction::OutputObject::from_output(
-                        output,
-                        best_block_hash.to_string(),
-                        tx.confirmations,
-                        tx.tx.version(),
-                        tx.tx.is_coinbase(),
-                        self.network(),
-                    ),
-                )))
-            }
-            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
-            _ => unreachable!("unmatched response to a `Transaction` request"),
+            zebra_state::ReadResponse::UnspentOutput(Some(output)) => Ok(GetTxOutResponse(Some(
+                types::transaction::OutputObject::from_output(
+                    &output.utxo.output,
+                    output.best_chain_tip_hash.to_string(),
+                    output.confirmations,
+                    output.transaction_version,
+                    output.utxo.from_coinbase,
+                    self.network(),
+                ),
+            ))),
+            zebra_state::ReadResponse::UnspentOutput(None) => Ok(GetTxOutResponse(None)),
+            _ => unreachable!("unmatched response to an `UnspentOutput` request"),
         }
     }
 }

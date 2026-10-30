@@ -59,8 +59,8 @@ pub use request::Spend;
 
 pub use response::{
     AnyTx, GetBlockTemplateChainInfo, HistoryCapabilities, KnownBlock, MinedTx,
-    MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener, ReadResponse,
-    Response,
+    MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener, OutputWithMetadata,
+    ReadResponse, Response,
 };
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},

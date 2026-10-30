@@ -9,7 +9,7 @@ use tokio::{sync::oneshot, time};
 use tower::ServiceExt;
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::Block,
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx},
 };
@@ -260,8 +260,8 @@ proptest! {
 
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set.clone()));
 
-            let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(None);
+            let expected_request = ReadRequest::KnownTransaction(transaction.hash());
+            let response = ReadResponse::KnownTransaction(false);
 
             read_state
                 .expect_request(expected_request)
@@ -293,8 +293,8 @@ proptest! {
             // check the state again
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set));
 
-            let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(Some(zebra_state::MinedTx::new(Arc::new(transaction), Height(1), 1, block.header.time, block.hash())));
+            let expected_request = ReadRequest::KnownTransaction(transaction.hash());
+            let response = ReadResponse::KnownTransaction(true);
 
             read_state
                 .expect_request(expected_request)
@@ -305,6 +305,9 @@ proptest! {
 
             // transaction was found in the state
             prop_assert_eq!(result.len(), 1);
+            prop_assert!(result.contains(&unmined_transaction.id));
+            runner.remove_committed(result);
+            prop_assert!(runner.queue.transactions().is_empty());
 
             read_state.expect_no_requests().await?;
             write_state.expect_no_requests().await?;
@@ -356,4 +359,25 @@ proptest! {
             Ok::<_, TestCaseError>(())
         })?;
     }
+}
+
+/// Every submitted witness variant is removed when its effects have been mined.
+#[tokio::test]
+async fn queue_state_matches_mined_id_without_body() {
+    use zebra_chain::transaction::{AuthDigest, Hash, UnminedTxId, WtxId};
+
+    let ids: HashSet<_> = [0, 1]
+        .into_iter()
+        .map(|byte| {
+            UnminedTxId::Witnessed(WtxId {
+                id: Hash([7; 32]),
+                auth_digest: AuthDigest([byte; 32]),
+            })
+        })
+        .collect();
+    let state = tower::service_fn(|request| async move {
+        assert_eq!(request, ReadRequest::KnownTransaction(Hash([7; 32])));
+        Ok::<_, BoxError>(ReadResponse::KnownTransaction(true))
+    });
+    assert_eq!(Runner::check_state(state, ids.clone()).await, ids);
 }
