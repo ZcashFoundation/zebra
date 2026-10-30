@@ -1,0 +1,6 @@
+project: zebrad
+kind: Added
+body: >-
+  Optional ZMQ `hashblock` notifications for mining pools, configured with
+  `notify.zmqpubhashblock` in builds using the `zmq` Cargo feature.
+time: 2026-10-24T20:20:40.701694578+02:00
