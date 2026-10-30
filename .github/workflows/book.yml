@@ -3,12 +3,17 @@ name: Book
 on:
   push:
     branches: [main]
+  # The site root documents the latest release. A published release appears at the
+  # root on the next push to `main`, or immediately through a manual run. A
+  # `release` trigger would expose this workflow's caches to cache poisoning.
+  workflow_dispatch:
 
-# GitHub Pages accepts one deployment at a time. Runs queue in push order, so an
-# older build never publishes over a newer one, and a newer push replaces any
-# run still waiting. In-progress runs are not cancelled midway through a deploy.
+# GitHub Pages accepts one deployment at a time, and every run publishes the
+# whole site. One concurrency group for all triggers keeps deployments from
+# overlapping; a newer run replaces any run still waiting, and an in-progress
+# run is not cancelled midway through a deploy.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 permissions:
@@ -43,8 +48,10 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
+      # `main` is always published under /main/, even from a manual run on another branch.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
+          ref: main
           persist-credentials: false
 
       - name: Setup mdBook
@@ -63,9 +70,34 @@ jobs:
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
 
+      # Operators read the site root, so it documents the release they can install.
+      # Setting the BOOK_ROOT_REF repository variable publishes another ref there,
+      # for example `main` when a documentation fix should not wait for a release,
+      # or in a fork without releases. A failed release lookup fails the build,
+      # rather than publishing unreleased documentation at the root.
+      - name: Select the ref published at the site root
+        id: root
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROOT_REF: ${{ vars.BOOK_ROOT_REF }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ROOT_REF" ]; then
+            ROOT_REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          test -n "$ROOT_REF"
+          echo "ref=$ROOT_REF" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          ref: ${{ steps.root.outputs.ref }}
+          path: root-ref
+          persist-credentials: false
+
       - name: Build Zebra book
         run: |
-          mdbook build book --dest-dir "$(pwd)"/target/docs
+          mdbook build root-ref/book --dest-dir "$(pwd)"/target/docs
+          mdbook build book --dest-dir "$(pwd)"/target/docs/main
         env:
           # The -A and -W settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
