@@ -785,6 +785,7 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
                 pool,
                 start_idx.into(),
                 limit.map(Into::into),
+                None,
             ))
             .catch_unwind()
             .await;

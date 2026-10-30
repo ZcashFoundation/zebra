@@ -670,7 +670,12 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         .map(|responder| responder.respond(ReadResponse::SaplingSubtrees(subtrees)));
 
     // Make the request.
-    let req = rpc.z_get_subtrees_by_index(String::from("sapling"), 0u16.into(), Some(2u16.into()));
+    let req = rpc.z_get_subtrees_by_index(
+        String::from("sapling"),
+        0u16.into(),
+        Some(2u16.into()),
+        None,
+    );
 
     // Get the response.
     let (subtrees_rsp, ..) = tokio::join!(req, rsp);
@@ -698,7 +703,12 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         .map(|responder| responder.respond(ReadResponse::OrchardSubtrees(subtrees)));
 
     // Make the request.
-    let req = rpc.z_get_subtrees_by_index(String::from("orchard"), 0u16.into(), Some(2u16.into()));
+    let req = rpc.z_get_subtrees_by_index(
+        String::from("orchard"),
+        0u16.into(),
+        Some(2u16.into()),
+        None,
+    );
 
     // Get the response.
     let (subtrees_rsp, ..) = tokio::join!(req, rsp);
