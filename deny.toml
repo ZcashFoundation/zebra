@@ -168,7 +168,7 @@ unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
-# Experimental NU7 dependencies must remain pinned to an immutable revision.
+# Git dependencies must remain pinned to an immutable revision.
 required-git-spec = "rev"
 
 # List of URLs for allowed crate registries. Defaults to the crates.io index
@@ -176,8 +176,14 @@ required-git-spec = "rev"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 # List of URLs for allowed Git repositories.
-# Remove this exception with the NU7 patches once supporting crates are released.
-allow-git = []
+# Remove these exceptions with the git patches once supporting crates are released.
+allow-git = [
+    "https://github.com/ZcashFoundation/reddsa",
+    "https://github.com/upbqdn/librustzcash",
+    "https://github.com/upbqdn/pasta_curves",
+    "https://github.com/upbqdn/halo2",
+    "https://github.com/upbqdn/sinsemilla",
+]
 
 [sources.allow-org]
 github = [

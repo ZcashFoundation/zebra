@@ -10,6 +10,13 @@ mod tests;
 
 /// Process entry point for `zebrad`
 fn main() {
+    #[allow(clippy::print_stderr)]
+    if let Err(error) = zebra_chain::diagnostic::check_pasta_cpu_features() {
+        // Report directly because the application and tracing are not initialized yet.
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    }
+
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     if !has_malloc_arena_override(
         std::env::var_os("MALLOC_ARENA_MAX").as_deref(),

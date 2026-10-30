@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added an opt-in `pasta-asm` build feature for faster Pasta field arithmetic on supported x86_64 targets, with an early startup check requiring BMI2 and ADX CPU flags.
+time: 2026-10-25T02:02:31.3520244+02:00

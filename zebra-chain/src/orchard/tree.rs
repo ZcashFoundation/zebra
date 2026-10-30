@@ -17,13 +17,14 @@ use std::{
     io,
 };
 
-use bitvec::prelude::*;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::ToHex;
 use incrementalmerkletree::{frontier::NonEmptyFrontier, Hashable};
 use lazy_static::lazy_static;
 use thiserror::Error;
 use zcash_primitives::merkle_tree::HashSer;
+
+use sinsemilla::{weighted::UncheckedFixedLengthHashDomain, HashDomain, K};
 
 use crate::{
     serialization::{
@@ -45,6 +46,25 @@ pub type NoteCommitmentUpdate = pallas::Base;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;
 
+/// Bits in one Merkle child encoding: a 255-bit little-endian Pallas base
+/// field element (`l_MerkleOrchard` in the protocol spec).
+const L_ORCHARD_MERKLE: usize = 255;
+/// Bits in one MerkleCRH message: the 10-bit layer prefix and two children.
+const MERKLE_CRH_BITS: usize = K + 2 * L_ORCHARD_MERKLE;
+/// Each MerkleCRH input fills exactly this many Sinsemilla words.
+const MERKLE_CRH_WORDS: usize = MERKLE_CRH_BITS / K;
+const _: () = assert!(MERKLE_CRH_BITS.is_multiple_of(K));
+/// Complete Sinsemilla words in one 255-bit child encoding.
+const MERKLE_CRH_FULL_CHILD_WORDS: usize = L_ORCHARD_MERKLE / K;
+/// Bits left after decoding a child's complete Sinsemilla words.
+const MERKLE_CRH_CHILD_REMAINDER_BITS: usize = L_ORCHARD_MERKLE % K;
+/// Index of the word spanning the left and right child encodings.
+const MERKLE_CRH_CROSS_CHILD_WORD: usize = 1 + MERKLE_CRH_FULL_CHILD_WORDS;
+const SINSEMILLA_WORD_MASK: u16 = (1 << K) - 1;
+const CHILD_REMAINDER_MASK: u8 = (1 << MERKLE_CRH_CHILD_REMAINDER_BITS) - 1;
+// The bit width of a byte always fits in usize.
+const BYTE_BITS: usize = u8::BITS as usize;
+
 /// MerkleCRH^Orchard Hash Function
 ///
 /// Used to hash incremental Merkle tree hash values for Orchard.
@@ -60,26 +80,72 @@ pub(super) const MERKLE_DEPTH: u8 = 32;
 /// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
 /// <https://zips.z.cash/protocol/protocol.pdf#constants>
 fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
-    // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
-    let prefix = BitArray::<_, Lsb0>::from([MERKLE_DEPTH - 1 - layer, 0]);
-    let left = BitArray::<_, Lsb0>::from(left.to_repr());
-    let right = BitArray::<_, Lsb0>::from(right.to_repr());
+    ORCHARD_MERKLE_CRH_DOMAIN.hash_words(&merkle_crh_words(layer, left, right))
+}
 
-    MERKLE_CRH_DOMAIN
-        .hash(
-            prefix[..10]
-                .iter()
-                .by_vals()
-                .chain(left[..255].iter().by_vals())
-                .chain(right[..255].iter().by_vals()),
-        )
-        .unwrap_or(pallas::Base::zero())
+/// Packs a MerkleCRH input into its 10-bit Sinsemilla words.
+///
+/// The message is `I2LEBSP_10(l) || left || right` with 255-bit little-endian
+/// child encodings, so the words are: the layer prefix `l`, 25 complete words
+/// of `left`, one word spanning `left`'s top 5 bits and `right`'s low 5 bits,
+/// and 25 words covering the remaining bits of `right`.
+fn merkle_crh_words(layer: u8, left: pallas::Base, right: pallas::Base) -> [u16; MERKLE_CRH_WORDS] {
+    // The bit width of u16 always fits in usize.
+    const WINDOW_BITS: usize = u16::BITS as usize;
+
+    /// Reads the 10-bit little-endian word starting at `bit_offset`.
+    fn word_at(bytes: &[u8; 32], bit_offset: usize) -> u16 {
+        let byte_offset = bit_offset / BYTE_BITS;
+        let shift = bit_offset % BYTE_BITS;
+        let window =
+            u16::from(bytes[byte_offset]) | (u16::from(bytes[byte_offset + 1]) << BYTE_BITS);
+        let word = window >> shift;
+
+        if shift + K > WINDOW_BITS {
+            (word | (u16::from(bytes[byte_offset + 2]) << (WINDOW_BITS - shift)))
+                & SINSEMILLA_WORD_MASK
+        } else {
+            word & SINSEMILLA_WORD_MASK
+        }
+    }
+
+    let left = left.to_repr();
+    let right = right.to_repr();
+    let mut words = [0; MERKLE_CRH_WORDS];
+
+    // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
+    words[0] = u16::from(MERKLE_DEPTH - 1 - layer);
+    for (index, word) in words[1..MERKLE_CRH_CROSS_CHILD_WORD].iter_mut().enumerate() {
+        *word = word_at(&left, index * K);
+    }
+    let left_tail_offset = MERKLE_CRH_FULL_CHILD_WORDS * K;
+    words[MERKLE_CRH_CROSS_CHILD_WORD] = u16::from(
+        (left[left_tail_offset / BYTE_BITS] >> (left_tail_offset % BYTE_BITS))
+            & CHILD_REMAINDER_MASK,
+    ) | (u16::from(right[0] & CHILD_REMAINDER_MASK)
+        << MERKLE_CRH_CHILD_REMAINDER_BITS);
+    for (index, word) in words[MERKLE_CRH_CROSS_CHILD_WORD + 1..]
+        .iter_mut()
+        .enumerate()
+    {
+        *word = word_at(&right, MERKLE_CRH_CHILD_REMAINDER_BITS + index * K);
+    }
+
+    words
 }
 
 lazy_static! {
-    /// Derive the fixed domain's group-hash generator once, rather than once per node.
-    static ref MERKLE_CRH_DOMAIN: sinsemilla::HashDomain =
-        sinsemilla::HashDomain::new("z.cash:Orchard-MerkleCRH");
+    /// The fixed 52-word Orchard MerkleCRH evaluator, constructed once.
+    ///
+    /// Its 3.75 MiB position-weighted table replaces the doubling recurrence
+    /// with table lookups and point additions. It omits incomplete-addition
+    /// exceptional-case checks: finding an input where it differs from
+    /// [`HashDomain`] yields a nontrivial discrete-logarithm relation among
+    /// the independently generated Sinsemilla bases. This relies on the
+    /// computational assumption detailed in [`sinsemilla::weighted`], not
+    /// exact equivalence of partial functions.
+    static ref ORCHARD_MERKLE_CRH_DOMAIN: UncheckedFixedLengthHashDomain<MERKLE_CRH_WORDS> =
+        UncheckedFixedLengthHashDomain::new(&HashDomain::new("z.cash:Orchard-MerkleCRH"));
 
     /// List of "empty" Orchard note commitment nodes, one for each layer.
     ///

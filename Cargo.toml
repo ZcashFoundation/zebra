@@ -391,3 +391,14 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91" }
+zcash_encoding = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
+zcash_primitives = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
+zcash_transparent = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
+pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "8cf375255b07e486b3eeceaa2ec465ec79bb2086" }
+halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
+halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
+halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
+sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "993b786db2ef1b73df93ea8ecbe9237f3203c55e" }

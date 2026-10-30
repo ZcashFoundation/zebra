@@ -15,6 +15,38 @@ use std::time::{Duration, Instant};
 
 use crate::fmt::duration_short;
 
+/// Checks CPU support for the selected Pasta field arithmetic backend.
+///
+/// Call this before using Pasta types, including decoding Orchard transactions. Cargo feature
+/// unification can enable the assembly backend through another package in the same build.
+///
+/// # Errors
+///
+/// Returns an error if the x86_64 assembly backend is selected but BMI2 or ADX is unavailable.
+/// Other backends do not require this check.
+pub fn check_pasta_cpu_features() -> Result<(), &'static str> {
+    #[cfg(target_arch = "x86_64")]
+    if halo2::pasta::BACKEND == "x86-64"
+        && !pasta_asm_supported(
+            std::arch::is_x86_feature_detected!("bmi2"),
+            std::arch::is_x86_feature_detected!("adx"),
+        )
+    {
+        return Err(
+            "the Pasta assembly backend requires CPU flags BMI2 and ADX; \
+             use a build without the pasta-asm feature",
+        );
+    }
+
+    Ok(())
+}
+
+/// Returns whether both CPU instructions required by the Pasta assembly backend are available.
+#[cfg(any(test, target_arch = "x86_64"))]
+pub(crate) fn pasta_asm_supported(bmi2: bool, adx: bool) -> bool {
+    bmi2 && adx
+}
+
 /// The default minimum info-level message time.
 ///
 /// This is high enough to ignore most slow code.

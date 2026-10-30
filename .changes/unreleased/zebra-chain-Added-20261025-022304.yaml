@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `diagnostic::check_pasta_cpu_features()` to check CPU support before using the selected Pasta assembly backend.
+time: 2026-10-25T02:23:04.96233562+02:00
