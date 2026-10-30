@@ -40,6 +40,7 @@ async fn validate_regtest_genesis_block() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
@@ -646,14 +647,19 @@ async fn forged_block_body_is_attributed_and_does_not_block_the_honest_body() ->
     // Replay the chain into a fresh in-process verifier and state, which is the stack the
     // syncer drives, so the error the syncer classifies on is the one asserted below.
     let (state, read_state, _, _) = zebra_state::init_test_services(&network).await;
-    let (block_verifier_router, _tx_verifier, _download_handles, _max_checkpoint_height) =
-        zebra_consensus::router::init_test(
-            zebra_consensus::Config::default(),
-            &network,
-            state.clone(),
-            read_state,
-        )
-        .await;
+    let (
+        block_verifier_router,
+        _tx_verifier,
+        _download_handles,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+        read_state,
+    )
+    .await;
 
     let commit = |block: Arc<Block>| {
         let router = block_verifier_router.clone();
@@ -1011,6 +1017,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
@@ -1369,6 +1376,7 @@ async fn nu6_3_block_template_proposal() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
+        _prepared_blocks,
     ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
