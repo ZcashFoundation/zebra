@@ -222,12 +222,13 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
-- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
+- **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
-- **Sync main to next** (`sync-next.yml`): Opens the pull request that merges `main` into the [`next` branch](../../book/src/dev/next-branch.md)
+- **Sync main to next** (`sync-next.yml`): Keeps the `sync/main-to-next` branch at `main` and opens its auto-merging pull request into the [`next` branch](../../book/src/dev/next-branch.md)
 
 ### Supporting/Reusable Workflows
 

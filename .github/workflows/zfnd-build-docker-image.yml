@@ -47,7 +47,7 @@ on:
         type: boolean
         default: false
       publish_to_dockerhub:
-        description: "Whether to publish to Docker Hub. Set to true only in release-binaries.yml to create official production images. Defaults to false to prevent duplicate publishing from deploy-nodes.yml."
+        description: "Whether to publish to Docker Hub. Set to true only in release-binaries.yml, which builds every release and pre-release. Defaults to false to prevent duplicate publishing from deploy-nodes.yml."
         required: false
         type: boolean
         default: false
@@ -162,42 +162,19 @@ jobs:
           echo "SOURCE_SHA_SHORT=${SOURCE_SHA:0:7}" >> "$GITHUB_ENV"
           echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      # Automatic tag management and OCI Image Format Specification for labels
+      # OCI Image Format Specification labels for each platform image.
+      # The merge job applies the image tags, so these tag rules only set the version label.
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
         with:
-          # list of Docker images to use as base name for tags
-          # Docker Hub publishing requires ALL conditions to be true:
-          # - inputs.publish_to_dockerhub must be explicitly set to true (defaults to false)
-          # - Event must be a release (not a pre-release)
-          # This prevents duplicate publishing when both release-binaries.yml and deploy-nodes.yml run
-          # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
-          images: |
-            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease }}
           labels: |
             org.opencontainers.image.revision=${{ inputs.source_sha }}
-          # generate Docker tags based on the following events/attributes
           tags: |
-            # These DockerHub release tags support the following use cases:
-            # - `latest`: Automatically points to the most recent Zebra release, ensuring users always get the latest stable version when pulling or updating.
-            # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
-            #
             type=semver,pattern={{version}}
-            # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
-            # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
-            # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
-            # - `edge`: Tags the latest build on the default branch (e.g., `main`), used in CI to represent the cutting-edge version for testing.
-            # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
             type=ref,event=pr
             type=ref,event=branch
-            type=edge,enable={{is_default_branch}}
             type=schedule
-            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
-            # Applied during pull requests and branch pushes to ensure CI tests use the exact image from the last commit.
-            type=sha,event=pr
-            type=sha,event=branch
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -325,22 +302,39 @@ jobs:
           pattern: digests-${{ inputs.image_name }}-*
           merge-multiple: true
 
-      # Docker meta for tag generation
+      # Automatic tag management for the multi-platform image
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf #v6.0.0
         with:
+          # list of Docker images to use as base name for tags
+          # Docker Hub publishing requires inputs.publish_to_dockerhub to be explicitly set to true (defaults to false), which only release-binaries.yml does.
+          # This prevents duplicate publishing when both release-binaries.yml and deploy-nodes.yml run
+          # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease }}
+            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub }}
+          # generate Docker tags based on the following events/attributes
           tags: |
+            # These DockerHub release tags support the following use cases:
+            # - `latest`: Automatically points to the most recent Zebra release, ensuring users always get the latest stable version when pulling or updating.
+            # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
+            # Pre-release versions (e.g., 1.2.3-alpha.0) only get their exact version tag, never `latest`.
+            #
             type=semver,pattern={{version}}
+            # - `edge`: Points to the most recent pre-release from `next`, which is any pre-release except a release candidate (release candidates are cut from `main`).
+            type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc') }}
+            # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
+            # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
+            # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
+            # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
             type=ref,event=pr
             type=ref,event=branch
-            type=edge,enable={{is_default_branch}}
             type=schedule
-            type=sha,event=pr
-            type=sha,event=branch
+            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
+            # Applied to every build except releases, to ensure CI tests use the exact image from the last commit.
+            # metadata-action ignores `event=` on `type=sha`, so `enable` is what limits it.
+            type=sha,enable=${{ github.event_name != 'release' }}
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -359,10 +353,10 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
 
       # Login to DockerHub when:
-      # 1. Publishing images for a release (not prerelease), OR
+      # 1. Publishing images for a release or pre-release, OR
       # 2. Running Docker Scout on release PRs (requires DockerHub authentication)
       - name: Login to DockerHub
-        if: (inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease) || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v'))
+        if: inputs.publish_to_dockerhub || (inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v'))
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -393,7 +387,7 @@ jobs:
 
       # Sign + attest the released image
       - name: Attest build provenance
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: inputs.publish_to_dockerhub
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: docker.io/zfnd/${{ inputs.image_name }}
@@ -401,11 +395,11 @@ jobs:
           push-to-registry: true
 
       - name: Install Cosign
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: inputs.publish_to_dockerhub
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign images with Cosign
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: inputs.publish_to_dockerhub
         env:
           DIGEST: ${{ steps.create.outputs.digest }}
           GAR_IMAGE: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
@@ -415,7 +409,7 @@ jobs:
           cosign sign --yes "${HUB_IMAGE}@${DIGEST}"
 
       - name: Generate SBOM
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: inputs.publish_to_dockerhub
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: docker.io/zfnd/${{ inputs.image_name }}@${{ steps.create.outputs.digest }}
@@ -424,7 +418,7 @@ jobs:
           upload-artifact: false
 
       - name: Attest SBOM
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: inputs.publish_to_dockerhub
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: docker.io/zfnd/${{ inputs.image_name }}
@@ -434,7 +428,7 @@ jobs:
 
       # Fail the release if the signature or attestations don't verify.
       - name: Verify release signatures
-        if: inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease
+        if: inputs.publish_to_dockerhub
         env:
           DIGEST: ${{ steps.create.outputs.digest }}
           HUB_IMAGE: docker.io/zfnd/${{ inputs.image_name }}
