@@ -140,6 +140,26 @@ fn librustzcash_tx_hash() {
 }
 
 #[test]
+fn recording_reader_preserves_short_reads_at_capacity_boundary() -> Result<()> {
+    use std::io::Read;
+
+    let _init_guard = zebra_test::init();
+
+    for len in [255, 256, 257] {
+        let data: Vec<u8> = (0..=u8::MAX).cycle().take(len).collect();
+        let mut reader = RecordingReader::new(Read::chain(&data[..128], &data[128..]));
+        let mut buf = [0; 257];
+
+        assert_eq!(reader.read(&mut buf)?, 128);
+        assert_eq!(reader.read(&mut buf)?, len - 128);
+        assert_eq!(reader.read(&mut buf)?, 0);
+        assert_eq!(reader.into_recorded(), data);
+    }
+
+    Ok(())
+}
+
+#[test]
 fn doesnt_deserialize_transaction_with_invalid_value_balance() {
     let _init_guard = zebra_test::init();
 
