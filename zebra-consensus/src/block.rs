@@ -778,7 +778,12 @@ where
             };
             // Hash only when populating the cache or when an unmatched block could reuse it.
             let proposal_key = if decoded_match.is_none()
-                && (request.is_proposal() || !proposals.borrow().is_empty())
+                && (request.is_proposal() || {
+                    let header = normalized_proposal_header(&block.header);
+                    proposals.borrow().iter().any(|proposal| {
+                        normalized_proposal_header(&proposal.block.header) == header
+                    })
+                })
             {
                 let block = block.clone();
                 Some(
