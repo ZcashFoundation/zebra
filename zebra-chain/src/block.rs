@@ -280,9 +280,9 @@ impl Block {
     /// `deferred_pool_balance_change` must also be calculated from that same parent.
     ///
     /// Note that the chain value pool has the opposite sign to the transaction value pool.
-    pub fn chain_value_pool_change(
+    pub fn chain_value_pool_change<U: AsRef<transparent::Utxo>>(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        utxos: &HashMap<transparent::OutPoint, U>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
@@ -301,9 +301,9 @@ impl Block {
     /// The arguments have the same requirements as [`Self::chain_value_pool_change`].
     /// Fees are `None` before NU7, preserving pre-NU7 accounting without fee validation,
     /// and `Some`, including zero, from NU7 onward. This does not validate coinbase payouts.
-    pub fn chain_value_pool_change_and_fees(
+    pub fn chain_value_pool_change_and_fees<U: AsRef<transparent::Utxo>>(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        utxos: &HashMap<transparent::OutPoint, U>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
@@ -383,9 +383,9 @@ impl Block {
     /// [nu7]: https://github.com/zcash/zips/pull/1363
     ///
     /// `utxos` has the same requirements as in [`Block::chain_value_pool_change`].
-    pub fn transaction_fees(
+    pub fn transaction_fees<U: AsRef<transparent::Utxo>>(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        utxos: &HashMap<transparent::OutPoint, U>,
     ) -> Result<Amount<NonNegative>, ValueBalanceError> {
         self.transactions
             .iter()
