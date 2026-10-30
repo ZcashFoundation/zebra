@@ -42,9 +42,13 @@ mod tests;
 /// This means that there can be hundreds of actions verified by some proofs,
 /// but just one action in others.
 ///
-/// To compensate for larger proofs, we process the batch once there are over
-/// [`HALO2_MAX_BATCH_SIZE`] total actions among pending items in the queue.
-const HALO2_MAX_BATCH_SIZE: usize = super::MAX_BATCH_SIZE;
+/// To compensate for larger proofs, we process the batch once there are at least
+/// [`HALO2_MAX_BATCH_SIZE`] weighted actions among pending items in the queue.
+/// Counting each bundle as at least two actions preserves the previous 64-bundle fallback bound.
+///
+/// Each batch ends with one multi-scalar multiplication, so a threshold of twice the shared batch
+/// size reduces those for large Orchard blocks; 256 measured slower.
+const HALO2_MAX_BATCH_SIZE: usize = 2 * super::MAX_BATCH_SIZE;
 
 /// The type of verification results.
 type VerifyResult = bool;
@@ -132,7 +136,7 @@ pub struct Item {
 
 impl RequestWeight for Item {
     fn request_weight(&self) -> usize {
-        self.bundle.actions().len()
+        self.bundle.actions().len().max(2)
     }
 }
 
