@@ -6,23 +6,24 @@
 
 1. Open a pull request against `next`. Use the same [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/#specification) title and [change fragments](changelog-guidelines.md) as for `main`, because its commits reach `main` unchanged.
 2. Merge it once the required checks pass. `next` needs no approval and has no merge queue.
-3. After each push to `main`, the `sync-next.yml` workflow opens a `chore: sync main to next` pull request. Merge it with a merge commit.
+3. After each push to `main`, the `sync-next.yml` workflow moves the `sync/main-to-next` branch up to `main` and opens a `chore: sync main to next` pull request from it, or updates the open one. The pull request merges itself with a merge commit once the required checks pass. To hold it, add the `do-not-merge` label.
 4. To land the work on `main`, open a pull request from `next` into `main`. It goes through `main`'s usual review and merge queue.
 
 ## Resolve Sync Conflicts
 
-The sync pull request's head is `main`, so resolve its conflicts on a branch cut from `next`:
+A sync pull request that conflicts with `next` can't merge itself. Resolve the conflicts on its own branch:
 
 ```bash
 git fetch origin
-git switch -c sync/main-to-next-$(date +%Y%m%d) origin/next
-git merge origin/main
+git switch -C sync/main-to-next origin/sync/main-to-next
+git merge origin/next
 # resolve the conflicts and commit the merge
-git push -u origin HEAD
-gh pr create --base next --title "chore: sync main to next"
+git push
 ```
 
-Merge it with a merge commit. GitHub then marks the automatic sync pull request as merged, or leaves it open with only newer commits.
+For simple text conflicts, the pull request's **Resolve conflicts** button makes the same merge in the browser. Merge the pull request once the required checks pass.
+
+Later pushes to `main` are merged into the branch, never force-pushed over your resolution. If that merge conflicts, merge `origin/main` into the branch the same way.
 
 ## Compare `next` With `main`
 

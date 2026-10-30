@@ -228,7 +228,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
-- **Sync main to next** (`sync-next.yml`): Opens the pull request that merges `main` into the [`next` branch](../../book/src/dev/next-branch.md)
+- **Sync main to next** (`sync-next.yml`): Keeps the `sync/main-to-next` branch at `main` and opens its auto-merging pull request into the [`next` branch](../../book/src/dev/next-branch.md)
 
 ### Supporting/Reusable Workflows
 
