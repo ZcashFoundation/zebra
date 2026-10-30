@@ -6255,7 +6255,7 @@ tokio::task_local! {
     /// Private Halo2 cache for the current transaction-verification test.
     pub(super) static HALO2_CACHE_VERIFIER: crate::primitives::halo2::CachedVerifierService;
     /// Private Sapling cache for the current transaction-verification test.
-    pub(super) static SAPLING_CACHE_VERIFIER: crate::primitives::sapling::VerifierService;
+    pub(crate) static SAPLING_CACHE_VERIFIER: crate::primitives::sapling::VerifierService;
 }
 
 /// Returns a block request that mines `tx` at `height`.
@@ -6421,7 +6421,7 @@ fn the_halo2_cache_is_reused_only_for_the_transaction_that_earned_it() {
 /// [`cacheable_mainnet_orchard_transaction`]'s: a Sapling bundle and no Orchard bundle, no
 /// transparent inputs, no time-based lock time, and a fee at or above the ZIP 317 conventional
 /// fee.
-fn cacheable_mainnet_sapling_transaction() -> (NetworkUpgrade, Transaction) {
+pub(crate) fn cacheable_mainnet_sapling_transaction() -> (NetworkUpgrade, Transaction) {
     zebra_test::vectors::MAINNET_BLOCKS
         .iter()
         .flat_map(|(height, bytes)| {
