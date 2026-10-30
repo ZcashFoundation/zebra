@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 use proptest::prelude::*;
 use zebra_chain::{block::Height, transaction, transparent};
@@ -75,6 +77,47 @@ proptest! {
             for (outpoint, utxo) in reference {
                 prop_assert_eq!(reader.get(&outpoint), Some(&utxo));
             }
+        }
+    }
+}
+
+/// Grows one partition's table through several resizes, so lookups rely on rehashing by key.
+#[test]
+fn one_partition_growth_keeps_lookups_and_snapshots() {
+    let mut index = CreatedUtxos::default();
+    let target = index.partition(&key(0));
+    let keys: Vec<OutPoint> = (0..u32::MAX)
+        .map(|n| OutPoint {
+            hash: transaction::Hash([7; 32]),
+            index: n,
+        })
+        .filter(|outpoint| index.partition(outpoint) == target)
+        .take(200)
+        .collect();
+    let mut expected = HashMap::new();
+    for (n, outpoint) in (0..).zip(&keys[..50]) {
+        index.insert(*outpoint, value(n));
+        expected.insert(*outpoint, value(n));
+    }
+    let snapshot = (index.clone(), expected.clone());
+
+    for (n, outpoint) in (50..).zip(&keys[50..]) {
+        index.insert(*outpoint, value(n));
+        expected.insert(*outpoint, value(n));
+    }
+    for (n, outpoint) in (500..).zip(keys.iter().step_by(3)) {
+        assert_eq!(index.remove(outpoint), expected.remove(outpoint));
+        if n % 2 == 0 {
+            index.insert(*outpoint, value(n));
+            expected.insert(*outpoint, value(n));
+        }
+    }
+
+    assert_eq!(index.partitions[target].len(), expected.len());
+    for (index, expected) in [(&index, &expected), (&snapshot.0, &snapshot.1)] {
+        assert_eq!(index.len, expected.len());
+        for outpoint in &keys {
+            assert_eq!(index.get(outpoint), expected.get(outpoint));
         }
     }
 }

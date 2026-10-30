@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Hash each key once when indexing transparent outputs and addresses in non-finalized blocks, using `hashbrown 0.16` for the partitioned indexes ([#12120](https://github.com/ZcashFoundation/zebra/pull/12120)).
+time: 2026-10-30T14:35:18.727601537-05:00
