@@ -1,0 +1,4 @@
+project: zebra-script
+kind: breaking
+body: Changed `Sigops::scripts` to return an iterator of borrowed `zcash_script::script::Code` references instead of owned byte vectors. Implementations must borrow the complete input and output scripts, including the coinbase scriptSig ([#12000](https://github.com/ZcashFoundation/zebra/issues/12000)).
+time: 2026-10-24T07:11:23.736546587+02:00
