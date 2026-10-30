@@ -250,23 +250,21 @@ impl PrecomputedTxData {
 
     /// Computes precomputed sighash data with an explicit consensus branch ID.
     ///
-    /// Clones the transaction to get an owned `TransactionData` for `map_authorization`,
+    /// Clones each bundle once to get owned `TransactionData` for `map_authorization`,
     /// reconstructing with the correct `branch_id` for V1-V4 sighash computation.
     fn from_transaction_with_branch_id(
         tx: &crate::transaction::Transaction,
         branch_id: zcash_protocol::consensus::BranchId,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
     ) -> Result<PrecomputedTxData, Error> {
-        let inner = tx.inner();
+        let data = tx.inner();
 
-        // Clone the transaction to get an owned TransactionData we can transform.
-        // Reconstruct with the correct branch_id (the stored value may differ for
-        // V1-V4 transactions that were parsed without network context).
+        // Reconstruct from borrowed fields with the correct branch_id (the stored value may
+        // differ for V1-V4 transactions that were parsed without network context).
         //
         // The rebuild must preserve every bundle: losing the Ironwood one would leave
         // `PrecomputedTxData::ironwood_bundle` empty, and the verifier queues an Ironwood proof
         // check only when that returns `Some`.
-        let data = inner.clone().into_data();
         let data_with_branch_id = crate::transaction::compat::transaction_data_from_parts(
             data.version(),
             branch_id,
