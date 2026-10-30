@@ -370,12 +370,10 @@ from the running test's logs, not merely from the source constant.
 
 The [lookup script](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/scripts/gcp-get-cached-disks.sh)
 requires a `READY` image matching purpose, database major, network, and
-state kind. It tries a branch-specific pattern, then `main`, then any
-branch, selecting the newest match in each query. The current first
-pattern places the branch where generated names put the commit SHA, so it
-does not provide the intended same-branch preference for ordinary branch
-names. Do not rely on same-branch or same-commit cache selection. Inspect
-the chosen image in the job output.
+state kind. It tries the current branch's truncated ref slug followed by a
+commit SHA, then `main`, then any branch, selecting the newest match in each
+query. Branch slugs can collide after truncation; selection does not require
+the current commit. Inspect the chosen image in the job output.
 
 The `allow_missing` input permits an empty selected name, not a failed
 image-list query. List recent v29 Mainnet tip images with:
