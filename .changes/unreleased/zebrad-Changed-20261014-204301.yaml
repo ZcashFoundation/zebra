@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Ordinary block requests that replace queued mined requests no longer require capacity in superseded notification channels; healthy observers still receive commits.
+time: 2026-10-14T20:43:01.905013183+02:00
