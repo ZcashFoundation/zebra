@@ -7,9 +7,10 @@
 
 use std::time::Duration;
 
+use tokio::time::{sleep, Instant};
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
 use tower::{Service, ServiceExt};
-use tower_batch_control::{error, Batch};
+use tower_batch_control::{error, Batch, BatchControl};
 use tower_test::mock;
 
 #[tokio::test]
@@ -18,7 +19,13 @@ async fn wakes_pending_waiters_on_close() {
 
     let (service, mut handle) = mock::pair::<_, ()>();
 
-    let (mut service, worker) = Batch::pair(service, 1, 1, Duration::from_secs(1));
+    let (mut service, worker) = Batch::pair(
+        service,
+        1,
+        1,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+    );
     let mut worker = task::spawn(worker.run());
 
     // // keep the request in the worker
@@ -74,7 +81,13 @@ async fn wakes_pending_waiters_on_failure() {
 
     let (service, mut handle) = mock::pair::<_, ()>();
 
-    let (mut service, worker) = Batch::pair(service, 1, 1, Duration::from_secs(1));
+    let (mut service, worker) = Batch::pair(
+        service,
+        1,
+        1,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+    );
     let mut worker = task::spawn(worker.run());
 
     // keep the request in the worker
@@ -123,4 +136,187 @@ async fn wakes_pending_waiters_on_failure() {
         err.is::<error::ServiceError>(),
         "ready 2 should fail with a ServiceError, got: {err:?}"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn batch_flushes_on_idle() {
+    let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+    let (mut service, worker) = Batch::pair(
+        inner,
+        64,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+    let start = Instant::now();
+
+    // Both a singleton and a burst flush on idle, including after the previous batch.
+    for count in [16, 1] {
+        for _ in 0..count {
+            drop(service.ready().await.unwrap().call(()));
+            assert_pending!(worker.poll());
+            let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+            assert!(matches!(request, BatchControl::Item(())));
+            response.send_response(());
+        }
+
+        sleep(Duration::from_millis(4)).await;
+        assert_pending!(worker.poll());
+        assert!(handle.poll_request().is_pending());
+        sleep(Duration::from_millis(1)).await;
+        assert_pending!(worker.poll());
+        let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+        assert!(matches!(request, BatchControl::Flush));
+        response.send_response(());
+        assert_pending!(worker.poll());
+        assert!(handle.poll_request().is_pending());
+    }
+    assert_eq!(start.elapsed(), Duration::from_millis(10));
+}
+
+#[tokio::test(start_paused = true)]
+async fn batch_idle_extends_until_max_latency() {
+    let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+    let (mut service, worker) = Batch::pair(
+        inner,
+        64,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+    let start = Instant::now();
+
+    for _ in 0..25 {
+        assert_pending!(worker.poll());
+        assert!(handle.poll_request().is_pending());
+        drop(service.ready().await.unwrap().call(()));
+        assert_pending!(worker.poll());
+        let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+        assert!(matches!(request, BatchControl::Item(())));
+        response.send_response(());
+        sleep(Duration::from_millis(4)).await;
+    }
+
+    assert_eq!(start.elapsed(), Duration::from_millis(100));
+    assert_pending!(worker.poll());
+    let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Flush));
+    response.send_response(());
+}
+
+#[tokio::test(start_paused = true)]
+async fn queued_items_extend_idle_but_not_max_latency() {
+    for delay_ms in [6, 100] {
+        let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+        let (mut service, worker) = Batch::pair(
+            inner,
+            64,
+            1,
+            Duration::from_millis(100),
+            Duration::from_millis(5),
+        );
+        let mut worker = task::spawn(worker.run());
+        drop(service.ready().await.unwrap().call(()));
+        assert_pending!(worker.poll());
+        let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+        assert!(matches!(request, BatchControl::Item(())));
+        response.send_response(());
+
+        // Input keeps arriving while the worker is not polled.
+        for _ in 0..3 {
+            drop(service.ready().await.unwrap().call(()));
+        }
+        sleep(Duration::from_millis(delay_ms)).await;
+        assert_pending!(worker.poll());
+        if delay_ms < 100 {
+            for _ in 0..3 {
+                let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+                assert!(matches!(request, BatchControl::Item(())));
+                response.send_response(());
+            }
+            assert!(handle.poll_request().is_pending());
+            sleep(Duration::from_millis(5)).await;
+            assert_pending!(worker.poll());
+        }
+        let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+        assert!(matches!(request, BatchControl::Flush));
+        response.send_response(());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn overflowing_batch_timeouts_flush_on_finite_bound() {
+    let finite = Duration::from_millis(10);
+    for (max_latency, max_idle, count, flush_after) in [
+        (Duration::MAX, finite, 1, finite),
+        (Duration::MAX, finite, 2, Duration::from_millis(14)),
+        (finite, Duration::MAX, 1, finite),
+        (finite, Duration::MAX, 2, finite),
+    ] {
+        let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+        let (mut service, worker) = Batch::pair(inner, 4, 1, max_latency, max_idle);
+        let mut worker = task::spawn(worker.run());
+        let start = Instant::now();
+
+        // Exercise both the first-item deadline and its reset on a later item.
+        for item in 0..count {
+            if item > 0 {
+                sleep(Duration::from_millis(4)).await;
+            }
+            drop(service.ready().await.unwrap().call(()));
+            assert_pending!(worker.poll());
+            let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+            assert!(matches!(request, BatchControl::Item(())));
+            response.send_response(());
+            assert!(handle.poll_request().is_pending());
+        }
+
+        sleep(flush_after - start.elapsed() - Duration::from_millis(1)).await;
+        assert_pending!(worker.poll());
+        assert!(handle.poll_request().is_pending());
+        sleep(Duration::from_millis(1)).await;
+        assert_pending!(worker.poll());
+        let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+        assert!(matches!(request, BatchControl::Flush));
+        response.send_response(());
+        assert_eq!(start.elapsed(), flush_after);
+
+        drop(service);
+        assert_ready!(worker.poll());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn batch_max_items_flushes_immediately() {
+    let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+    let (mut service, worker) = Batch::pair(
+        inner,
+        4,
+        1,
+        Duration::from_millis(100),
+        Duration::from_millis(5),
+    );
+    let mut worker = task::spawn(worker.run());
+    let start = Instant::now();
+
+    for _ in 0..3 {
+        drop(service.ready().await.unwrap().call(()));
+        assert_pending!(worker.poll());
+        let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+        assert!(matches!(request, BatchControl::Item(())));
+        response.send_response(());
+        assert!(handle.poll_request().is_pending());
+    }
+
+    drop(service.ready().await.unwrap().call(()));
+    assert_pending!(worker.poll());
+    let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Item(())));
+    response.send_response(());
+    let (request, response) = assert_ready!(handle.poll_request()).unwrap();
+    assert!(matches!(request, BatchControl::Flush));
+    response.send_response(());
+    assert_eq!(start.elapsed(), Duration::ZERO);
 }

@@ -290,6 +290,7 @@ fn batch_fallback_verifier() -> BatchFallbackService {
             super::MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
+            super::MAX_BATCH_IDLE,
         ),
         tower::service_fn(verify_single as fn(Item) -> _),
     )
