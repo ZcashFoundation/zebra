@@ -27,3 +27,9 @@ Merge it with a merge commit. GitHub then marks the automatic sync pull request 
 ## Compare `next` With `main`
 
 `next` nodes report to Sentry in the `next` environment, and stage nodes in `stage`. Compare nodes on the same network and zone, for example `zebrad-next-mainnet-b` and `zebrad-main-mainnet-b`.
+
+## Read the `next` Book
+
+The book from `next` is published at [zebra.zfnd.org/next](https://zebra.zfnd.org/next/), beside the book from `main` at [zebra.zfnd.org](https://zebra.zfnd.org/). Compare the same page in both, for example `/dev/next-branch.html` and `/next/dev/next-branch.html`.
+
+`/next` updates after each push to `next` that changes the book. If the `next` book doesn't change for 90 days, `/next` is removed until its next change.
