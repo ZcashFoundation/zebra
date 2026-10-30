@@ -9,14 +9,14 @@ mod utxo;
 
 use std::{collections::HashMap, fmt, ops::AddAssign};
 
+use zcash_protocol::value::Zatoshis;
 use zcash_script::{opcode::Evaluable as _, pattern::push_num};
-use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
 
 use crate::{
     amount::{Amount, NonNegative},
     block,
     parameters::Network,
-    serialization::ZcashSerialize,
+    serialization::{CompactSizeMessage, ZcashSerialize},
     transaction,
     transparent::serialize::GENESIS_COINBASE_SCRIPT_SIG,
 };
@@ -320,17 +320,35 @@ impl Output {
         self.value
     }
 
-    /// Return the destination address from a transparent output.
+    /// Return the destination of a canonical P2PKH or P2SH output without allocating.
     ///
-    /// Returns None if the address type is not valid or unrecognized.
+    /// Returns `None` for all other scripts, including nonminimal pushes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a manually constructed script exceeds the network message size limit.
     pub fn address(&self, net: &Network) -> Option<Address> {
-        match TxOut::try_from(self).ok()?.recipient_address()? {
-            TransparentAddress::PublicKeyHash(pkh) => {
-                Some(Address::from_pub_key_hash(net.t_addr_kind(), pkh))
+        let script = self.lock_script.as_raw_bytes();
+        // Preserve the owned conversion's length and value validation.
+        CompactSizeMessage::try_from(script.len())
+            .map_err(std::io::Error::from)
+            .expect("zcash_primitives and Zebra transparent output formats must be compatible");
+        Zatoshis::try_from(self.value).ok()?;
+
+        match script {
+            // OP_DUP OP_HASH160 <direct 20-byte push> OP_EQUALVERIFY OP_CHECKSIG
+            [0x76, 0xa9, 0x14, hash @ .., 0x88, 0xac] if hash.len() == 20 => {
+                Some(Address::from_pub_key_hash(
+                    net.t_addr_kind(),
+                    hash.try_into().expect("matched a 20-byte public key hash"),
+                ))
             }
-            TransparentAddress::ScriptHash(sh) => {
-                Some(Address::from_script_hash(net.t_addr_kind(), sh))
-            }
+            // OP_HASH160 <direct 20-byte push> OP_EQUAL
+            [0xa9, 0x14, hash @ .., 0x87] if hash.len() == 20 => Some(Address::from_script_hash(
+                net.t_addr_kind(),
+                hash.try_into().expect("matched a 20-byte script hash"),
+            )),
+            _ => None,
         }
     }
 
