@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Changed empty-state `getinfo`, `getblockchaininfo` and `getmininginfo` difficulty to `1.0`,
+  matching zcashd.
+time: 2026-10-24T20:34:17.011362024+02:00

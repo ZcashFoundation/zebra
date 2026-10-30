@@ -1,0 +1,6 @@
+project: zebrad
+kind: Added
+body: >-
+  Added current network difficulty to `getmininginfo` and advertised peer starting heights to
+  `getpeerinfo` for pool compatibility.
+time: 2026-10-24T20:20:05.502682933+02:00
