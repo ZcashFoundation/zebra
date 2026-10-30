@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::service::non_finalized_state::chain::{RevertPosition, UpdateWith};
 use proptest::prelude::*;
@@ -112,8 +114,13 @@ proptest! {
                 if partition != touched {
                     continue;
                 }
-                for (other_address, old_history) in old.iter().filter(|(a, _)| **a != address) {
-                    prop_assert!(Arc::ptr_eq(current.get(other_address).unwrap(), old_history));
+                for (other_address, old_history) in old.iter().filter(|(a, _)| *a != address) {
+                    let current_history = current
+                        .iter()
+                        .find(|(a, _)| a == other_address)
+                        .map(|(_, history)| history)
+                        .unwrap();
+                    prop_assert!(Arc::ptr_eq(current_history, old_history));
                 }
             }
             prop_assert_eq!(index.len(), expected.len());
@@ -132,6 +139,75 @@ proptest! {
             for (address, transfers) in reference {
                 prop_assert_eq!(reader.get(&address), Some(&transfers));
             }
+        }
+    }
+}
+
+/// Grows one partition's table through several resizes, so lookups rely on rehashing by key.
+#[test]
+fn one_partition_growth_keeps_lookups_and_snapshots() {
+    let mut index = AddressTransfers::default();
+    let target = index.partition(&address(0));
+    let addresses: Vec<Address> = (0..u32::MAX)
+        .map(|n| {
+            let mut pub_key_hash = [0; 20];
+            pub_key_hash[..4].copy_from_slice(&n.to_le_bytes());
+            Address::PayToPublicKeyHash {
+                network_kind: NetworkKind::Mainnet,
+                pub_key_hash,
+            }
+        })
+        .filter(|address| index.partition(address) == target)
+        .take(200)
+        .collect();
+    let mut expected: HashMap<Address, TransparentTransfers> = HashMap::new();
+    let receive = |index: &mut AddressTransfers,
+                   expected: &mut HashMap<Address, TransparentTransfers>,
+                   address: Address,
+                   n: u32| {
+        let outpoint = transparent::OutPoint {
+            hash: transaction::Hash([1; 32]),
+            index: n,
+        };
+        let utxo = Arc::new(transparent::OrderedUtxo::new(
+            transparent::Output::new(1u64.try_into().unwrap(), transparent::Script::new(&[])),
+            Height(1),
+            0,
+        ));
+        let update = (&outpoint, &utxo);
+        index
+            .get_or_insert_mut(address)
+            .update_chain_tip_with(&update)
+            .unwrap();
+        expected
+            .entry(address)
+            .or_default()
+            .update_chain_tip_with(&update)
+            .unwrap();
+    };
+    for (n, address) in (0..).zip(&addresses[..50]) {
+        receive(&mut index, &mut expected, *address, n);
+    }
+    let snapshot = (index.clone(), expected.clone());
+
+    for (n, address) in (50..).zip(&addresses[50..]) {
+        receive(&mut index, &mut expected, *address, n);
+    }
+    for (n, address) in (500..).zip(addresses.iter().step_by(3)) {
+        assert_eq!(
+            index.remove(address).as_deref(),
+            expected.remove(address).as_ref()
+        );
+        if n % 2 == 0 {
+            receive(&mut index, &mut expected, *address, n);
+        }
+    }
+
+    assert_eq!(index.partitions[target].len(), expected.len());
+    for (index, expected) in [(&index, &expected), (&snapshot.0, &snapshot.1)] {
+        assert_eq!(index.len(), expected.len());
+        for address in &addresses {
+            assert_eq!(index.get(address), expected.get(address));
         }
     }
 }

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Hash each key once when indexing transparent outputs and addresses in non-finalized blocks.
+time: 2026-10-30T14:35:18.727601537-05:00
