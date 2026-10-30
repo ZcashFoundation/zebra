@@ -19,6 +19,7 @@ use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
+    error::PreciousError,
     service::{
         finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
@@ -2436,6 +2437,212 @@ fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         previous = state.best_tip().expect("the chain has a tip");
     }
 
+    Ok(())
+}
+
+/// Build equal-work siblings with explicit first- and second-received stamps.
+fn precious_test_forks() -> (NonFinalizedState, FinalizedState, [Arc<Block>; 3]) {
+    let network = Network::Mainnet;
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let first = root
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([1; 32]);
+    let second = root
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([2; 32]);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(root.clone().prepare(), &finalized_state)
+        .unwrap();
+    let received = std::time::Instant::now();
+    for (block, delay) in [(&first, 0), (&second, 1)] {
+        let mut prepared = block.clone().prepare();
+        prepared.received_time = Some(received + Duration::from_secs(delay));
+        state.commit_block(prepared, &finalized_state).unwrap();
+    }
+    assert_eq!(state.best_tip().unwrap().1, first.hash());
+    (state, finalized_state, [root, first, second])
+}
+
+#[test]
+fn precious_block_prefers_second_received_tip() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, [_, first, second]) = precious_test_forks();
+    let snapshot = state.clone();
+    assert_eq!(
+        state
+            .precious_block(second.hash(), &finalized_state.db)
+            .unwrap(),
+        second.hash()
+    );
+    assert_eq!(state.best_tip().unwrap().1, second.hash());
+    assert_eq!(state.chain_count(), 2);
+    assert_eq!(snapshot.best_tip().unwrap().1, first.hash());
+}
+
+#[test]
+fn precious_block_latest_call_wins() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, [_, first, second]) = precious_test_forks();
+    for tip in [&second, &first, &second] {
+        state
+            .precious_block(tip.hash(), &finalized_state.db)
+            .unwrap();
+        assert_eq!(state.best_tip().unwrap().1, tip.hash());
+        assert_eq!(state.chain_count(), 2);
+    }
+    let before = state.clone();
+    state
+        .precious_block(second.hash(), &finalized_state.db)
+        .unwrap();
+    assert!(
+        state.eq_internal_state(&before),
+        "repeating the latest call must not change the state"
+    );
+}
+
+#[test]
+fn precious_block_never_overrides_more_work() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, [_, first, second]) = precious_test_forks();
+    state
+        .precious_block(second.hash(), &finalized_state.db)
+        .unwrap();
+    assert_eq!(state.best_tip().unwrap().1, second.hash());
+    let child = first.make_fake_child().set_work(10);
+    state
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    assert_eq!(state.best_tip().unwrap().1, child.hash());
+}
+
+#[test]
+fn precious_block_lower_work_call_leaves_no_preference() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, [_, first, second]) = precious_test_forks();
+    let child = first.make_fake_child().set_work(10);
+    state
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    let before = state.clone();
+    state
+        .precious_block(second.hash(), &finalized_state.db)
+        .unwrap();
+    assert_eq!(state.best_tip().unwrap().1, child.hash());
+    assert!(
+        state.eq_internal_state(&before),
+        "a lower-work call must not store a rank"
+    );
+    assert!(state
+        .chain_iter()
+        .all(|chain| chain.precious_rank.is_none()));
+    state.invalidate_block(child.hash()).unwrap();
+    assert_eq!(state.best_tip().unwrap().1, first.hash());
+}
+
+#[test]
+fn precious_block_preference_drops_on_push_and_fork() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, [root, first, second]) = precious_test_forks();
+    state
+        .precious_block(second.hash(), &finalized_state.db)
+        .unwrap();
+    let precious = state.best_chain().unwrap();
+    assert!(precious.precious_rank.is_some());
+    for hash in [root.hash(), second.hash()] {
+        assert!(precious.fork(hash).unwrap().precious_rank.is_none());
+    }
+    let first_child = first.make_fake_child().set_work(10);
+    let second_child = second.make_fake_child().set_work(10);
+    let received = std::time::Instant::now();
+    for (block, delay) in [(&first_child, 0), (&second_child, 1)] {
+        let mut prepared = block.clone().prepare();
+        prepared.received_time = Some(received + Duration::from_secs(delay));
+        state.commit_block(prepared, &finalized_state).unwrap();
+    }
+    assert!(state
+        .chain_iter()
+        .all(|chain| chain.precious_rank.is_none()));
+    assert_eq!(state.best_tip().unwrap().1, first_child.hash());
+}
+
+#[test]
+fn precious_block_rejects_unknown_hash() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, _) = precious_test_forks();
+    let unknown = block::Hash([0; 32]);
+    let before = state.clone();
+    let error = state
+        .precious_block(unknown, &finalized_state.db)
+        .unwrap_err();
+    assert_eq!(error.to_string(), "Block not found");
+    assert!(matches!(error, PreciousError::MissingBlock(hash) if hash == unknown));
+    assert!(state.eq_internal_state(&before));
+}
+
+#[test]
+fn precious_block_accepts_known_non_tips_unchanged() {
+    let _init_guard = zebra_test::init();
+    let (mut state, mut finalized_state, [root, _, second]) = precious_test_forks();
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    finalized_state
+        .commit_finalized_direct(
+            crate::CheckpointVerifiedBlock::from(genesis.clone()).into(),
+            None,
+            "precious finalized no-op test",
+        )
+        .unwrap();
+    state
+        .precious_block(second.hash(), &finalized_state.db)
+        .unwrap();
+    assert_eq!(state.best_tip().unwrap().1, second.hash());
+    let before = state.clone();
+    for hash in [root.hash(), genesis.hash()] {
+        assert_eq!(
+            state.precious_block(hash, &finalized_state.db).unwrap(),
+            hash
+        );
+        assert!(state.eq_internal_state(&before));
+    }
+}
+
+#[test]
+fn precious_block_preference_is_not_backed_up() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized_state, [_, first, second]) = precious_test_forks();
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+    let baseline = super::super::backup::restore_backup(
+        NonFinalizedState::new(&Network::Mainnet),
+        backup_dir.path(),
+        &finalized_state.db,
+    );
+    let preferred = if baseline.best_tip().unwrap().1 == first.hash() {
+        second
+    } else {
+        first
+    };
+    state
+        .precious_block(preferred.hash(), &finalized_state.db)
+        .unwrap();
+    assert_eq!(state.best_tip().unwrap().1, preferred.hash());
+    assert!(state.best_chain().unwrap().precious_rank.is_some());
+    state.write_to_backup(backup_dir.path());
+    let restored = super::super::backup::restore_backup(
+        NonFinalizedState::new(&Network::Mainnet),
+        backup_dir.path(),
+        &finalized_state.db,
+    );
+    assert_eq!(restored.chain_count(), 2);
+    assert_eq!(restored.precious_rank, 0);
+    assert!(restored
+        .chain_iter()
+        .all(|chain| chain.precious_rank.is_none()));
+    assert_eq!(restored.best_tip(), baseline.best_tip());
     Ok(())
 }
 
