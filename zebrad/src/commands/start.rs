@@ -384,7 +384,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) =
+        let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
                 config.network.clone(),
                 inbound,
@@ -601,7 +601,7 @@ impl StartCmd {
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change.clone(),
-                peer_set.clone(),
+                block_advertiser,
                 Some(submit_block_channel.receiver()),
             )
             .in_current_span(),

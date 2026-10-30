@@ -1644,21 +1644,20 @@ async fn rpc_getaddresstxids_response() {
             zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
-            // Exhaustively test possible block ranges for mainnet.
-            for start in 1..=10 {
-                for end in start..=10 {
-                    rpc_getaddresstxids_response_with(
-                        &network,
-                        Some(start),
-                        Some(end),
-                        &address,
-                        &read_state,
-                        &latest_chain_tip,
-                        (end - start + 1) as usize,
-                    )
-                    .await;
-                }
-            }
+            // Keep every range and its full no-request window, but overlap independent cases.
+            let ranges = (1..=10).flat_map(|start| (start..=10).map(move |end| (start, end)));
+            futures::future::join_all(ranges.map(|(start, end)| {
+                rpc_getaddresstxids_response_with(
+                    &network,
+                    Some(start),
+                    Some(end),
+                    &address,
+                    &read_state,
+                    &latest_chain_tip,
+                    usize::try_from(end - start + 1).expect("range contains at most ten blocks"),
+                )
+            }))
+            .await;
         } else {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
@@ -3574,8 +3573,9 @@ async fn getblocktemplate_precomputed() {
 
     // The RPC validates the tip against the state, then must answer from the precomputed template:
     // the mempool never responds again, so selecting transactions for a fresh template would block
-    // forever.
+    // forever. An aborted responder can still claim a request until it stops, so wait for it.
     mempool_responder.abort();
+    let _ = mempool_responder.await;
 
     let template = tokio::time::timeout(Duration::from_secs(1), rpc.get_block_template(None))
         .await
@@ -3596,6 +3596,7 @@ async fn getblocktemplate_precomputed() {
         Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
 
     read_state_responder.abort();
+    let _ = read_state_responder.await;
 
     let (read_state_responder, mempool_responder) =
         spawn_responders(next_tip_height, next_tip_hash);
@@ -4561,6 +4562,189 @@ async fn rpc_z_validateaddress() {
         z_validate_address.is_valid,
         "Unified address should be valid on Mainnet"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_converttex() {
+    use crate::server::error::LegacyCode;
+
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // ZIP 320 reference test vector: <https://zips.z.cash/zip-0320#reference-implementation>
+    const P2PKH: &str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+    const TEX: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    let tex = rpc
+        .z_convert_tex(P2PKH.to_string())
+        .await
+        .expect("a mainnet P2PKH address should convert");
+    assert_eq!(tex, TEX, "conversion should match the ZIP 320 test vector");
+
+    // Round trip: the TEX address is valid, and carries the same 20-byte hash as its source.
+    assert!(
+        rpc.validate_address(tex.clone())
+            .await
+            .expect("we should have a validate_address::Response")
+            .is_valid,
+        "converted TEX address should pass validateaddress"
+    );
+    let source: zebra_chain::transparent::Address = P2PKH.parse().expect("valid P2PKH");
+    let converted: zebra_chain::transparent::Address = tex.parse().expect("valid TEX");
+    assert_eq!(
+        source.hash_bytes(),
+        converted.hash_bytes(),
+        "TEX address should re-encode the P2PKH validating key hash unchanged"
+    );
+
+    // Addresses that decode but aren't transparent P2PKH: zcashd returns -8.
+    for (address, kind) in [
+        ("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR", "P2SH"),
+        (
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya",
+            "Sapling",
+        ),
+        (
+            "u1c4ndwzy9hx70zjdtq4qt4x3c7zm0fnh85g9thsc8sunjcpk905w898pdvw82gdpj2p0mggs9tm23u6mzwk3xn4q25fq4czglssz5l6rlj268wfamxn7z4pvmgxwfl55xf0ua2u03afw66579fplkh8mvx2tp6t8er3zvvvtvf8e43mjv7n32st3zpvamfpvmxdrnzesakax8jrq3l3e",
+            "unified",
+        ),
+        // zcashd can't decode TEX addresses at all and returns -5 here; Zebra can, so it
+        // falls through to the "not P2PKH" check instead. The call is rejected either way.
+        (TEX, "TEX"),
+    ] {
+        let error = rpc
+            .z_convert_tex(address.to_string())
+            .await
+            .expect_err("non-P2PKH addresses must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidParameter),
+            "{kind} address should be rejected as an invalid parameter"
+        );
+        assert_eq!(error.message(), "Address is not a transparent p2pkh address");
+    }
+
+    // Addresses that don't decode, or are for another network: zcashd returns -5.
+    for (address, kind) in [
+        ("not an address", "garbage"),
+        ("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx", "Testnet P2PKH"),
+    ] {
+        let error = rpc
+            .z_convert_tex(address.to_string())
+            .await
+            .expect_err("undecodable or wrong-network addresses must be rejected");
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidAddressOrKey),
+            "{kind} should be rejected as an invalid address on Mainnet"
+        );
+        assert_eq!(error.message(), "Invalid address");
+    }
+}
+
+/// Addresses produced by `z_converttex` must be rejected by the address-index RPCs, rather
+/// than silently returning an empty result. See the comment in `ValidateAddresses`.
+#[test]
+fn tex_addresses_are_rejected_by_the_address_index() {
+    use crate::{methods::ValidateAddresses, server::error::LegacyCode};
+
+    let _init_guard = zebra_test::init();
+
+    const P2PKH: &str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+    const TEX: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    // The underlying P2PKH address is still accepted, including alongside other addresses.
+    GetAddressBalanceRequest::new(vec![P2PKH.to_string()])
+        .valid_addresses()
+        .expect("a P2PKH address should be accepted");
+
+    for addresses in [
+        vec![TEX.to_string()],
+        // A TEX address must not slip through by being mixed in with valid ones.
+        vec![P2PKH.to_string(), TEX.to_string()],
+    ] {
+        let error = GetAddressBalanceRequest::new(addresses.clone())
+            .valid_addresses()
+            .expect_err("a TEX address must be rejected");
+
+        assert_eq!(
+            error.code(),
+            i32::from(LegacyCode::InvalidAddressOrKey),
+            "TEX address in {addresses:?} should be rejected as an invalid address"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_converttex_regtest() {
+    use crate::server::error::LegacyCode;
+
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Testnet(Arc::new(
+            Parameters::new_regtest(Default::default())
+                .expect("failed to build regtest parameters"),
+        )),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // tm address (P2PKH): Testnet and Regtest share transparent address prefixes, so the input
+    // decodes as Testnet, but the TEX HRP must be the Regtest one.
+    let tex = rpc
+        .z_convert_tex("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx".to_string())
+        .await
+        .expect("a tm address should convert on Regtest");
+    assert_eq!(tex, "texregtest1mjhhrt3ldpw98t2rxd9uzq9c25wer5nrttd29l");
+
+    // The result round trips: Zebra parses the `texregtest` HRP back to a Regtest TEX address.
+    assert!(
+        rpc.validate_address(tex)
+            .await
+            .expect("we should have a validate_address::Response")
+            .is_valid,
+        "converted TEX address should pass validateaddress on Regtest"
+    );
+
+    // t1 address: wrong network
+    let error = rpc
+        .z_convert_tex("t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC".to_string())
+        .await
+        .expect_err("a Mainnet address must be rejected on Regtest");
+    assert_eq!(error.code(), i32::from(LegacyCode::InvalidAddressOrKey));
+    assert_eq!(error.message(), "Invalid address");
 }
 
 #[tokio::test(flavor = "multi_thread")]

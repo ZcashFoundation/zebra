@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: 'Capped the number of transaction IDs the inbound service looks up per transaction request at `GETDATA_MAX_TRANSACTION_COUNT`, before the mempool lookup — matching the block request path, which was already capped at `GETDATA_MAX_BLOCK_COUNT` ([#10566](https://github.com/ZcashFoundation/zebra/issues/10566)).'
-time: 2026-10-09T12:00:00.000000000Z

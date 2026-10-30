@@ -2,16 +2,16 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use futures::{stream, StreamExt};
+use futures::{channel::mpsc, stream, StreamExt};
 use tower::{discover::Change, ServiceExt};
 use zebra_chain::{block, chain_tip::mock::MockChainTip, parameters::Network};
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
-    peer::{ClientTestHarness, ConnectedAddr, MinimumPeerVersion},
+    peer::{ClientTestHarness, ConnectedAddr, LoadTrackedClient, MinimumPeerVersion},
     peer_set::InventoryChange,
     types::{InventoryHash, PeerServices},
-    BoxError, NetworkService, PeerSocketAddr, Request, Response,
+    BlockAdvertiser, BoxError, NetworkService, PeerSocketAddr, Request, Response,
 };
 
 pub use crate::peer::ReceivedClientRequest;
@@ -22,11 +22,14 @@ use super::{PeerSetBuilder, PeerSetGuard};
 pub struct PeerSetHarness {
     /// The service to pass to the production sync or inbound constructor.
     pub network: NetworkService,
+    /// The bounded advertiser for this peer set.
+    pub block_advertiser: BlockAdvertiser<MockChainTip>,
     /// The connected addresses, in the same order as the supplied service flags.
     pub addrs: Vec<PeerSocketAddr>,
     peers: Vec<ClientTestHarness>,
     guard: PeerSetGuard,
     busy_requests: Vec<super::super::ResponseFuture>,
+    discovery: mpsc::Sender<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>>,
 }
 
 impl PeerSetHarness {
@@ -55,8 +58,9 @@ impl PeerSetHarness {
             peers.push(handle);
         }
         let (tip, _tip_sender) = MockChainTip::new();
+        let (discovery, discovered) = mpsc::channel(1);
         let builder = PeerSetBuilder::new()
-            .with_discover(stream::iter(changes).chain(stream::pending()))
+            .with_discover(stream::iter(changes).chain(discovered))
             .with_minimum_peer_version(MinimumPeerVersion::new(tip, &Network::Mainnet));
         let (mut peer_set, mut peer_guard) = PeerSetBuilder {
             inv_stream: Some(inventory_receiver),
@@ -65,7 +69,9 @@ impl PeerSetHarness {
         .build();
         // Keep the sender for the channel actually used by this peer set.
         *peer_guard.inventory_sender() = guard.inventory_sender().take();
-        peer_set.ready().await.expect("test peers are ready");
+        if !services.is_empty() {
+            peer_set.ready().await.expect("test peers are ready");
+        }
         let mut busy_requests = Vec::new();
         if let Some(peer) = busy_peer {
             for byte in [0xF0, 0xF1] {
@@ -81,14 +87,36 @@ impl PeerSetHarness {
                 .expect("an idle fallback peer remains ready");
             assert!(peer_set.cancel_handles.contains_key(&addrs[peer]));
         }
+        let block_advertiser = peer_set.block_advertiser();
         let (network, _poll_task) = peer_set.into_buffer(3);
         Self {
             network,
+            block_advertiser,
             addrs,
             peers,
             guard: peer_guard,
             busy_requests,
+            discovery,
         }
+    }
+
+    /// Discovers another real client without issuing an ordinary network request.
+    pub fn connect_peer(&mut self, services: PeerServices) -> usize {
+        let peer = self.peers.len();
+        let host = u8::try_from(peer + 1).expect("test peer count fits in an IPv4 octet");
+        let addr: PeerSocketAddr = SocketAddr::from(([127, 0, 0, host], 8233)).into();
+        let (mut client, handle) = ClientTestHarness::build()
+            .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+            .with_services(services)
+            .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
+            .finish();
+        client.inv_collector = self.guard.inventory_sender().as_ref().unwrap().clone();
+        self.discovery
+            .try_send(Ok(Change::Insert(addr, client.into())))
+            .expect("the discovery channel has room for a test peer");
+        self.addrs.push(addr);
+        self.peers.push(handle);
+        peer
     }
 
     /// Receives an already-dispatched client request, without advancing the clock.
@@ -115,6 +143,24 @@ impl PeerSetHarness {
         })
         .await
         .expect("a selected peer must receive the consumer request")
+    }
+
+    /// Receives a block advert and its write acknowledgment, or none within one virtual second.
+    pub async fn next_block_advert(
+        &mut self,
+        peer: usize,
+    ) -> Option<(
+        block::Hash,
+        tokio::sync::oneshot::Sender<Result<(), BoxError>>,
+    )> {
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            self.peers[peer].block_advert_receiver.recv(),
+        )
+        .await
+        .ok()
+        .flatten()
+        .map(|advert| (advert.hash, advert.result))
     }
 
     /// Publishes an inventory event through the real lossy registry channel.

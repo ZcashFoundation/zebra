@@ -102,6 +102,11 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// [blocking thread](https://docs.rs/tokio/1.15.0/tokio/task/index.html#blocking-and-yielding),
 /// to avoid async task deadlocks.
 ///
+/// The fourth result is an independently bounded [`crate::BlockAdvertiser`]. Outbound block
+/// adverts must use it, not the ordinary buffered service. Its success acknowledges completed
+/// local transport writes to selected peers; admission alone and zero-peer fanout are not success.
+/// Readiness waits for an eligible connected peer, independently of ordinary request readiness.
+///
 /// # Panics
 ///
 /// If `config.config.peerset_initial_target_size` is zero.
@@ -117,6 +122,7 @@ pub async fn init<S, C>(
     NetworkService,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<MisbehaviorReport>,
+    super::BlockAdvertiser<C>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -150,6 +156,7 @@ pub async fn init_with_block_gossip_peer_ips<S, C>(
     NetworkService,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<MisbehaviorReport>,
+    super::BlockAdvertiser<C>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -167,7 +174,7 @@ where
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, listen_addr);
 
-    let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
+    let (misbehavior_tx, misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
         // Leave enough room for a misbehaviour update on every peer connection
         // before the channel is drained.
         config
@@ -175,47 +182,12 @@ where
             .max(MIN_CHANNEL_SIZE),
     );
 
-    let misbehaviour_updater = address_book_updater.clone();
     let misbehavior_guard = tokio::spawn(
-        async move {
-            let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
-            // Batch misbehaviour updates so peers can't keep the address book mutex locked
-            // by repeatedly sending invalid blocks or transactions.
-            let mut flush_timer =
-                IntervalStream::new(tokio::time::interval(constants::MISBEHAVIOR_FLUSH_INTERVAL));
-
-            loop {
-                tokio::select! {
-                    msg = misbehavior_rx.recv() => match msg {
-                        Some(report) => {
-                            // Keep the first reason: any report can cross the ban threshold.
-                            let score = report.score;
-                            misbehaviors
-                                .entry(report.addr)
-                                .and_modify(|batched| {
-                                    batched.score = batched.score.saturating_add(score)
-                                })
-                                .or_insert(report);
-                        }
-                        None => break,
-                    },
-
-                    _ = flush_timer.next() => {
-                        for (_, report) in misbehaviors.drain() {
-                            let _ = misbehaviour_updater
-                                .send(MetaAddr::new_misbehavior(
-                                    report.addr,
-                                    report.score,
-                                    report.reason,
-                                ))
-                                .await;
-                        }
-                    },
-                };
-            }
-
-            tracing::warn!("exiting misbehavior update batch task");
-        }
+        batch_misbehavior_updates(
+            misbehavior_rx,
+            address_book_updater.clone(),
+            constants::MISBEHAVIOR_FLUSH_INTERVAL,
+        )
         .in_current_span(),
     );
 
@@ -241,6 +213,7 @@ where
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
+            .with_bans(bans_receiver.clone())
             .with_advertised_services(PeerServices::NODE_NETWORK)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
@@ -287,6 +260,7 @@ where
         None,
     );
     // Also route queued peer set requests as soon as a peer that might serve them is ready.
+    let block_advertiser = peer_set.block_advertiser();
     let (mut peer_set, poll_peer_set_guard) = peer_set.into_buffer(constants::PEERSET_BUFFER_SIZE);
     peer_set.extend_tasks([
         address_book_updater_guard.abort_handle(),
@@ -382,7 +356,7 @@ where
         ])
         .unwrap();
 
-    (peer_set, address_book, misbehavior_tx)
+    (peer_set, address_book, misbehavior_tx, block_advertiser)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
@@ -626,6 +600,70 @@ async fn limit_initial_peers(
     initial_peers
 }
 
+/// Batches peer misbehaviour reports from `misbehavior_rx`, and sends them to the address
+/// book every `flush_interval`.
+///
+/// Batching stops peers from keeping the address book mutex locked by repeatedly sending
+/// invalid blocks or transactions.
+///
+/// Senders use `try_send()`, so this task keeps receiving while a flush is waiting for the
+/// address book updater. Otherwise the channel could fill up during the flush, and new
+/// reports would be dropped.
+async fn batch_misbehavior_updates(
+    mut misbehavior_rx: mpsc::Receiver<MisbehaviorReport>,
+    address_book_updater: AddressBookChangeSender,
+    flush_interval: Duration,
+) {
+    let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
+    let mut flush_timer = IntervalStream::new(tokio::time::interval(flush_interval));
+
+    loop {
+        tokio::select! {
+            msg = misbehavior_rx.recv() => match msg {
+                Some(report) => batch_misbehavior_report(&mut misbehaviors, report),
+                None => break,
+            },
+
+            _ = flush_timer.next() => {
+                for (_, report) in std::mem::take(&mut misbehaviors) {
+                    let update = address_book_updater.send(MetaAddr::new_misbehavior(
+                        report.addr,
+                        report.score,
+                        report.reason,
+                    ));
+                    tokio::pin!(update);
+
+                    // Keep receiving while the address book updater is busy.
+                    // Reports received here are sent in the next flush.
+                    loop {
+                        tokio::select! {
+                            _ = &mut update => break,
+                            Some(report) = misbehavior_rx.recv() => {
+                                batch_misbehavior_report(&mut misbehaviors, report);
+                            }
+                        }
+                    }
+                }
+            },
+        };
+    }
+
+    tracing::warn!("exiting misbehavior update batch task");
+}
+
+/// Adds `report` to the batched `misbehaviors`, summing the scores for the same peer.
+fn batch_misbehavior_report(
+    misbehaviors: &mut HashMap<PeerSocketAddr, MisbehaviorReport>,
+    report: MisbehaviorReport,
+) {
+    // Keep the first reason: any report can cross the ban threshold.
+    let score = report.score;
+    misbehaviors
+        .entry(report.addr)
+        .and_modify(|batched| batched.score = batched.score.saturating_add(score))
+        .or_insert(report);
+}
+
 /// Open a peer connection listener on `config.listen_addr`,
 /// returning the opened [`TcpListener`], and the address it is bound to.
 ///
@@ -863,7 +901,7 @@ where
 //
 // TODO: when we support inbound proxies, distinguish between proxied listeners and
 //       direct listeners in the span generated by this instrument macro
-#[instrument(skip(handshaker, tcp_stream, connection_tracker, peerset_tx))]
+#[instrument(skip(handshaker, tcp_stream, connection_tracker, peerset_tx, handshakes))]
 async fn accept_inbound_handshake<S>(
     network: Network,
     addr: PeerSocketAddr,
@@ -881,6 +919,8 @@ where
     let connected_addr = peer::ConnectedAddr::new_inbound_direct(addr);
 
     debug!("got incoming connection");
+
+    peer::set_tcp_nodelay(&tcp_stream);
 
     // # Correctness
     //

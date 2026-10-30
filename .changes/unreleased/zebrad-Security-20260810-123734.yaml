@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: "The mempool per-peer inbound-download cap is now keyed on the peer's IP address instead of its full socket address, so a single host can no longer exceed the cap by opening connections from multiple source ports. This matches the inbound-block download cap ([#10685](https://github.com/ZcashFoundation/zebra/issues/10685))."
-time: 2026-08-10T12:37:34.000000000+00:00

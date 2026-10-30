@@ -147,6 +147,19 @@ pub enum TransactionDownloadVerifyError {
     },
 }
 
+impl TransactionDownloadVerifyError {
+    /// Returns a bounded metric label, excluding nested errors and transaction details.
+    pub(super) fn metric_label(&self) -> &'static str {
+        match self {
+            Self::InState => "in_state",
+            Self::StateError(_) => "state_error",
+            Self::DownloadFailed(_) => "download_failed",
+            Self::Cancelled => "cancelled",
+            Self::Invalid { .. } => "invalid",
+        }
+    }
+}
+
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]

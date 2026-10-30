@@ -385,9 +385,9 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
 ///
-/// Advertise NU7 Testnet support; Mainnet's assigned version must wait for its activation schedule.
+/// Advertise NU7 support on Mainnet and Testnet.
 /// See [ZIP 204](https://zips.z.cash/zip-0204#assigning-protocol-versions-to-network-upgrades).
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_180);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_190);
 
 /// The default RTT estimate for peer responses.
 ///

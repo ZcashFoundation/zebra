@@ -78,10 +78,10 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (label_replace(zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"}, \"seed\", \"$1\", \"seed\", \"(.*):1?8233\") * on(remote_ip) group_left(remote_version) (count_values by (remote_ip) (\"remote_version\", zcash_net_peers_version_connected{job=\"$job\"})))",
+          "expr": "zcash_net_peers_version_connected{job=\"$job\"}",
           "instant": false,
           "interval": "",
-          "legendFormat": "{{remote_version}} - {{seed}}",
+          "legendFormat": "{{instance}}",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -93,7 +93,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Compatible Seed Peers - $job",
+      "title": "Latest Connected Peer Protocol Version - $job",
       "tooltip": {
         "shared": true,
         "sort": 2,
@@ -180,10 +180,10 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (remote_version, seed) (label_replace(zcash_net_peers_initial{job=\"$job\",seed=~\"$seed\"}, \"seed\", \"$1\", \"seed\", \"(.*):1?8233\") * on(remote_ip) group_left(remote_version) (count_values by (remote_ip) (\"remote_version\", zcash_net_peers_version_obsolete{job=\"$job\"})))",
+          "expr": "zcash_net_peers_version_obsolete{job=\"$job\"}",
           "instant": false,
           "interval": "",
-          "legendFormat": "{{remote_version}} - {{seed}}",
+          "legendFormat": "{{instance}}",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -195,7 +195,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Obsolete Seed Peers - $job",
+      "title": "Latest Obsolete Peer Protocol Version - $job",
       "tooltip": {
         "shared": true,
         "sort": 2,
@@ -480,9 +480,9 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (user_agent) (zcash_net_peers_connected{job=\"$job\"})",
+          "expr": "sum by (implementation) (zcash_net_peer_version_outcomes_total{job=\"$job\",outcome=\"success\"})",
           "interval": "",
-          "legendFormat": "{{user_agent}}",
+          "legendFormat": "{{implementation}}",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -494,7 +494,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Peer User Agents - $job",
+      "title": "Successful Handshakes by Implementation - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -561,40 +561,6 @@
         "options": [],
         "query": {
           "query": "label_values(zcash_net_in_bytes_total, job)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "tagValuesQuery": "",
-        "tagsQuery": "",
-        "type": "query",
-        "useTags": false
-      },
-      {
-        "allValue": ".+",
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "datasource": null,
-        "definition": "label_values(zcash_net_peers_initial, seed)",
-        "description": null,
-        "error": null,
-        "hide": 0,
-        "includeAll": true,
-        "label": null,
-        "multi": true,
-        "name": "seed",
-        "options": [],
-        "query": {
-          "query": "label_values(zcash_net_peers_initial, seed)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,

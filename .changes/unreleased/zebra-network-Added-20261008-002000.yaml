@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Added
-body: '`constants::INVENTORY_BUSY_PEER_WAIT_TIMEOUT` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11521](https://github.com/ZcashFoundation/zebra/pull/11521))'
-time: 2026-10-08T00:20:00.260937965+02:00

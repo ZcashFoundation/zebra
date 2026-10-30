@@ -41,6 +41,7 @@
   - [Continuous Integration](dev/continuous-integration.md)
   - [Continuous Delivery](dev/continuous-delivery.md)
     - [GCP Deployment Operations](dev/gcp-deployment-operations.md)
+    - [The `next` Branch](dev/next-branch.md)
   - [Generating Zebra Checkpoints](dev/zebra-checkpoints.md)
   - [Doing Mass Renames](dev/mass-renames.md)
   - [Updating the ECC dependencies](dev/ecc-updates.md)

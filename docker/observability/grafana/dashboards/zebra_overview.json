@@ -490,7 +490,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-      "description": "Distribution of connected peers by client software",
+      "description": "Cumulative successful handshakes by client implementation, not live peer counts",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -510,12 +510,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-          "expr": "sum by (user_agent) (zcash_net_peers_connected)",
-          "legendFormat": "{{user_agent}}",
+          "expr": "sum by (implementation) (zcash_net_peer_version_outcomes_total{outcome=\"success\"})",
+          "legendFormat": "{{implementation}}",
           "refId": "A"
         }
       ],
-      "title": "Peer Distribution",
+      "title": "Successful Handshakes by Implementation",
       "type": "piechart"
     },
     {

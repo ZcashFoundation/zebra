@@ -269,7 +269,11 @@ impl Tracing {
         let subscriber = subscriber.with(journaldlayer);
 
         #[cfg(feature = "sentry")]
-        let subscriber = subscriber.with(crate::sentry::tracing_layer());
+        let sentry_layer = crate::sentry::tracing_layer();
+        #[cfg(feature = "sentry")]
+        let sentry_installed = sentry_layer.is_some();
+        #[cfg(feature = "sentry")]
+        let subscriber = subscriber.with(sentry_layer);
 
         // OpenTelemetry layer - zero overhead when config.opentelemetry_endpoint is None
         #[cfg(feature = "opentelemetry")]
@@ -350,7 +354,9 @@ impl Tracing {
         }
 
         #[cfg(feature = "sentry")]
-        info!("installed sentry tracing layer");
+        if sentry_installed {
+            info!("installed sentry tracing layer");
+        }
 
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         info!(

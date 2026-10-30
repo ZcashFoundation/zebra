@@ -35,10 +35,8 @@ use InventoryResponse::*;
 
 /// Maximum time to wait for a request to any test service.
 ///
-/// The default [`MockService`] value can be too short for some of these tests that take a little
-/// longer than expected to actually send the request.
-///
-/// Increasing this value causes the tests to take longer to complete, so it can't be too large.
+/// Mock-only tests pause Tokio time, preserving the full no-request observation window without
+/// spending that time idle.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// Test that the syncer downloads genesis, blocks 1-2 using obtain_tips, and blocks 3-4 using extend_tips.
@@ -293,7 +291,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 }
 
 /// Test that the syncer downloads a singleton unknown hash returned by obtain_tips.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -415,7 +413,7 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 /// stay there, so a peer response can contain a missing parent followed by its queued children.
 /// If queued blocks were treated as present, obtain_tips would reject every such download set with
 /// "queued download of hash behind our chain tip", and the sync would stall forever.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -539,7 +537,7 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 }
 
 /// Test that the syncer downloads a singleton unknown hash returned by extend_tips.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
     let (
         chain_sync_future,
@@ -993,7 +991,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 }
 
 /// Test that zebra-network rejects blocks that are a long way ahead of the state tip.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1054,7 +1052,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in obtain_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -1227,7 +1225,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
 /// Test that the sync downloader rejects blocks that are too high in extend_tips.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     // Get services
     let (
@@ -2170,6 +2168,105 @@ async fn download_failed_is_only_requeued_for_not_found() {
     );
 }
 
+/// A download round that expires is re-requested like a missing block, instead of restarting sync.
+///
+/// When one hedged request fails with `NotFound`, it waits for its sibling, so the round deadline
+/// can drop that `NotFound`.
+#[tokio::test]
+async fn download_round_timeout_is_requeued_without_restart() {
+    let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let timed_out_hash = block::Hash::from([0xA5; 32]);
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadTimedOut {
+            hash: timed_out_hash,
+        }))
+        .expect("a download round timeout is non-fatal and must not restart the syncer");
+
+    assert!(
+        chain_sync.reobtain_hashes.contains(&timed_out_hash),
+        "a block no peer delivered within the download round must be re-queued"
+    );
+
+    assert!(
+        matches!(
+            misbehavior_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "a timed out download must not score any peer"
+    );
+}
+
+/// A block that arrives while its hash is queued for re-download is not re-requested.
+#[tokio::test]
+async fn verified_block_is_removed_from_reobtain_queue() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0xC3; 32]);
+    chain_sync.reobtain_hashes.insert(hash);
+    chain_sync.block_reobtain_retries.insert(hash, 1);
+
+    chain_sync
+        .handle_block_response(Ok((Height(1), hash)))
+        .expect("a verified block is not an error");
+
+    assert!(
+        !chain_sync.reobtain_hashes.contains(&hash),
+        "a verified block must not be re-requested"
+    );
+    assert!(!chain_sync.block_reobtain_retries.contains_key(&hash));
+}
+
+/// A re-download that can't get network capacity before its deadline stays queued for a later
+/// sync round, along with the blocks queued after it, which don't wait out their own deadlines.
+#[tokio::test(start_paused = true)]
+async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        never_ready_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    let missing = [block::Hash::from([0xB1; 32]), block::Hash::from([0xB2; 32])];
+    chain_sync.reobtain_hashes.extend(missing);
+
+    let started = tokio::time::Instant::now();
+    chain_sync.reobtain_missing_blocks().await;
+
+    assert_eq!(
+        chain_sync
+            .reobtain_hashes
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        missing,
+        "blocks that couldn't be re-requested must stay queued for the next sync round"
+    );
+    assert_eq!(
+        tokio::time::Instant::now() - started,
+        sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+        "only the first block waits out its download deadline"
+    );
+}
+
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
 /// height limit must NOT score the peer that served it, while consensus-invalid
 /// blocks still must.
@@ -2295,9 +2392,8 @@ fn setup() -> (
         ..Default::default()
     };
 
-    // These tests run multiple tasks in parallel.
-    // So machines under heavy load need a longer delay.
-    // (For example, CI machines with limited cores.)
+    // All services are in-process mocks, so paused Tokio time cannot race real I/O.
+    // Keep the full observation windows for absence assertions.
     let peer_set = MockService::build()
         .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
         .for_unit_tests();

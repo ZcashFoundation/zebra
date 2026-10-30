@@ -77,6 +77,7 @@ where
     address_book_updater: AddressBookChangeSender,
     inv_collector: broadcast::Sender<InventoryChange>,
     minimum_peer_version: MinimumPeerVersion<C>,
+    bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
 
     parent_span: Span,
@@ -117,6 +118,7 @@ where
             address_book_updater: self.address_book_updater.clone(),
             inv_collector: self.inv_collector.clone(),
             minimum_peer_version: self.minimum_peer_version.clone(),
+            bans_receiver: self.bans_receiver.clone(),
             nonces: self.nonces.clone(),
             parent_span: self.parent_span.clone(),
         }
@@ -302,7 +304,7 @@ impl ConnectedAddr {
         }
     }
 
-    /// Returns the metrics label for this connection's address.
+    /// Returns the log label for this connection's address.
     pub fn get_transient_addr_label(&self) -> String {
         self.get_transient_addr()
             .map_or_else(|| "isolated".to_string(), |addr| addr.to_string())
@@ -409,6 +411,7 @@ where
     address_book_updater: Option<AddressBookChangeSender>,
     inv_collector: Option<broadcast::Sender<InventoryChange>>,
     latest_chain_tip: C,
+    bans_receiver: Option<tokio::sync::watch::Receiver<crate::BanList>>,
 }
 
 impl<S, C> Builder<S, C>
@@ -453,6 +456,12 @@ where
         self
     }
 
+    /// Share the live ban list with connection advert delivery.
+    pub fn with_bans(mut self, bans: tokio::sync::watch::Receiver<crate::BanList>) -> Self {
+        self.bans_receiver = Some(bans);
+        self
+    }
+
     /// Provide the services this node advertises to other peers.  Optional.
     ///
     /// If this is unset, the node will advertise itself as a client.
@@ -490,6 +499,7 @@ where
             user_agent: self.user_agent,
             relay: self.relay,
             inv_collector: self.inv_collector,
+            bans_receiver: self.bans_receiver,
         }
     }
 
@@ -535,6 +545,9 @@ where
             address_book_updater,
             inv_collector,
             minimum_peer_version,
+            bans_receiver: self
+                .bans_receiver
+                .unwrap_or_else(|| tokio::sync::watch::channel(crate::BanList::default()).1),
             nonces,
             parent_span: Span::current(),
         })
@@ -560,6 +573,7 @@ where
             address_book_updater: None,
             inv_collector: None,
             latest_chain_tip: NoChainTip,
+            bans_receiver: None,
         }
     }
 }
@@ -772,22 +786,16 @@ where
             "disconnecting from peer with obsolete network protocol version",
         );
 
-        // the value is the number of rejected handshakes, by peer IP and protocol version
+        // Count rejected handshakes by protocol version, without per-peer labels.
         metrics::counter!(
             "zcash.net.peers.obsolete",
-            "remote_ip" => their_addr.to_string(),
-            "remote_version" => remote.version.to_string(),
+            "remote_version" => remote.version.metric_label(),
             "min_version" => min_version.to_string(),
-            "user_agent" => remote.user_agent.clone(),
         )
         .increment(1);
 
-        // the value is the remote version of the most recent rejected handshake from each peer
-        metrics::gauge!(
-            "zcash.net.peers.version.obsolete",
-            "remote_ip" => their_addr.to_string(),
-        )
-        .set(remote.version.0 as f64);
+        // Record the remote version of the most recently rejected handshake.
+        metrics::gauge!("zcash.net.peers.version.obsolete").set(f64::from(remote.version.0));
 
         // Disconnect if peer is using an obsolete version.
         return Err(
@@ -817,12 +825,10 @@ where
             "disconnecting from non-serving peer",
         );
 
-        // the value is the number of rejected handshakes, by peer IP and advertised services
+        // Count rejected handshakes by advertised services, without per-peer labels.
         metrics::counter!(
             "zcash.net.peers.missing_services",
-            "remote_ip" => their_addr.to_string(),
             "remote_services" => format!("{:?}", remote.services),
-            "user_agent" => remote.user_agent.clone(),
         )
         .increment(1);
 
@@ -852,23 +858,18 @@ where
         "negotiated network protocol version with peer",
     );
 
-    // the value is the number of connected handshakes, by peer IP and protocol version
+    // Count connected handshakes by protocol version, without per-peer labels.
     metrics::counter!(
         "zcash.net.peers.connected",
-        "remote_ip" => their_addr.to_string(),
-        "remote_version" => connection_info.remote.version.to_string(),
-        "negotiated_version" => negotiated_version.to_string(),
+        "remote_version" => connection_info.remote.version.metric_label(),
+        "negotiated_version" => negotiated_version.metric_label(),
         "min_version" => min_version.to_string(),
-        "user_agent" => connection_info.remote.user_agent.clone(),
     )
     .increment(1);
 
-    // the value is the remote version of the most recent connected handshake from each peer
-    metrics::gauge!(
-        "zcash.net.peers.version.connected",
-        "remote_ip" => their_addr.to_string(),
-    )
-    .set(connection_info.remote.version.0 as f64);
+    // Record the remote version of the most recently connected handshake.
+    metrics::gauge!("zcash.net.peers.version.connected")
+        .set(f64::from(connection_info.remote.version.0));
 
     if let Err(error) = peer_conn.send(Message::Verack).await {
         return Err(remote_version_outcome.record_error(HandshakeError::from(error)));
@@ -974,6 +975,7 @@ where
         let our_services = self.our_services;
         let relay = self.relay;
         let minimum_peer_version = self.minimum_peer_version.clone();
+        let bans_receiver = self.bans_receiver.clone();
 
         // # Security
         //
@@ -990,10 +992,7 @@ where
 
             let mut peer_conn = Framed::new(
                 data_stream,
-                Codec::builder()
-                    .for_network(&config.network)
-                    .with_metrics_addr_label(connected_addr.get_transient_addr_label())
-                    .finish(),
+                Codec::builder().for_network(&config.network).finish(),
             );
 
             let connection_info = match negotiate_version(
@@ -1004,7 +1003,7 @@ where
                 user_agent,
                 our_services,
                 relay,
-                minimum_peer_version,
+                minimum_peer_version.clone(),
             )
             .await
             {
@@ -1086,6 +1085,8 @@ where
             // and between the different connection tasks. We create separate tasks and channels
             // for each new connection.
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
+            // Bound pending adverts; slow peers can catch up through later tip gossip.
+            let (block_advert_tx, block_advert_rx) = tokio::sync::mpsc::channel(4);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
 
@@ -1100,7 +1101,6 @@ where
                 metrics::counter!(
                     "zcash.net.out.messages",
                     "command" => msg.command(),
-                    "addr" => connected_addr.get_transient_addr_label(),
                 )
                 .increment(1);
                 // We need to use future::ready rather than an async block here,
@@ -1137,7 +1137,6 @@ where
                                 metrics::counter!(
                                     "zcash.net.in.messages",
                                     "command" => msg.command(),
-                                    "addr" => connected_addr.get_transient_addr_label(),
                                 )
                                 .increment(1);
 
@@ -1149,8 +1148,7 @@ where
                             Err(err) => {
                                 metrics::counter!(
                                     "zebra.net.in.errors",
-                                    "error" => err.to_string(),
-                                    "addr" => connected_addr.get_transient_addr_label(),
+                                    "error" => serialization_error_metric_label(err),
                                 )
                                 .increment(1);
 
@@ -1208,7 +1206,12 @@ where
 
             let server = Connection::new(
                 inbound_service,
-                server_rx,
+                (
+                    server_rx,
+                    block_advert_rx,
+                    minimum_peer_version,
+                    bans_receiver,
+                ),
                 error_slot.clone(),
                 peer_tx,
                 connection_tracker,
@@ -1238,6 +1241,7 @@ where
                 connection_info,
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
+                block_advert_tx,
                 inv_collector,
                 error_slot,
                 connection_task,
@@ -1270,6 +1274,23 @@ where
                 },
             )
             .boxed()
+    }
+}
+
+/// Returns a bounded serialization error label without error details.
+fn serialization_error_metric_label(error: &SerializationError) -> &'static str {
+    match error {
+        SerializationError::Io(_) => "io",
+        SerializationError::Parse(_) => "parse",
+        SerializationError::Utf8Error(_) => "utf8_error",
+        SerializationError::TryFromSliceError(_) => "try_from_slice_error",
+        SerializationError::TryFromIntError(_) => "try_from_int_error",
+        SerializationError::FromHexError(_) => "from_hex_error",
+        SerializationError::Amount { .. } => "amount",
+        SerializationError::BadTransactionBalance => "bad_transaction_balance",
+        SerializationError::Script(_) => "script",
+        SerializationError::Opcode(_) => "opcode",
+        SerializationError::Num(_) => "num",
     }
 }
 
