@@ -56,6 +56,9 @@ pub struct Chain {
     /// The internal state of this chain.
     inner: ChainInner,
 
+    /// In-memory tie-break preference for this tip, cleared when extending or forking the chain.
+    pub(super) precious_rank: Option<u64>,
+
     // Diagnostics
     //
     /// The last height this chain forked at. Diagnostics only.
@@ -313,6 +316,7 @@ impl Chain {
         let mut chain = Self {
             network: network.clone(),
             inner,
+            precious_rank: None,
             last_fork_height: None,
         };
 
@@ -337,7 +341,7 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn eq_internal_state(&self, other: &Chain) -> bool {
-        self.inner == other.inner
+        self.inner == other.inner && self.precious_rank == other.precious_rank
     }
 
     /// Returns the last fork height if that height is still in the non-finalized state.
@@ -373,6 +377,7 @@ impl Chain {
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, Arc::new(block));
+        self.precious_rank = None;
 
         Ok(self)
     }
@@ -450,6 +455,7 @@ impl Chain {
         }
 
         let mut forked = self.clone();
+        forked.precious_rank = None;
 
         // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
@@ -2365,11 +2371,12 @@ impl Ord for Chain {
     /// Chain order for the [`NonFinalizedState`][1]'s `chain_set`.
     ///
     /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`].
-    /// Ties are broken by preferring the chain whose tip block was received
-    /// first (the earlier [`received_time`][3] stamp set by the block verifier),
-    /// implementing the consensus rule
-    /// quoted below. Sibling blocks on Zcash always have equal work (`nBits`
-    /// is fully determined by their ancestors), so without first-received
+    /// Equal-work ties first prefer the tip most recently marked by `preciousblock`, treating
+    /// it as received before other tips. This local preference is not persisted and is cleared
+    /// when the chain is extended or forked; it never overrides cumulative work.
+    /// Remaining ties prefer the earlier [`received_time`][3] stamp set by the block verifier,
+    /// implementing the consensus rule quoted below. Sibling blocks on Zcash always have equal work
+    /// (`nBits` is fully determined by their ancestors), so without first-received
     /// preference, an already-adopted tip could be displaced by an equal-work
     /// sibling arriving arbitrarily later.
     ///
@@ -2405,13 +2412,12 @@ impl Ord for Chain {
     /// interior mutability. The tip block's `received_time` is set by the block verifier
     /// before the block is pushed onto a chain, and is never modified afterwards.
     ///
-    /// `cmp` returns [`Ordering::Equal`] only when both the cumulative work and
-    /// the tip hash match. Two chains with the same tip hash share the stored tip
-    /// block (and therefore its receipt time), so they always compare equal. The
-    /// [`NonFinalizedState::chain_set`][2] is a `BTreeSet<Arc<Chain>>`, so an
-    /// attempt to insert a chain that compares equal to an existing entry is a
-    /// no-op rather than a process-fatal panic. Callers that need to replace
-    /// such a chain must remove the existing entry first.
+    /// Precious ranks must only change after removing a chain from
+    /// [`NonFinalizedState::chain_set`][2], followed by reinsertion.
+    ///
+    /// `cmp` returns [`Ordering::Equal`] only when cumulative work, precious rank,
+    /// receipt time, and tip hash match. Inserting an equal chain is a no-op;
+    /// callers replacing an existing chain must remove it first.
     ///
     /// [1]: super::NonFinalizedState
     /// [2]: super::NonFinalizedState::chain_set
@@ -2419,6 +2425,7 @@ impl Ord for Chain {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cumulative_work
             .cmp(&other.partial_cumulative_work)
+            .then_with(|| self.precious_rank.cmp(&other.precious_rank))
             .then_with(|| {
                 let self_tip = self
                     .tip_block()
@@ -2447,11 +2454,8 @@ impl PartialOrd for Chain {
 }
 
 impl PartialEq for Chain {
-    /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
-    /// work, then the tip block's receipt time, then the tip block hash.
-    ///
-    /// Two chains with the same cumulative work and tip hash are equal; the
-    /// `chain_set` uses this to keep tip hashes unique.
+    /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of work,
+    /// precious rank, the tip block's receipt time, then the tip block hash.
     ///
     /// [1]: super::NonFinalizedState::chain_set
     fn eq(&self, other: &Self) -> bool {

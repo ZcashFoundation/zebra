@@ -334,6 +334,95 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
     ));
 }
 
+#[test]
+fn precious_response_follows_tip_and_snapshot_publication() {
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::atomic::{AtomicBool, Ordering},
+        task::{Context, Wake, Waker},
+    };
+
+    struct AtResponse {
+        tip: LatestChainTip,
+        snapshot: watch::Receiver<NonFinalizedState>,
+        expected: block::Hash,
+        published: AtomicBool,
+    }
+
+    impl Wake for AtResponse {
+        fn wake(self: Arc<Self>) {
+            // Observe the exact send boundary without racing a separate receiver task.
+            self.published.store(
+                self.tip.best_tip_hash() == Some(self.expected)
+                    && self.snapshot.borrow().best_tip().map(|(_, hash)| hash)
+                        == Some(self.expected),
+                Ordering::SeqCst,
+            );
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized, root, first) = populated_state();
+    let second = root
+        .make_fake_child()
+        .set_work(10)
+        .set_block_commitment([1; 32]);
+    let mut prepared = second.clone().prepare();
+    prepared.received_time = Some(Instant::now());
+    state.commit_block(prepared, &finalized.db).unwrap();
+    assert_eq!(state.best_tip().unwrap().1, first.hash());
+    let (mut chain_tip_sender, tip, _) = ChainTipSender::new(None, &Network::Mainnet);
+    let (non_finalized_state_sender, snapshot) = watch::channel(state.clone());
+    update_latest_chain_channels(
+        &state,
+        &finalized.db,
+        &mut chain_tip_sender,
+        &non_finalized_state_sender,
+        None,
+    );
+    let observation = Arc::new(AtResponse {
+        tip: tip.clone(),
+        snapshot,
+        expected: second.hash(),
+        published: AtomicBool::new(false),
+    });
+    let waker = Waker::from(observation.clone());
+    let mut cx = Context::from_waker(&waker);
+    let (rsp_tx, mut rsp_rx) = oneshot::channel();
+    assert!(Pin::new(&mut rsp_rx).poll(&mut cx).is_pending());
+    let (queued, non_finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+    queued
+        .send(NonFinalizedWriteMessage::Precious {
+            hash: second.hash(),
+            rsp_tx,
+        })
+        .unwrap();
+    drop(queued);
+    let (invalid_block_reset_sender, _resets) = tokio::sync::mpsc::unbounded_channel();
+    // Bind the worker first: temporaries in a single `.run()` statement, such as the unused
+    // finalized-block sender, would live until `run()` returns and keep its first loop waiting.
+    let worker = WriteBlockWorkerTask {
+        finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
+        non_finalized_block_write_receiver,
+        finalized_state: finalized,
+        non_finalized_state: state,
+        invalid_block_reset_sender,
+        non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        chain_tip_sender,
+        non_finalized_state_sender,
+        backup_dir_path: None,
+        early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
+        pruning_wake: None,
+    };
+    worker.run();
+    assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), second.hash());
+    assert!(
+        observation.published.load(Ordering::SeqCst),
+        "the selected tip and read-state snapshot must be published before the response",
+    );
+}
+
 /// Observe the real writer at notification, response, database write, and snapshot boundaries.
 #[test]
 fn commit_response_precedes_retention_finalization_without_read_gaps() {

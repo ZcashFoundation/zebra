@@ -22,7 +22,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
+        ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
     },
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -170,6 +170,11 @@ pub enum NonFinalizedWriteMessage {
     Reconsider {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
+    },
+    /// The hash of a block to prefer over equal-work chain tips.
+    Precious {
+        hash: block::Hash,
+        rsp_tx: oneshot::Sender<Result<block::Hash, PreciousError>>,
     },
 }
 
@@ -422,6 +427,20 @@ impl WriteBlockWorkerTask {
                     let _ = rsp_tx
                         .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
                     None
+                }
+                NonFinalizedWriteMessage::Precious { hash, rsp_tx } => {
+                    tracing::info!(?hash, "preferring a block in the non-finalized state");
+                    let result = non_finalized_state.precious_block(hash, &finalized_state.db);
+                    update_latest_chain_channels(
+                        non_finalized_state,
+                        &finalized_state.db,
+                        chain_tip_sender,
+                        non_finalized_state_sender,
+                        backup_dir_path.as_deref(),
+                    );
+                    drop(_context_update);
+                    let _ = rsp_tx.send(result);
+                    continue;
                 }
             };
 

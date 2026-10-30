@@ -349,7 +349,14 @@ or the sidecar.
 | `getbestblockheightandhash` | Zebra | Done   | Tip height and hash in one call, so a caller cannot read a torn pair across two requests.                                                                                 |
 | `getstandardfee`            | Zebra | Done   | Returns `{standard_fee, version}`: the ZIP 317 marginal fee per logical action, in zatoshis, for the next block. The value depends on the next block's height ([#11557]). |
 | `generatetoaddress`         | Zebra | Done   | Regtest only. Like `generate`, but pays the coinbase to a given address instead of the configured `mining.miner_address`, which lets one node fund several test wallets.  |
+| `preciousblock`             | Zebra | Done   | Returns null; see the tip-selection rules below.                                                                                                                          |
 | `rpc.discover`              | Zebra | Done   | OpenRPC schema for every Zebra RPC method.                                                                                                                                |
+
+`preciousblock` prefers a non-finalized chain tip only over competing tips with
+equal cumulative work; higher-work chains always take precedence. The last call
+for competing equal-work tips wins. Preferences are not persisted and are lost
+on restart. Finalized blocks and known non-tip blocks succeed without changing
+the preference; an unknown hash returns `Block not found`.
 
 ## Notification transports
 

@@ -194,6 +194,10 @@ pub enum Response {
     /// of block hashes that were reconsidered in the state and successfully re-committed.
     Reconsidered(Vec<block::Hash>),
 
+    /// Response to [`Request::PreciousBlock`] with the hash whose preference was processed.
+    /// Finalized blocks and known non-tip blocks succeed without changing the state.
+    Precious(block::Hash),
+
     /// Response to [`Request::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
 
