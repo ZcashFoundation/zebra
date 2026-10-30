@@ -69,8 +69,21 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks).
+    /// Returns [`Response::Blocks`](super::Response::Blocks), or
+    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source.
     BlocksByHash(HashSet<block::Hash>),
+
+    /// Request blocks from this node on a connection that negotiated experimental early relay.
+    ///
+    /// Only the inbound connection creates this request, based on both peers' service bits.
+    /// The inbound service may consult its bounded early-relay cache before committed state.
+    /// Ordinary [`Request::BlocksByHash`] requests must not consult that cache.
+    /// Outbound callers must use [`Request::BlocksByHash`] or [`Request::BlockDownload`] instead.
+    ///
+    /// # Returns
+    ///
+    /// The inbound service returns [`Response::Blocks`](super::Response::Blocks).
+    EarlyBlocksByHash(HashSet<block::Hash>),
 
     /// Download one block from a connected peer, waiting for eligible peer capacity.
     ///
@@ -84,12 +97,14 @@ pub enum Request {
     /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
-    /// Inbound `getdata` messages are always decoded as [`Request::BlocksByHash`], never this variant.
+    /// Inbound `getdata` messages decode as [`Request::BlocksByHash`] or, on negotiated connections,
+    /// [`Request::EarlyBlocksByHash`], never this variant.
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks) containing the requested block,
-    /// or an error if the download fails.
+    /// Returns [`Response::Blocks`](super::Response::Blocks), or
+    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source,
+    /// containing the requested block, or an error if the download fails.
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
@@ -213,8 +228,8 @@ pub enum Request {
     /// This is implemented by sending an `inv` message containing the
     /// block hash, allowing the remote peer to choose whether to download
     /// it. Remote peers who choose to download the block will generate a
-    /// [`Request::BlocksByHash`] against the "inbound" service passed to
-    /// [`init`](crate::init).
+    /// [`Request::BlocksByHash`] or negotiated [`Request::EarlyBlocksByHash`] against the "inbound"
+    /// service passed to [`init`](crate::init).
     ///
     /// Outbound block adverts use [`crate::BlockAdvertiser`], which samples peers and always
     /// includes configured sidecars independently of ordinary request readiness.
@@ -240,6 +255,17 @@ pub enum Request {
     ///
     /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
     AdvertiseBlockToAll(block::Hash),
+
+    /// Advertise an authenticated next-tip block only to peers that negotiated early relay.
+    ///
+    /// Use [`crate::BlockAdvertiser`]. Sampling and sidecar selection follow ordinary
+    /// [`Request::AdvertiseBlock`] fanout, restricted to bilaterally opted-in connections.
+    /// The block must already be available in the bounded early-relay serving cache.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
+    AdvertiseEarlyBlock(block::Hash),
 
     /// Request the contents of this node's mempool.
     ///
@@ -268,6 +294,9 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
+            Request::EarlyBlocksByHash(hashes) => {
+                format!("EarlyBlocksByHash({})", hashes.len())
+            }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
@@ -289,6 +318,7 @@ impl fmt::Display for Request {
 
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
+            Request::AdvertiseEarlyBlock(_) => "AdvertiseEarlyBlock".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
             Request::PollPeerSet => "PollPeerSet".to_string(),
         })
@@ -303,6 +333,7 @@ impl Request {
             Request::Ping(_) => "Ping",
 
             Request::BlocksByHash(_) => "BlocksByHash",
+            Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
             Request::TransactionsById(_) => "TransactionsById",
 
@@ -313,6 +344,7 @@ impl Request {
             Request::AdvertiseTransactionIds(_, _) => "AdvertiseTransactionIds",
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
+            Request::AdvertiseEarlyBlock(_) => "AdvertiseEarlyBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
             Request::PollPeerSet => "PollPeerSet",
         }
@@ -322,7 +354,10 @@ impl Request {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Request::BlockDownload { .. } | Request::BlocksByHash(_) | Request::TransactionsById(_)
+            Request::BlockDownload { .. }
+                | Request::BlocksByHash(_)
+                | Request::EarlyBlocksByHash(_)
+                | Request::TransactionsById(_)
         )
     }
 
@@ -330,7 +365,9 @@ impl Request {
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
         match self {
             Request::BlockDownload { hash, .. } => HashSet::from([*hash]),
-            Request::BlocksByHash(block_hashes) => block_hashes.clone(),
+            Request::BlocksByHash(block_hashes) | Request::EarlyBlocksByHash(block_hashes) => {
+                block_hashes.clone()
+            }
             _ => HashSet::new(),
         }
     }

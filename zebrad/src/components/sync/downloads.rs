@@ -413,7 +413,9 @@ where
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
-                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
+                let early_relay = matches!(rsp, zn::Response::EarlyBlocks(_));
+                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
+                    | zn::Response::EarlyBlocks(blocks) = rsp {
                     assert_eq!(
                         blocks.len(),
                         1,
@@ -610,8 +612,13 @@ where
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?;
                 let verification = async move {
                     loop {
+                        let request = if early_relay {
+                            zebra_consensus::Request::CommitEarlyRelay(block.clone())
+                        } else {
+                            zebra_consensus::Request::Commit(block.clone())
+                        };
                         let result = verifier
-                            .call(zebra_consensus::Request::Commit(block.clone()))
+                            .call(request)
                             .await;
                         let pressure = result.as_ref().err()
                             .and_then(|error| error.downcast_ref::<zebra_consensus::RouterError>())

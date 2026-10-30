@@ -532,7 +532,8 @@ impl ContextuallyVerifiedBlock {
     /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.
     /// Computing the charge serializes the block without copying its bytes; use a blocking worker.
     pub fn retained_bytes(&self) -> usize {
-        block_retained_bytes(&self.block, &self.transaction_hashes)
+        block_wire_and_retained_bytes(&self.block, &self.transaction_hashes)
+            .1
             .saturating_add(self.contextual_data_retained_bytes())
     }
 
@@ -645,13 +646,13 @@ impl ContextuallyVerifiedBlock {
     }
 }
 
-/// Conservative block content/metadata charge shared by proposal caches and orphan queues.
-pub(crate) fn block_retained_bytes(
+/// Wire size and conservative decoded-content/metadata charge, computed in one serialization pass.
+pub(crate) fn block_wire_and_retained_bytes(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
-) -> usize {
-    let mut bytes = block
-        .zcash_serialized_size()
+) -> (usize, usize) {
+    let wire_bytes = block.zcash_serialized_size();
+    let mut bytes = wire_bytes
         .saturating_add(size_of::<Block>())
         .saturating_add(size_of::<block::Header>())
         .saturating_add(
@@ -683,7 +684,7 @@ pub(crate) fn block_retained_bytes(
             bytes = bytes.saturating_add(size_of_val(action));
         }
     }
-    bytes
+    (wire_bytes, bytes)
 }
 
 /// Include scripts from prior transactions, not just the current block's wire bytes.
@@ -1054,6 +1055,28 @@ impl Eq for MinedBlockNotifications {}
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
+    /// Authenticates a NU5-or-later body against its committed parent's header context.
+    ///
+    /// The caller must first check PoW/Equihash, size, cheap structure/resource limits, transaction
+    /// Merkle root, duplicates, and branch consistency. Returns [`Response::EarlyRelay`]; only
+    /// current-best-tip children can be cached, and only while an early-relay subscription exists.
+    EarlyRelay {
+        /// The immutable block whose transaction authorization commitment must be checked.
+        block: Arc<Block>,
+        /// If true, authenticate even when caching is disabled or full, against any retained
+        /// committed parent context. Missing or changing context returns no guard. Finalized
+        /// history roots are retained only for the tip.
+        /// If false, skip disabled caching and restrict admission to the current best tip.
+        require_authentication: bool,
+    },
+
+    /// Authenticates an early-relay body without publishing it or reserving publication capacity.
+    ///
+    /// Uses the same caller preconditions and response as [`Request::EarlyRelay`], against any
+    /// retained committed parent. Missing or changing context returns no guard; callers bound
+    /// any retries. Use this before assigning peer punishment after deferred authentication.
+    AuthenticateEarlyRelay(Arc<Block>),
+
     /// Announces a block after proof-of-work and transaction Merkle-root checks.
     ///
     /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
@@ -1398,6 +1421,8 @@ impl Request {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Request::MiningCandidate(_) => "mining_candidate",
+            Request::EarlyRelay { .. } => "early_relay",
+            Request::AuthenticateEarlyRelay(_) => "authenticate_early_relay",
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
             Request::CommitMinedBlock { .. } => "commit_mined_block",
@@ -1451,6 +1476,10 @@ pub enum ReadRequest {
     /// Subscribes to early mining changes and enables candidate computation while held.
     /// Returns [`ReadResponse::MiningCandidateChanges`].
     MiningCandidateChanges,
+
+    /// Returns [`ReadResponse::EarlyRelayCache`], enabling early block retention while the cache
+    /// or one of its subscribers is held. Independent of mining and never enabled by default.
+    EarlyRelayCache,
 
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
     /// with the latest disk space usage estimate in bytes. Primary services normally refresh
@@ -1963,6 +1992,7 @@ impl ReadRequest {
             ReadRequest::ChainInfo => "chain_info",
             ReadRequest::MiningCandidate => "mining_candidate",
             ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
+            ReadRequest::EarlyRelayCache => "early_relay_cache",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
@@ -2024,6 +2054,8 @@ impl TryFrom<Request> for ReadRequest {
             | Request::CommitMinedBlock { .. }
             | Request::CommitMinedCheckpointVerifiedBlock { .. }
             | Request::MiningCandidate(_)
+            | Request::EarlyRelay { .. }
+            | Request::AuthenticateEarlyRelay(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),

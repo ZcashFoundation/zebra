@@ -228,6 +228,78 @@ async fn outbound_direct_accepts_serving_peer() {
     assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
 }
 
+/// Both actual version messages must opt in; configuration and user agents cannot substitute.
+#[tokio::test]
+async fn early_block_relay_requires_bilateral_handshake() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for local_setting in [
+            "",
+            "experimental_early_block_relay = false",
+            "experimental_early_block_relay = true",
+        ] {
+            for remote_enabled in [false, true] {
+                for isolated in [false, true] {
+                    let config: Config = toml::from_str(local_setting).unwrap();
+                    let local_enabled = config.experimental_early_block_relay;
+                    // Exercise the serialized operator configuration, not just a Rust field.
+                    let config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+                    let remote_config = Config {
+                        experimental_early_block_relay: remote_enabled,
+                        ..Config::default()
+                    };
+                    let (local, remote) = tokio::io::duplex(65536);
+                    let network = Network::Mainnet;
+                    let codec = || Codec::builder().for_network(&network).finish();
+                    let mut local = Framed::new(local, codec());
+                    let mut remote = Framed::new(remote, codec());
+                    let address = "127.0.0.1:8233".parse().unwrap();
+                    let local_addr = if isolated {
+                        ConnectedAddr::Isolated
+                    } else {
+                        ConnectedAddr::new_outbound_direct(address)
+                    };
+                    let remote_addr = ConnectedAddr::new_inbound_direct(address);
+                    let (local_info, remote_info) = tokio::try_join!(
+                        negotiate_version(
+                            &mut local,
+                            &local_addr,
+                            config,
+                            Arc::default(),
+                            "/same-user-agent/".to_string(),
+                            PeerServices::NODE_NETWORK,
+                            false,
+                            MinimumPeerVersion::new(NoChainTip, &network),
+                        ),
+                        negotiate_version(
+                            &mut remote,
+                            &remote_addr,
+                            remote_config,
+                            Arc::default(),
+                            "/same-user-agent/".to_string(),
+                            PeerServices::NODE_NETWORK,
+                            false,
+                            MinimumPeerVersion::new(NoChainTip, &network),
+                        ),
+                    )
+                    .expect("both peers support this network version");
+                    let bit = PeerServices::NODE_EARLY_BLOCK_RELAY;
+                    assert_eq!(local_info.remote.services.contains(bit), remote_enabled);
+                    assert_eq!(
+                        remote_info.remote.services.contains(bit),
+                        local_enabled && !isolated
+                    );
+                    let negotiated = local_enabled && remote_enabled && !isolated;
+                    assert_eq!(local_info.early_block_relay, negotiated);
+                    assert_eq!(remote_info.early_block_relay, negotiated);
+                }
+            }
+        }
+    })
+    .await
+    .expect("bilateral handshakes must complete within the test deadline");
+}
+
 /// A rejected non-serving outbound peer must NOT have its advertised services recorded by the
 /// handshake: the rejection only applies while syncing, and storing non-serving services would
 /// permanently exclude the peer from outbound connections, so it could never be dialed once
