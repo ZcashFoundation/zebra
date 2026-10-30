@@ -436,12 +436,12 @@ async fn mempool_downloads_bypass_state_writer() {
         assert!(queued[0].is_ok());
 
         read_state
-            .expect_request(zs::ReadRequest::Transaction(
+            .expect_request(zs::ReadRequest::KnownTransaction(
                 transaction.transaction.id.mined_id(),
             ))
             .await
             .expect("downloads check mined transactions on the read service")
-            .respond(zs::ReadResponse::Transaction(None));
+            .respond(zs::ReadResponse::KnownTransaction(false));
         read_state
             .expect_request(zs::ReadRequest::Tip)
             .await

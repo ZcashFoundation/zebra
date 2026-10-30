@@ -102,6 +102,12 @@ transparent-address response omits `ismine`; a valid `z_validateaddress` respons
 `ismine: false`. Neither proves that the payout wallet can spend the rewards. Check ownership with
 that wallet and verify the pool's payout integration separately before production use.
 
+To reduce backend disk use, see [pruned mining nodes](pruning.md). Choose retention for the oldest
+block and transaction bodies used by payout and accounting queries, including outage recovery.
+The minimum 10,000-block window is about 8.7 days at 75-second spacing but only 2.9 days at
+25-second spacing. Use a separate archive when those queries need older history; a pruned
+backend cannot also serve a zcashd sidecar.
+
 ## Plan for restarts and replacement
 
 - Keep a separately synced standby node with the same network and mining settings, its own state

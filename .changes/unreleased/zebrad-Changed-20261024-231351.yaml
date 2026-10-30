@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Changed `gettxout` to answer from the UTXO set without reading the creating transaction; once
+  that transaction's block body is pruned, `version` is null.
+time: 2026-10-24T23:13:51.699720838+02:00

@@ -84,6 +84,15 @@ serial-zcashd-compat = { max-threads = 1 }
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
 retries = 1
 
+# Run alone because the known-port helper releases the socket before zebrad binds it.
+[[profile.default.overrides]]
+filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart)'
+threads-required = "num-test-threads"
+
+[[profile.ci.overrides]]
+filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart)'
+threads-required = "num-test-threads"
+
 # Force live Testnet peer-limit tests to run serially with each other, while
 # allowing them to run concurrently with live Mainnet tests.
 #

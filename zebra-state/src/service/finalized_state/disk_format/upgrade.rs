@@ -22,6 +22,9 @@ use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
 pub(crate) mod block_info_and_address_received;
@@ -81,6 +84,13 @@ pub trait DiskFormatUpgrade {
         true
     }
 
+    /// Returns whether running this migration requires complete historical block bodies.
+    ///
+    /// New migrations must opt out only if they can run entirely on retained data.
+    fn requires_full_history(&self) -> bool {
+        self.needs_migration()
+    }
+
     /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
     fn is_reusable_major_upgrade(&self) -> bool {
         let version = self.version();
@@ -116,7 +126,12 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        // The major directory isolates body deletion from older archive readers.
+        Box::new(no_migration::NoMigration::new(
+            "isolate pruned state from archive readers",
+            Version::new(30, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -131,6 +146,16 @@ pub fn restorable_db_versions() -> Vec<u64> {
                 .then_some(upgrade.version().major)
         })
         .collect()
+}
+
+/// Whether the existing records can be read without applying any intervening migrations.
+pub(crate) fn can_read_without_migration(
+    disk_version: &Version,
+    running_version: &Version,
+) -> bool {
+    !format_upgrades(Some(disk_version.clone()))
+        .take_while(|upgrade| upgrade.version() <= *running_version)
+        .any(|upgrade| upgrade.needs_migration())
 }
 
 /// The kind of database format change or validity check we're performing.
@@ -283,7 +308,6 @@ impl DbFormatChange {
     }
 
     /// Returns true if this format change/check happens at startup.
-    #[allow(dead_code)]
     pub fn is_run_at_startup(&self) -> bool {
         !matches!(self, CheckNewBlocksCurrent { .. })
     }
@@ -401,6 +425,36 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        let history = db
+            .history_capabilities()
+            .expect("historical availability must be readable before changing the format");
+        if history.is_pruned() {
+            if let Upgrade {
+                older_disk_version, ..
+            } = self
+            {
+                if let Some(upgrade) = format_upgrades(Some(older_disk_version.clone()))
+                    .find(|upgrade| upgrade.requires_full_history())
+                {
+                    panic!(
+                        "{} requires unavailable block history; restore an archive snapshot or resync",
+                        upgrade.description()
+                    );
+                }
+            }
+
+            let disk_version = db
+                .format_version_on_disk()
+                .expect("database version must be readable before changing the format")
+                .expect("a database with pruned history has a format version");
+            assert_eq!(
+                disk_version.build.contains("indexer"),
+                cfg!(feature = "indexer"),
+                "changing spending-index mode requires unavailable block history; \
+                 restore an archive snapshot or resync"
+            );
+        }
+
         // Mark the database as having finished applying any format upgrades if there are no
         // format upgrades that need to be applied.
         if !self.is_upgrade() {
@@ -458,15 +512,20 @@ impl DbFormatChange {
         }
 
         #[cfg(feature = "indexer")]
-        if let (
-            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
-            Some(initial_tip_height),
-        ) = (self, initial_tip_height)
-        {
+        if matches!(
+            self,
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. }
+        ) {
             // Indexing transaction locations by their spent outpoints and revealed nullifiers.
             let timer = CodeTimer::start();
 
-            // Add build metadata to on-disk version file just before starting to add indexes
+            if let Some(initial_tip_height) = initial_tip_height.filter(|_| !history.is_pruned()) {
+                info!("started checking/adding indexes for spending tx ids");
+                track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                info!("finished checking/adding indexes for spending tx ids");
+            }
+
+            // Record the spending-index layout only after its conversion has completed.
             let mut version = db
                 .format_version_on_disk()
                 .expect("unable to read database format version file")
@@ -476,19 +535,14 @@ impl DbFormatChange {
             db.update_format_version_on_disk(&version)
                 .expect("unable to write database format version file to disk");
 
-            info!("started checking/adding indexes for spending tx ids");
-            track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-            info!("finished checking/adding indexes for spending tx ids");
-
             timer.finish_desc("indexing spending transaction ids");
         };
 
         #[cfg(not(feature = "indexer"))]
-        if let (
-            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
-            Some(initial_tip_height),
-        ) = (self, initial_tip_height)
-        {
+        if matches!(
+            self,
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. }
+        ) {
             let mut version = db
                 .format_version_on_disk()
                 .expect("unable to read database format version file")
@@ -498,9 +552,11 @@ impl DbFormatChange {
                 // Indexing transaction locations by their spent outpoints and revealed nullifiers.
                 let timer = CodeTimer::start();
 
-                info!("started removing indexes for spending tx ids");
-                drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-                info!("finished removing indexes for spending tx ids");
+                if let Some(initial_tip_height) = initial_tip_height {
+                    info!("started removing indexes for spending tx ids");
+                    drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                    info!("finished removing indexes for spending tx ids");
+                }
 
                 // Remove build metadata to on-disk version file after indexes have been dropped.
                 version.build = db.format_version_in_code().build;
@@ -525,6 +581,10 @@ impl DbFormatChange {
                 db.path()
             )
         });
+        // Runtime and shutdown checks do not finish cancelled spending-index conversions.
+        if self.is_run_at_startup() {
+            db.mark_ready_for_pruning();
+        }
 
         let initial_disk_version = self
             .initial_disk_version()
@@ -766,7 +826,11 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
-        db.update_format_version_on_disk(format_upgrade_version)
+        // Format changes do not change the spending-index layout. Keep its metadata until the
+        // separate conversion finishes, including across interruptions between upgrade steps.
+        let mut format_upgrade_version = format_upgrade_version.clone();
+        format_upgrade_version.build = disk_version.build.clone();
+        db.update_format_version_on_disk(&format_upgrade_version)
             .expect("unable to write database format version file to disk");
 
         info!(
@@ -795,7 +859,7 @@ impl DbFormatChange {
     ///
     /// Multiple downgrades are allowed, because they all downgrade to the same running version.
     fn mark_as_downgraded(db: &ZebraDb) {
-        let running_version = db.format_version_in_code();
+        let mut running_version = db.format_version_in_code();
         let disk_version = db
             .format_version_on_disk()
             .expect("unable to read database format version file")
@@ -807,6 +871,9 @@ impl DbFormatChange {
              disk: {disk_version}\n\
              running: {running_version}"
         );
+
+        // A downgrade also leaves the existing index layout intact until its conversion completes.
+        running_version.build = disk_version.build.clone();
 
         db.update_format_version_on_disk(&running_version)
             .expect("unable to write database format version file to disk");

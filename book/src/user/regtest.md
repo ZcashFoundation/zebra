@@ -127,20 +127,19 @@ Starting at the configured deployment height, mining templates and
 block's reserve. `getblocksubsidy` rejects a future reissuance height whose parent
 block is not yet in the best chain.
 
-Ordinary builds use database format v29.0.0, including the NSM balance in each
-new value-pool record. The registered upgrade automatically moves compatible v28
-state into `state/v29` when no v29 database exists, without resyncing. Legacy
-48-byte value-pool and 52-byte block-info records remain readable with a zero NSM
-balance; new writes use 56 and 60 bytes.
+Ordinary builds use database format v30.0.0. The registered upgrade moves compatible
+v29 archives into `state/v30` when no v30 database exists, without resyncing.
+The NSM record layout is unchanged: legacy 48-byte value-pool and 52-byte block-info
+records remain readable with a zero NSM balance; new writes use 56 and 60 bytes.
 
-Before upgrading, stop Zebra and direct database readers and retain a v28 backup
-for rollback. Disabling `state.delete_old_database` does not preserve the
+Before upgrading, stop Zebra and direct database readers and retain a v29 archive
+backup for rollback. Disabling `state.delete_old_database` does not preserve the
 directory that the upgrade moves. Upgrade direct database readers, including
 Zallet's Zebra backend and Zaino's Zebra read-state backend, together with the
-node: their `zebra-state` dependency must support v29. Start the writer before
-compatible readers. A v28 reader cannot read the wider records written by v29;
-manually renaming or symlinking versioned directories is not a substitute for
-the supported upgrade.
+node: their `zebra-state` dependency must support v30 and unavailable historical
+bodies. Start the writer before compatible readers. Older binaries must not open
+v30 state; manually renaming or symlinking versioned directories bypasses the
+pruning safety boundary.
 
 Format reuse does not fix old custom-network accounting: existing state with
 nonzero genesis transparent outputs must still be rebuilt, including experimental

@@ -67,7 +67,12 @@ where
 
 /// Returns the tip block of `chain`.
 /// If there is no chain, returns the tip of `db`.
-pub fn tip_block<C>(chain: Option<C>, db: &ZebraDb) -> Option<Arc<Block>>
+///
+/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+pub fn tip_block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+) -> Result<Option<Arc<Block>>, crate::BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -79,7 +84,7 @@ where
     // so it is acceptable to return either tip.
     chain
         .and_then(|chain| chain.as_ref().tip_block().map(|b| b.block.clone()))
-        .or_else(|| db.tip_block())
+        .map_or_else(|| db.tip_block(), |block| Ok(Some(block)))
 }
 
 /// Returns the tip [`Height`] of `chain`.
@@ -446,17 +451,20 @@ fn collect_chain_hashes<C>(
     intersection: Option<block::Hash>,
     stop: Option<block::Hash>,
     max_len: u32,
-) -> Vec<block::Hash>
+) -> Result<Vec<block::Hash>, BoxError>
 where
     C: AsRef<Chain>,
 {
     let chain = chain.as_ref();
 
     let height_range = find_chain_height_range(chain, db, intersection, stop, max_len);
+    let history = db.history_capabilities()?;
 
     // All the hashes should be in the chain.
     // If they are not, we don't want to return them.
-    let hashes: Vec<block::Hash> = height_range.into_iter().map_while(|height| {
+    let hashes: Vec<block::Hash> = height_range
+        .take_while(|&height| history.has_block_body(Height(height)))
+        .map_while(|height| {
         let hash = hash_by_height(chain, db, Height(height));
 
         // A recently committed block dropped the intersection we previously found.
@@ -496,7 +504,7 @@ where
         );
     }
 
-    hashes
+    Ok(hashes)
 }
 
 /// Returns a list of [`block::Header`]s in the chain,
@@ -559,18 +567,21 @@ where
 ///
 /// Stops the list of hashes after:
 ///   * adding the tip,
-///   * adding the `stop` hash to the list, if it is in the chain, or
-///   * adding `max_len` hashes to the list.
+///   * adding the `stop` hash to the list, if it is in the chain,
+///   * adding `max_len` hashes to the list, or
+///   * reaching a height whose block body is unavailable.
 ///
 /// Returns an empty list if the state is empty,
 /// and a partial or empty list if the found heights are concurrently modified.
+///
+/// Returns an error if historical body availability cannot be read.
 pub fn find_chain_hashes<C>(
     chain: Option<C>,
     db: &ZebraDb,
     known_blocks: Vec<block::Hash>,
     stop: Option<block::Hash>,
     max_len: u32,
-) -> Vec<block::Hash>
+) -> Result<Vec<block::Hash>, BoxError>
 where
     C: AsRef<Chain>,
 {
@@ -615,7 +626,8 @@ where
 /// Finds the first hash that's in the peer's `known_blocks` and the chain.
 /// Returns a list of headers that follow that intersection, from the chain.
 ///
-/// See [`find_chain_hashes()`] for details.
+/// Follows the locator and response limits of [`find_chain_hashes()`], independently of body
+/// availability.
 pub fn find_chain_headers<C>(
     chain: Option<C>,
     db: &ZebraDb,

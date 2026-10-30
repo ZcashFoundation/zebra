@@ -30,7 +30,7 @@ use crate::{
     arbitrary::Prepare,
     init_test,
     service::{
-        arbitrary::{populated_state, PreparedChain},
+        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
         chain_tip::TipAction,
         StateService,
     },
@@ -42,7 +42,260 @@ use crate::{
     ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
+mod header;
+
 const LAST_BLOCK_HEIGHT: u32 = 10;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_propagates_incomplete_block_body_errors() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        // Exercise the size fallback used before block-info backfilling has finished.
+        batch.zs_delete(&db.cf_handle("block_info").unwrap(), height);
+        db.write_batch(batch).unwrap();
+
+        let expected = BlockReadError::CorruptBlock { height };
+        for query in [height.into(), block.hash().into()] {
+            for request in [
+                ReadRequest::Block(query),
+                ReadRequest::AnyChainBlock(query),
+                ReadRequest::BlockAndSize(query),
+                ReadRequest::SpentOutputs(query),
+                ReadRequest::TipBlockSize,
+            ] {
+                let error = read_state.clone().oneshot(request).await.unwrap_err();
+                assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+            }
+            let error = state
+                .clone()
+                .oneshot(Request::Block(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+        let tx_hash = block.transactions[0].hash();
+        for request in [
+            ReadRequest::Transaction(tx_hash),
+            ReadRequest::AnyChainTransaction(tx_hash),
+        ] {
+            let error = read_state.clone().oneshot(request).await.unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+
+        let ancestors = super::block_iter::any_ancestor_blocks(
+            &read_state.latest_non_finalized_state(),
+            db,
+            block.hash(),
+        );
+        let error =
+            super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10).unwrap_err();
+        assert!(error.to_string().contains("cannot prove"));
+        assert!(error
+            .to_string()
+            .contains("restore an archive snapshot or resync"));
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn header_reads_distinguish_unknown_blocks_from_missing_known_headers() {
+    use crate::{BlockReadError, DiskWriteBatch, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks[1].clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let header = crate::BlockHeader {
+            header: block.header.clone(),
+            hash: block.hash(),
+            height,
+            next_block_hash: None,
+        };
+        for query in [height.into(), block.hash().into()] {
+            assert_eq!(
+                read_state
+                    .clone()
+                    .oneshot(ReadRequest::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                ReadResponse::BlockHeader(Some(header.clone()))
+            );
+            assert_eq!(
+                state
+                    .clone()
+                    .oneshot(Request::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                Response::BlockHeader(Some(header.clone()))
+            );
+        }
+        for query in [Height(2).into(), block::Hash([0xff; 32]).into()] {
+            assert_eq!(
+                read_state
+                    .clone()
+                    .oneshot(ReadRequest::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                ReadResponse::BlockHeader(None)
+            );
+            assert_eq!(
+                state
+                    .clone()
+                    .oneshot(Request::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                Response::BlockHeader(None)
+            );
+        }
+
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete(&db.cf_handle("block_header_by_height").unwrap(), height);
+        db.write_batch(batch).unwrap();
+        let expected = BlockReadError::CorruptBlock { height };
+        for query in [height.into(), block.hash().into()] {
+            let error = read_state
+                .clone()
+                .oneshot(ReadRequest::BlockHeader(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+            let error = state
+                .clone()
+                .oneshot(Request::BlockHeader(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_distinguishes_known_pruned_transactions_from_unknown_hashes() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let pruned_hash = blocks[1].transactions[0].hash();
+        let retained_hash = blocks[2].transactions[0].hash();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(Height(1)),
+            TransactionLocation::min_for_height(Height(2)),
+        );
+        db.write_batch(batch).unwrap();
+
+        let expected = BlockReadError::BlockBodyUnavailable { height: Height(1) };
+        for request in [
+            ReadRequest::Transaction(pruned_hash),
+            ReadRequest::AnyChainTransaction(pruned_hash),
+        ] {
+            let error = read_state.clone().oneshot(request).await.unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+        for request in [
+            Request::Transaction(pruned_hash),
+            Request::AnyChainTransaction(pruned_hash),
+        ] {
+            let error = state.clone().oneshot(request).await.unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+        let unknown = transaction::Hash([0xff; 32]);
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::Transaction(unknown))
+                .await
+                .unwrap(),
+            ReadResponse::Transaction(None)
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::AnyChainTransaction(unknown))
+                .await
+                .unwrap(),
+            ReadResponse::AnyChainTransaction(None)
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::Transaction(retained_hash))
+                .await
+                .unwrap(),
+            ReadResponse::Transaction(Some(_))
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::AnyChainTransaction(retained_hash))
+                .await
+                .unwrap(),
+            ReadResponse::AnyChainTransaction(Some(_))
+        ));
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::KnownTransaction(pruned_hash))
+                .await
+                .unwrap(),
+            ReadResponse::KnownTransaction(true)
+        ));
+    })
+    .await
+    .unwrap();
+}
+
+#[test]
+fn legacy_chain_rejects_exhausted_history() {
+    let block = zebra_test::vectors::MAINNET_BLOCKS[&1]
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let error = super::check::legacy_chain(
+        Height(0),
+        std::iter::once(Ok(block)),
+        &Network::Mainnet,
+        100_000,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("cannot prove"));
+}
 
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -590,12 +843,15 @@ proptest! {
     /// Test blocks that are less than the NU5 activation height.
     #[test]
     fn some_block_less_than_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, _, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let nu_activation_height = NetworkUpgrade::Nu5
+            .activation_height(&network)
+            .expect("test networks activate NU5 after Canopy");
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
-        prop_assert_eq!(response, Ok(()));
+        prop_assert_eq!(response, Ok(None));
     }
 
     /// Test the maximum amount of blocks to check before chain is declared to be legacy.
@@ -609,7 +865,8 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+            .map(|_| ())
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -647,10 +904,10 @@ proptest! {
 
         let response = crate::service::check::legacy_chain(
             nu_activation_height,
-            chain.clone().into_iter().rev(),
+            chain.clone().into_iter().rev().map(Ok),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
-        ).map_err(|error| error.to_string());
+        ).map(|_| ()).map_err(|error| error.to_string());
 
         prop_assert_eq!(
             response,
@@ -666,7 +923,8 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+            .map(|_| ())
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));

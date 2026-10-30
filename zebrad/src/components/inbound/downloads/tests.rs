@@ -243,12 +243,12 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::Response::BlockHeader {
+        .respond(zs::Response::BlockHeader(Some(zs::BlockHeader {
             header: block_1.header.clone(),
             hash: block_1.hash(),
             height: Height(1),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let (error, advertiser_addr) = downloads
         .next()
@@ -325,12 +325,12 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::Response::BlockHeader {
+        .respond(zs::Response::BlockHeader(Some(zs::BlockHeader {
             header: genesis.header.clone(),
             hash: genesis.hash(),
             height: Height(0),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let (error, advertiser_addr) = downloads
         .next()
@@ -395,7 +395,7 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(Err(zn::BoxError::from("block not found in any chain")));
+        .respond(zs::Response::BlockHeader(None));
 
     let (error, advertiser_addr) = downloads
         .next()
@@ -609,12 +609,12 @@ async fn contradicted_far_ahead_height_is_attributed_and_never_verified() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::Response::BlockHeader {
+        .respond(zs::Response::BlockHeader(Some(zs::BlockHeader {
             header: block_1.header.clone(),
             hash: block_1.hash(),
             height: Height(1),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let (error, advertiser_addr) = downloads
         .next()
@@ -683,7 +683,7 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(Err(zn::BoxError::from("block hash or height not found")));
+        .respond(zs::Response::BlockHeader(None));
 
     let (error, advertiser_addr) = downloads
         .next()

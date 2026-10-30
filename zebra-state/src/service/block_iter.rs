@@ -125,10 +125,10 @@ pub(crate) trait ChainItem {
 // Block iteration
 
 impl ChainItem for Block {
-    type Type = Arc<Block>;
+    type Type = Result<Arc<Block>, crate::BlockReadError>;
 
     fn read(chain: Option<&Arc<Chain>>, db: &ZebraDb, height: Height) -> Option<Self::Type> {
-        read::block(chain, db, height.into())
+        read::block(chain, db, height.into()).transpose()
     }
 }
 

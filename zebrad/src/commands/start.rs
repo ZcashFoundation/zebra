@@ -269,11 +269,32 @@ impl StartCmd {
         false
     }
 
-    async fn start(&self) -> Result<(), Report> {
+    /// Disables archive service and sidecars as soon as pruning is enabled or history is missing.
+    pub(super) fn network_services(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Result<zebra_network::types::PeerServices, Report> {
+        let mut services = config.network.local_services;
+        if config.state.prune_blocks_older_than.is_some() || history.is_pruned() {
+            if config.zcashd_compat.enabled {
+                return Err(eyre!(
+                    "zcashd-compat requires an archive node; pruning is enabled or history is missing"
+                ));
+            }
+            services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
+        }
+        Ok(services)
+    }
+
+    /// Starts the node, rejecting incompatible pruning settings before opening writable state.
+    pub(super) async fn start(&self, config: Arc<ZebradConfig>) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
-        let config = APPLICATION.config();
+        // State initialization can prune immediately. Check the pruning config before starting
+        // services; check persisted history separately once the state is open.
+        Self::network_services(&config, zebra_state::HistoryCapabilities::default())?;
         config.notify.validate()?;
+
         #[cfg(feature = "zmq")]
         let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
             Some(notify::zmq::bind(endpoint).await?)
@@ -373,6 +394,17 @@ impl StartCmd {
             )
             .await;
 
+        let zebra_state::ReadResponse::HistoryCapabilities(history) = read_only_state_service
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
+            .await
+            .map_err(|error| eyre!(error))?
+        else {
+            unreachable!("state returns history capabilities for its capabilities request");
+        };
+        let mut network_config = config.network.clone();
+        network_config.local_services = Self::network_services(&config, history)?;
+
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
@@ -391,7 +423,7 @@ impl StartCmd {
         };
 
         let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound())
+            .buffer(Self::state_buffer_bound(&config))
             .service(state_service);
 
         info!("initializing network");
@@ -423,7 +455,7 @@ impl StartCmd {
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
-                config.network.clone(),
+                network_config,
                 inbound,
                 latest_chain_tip.clone(),
                 user_agent(),
@@ -1042,9 +1074,7 @@ impl StartCmd {
 
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
-    fn state_buffer_bound() -> usize {
-        let config = APPLICATION.config();
-
+    fn state_buffer_bound(config: &ZebradConfig) -> usize {
         // Ignore the checkpoint verify limit, because it is very large.
         // Mempool reads bypass the state writer's buffer.
         //
@@ -1074,7 +1104,7 @@ impl Runnable for StartCmd {
             .take();
 
         rt.expect("runtime should not already be taken")
-            .run(self.start());
+            .run(self.start(APPLICATION.config()));
 
         info!("stopping zebrad");
     }
