@@ -3,7 +3,8 @@ name: Book
 on:
   push:
     branches: [main]
-  # Publishes each `next` book build from `book-next.yml` at `/next`.
+  # Publishes each `next` book build from `book-next.yml` at `/next`. Runs after
+  # a failed build too: it may have replaced a queued deploy from `main`.
   # zizmor: ignore[dangerous-triggers] -- runs `main`'s copy of this file and no code
   # from `next`; it only publishes the rendered HTML from that run's artifact
   workflow_run:
@@ -42,10 +43,7 @@ jobs:
   build:
     name: Build Docs
     needs: changes
-    # A failed `next` book build has nothing new to publish.
-    if: >-
-      needs.changes.outputs.book == 'true' &&
-      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    if: needs.changes.outputs.book == 'true'
     permissions:
       actions: read
       contents: read
