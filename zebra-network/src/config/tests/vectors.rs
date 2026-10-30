@@ -96,6 +96,74 @@ fn default_config_uses_ipv6() {
 }
 
 #[test]
+fn parse_config_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    let fixtures: Vec<(&str, Vec<&str>)> = vec![
+        (
+            "initial_mainnet_peers = ['203.0.113.1:8233', 'seeder.example.com:8233']",
+            vec!["203.0.113.1:8233", "seeder.example.com:8233"],
+        ),
+        (
+            "initial_mainnet_peers = '203.0.113.1:8233,seeder.example.com:8233'",
+            vec!["203.0.113.1:8233", "seeder.example.com:8233"],
+        ),
+        (
+            "initial_mainnet_peers = '203.0.113.1:8233'",
+            vec!["203.0.113.1:8233"],
+        ),
+        (
+            "initial_mainnet_peers = ' 203.0.113.1:8233 , [2001:db8::1]:8233 ,'",
+            vec!["203.0.113.1:8233", "[2001:db8::1]:8233"],
+        ),
+        (
+            "initial_mainnet_peers = '203.0.113.1:8233,203.0.113.1:8233'",
+            vec!["203.0.113.1:8233"],
+        ),
+        ("initial_mainnet_peers = ''", vec![]),
+        ("initial_mainnet_peers = ' , '", vec![]),
+        ("initial_mainnet_peers = []", vec![]),
+    ];
+
+    for (config, expected) in fixtures {
+        let config: Config = toml::from_str(config).unwrap();
+        assert_eq!(
+            config.initial_mainnet_peers.iter().collect::<Vec<_>>(),
+            expected,
+        );
+    }
+
+    let error = toml::from_str::<Config>("initial_mainnet_peers = 8233")
+        .expect_err("a number is not a peer list")
+        .to_string();
+    assert!(error.contains("comma-separated string"), "{error}");
+}
+
+#[test]
+fn parse_config_rejects_malformed_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    let fixtures = [
+        ("initial_mainnet_peers", "203.0.113.1"),
+        ("initial_mainnet_peers", "seeder.example.com"),
+        ("initial_mainnet_peers", "[2001:db8::1]"),
+        ("initial_mainnet_peers", ":8233"),
+        ("initial_mainnet_peers", "203.0.113.1:65536"),
+        ("initial_testnet_peers", "203.0.113.1:port"),
+    ];
+
+    for (field_name, peer) in fixtures {
+        let error = toml::from_str::<Config>(&format!("{field_name} = '203.0.113.2:8233,{peer}'"))
+            .expect_err("a peer without a valid port is rejected")
+            .to_string();
+        assert!(
+            error.contains(&format!("{peer:?} in {field_name}")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn funding_streams_serialization_roundtrip() {
     let _init_guard = zebra_test::init();
 

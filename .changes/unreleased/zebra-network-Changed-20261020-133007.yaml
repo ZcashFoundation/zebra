@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Changed `Config` deserialization to reject `initial_mainnet_peers` and `initial_testnet_peers` entries that are not a host or IP address followed by a valid port. These entries previously deserialized and then panicked during peer resolution.
+time: 2026-10-20T13:30:07.047350728Z

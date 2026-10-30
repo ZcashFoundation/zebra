@@ -19,7 +19,7 @@ Zonal MIGs use `--zone` (not `--region`). One MIG per zone per network. MIG name
 Each `deploy-nodes` matrix cell reports two sequential signals:
 
 - **Template rollout** waits up to 10 minutes for the requested template to reach the zonal MIG. A failure means the deployment infrastructure did not converge.
-- **Application health**, when enabled, then waits up to 90 minutes for the zonal MIG to reach HEALTHY. A failure means the node took longer than that to establish peers and catch up to chain tip; on-call action is usually "wait, or investigate why sync is slow".
+- **Application health**, when enabled, then waits up to 90 minutes for the zonal MIG to reach HEALTHY. The MIG's health check calls Zebra's `/healthy` endpoint, which passes once the node has at least one recently live peer (`ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`). It does not check sync progress or distance to the chain tip, which `/ready` reports, so a HEALTHY node can still be far behind. A failure means the node could not keep a live peer within that time; on-call action is usually "investigate peer connectivity", such as firewall rules, DNS seeder resolution, or the peer cache on the mounted disk.
 
 The per-MIG concurrency lock covers both stages, so another run cannot replace the template while health is being verified. Either failure uses `failure-issue` with label `ci-fail/release`.
 
