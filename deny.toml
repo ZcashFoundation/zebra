@@ -181,6 +181,7 @@ allow-git = [
     "https://github.com/ZcashFoundation/reddsa",
     "https://github.com/upbqdn/pasta_curves",
     "https://github.com/upbqdn/halo2",
+    "https://github.com/upbqdn/sinsemilla",
 ]
 
 [sources.allow-org]

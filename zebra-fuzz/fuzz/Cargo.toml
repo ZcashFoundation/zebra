@@ -157,3 +157,4 @@ pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "569f897e
 halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "c61deee3528a3526d73660f32525ff41599fb5c1" }
 halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "c61deee3528a3526d73660f32525ff41599fb5c1" }
 halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "c61deee3528a3526d73660f32525ff41599fb5c1" }
+sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "993b786db2ef1b73df93ea8ecbe9237f3203c55e" }
