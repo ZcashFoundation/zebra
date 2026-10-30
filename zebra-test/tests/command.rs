@@ -605,6 +605,25 @@ fn shell_child(script: &str) -> Result<zebra_test::command::TestChild<tempfile::
     tempdir()?.spawn_child_with_command("sh", args!["-c": script])
 }
 
+/// A killed child's temporary files are removed with its `TestChild`.
+#[cfg(unix)]
+#[test]
+fn killed_child_tmpdir_is_removed() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child =
+        shell_child(r#"mkdir "$TMPDIR/state" && echo "tmpdir=$TMPDIR"; exec sleep 120"#)?
+            .with_timeout(Duration::from_secs(30))?;
+    let line = child.expect_stdout_line_matches("^tmpdir=")?;
+    let tmp_dir = std::path::PathBuf::from(line.trim_end().trim_start_matches("tmpdir="));
+    assert!(tmp_dir.join("state").is_dir());
+
+    child.kill(false)?;
+    drop(child);
+    assert!(!tmp_dir.exists(), "{tmp_dir:?} outlived its killed child");
+
+    Ok(())
+}
+
 /// Quiet pipes and incomplete lines on either stream must not defeat the child deadline.
 #[cfg(unix)]
 #[test]

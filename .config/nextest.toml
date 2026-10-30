@@ -22,6 +22,9 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^
 [profile.ci]
 fail-fast = false
 failure-output = "immediate"
+# Many of the slowest tests wait on timers or live peers rather than the CPU, so run 8 tests at a
+# time on the 4-CPU runners.
+test-threads = 8
 slow-timeout = { period = "5m", terminate-after = 4 }
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
@@ -139,6 +142,11 @@ test-group = 'serial-live-mainnet'
 [[profile.ci.overrides]]
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
+
+# Start the slowest tests first, so they overlap the rest of the run instead of extending it.
+[[profile.ci.overrides]]
+filter = 'test(=integration::network::disconnects_from_misbehaving_peers) or test(=integration::network::synced_node_keeps_upstream_peer_connected) or test(=unit::config::persistent_mode_peer_cache) or test(=methods::types::get_block_template::tests::coinbase) or test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_(mainnet|testnet)$/)'
+priority = 100
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test

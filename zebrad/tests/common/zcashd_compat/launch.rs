@@ -1,6 +1,6 @@
 //! Process spawning and connection helpers for the zcashd-compat test suite.
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -140,19 +140,20 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
     let dir = testdir()?;
     let work_dir = dir.path().to_path_buf();
 
-    let compat_cfg: ZcashdCompatConfig = build_zcashd_compat_config(work_dir)?;
+    // The sidecar does not report its bound RPC port. Keep the reservation through config writing.
+    // TODO: release-before-spawn still races; use port 0 when upstream reports its bound address.
+    let port_reservation = TcpListener::bind("127.0.0.1:0")?;
+    let zcashd_own_rpc_addr = port_reservation.local_addr()?;
+    let compat_cfg: ZcashdCompatConfig = build_zcashd_compat_config(work_dir, zcashd_own_rpc_addr)?;
     let mut zebrad_config = compat_cfg.zebrad_config;
 
     let zebra_rpc_addr = compat_cfg.zebra_rpc_addr;
-    let zcashd_own_rpc_addr = compat_cfg.zcashd_own_rpc_addr;
 
     // `--unsafe-low-specs` skips the hardware preflight minimums (550 GiB disk
     // etc.), which regtest doesn't need and CI runners don't have.
-    let zebrad = dir.with_config(&mut zebrad_config)?.spawn_child(args![
-        "start",
-        "--zcashd-compat",
-        "--unsafe-low-specs"
-    ])?;
+    let dir = dir.with_config(&mut zebrad_config)?;
+    drop(port_reservation);
+    let zebrad = dir.spawn_child(args!["start", "--zcashd-compat", "--unsafe-low-specs"])?;
 
     let zebra_client = RpcRequestClient::new(zebra_rpc_addr);
     let zcashd_client = ZcashdRpcClient::new(
@@ -177,7 +178,10 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
         .managed
         .as_mut()
         .expect("managed zebrad child was just spawned");
-    let _ = read_listen_addr_from_logs(zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+    let zebra_rpc_addr = read_listen_addr_from_logs(zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+    assert_ne!(zebra_rpc_addr, zcashd_own_rpc_addr);
+    setup.zebra_rpc_addr = zebra_rpc_addr;
+    setup.zebra_client = RpcRequestClient::new(zebra_rpc_addr);
 
     // Mining callers need Zebra's genesis block and mempool, not just an open RPC port.
     wait_for_mempool_activation(&setup.zebra_client).await?;

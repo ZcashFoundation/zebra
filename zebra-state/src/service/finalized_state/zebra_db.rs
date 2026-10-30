@@ -10,7 +10,7 @@
 //! each time the database format (column, serialization, etc) changes.
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -23,7 +23,11 @@ use semver::Version;
 use zebra_chain::{block::Height, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
-    config::database_format_version_on_disk,
+    config::{
+        database_format_version_at_path, database_format_version_on_disk,
+        write_database_format_version_at_path,
+    },
+    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -32,7 +36,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    write_database_format_version_to_disk, BoxError, Config, StateInitError,
+    BoxError, Config, StateInitError,
 };
 
 use super::disk_format::upgrade::{can_read_without_migration, restorable_db_versions};
@@ -137,14 +141,19 @@ impl ZebraDb {
             DiskDb::check_cache_dir_readable(&config.cache_dir)?;
         }
 
-        let reused_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
-            &restorable_db_versions(),
-            format_version_in_code,
-            config,
-            &db_kind,
-            network,
-            read_only,
-        );
+        // An ephemeral database lives in a new temporary directory, so it is always new.
+        let reused_version = if config.ephemeral {
+            None
+        } else {
+            DiskDb::try_reusing_previous_db_after_major_upgrade(
+                &restorable_db_versions(),
+                format_version_in_code,
+                config,
+                &db_kind,
+                network,
+                read_only,
+            )
+        };
         let read_previous_version = read_only && reused_version.is_some();
         if read_only {
             if let Some(disk_version) = &reused_version {
@@ -161,10 +170,19 @@ impl ZebraDb {
                 }
             }
         }
-        let disk_version = reused_version.or_else(|| {
-            database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
+        let disk_version = if config.ephemeral {
+            None
+        } else {
+            reused_version.or_else(|| {
+                database_format_version_on_disk(
+                    config,
+                    &db_kind,
+                    format_version_in_code.major,
+                    network,
+                )
                 .expect("unable to read database format version file")
-        });
+            })
+        };
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
@@ -309,11 +327,10 @@ impl ZebraDb {
     ///
     /// See `database_format_version_on_disk()` for details.
     pub fn format_version_on_disk(&self) -> Result<Option<Version>, BoxError> {
-        database_format_version_on_disk(
-            self.config(),
-            self.db_kind(),
+        database_format_version_at_path(
+            &self.version_file_path(),
+            self.path(),
             self.major_version(),
-            &self.network(),
         )
     }
 
@@ -324,13 +341,15 @@ impl ZebraDb {
         &self,
         new_version: &Version,
     ) -> Result<(), BoxError> {
-        write_database_format_version_to_disk(
-            self.config(),
-            self.db_kind(),
-            self.major_version(),
-            new_version,
-            &self.network(),
-        )
+        write_database_format_version_at_path(self.version_file_path(), new_version)
+    }
+
+    /// Returns the path of this database's format version file.
+    ///
+    /// An ephemeral config gives every [`Config::db_path`] call a new temporary directory, so the
+    /// version file path comes from the path of the open database instead.
+    fn version_file_path(&self) -> PathBuf {
+        self.path().join(DATABASE_FORMAT_VERSION_FILE_NAME)
     }
 
     /// Returns the configured network for this database.
@@ -392,6 +411,12 @@ impl ZebraDb {
         if !self.debug_skip_format_upgrades && is_shutdown {
             if let Some(format_change_handle) = self.format_change_handle.as_mut() {
                 format_change_handle.force_cancel();
+
+                // An ephemeral database's files are deleted below, and the format change thread
+                // reads and writes its version file, so the thread has to stop first.
+                if self.config.ephemeral {
+                    format_change_handle.wait_for_exit();
+                }
             }
 
             // # Correctness
@@ -406,13 +431,9 @@ impl ZebraDb {
             // which would then make unrelated PRs fail when Zebra starts up.
 
             // If the upgrade has completed, or we've done a downgrade, check the state is valid.
-            let disk_version = database_format_version_on_disk(
-                &self.config,
-                self.db_kind(),
-                self.major_version(),
-                &self.network(),
-            )
-            .expect("unexpected invalid or unreadable database version file");
+            let disk_version = self
+                .format_version_on_disk()
+                .expect("unexpected invalid or unreadable database version file");
 
             if let Some(disk_version) = disk_version {
                 // We need to keep the cancel handle until the format check has finished,
