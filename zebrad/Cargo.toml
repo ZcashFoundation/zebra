@@ -293,7 +293,6 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 tempfile = { workspace = true }
 
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
-tracing-test = { workspace = true, features = ["no-env-filter"] }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-stream = { workspace = true }
