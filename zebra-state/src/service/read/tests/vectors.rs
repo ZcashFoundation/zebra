@@ -969,7 +969,12 @@ fn unspent_output_survives_pruning() -> Result<(), crate::BoxError> {
     assert_eq!(archived.best_chain_tip_hash, blocks[3].hash());
 
     let mut batch = DiskWriteBatch::new();
-    batch.prepare_history_pruning(&finalized.db, Height(3))?;
+    // Deliberately bypass readiness and witness guards to exercise an externally pruned state.
+    batch.zs_delete_range(
+        &finalized.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(Height(3)),
+    );
     finalized.db.write(batch)?;
     let pruned = read()?.unwrap();
     assert_eq!(pruned.transaction_version, None);

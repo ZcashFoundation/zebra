@@ -9,7 +9,13 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use crossbeam_channel::bounded;
 use semver::Version;
@@ -29,7 +35,7 @@ use crate::{
     write_database_format_version_to_disk, BoxError, Config, StateInitError,
 };
 
-use super::disk_format::upgrade::restorable_db_versions;
+use super::disk_format::upgrade::{can_read_without_migration, restorable_db_versions};
 
 /// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
 /// than parallel serialization saves.
@@ -86,6 +92,9 @@ pub struct ZebraDb {
     // TODO: move the generic upgrade code and fields to DiskDb
     format_change_handle: Option<DbFormatChangeThreadHandle>,
 
+    /// All history-dependent startup work and initial format checks have completed.
+    ready_for_pruning: Arc<AtomicBool>,
+
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
 }
@@ -112,9 +121,9 @@ impl ZebraDb {
         // A read-only secondary instance must never modify the primary's cache directory, so it
         // skips the post-major-upgrade DB reuse (which can create directories and rename the
         // on-disk database) and reads the on-disk format version directly. The cache directory is
-        // checked for readability first, so a missing or unreadable directory returns a typed
-        // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
-        let disk_version = if read_only {
+        // checked before either lookup. A compatible reusable archive can be read in place,
+        // but no migration, directory rename, or primary-cache creation is allowed.
+        if read_only {
             // While this check is also done in `DiskDB::new()` below, we must
             // repeat it here because the `check_cache_dir_readable()` call just
             // after this will look into `cache_dir` but that should be ignored
@@ -124,27 +133,36 @@ impl ZebraDb {
             }
 
             DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+        }
 
+        let reused_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
+            &restorable_db_versions(),
+            format_version_in_code,
+            config,
+            &db_kind,
+            network,
+            read_only,
+        );
+        let read_previous_version = read_only && reused_version.is_some();
+        if read_only {
+            if let Some(disk_version) = &reused_version {
+                let directory_major = format_version_in_code.major - 1;
+                // Even compatible records cannot finish a directory transition read-only.
+                // Current-directory secondaries can follow a writable primary during an upgrade;
+                // only older-major reuse candidates require a completed transition here.
+                if disk_version.major != directory_major
+                    || !can_read_without_migration(disk_version, format_version_in_code)
+                {
+                    return Err(StateInitError::ReadOnlyDatabaseNeedsUpgrade {
+                        path: config.db_path(&db_kind, directory_major, network),
+                    });
+                }
+            }
+        }
+        let disk_version = reused_version.or_else(|| {
             database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
                 .expect("unable to read database format version file")
-        } else {
-            DiskDb::try_reusing_previous_db_after_major_upgrade(
-                &restorable_db_versions(),
-                format_version_in_code,
-                config,
-                &db_kind,
-                network,
-            )
-            .or_else(|| {
-                database_format_version_on_disk(
-                    config,
-                    &db_kind,
-                    format_version_in_code.major,
-                    network,
-                )
-                .expect("unable to read database format version file")
-            })
-        };
+        });
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
@@ -171,10 +189,17 @@ impl ZebraDb {
         // changes to the default database version. Then we set the correct version in the
         // upgrade thread. We need to do the version change in this order, because the version
         // file can only be changed while we hold the RocksDB database lock.
+        // Read-only reuse checked that the stored major matches the selected directory above.
+        let format_version_for_open = match &format_change {
+            DbFormatChange::Upgrade {
+                older_disk_version, ..
+            } if read_previous_version => older_disk_version,
+            _ => format_version_in_code,
+        };
         let disk_db = DiskDb::new(
             config,
             db_kind,
-            format_version_in_code,
+            format_version_for_open,
             network,
             column_families_in_code,
             read_only,
@@ -184,6 +209,7 @@ impl ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
+            ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db: disk_db,
         };
 
@@ -241,6 +267,19 @@ impl ZebraDb {
     /// indicate that Zebra has finished applying any required db format upgrades.
     pub fn finished_format_upgrades(&self) -> bool {
         self.db.finished_format_upgrades()
+    }
+
+    /// Returns whether migrations, spending-index conversion, and initial format checks completed.
+    ///
+    /// This is an in-memory startup gate, not evidence of historical body availability. Skipped,
+    /// cancelled, or failed checks leave it false, including on read-only instances.
+    pub fn ready_for_pruning(&self) -> bool {
+        self.ready_for_pruning.load(Ordering::Acquire)
+    }
+
+    /// Allows pruning only after the format task has completed all history-dependent work.
+    pub(crate) fn mark_ready_for_pruning(&self) {
+        self.ready_for_pruning.store(true, Ordering::Release);
     }
 
     /// Returns config for this database.

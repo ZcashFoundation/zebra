@@ -527,10 +527,10 @@ impl StateService {
             ) {
                 let legacy_db_path = state.read_service.db.path().to_path_buf();
                 panic!(
-                    "Cached state contains a legacy chain.\n\
-                     An outdated Zebra version did not know about a recent network upgrade,\n\
-                     so it followed a legacy chain using outdated consensus branch rules.\n\
-                     Hint: Delete your database, and restart Zebra to do a full sync.\n\
+                    "Unable to prove the cached chain follows the configured consensus branch rules.\n\
+                     Required history may be unavailable, or an outdated Zebra version may have \
+                     followed a legacy chain.\n\
+                     Hint: Restore an archive snapshot or resync in a separate cache directory.\n\
                      Database path: {legacy_db_path:?}\n\
                      Error: {error:?}",
                 );
@@ -2341,6 +2341,9 @@ pub async fn init(
 /// Returns a read-only state service,
 ///
 /// Each `network` has its own separate on-disk database.
+///
+/// If writable initialization would reuse the previous major database and its records need no
+/// migrations, reads that database in place. Never migrates, renames, or creates the primary cache.
 ///
 /// To share access to the state, clone the returned [`ReadStateService`].
 pub fn init_read_only(

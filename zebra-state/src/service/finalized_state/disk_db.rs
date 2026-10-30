@@ -1272,12 +1272,13 @@ impl DiskDb {
 
     /// Tries to reuse an existing db after a major upgrade.
     ///
-    /// If the current db version belongs to `restorable_db_versions`, the function moves a previous
-    /// db to a new path so it can be used again. It does so by merely trying to rename the path
-    /// corresponding to the db version directly preceding the current version to the path that is
-    /// used by the current db. If successful, it also deletes the db version file.
+    /// If the current db version belongs to `restorable_db_versions`, moves the previous major
+    /// database to the current path and updates its version file.
     ///
-    /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
+    /// In `read_only` mode, returns the candidate's stored version without modifying either path.
+    /// The caller must check that its records and directory version permit read-only reuse.
+    ///
+    /// Returns the old disk version if a candidate was found or moved, or `None` otherwise.
     // TODO: Update this function to rename older major db format version to the current version (#9565).
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
@@ -1286,6 +1287,7 @@ impl DiskDb {
         config: &Config,
         db_kind: impl AsRef<str>,
         network: &Network,
+        read_only: bool,
     ) -> Option<Version> {
         if let Some(&major_db_ver) = restorable_db_versions
             .iter()
@@ -1337,6 +1339,16 @@ impl DiskDb {
             let new_db_exists = DB::list_cf(&opts, &new_path).is_ok_and(|cf| !cf.is_empty());
 
             if old_db_exists && !new_db_exists {
+                if read_only {
+                    return database_format_version_on_disk(
+                        config,
+                        db_kind,
+                        old_major_db_ver,
+                        network,
+                    )
+                    .expect("unable to read database format version file");
+                }
+
                 // Create the parent directory for the new db. This is because we can't directly
                 // rename e.g. `state/v25/mainnet/` to `state/v26/mainnet/` with `fs::rename()` if
                 // `state/v26/` does not exist.

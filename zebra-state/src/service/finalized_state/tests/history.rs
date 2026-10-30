@@ -50,6 +50,26 @@ fn populated(config: &Config) -> FinalizedState {
     state
 }
 
+// Deliberately bypass pruning safety when constructing damaged or externally pruned databases.
+fn delete_body_prefix(batch: &mut DiskWriteBatch, db: &ZebraDb, end: Height) {
+    batch.zs_delete_range(
+        &db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(end),
+    );
+}
+
+#[test]
+fn pruning_without_a_restart_witness_is_refused() {
+    let _init_guard = zebra_test::init();
+    let state = populated(&Config::ephemeral());
+    state.db.mark_ready_for_pruning();
+    let mut batch = DiskWriteBatch::new();
+    assert!(batch.prepare_history_pruning(&state.db, Height(2)).is_err());
+    assert_eq!(batch, DiskWriteBatch::new());
+    assert!(state.db.block(Height(1).into()).unwrap().is_some());
+}
+
 #[test]
 fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let _init_guard = zebra_test::init();
@@ -63,7 +83,7 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let tx_cf = state.db.cf_handle("tx_by_loc").unwrap();
     let first_deleted = TransactionLocation::min_for_height(Height(1)).as_bytes();
     let mut batch = DiskWriteBatch::new();
-    batch.prepare_history_pruning(&state.db, Height(2)).unwrap();
+    delete_body_prefix(&mut batch, &state.db, Height(2));
     assert_eq!(
         state.db.history_capabilities().unwrap(),
         HistoryCapabilities::default()
@@ -114,7 +134,7 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
         assert_eq!(invalid, DiskWriteBatch::new());
     }
     let mut batch = DiskWriteBatch::new();
-    batch.prepare_history_pruning(&state.db, Height(3)).unwrap();
+    delete_body_prefix(&mut batch, &state.db, Height(3));
     state.db.write(batch).unwrap();
     drop(state);
 
@@ -240,7 +260,7 @@ async fn read_only_capability_requests_do_not_mutate_history() {
         );
         drop(secondary);
         let mut batch = DiskWriteBatch::new();
-        batch.prepare_history_pruning(&state.db, Height(2)).unwrap();
+        delete_body_prefix(&mut batch, &state.db, Height(2));
         state.db.write(batch).unwrap();
         drop(state);
         let (reader, secondary, _sender) =
@@ -256,9 +276,7 @@ async fn read_only_capability_requests_do_not_mutate_history() {
             ReadResponse::HistoryCapabilities(expected)
         );
         let mut batch = DiskWriteBatch::new();
-        batch
-            .prepare_history_pruning(&secondary, Height(3))
-            .unwrap();
+        delete_body_prefix(&mut batch, &secondary, Height(3));
         assert!(
             secondary.write(batch).is_err(),
             "secondary instances cannot change policy or delete bodies"
@@ -435,4 +453,298 @@ fn legacy_secondary_survives_archive_writer_restarts() {
             HistoryCapabilities::default()
         );
     }
+}
+
+#[test]
+fn history_migrations_and_index_mode_changes_fail_before_mutation() {
+    use super::super::disk_format::upgrade::DbFormatChange;
+
+    let _init_guard = zebra_test::init();
+    for change_index_mode in [false, true] {
+        let cache = tempfile::tempdir().unwrap();
+        let state = populated(&Config {
+            cache_dir: cache.path().to_path_buf(),
+            ..Config::default()
+        });
+        let mut version = state_database_format_version_in_code();
+        if change_index_mode {
+            version.build = if cfg!(feature = "indexer") {
+                semver::BuildMetadata::EMPTY
+            } else {
+                semver::BuildMetadata::new("indexer").unwrap()
+            };
+        } else {
+            version.major = 26;
+        }
+        state.db.update_format_version_on_disk(&version).unwrap();
+        let mut batch = DiskWriteBatch::new();
+        delete_body_prefix(&mut batch, &state.db, Height(2));
+        state.db.write(batch).unwrap();
+        let before = state.db.block_info(Height(1).into());
+        let change = DbFormatChange::open_database(
+            &state_database_format_version_in_code(),
+            Some(version.clone()),
+        );
+        let (_sender, receiver) = crossbeam_channel::bounded(1);
+        let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            change.run_format_change_or_check(&state.db, Some(Height(3)), &receiver)
+        }))
+        .unwrap_err();
+        let message = error
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| error.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert!(
+            message.contains("requires unavailable block history"),
+            "{message}"
+        );
+        assert_eq!(state.db.format_version_on_disk().unwrap(), Some(version));
+        assert_eq!(state.db.block_info(Height(1).into()), before);
+        assert!(!state.db.ready_for_pruning());
+    }
+}
+
+#[test]
+fn pruning_readiness_waits_for_migrations_and_uncancelled_checks() {
+    use super::super::disk_format::upgrade::{CancelFormatChange, DbFormatChange};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    });
+    state.db.mark_finished_format_upgrades();
+    assert!(!state.db.ready_for_pruning());
+
+    let old_version = semver::Version::new(26, 0, 0);
+    state
+        .db
+        .update_format_version_on_disk(&old_version)
+        .unwrap();
+    let change =
+        DbFormatChange::open_database(&state_database_format_version_in_code(), Some(old_version));
+    let (sender, receiver) = crossbeam_channel::bounded(1);
+    sender.send(CancelFormatChange).unwrap();
+    assert_eq!(
+        change.run_format_change_or_check(&state.db, Some(Height(3)), &receiver),
+        Err(CancelFormatChange)
+    );
+    assert!(!state.db.ready_for_pruning());
+    change
+        .run_format_change_or_check(&state.db, Some(Height(3)), &receiver)
+        .unwrap();
+    assert!(state.db.ready_for_pruning());
+}
+
+#[test]
+fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
+    use zebra_chain::{
+        parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
+        transaction::{LockTime, Transaction},
+        transparent::Input,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(zebra_chain::parameters::testnet::RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let state = FinalizedState::new_with_debug(
+        &config,
+        &network,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    )
+    .unwrap();
+    state
+        .db
+        .update_format_version_on_disk(&state_database_format_version_in_code())
+        .unwrap();
+    let witness_height = Height(3);
+    let tip_height = Height(witness_height.0 + 15_000);
+    let mut header: zebra_chain::block::Header = zebra_test::vectors::DUMMY_HEADER
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    let mut batch = DiskWriteBatch::new();
+    let cf = |name| state.db.cf_handle(name).unwrap();
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    for height in 0..=tip_height.0 {
+        let height = Height(height);
+        let inputs = vec![Input::Coinbase {
+            height,
+            data: if height.is_min() {
+                genesis.transactions[0].inputs()[0]
+                    .miner_data()
+                    .unwrap()
+                    .clone()
+            } else {
+                vec![0]
+            },
+            sequence: u32::MAX,
+        }];
+        let tx = Arc::new(if height == witness_height {
+            Transaction::test_v5(
+                NetworkUpgrade::current(&network, height),
+                inputs,
+                vec![],
+                LockTime::unlocked(),
+                height,
+            )
+        } else {
+            Transaction::test_v4(inputs, vec![], LockTime::unlocked(), height)
+        });
+        header.merkle_root = std::iter::once(tx.hash()).collect();
+        let hash = header.hash();
+        let location = TransactionLocation::from_usize(height, 0);
+        batch.zs_insert(&cf("block_header_by_height"), height, header);
+        batch.zs_insert(&cf("hash_by_height"), height, hash);
+        batch.zs_insert(&cf("height_by_hash"), hash, height);
+        batch.zs_insert(&cf("tx_by_loc"), location, &tx);
+        batch.zs_insert(&cf("hash_by_tx_loc"), location, tx.hash());
+        batch.zs_insert(&cf("tx_loc_by_hash"), tx.hash(), location);
+        header.previous_block_hash = hash;
+    }
+    state.db.write(batch).unwrap();
+
+    // The fixture writes block indexes directly; readiness is tested separately above.
+    let mut batch = DiskWriteBatch::new();
+    assert!(batch
+        .prepare_history_pruning(&state.db, Height(5_004))
+        .is_err());
+    assert_eq!(batch, DiskWriteBatch::new());
+    state.db.mark_ready_for_pruning();
+    batch
+        .prepare_history_pruning(&state.db, Height(5_004))
+        .unwrap();
+    state.db.write(batch).unwrap();
+    assert_eq!(
+        state
+            .db
+            .history_capabilities()
+            .unwrap()
+            .lowest_retained_height,
+        witness_height
+    );
+    drop(state);
+
+    let reopened = FinalizedState::new_with_debug(
+        &config,
+        &network,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        true,
+    )
+    .unwrap();
+    let ancestors = crate::service::block_iter::known_chain_ancestor_iter::<Block>(
+        None,
+        &reopened.db,
+        tip_height.into(),
+    );
+    assert_eq!(
+        crate::service::check::legacy_chain(
+            NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
+            ancestors,
+            &network,
+            crate::constants::MAX_LEGACY_CHAIN_BLOCKS,
+        )
+        .unwrap(),
+        Some(witness_height)
+    );
+}
+
+#[test]
+fn pruned_subtree_checks_still_reject_missing_or_incorrect_roots() {
+    use super::super::disk_format::upgrade::add_subtrees::subtree_format_calculation_pre_checks;
+    use hex_literal::hex;
+    use zebra_chain::subtree::NoteCommitmentSubtree;
+
+    let _init_guard = zebra_test::init();
+    let state = populated(&Config::ephemeral());
+    let tx = state
+        .db
+        .block(Height(3).into())
+        .unwrap()
+        .unwrap()
+        .transactions[0]
+        .clone();
+    let mut batch = DiskWriteBatch::new();
+    let floor = Height(2_000_000);
+    delete_body_prefix(&mut batch, &state.db, floor);
+    batch.zs_insert(
+        &state.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(floor),
+        tx,
+    );
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_err());
+
+    let mut sapling = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(558_822),
+        root: sapling_crypto::Node::from_bytes(hex!(
+            "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+        ))
+        .unwrap(),
+    };
+    let mut orchard = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(1_707_429),
+        root: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+            .as_slice()
+            .try_into()
+            .unwrap(),
+    };
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    sapling.root = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db)
+        .unwrap_err()
+        .contains("sapling: Err"));
+
+    orchard.root = [0; 32].as_slice().try_into().unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db)
+        .unwrap_err()
+        .contains("orchard: Err"));
+}
+
+#[test]
+fn recent_address_checks_reject_an_unavailable_required_window() {
+    use super::super::disk_format::upgrade::{
+        block_info_and_address_received::Upgrade, DiskFormatUpgrade,
+    };
+
+    let _init_guard = zebra_test::init();
+    let state = populated(&Config::ephemeral());
+    let mut batch = DiskWriteBatch::new();
+    delete_body_prefix(&mut batch, &state.db, Height(2));
+    state.db.write(batch).unwrap();
+    let (_sender, receiver) = crossbeam_channel::bounded(1);
+    let error = Upgrade.validate(&state.db, &receiver).unwrap().unwrap_err();
+    assert!(error.contains("require unavailable block history"));
 }
