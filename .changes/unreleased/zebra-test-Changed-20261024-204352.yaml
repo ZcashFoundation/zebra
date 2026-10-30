@@ -1,0 +1,4 @@
+project: zebra-test
+kind: Changed
+body: Each child spawned by `CommandExt::spawn2` or `TestDirExt::spawn_child_with_command` gets its own temporary directory in `TMPDIR`, `TMP` and `TEMP`, removed when its `TestChild` is dropped, so killed children no longer leave temporary files behind.
+time: 2026-10-24T20:43:52.698877736+02:00
