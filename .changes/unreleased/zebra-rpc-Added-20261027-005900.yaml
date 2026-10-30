@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Record new-tip to first-template latency in `rpc.getblocktemplate.first_template.duration_seconds`, once per served best-tip transition.
+time: 2026-10-27T00:59:00.032264459+01:00
