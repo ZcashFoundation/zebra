@@ -216,7 +216,7 @@ The [`Request` and `Response` enums][api] define the internal Tower API.
 | Request | Result or action |
 | --- | --- |
 | `TransactionIds` | Return the stored unmined IDs. |
-| `TransactionsById` | Look up transactions using supplied unmined IDs. |
+| `TransactionsById` | Return transactions whose full unmined IDs match, including the authorization digest. |
 | `TransactionsByMinedId` | Look up transactions using mined IDs. |
 | `TransactionWithDepsByMinedId` | Return a verified transaction and its recorded dependency IDs. |
 | `FullTransactions` | Return verified transactions, dependency information, and the last processed tip hash. |
@@ -228,9 +228,9 @@ The [`Request` and `Response` enums][api] define the internal Tower API.
 | `CheckForVerifiedTransactions` | Trigger readiness processing and acknowledge the check. |
 | `QueueStats` | Return transaction count, serialized bytes, the current usage estimate, and notification status. |
 
-The [current storage lookup][storage] resolves `TransactionsById` through the
-mined-ID index; it does not compare the stored authorization digest with the
-supplied digest. The [statistics handler][mempool] sets `usage` equal to serialized
+The [storage lookup][storage] resolves `TransactionsById` through the mined-ID
+index, then checks the full unmined ID. A different authorization digest does
+not match. The [statistics handler][mempool] sets `usage` equal to serialized
 bytes and leaves `fully_notified` unset. Neither field is a measurement of all
 mempool allocations or proof that every notification was delivered.
 
