@@ -215,7 +215,7 @@ In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback t
    docker buildx imagetools create -t zfnd/zebra:latest zfnd/zebra:<good>
    ```
 
-   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. In the Docker Hub repository, delete the `<bad>` tag and the `sha-<7 chars>` tag with the same digest (the short SHA of the Release PR's merge commit), so nobody can fetch the withdrawn image by tag. A pull by digest can still succeed.
+   Run the `create` command only when the first two digests match, then check that `zfnd/zebra:latest` and `zfnd/zebra:<good>` print the same digest. In the Docker Hub repository, delete the `<bad>` tag, and for releases up to 7.0.0 also the `sha-<7 chars>` tag with the same digest (the short SHA of the Release PR's merge commit), so nobody can fetch the withdrawn image by tag. A pull by digest can still succeed.
 
 3. Roll production back to `<good>`. `zfnd-deploy-nodes-gcp.yml` builds and deploys the commit of the ref it runs from, so dispatch it from the good release tag, once per network and zone. Leave out a network whose active upgrades `<good>` does not support. The production state disks already exist, so skip the cached-disk lookup:
 
