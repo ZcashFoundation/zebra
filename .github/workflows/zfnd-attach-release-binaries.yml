@@ -20,7 +20,7 @@ jobs:
       ${{
         github.repository == 'ZcashFoundation/zebra' &&
         github.event_name == 'release' &&
-        github.event.action == 'released' &&
+        github.event.action == 'published' &&
         startsWith(inputs.release_tag, 'v') &&
         inputs.release_tag == github.event.release.tag_name
       }}

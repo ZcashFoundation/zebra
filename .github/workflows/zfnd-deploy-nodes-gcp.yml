@@ -126,8 +126,16 @@ permissions:
 jobs:
   # Resolve event-specific values once, then pass explicit deployment inputs to
   # the reusable deployment workflow.
+  #
+  # Alpha and beta pre-releases preview work production must not run, so they
+  # skip this job and, through `needs`, every build and deployment.
   set-matrix:
     name: Resolve event deployment inputs
+    if: >-
+      ${{
+        !(github.event_name == 'release' &&
+          (contains(github.event.release.tag_name, '-alpha') || contains(github.event.release.tag_name, '-beta')))
+      }}
     runs-on: ubuntu-26.04
     outputs:
       networks: ${{ steps.set-matrix.outputs.networks }}

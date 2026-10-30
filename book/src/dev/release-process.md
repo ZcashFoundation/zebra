@@ -46,22 +46,24 @@ You can update to any version of Zebra, provided that the following criteria are
 
 ### Preview releases
 
-We let you preview what's coming by providing Release Candidate \(`rc`\) pre-releases for some major releases:
+We let you preview what's coming with pre-releases:
 
-| Pre-release type  | Details                                                                                                                                                                |
-| :---------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as `8.1.0-beta.0`. |
-| Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`.       |
+| Pre-release type  | Details                                                                                                                                                                                            |
+| :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Alpha             | An early preview of features that are still on the [`next` branch](next-branch.md). An alpha release is indicated by a release tag appended with the `-alpha` identifier, such as `8.1.0-alpha.0`. |
+| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as `8.1.0-beta.0`.                             |
+| Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`.                                   |
+
+Every pre-release has signed Linux binaries attached to its GitHub Release, and a Docker Hub image tagged with its exact version.
 
 ### Distribution tags
 
 Zebra's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
-| Tag    | Description                                                                                         |
-| :----- | :-------------------------------------------------------------------------------------------------- |
-| latest | The most recent stable version.                                                                     |
-| beta   | The most recent pre-release version of Zebra for testing. May not always exist.                     |
-| rc     | The most recent release candidate of Zebra, meant to become a stable version. May not always exist. |
+| Tag         | Description                                                        |
+| :---------- | :----------------------------------------------------------------- |
+| latest      | The most recent stable version.                                    |
+| `<version>` | One exact release or pre-release, such as `7.0.0` or `8.1.0-rc.0`. |
 
 ### Feature Flags
 
@@ -203,7 +205,7 @@ In the commands, `<bad>` is the withdrawn version and `<good>` is the rollback t
    gh release view v<bad> --json assets --jq '.assets[].name' | xargs -I{} gh release delete-asset v<bad> {} --yes
    ```
 
-   Keep the release and its git tag as the record of what shipped. Leave it a full release, not a pre-release or draft: `resume` treats a changed channel as a conflict, and turning a pre-release back into a release runs `release-binaries.yml` again. Do not run `resume` for the withdrawn version's Release PR, because it can restore the planned release notes and Latest selection.
+   Keep the release and its git tag as the record of what shipped. Leave it a full release, not a pre-release or draft: `resume` treats a changed channel as a conflict. Do not run `resume` for the withdrawn version's Release PR, because it can restore the planned release notes and Latest selection.
 
 2. Fix the Docker Hub tags. If `zfnd/zebra:latest` has the digest of the withdrawn image, point it at `<good>`. The copy keeps the image digest, so signatures and attestations still verify:
 

@@ -24,6 +24,25 @@ gh pr create --base next --title "chore: sync main to next"
 
 Merge it with a merge commit. GitHub then marks the automatic sync pull request as merged, or leaves it open with only newer commits.
 
+## Release an Alpha
+
+An [alpha](release-process.md#previews) publishes what `next` runs as a GitHub pre-release with signed binaries and a Docker Hub image, without publishing crates.
+
+1. Merge a `chore(release): set zebrad version to <version>` pull request into `next` that sets the `zebrad` version, such as `8.1.0-alpha.0`, and updates `Cargo.lock`. Later sync pull requests can conflict on that version: keep the higher one.
+2. Generate the release notes from the pending change fragments, without committing them:
+
+   ```bash
+   changie batch v<version> --project zebrad --dry-run > release-notes.md
+   ```
+
+3. Publish the pre-release on the merge commit from step 1, with your own GitHub credentials. A release created with a workflow's `GITHUB_TOKEN` does not start the release workflows.
+
+   ```bash
+   gh release create v<version> --target <commit> --prerelease --title "Zebra <version>" --notes-file release-notes.md
+   ```
+
+Never promote it to a full release, which would make it the Latest release.
+
 ## Compare `next` With `main`
 
 `next` nodes report to Sentry in the `next` environment, and stage nodes in `stage`. Compare nodes on the same network and zone, for example `zebrad-next-mainnet-b` and `zebrad-main-mainnet-b`.
