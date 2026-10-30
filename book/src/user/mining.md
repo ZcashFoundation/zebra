@@ -9,6 +9,7 @@ need a longer retention window or a separate archive.
 Contents:
 
 - [Download Zebra](#download-and-build-zebra)
+  - [Optional Pasta assembly](#optional-pasta-assembly)
 - [Configure zebra for mining](#configure-zebra-for-mining)
   - [Miner address](#miner-address)
   - [Extra coinbase data](#extra-coinbase-data)
@@ -27,6 +28,30 @@ The easiest way to run Zebra for mining is with [our docker images](https://zebr
 
 If you have [installed Zebra another way](https://zebra.zfnd.org/user/install.html), follow the
 instructions below to start mining:
+
+### Optional Pasta assembly
+
+For non-Apple x86_64 targets with 64-bit pointers, you can opt into faster Pasta field arithmetic:
+
+```sh
+cargo build --release -p zebrad --features pasta-asm
+```
+
+The CPU must support both **BMI2** and **ADX** (Intel Broadwell / AMD Zen or newer).
+Before any configuration, state initialization or Halo 2 key preload, Zebra checks these flags and
+exits with an error if either is missing. Use a build without `pasta-asm` on unsupported CPUs.
+The feature is disabled by default and is not part of `default-release-binaries`.
+It has no effect on other targets, including Apple x86_64 and x32.
+
+Cargo unifies dependency features across the whole build: selecting `zebrad/pasta-asm` also enables
+the backend for other workspace packages built alongside it. Both `block-template-to-proposal` and
+`zebra-checkpoints` check the CPU before decoding Orchard transactions. Test harnesses do not run
+these startup checks, so `cargo test --workspace --all-features` requires a BMI2/ADX CPU on supported
+x86_64 targets.
+
+In pinned measurements, cold Orchard submissions were 6.1 ms faster for a 1.9 MB block
+(observed improvement: 4.8–6.5 ms) and 1.4 ms faster for a 250 kB block (1.0–2.1 ms).
+Warm submissions showed no change; these measurements are not a throughput guarantee.
 
 ## Configure zebra for mining
 

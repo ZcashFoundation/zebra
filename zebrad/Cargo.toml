@@ -108,6 +108,9 @@ prometheus = ["metrics-exporter-prometheus"]
 
 # Production features that modify dependency behaviour
 
+# Enable the x86_64 Pasta assembly backend; startup requires BMI2 and ADX.
+pasta-asm = ["dep:pasta_curves", "pasta_curves/asm"]
+
 # Enable additional error debugging in release builds
 error-debug = ["color-eyre/track-caller", "color-eyre/capture-spantrace"]
 
@@ -271,6 +274,10 @@ proptest-derive = { workspace = true, optional = true }
 console-subscriber = { workspace = true, optional = true }
 
 derive-new.workspace = true
+
+[target.'cfg(all(target_arch = "x86_64", target_pointer_width = "64", not(target_vendor = "apple")))'.dependencies]
+# Unify the assembly feature with the pinned Pasta dependency used by Halo 2 and Orchard.
+pasta_curves = { version = "0.6.1", optional = true, default-features = false }
 
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }

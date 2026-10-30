@@ -7773,6 +7773,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "pasta_curves",
  "pin-project",
  "proptest",
  "proptest-derive",

@@ -94,6 +94,17 @@
 //! [skip verbose tracing]: https://docs.rs/tracing/0.1.35/tracing/level_filters/index.html#compile-time-filters
 //! [specific compiler flags]: https://zebra.zfnd.org/dev/tokio-console.html#setup
 //!
+//! ### Performance
+//!
+//! * `pasta-asm`: opt into Pasta field assembly on non-Apple x86_64 with 64-bit pointers.
+//!   Requires BMI2 and ADX CPU flags; Zebra exits before initialization if either is missing.
+//!   Disabled by default, including official release builds; has no effect on other targets.
+//!   Cargo unifies this feature across packages in the same build. Tools that decode Orchard
+//!   transactions also check the CPU before doing so; test harnesses do not, so workspace
+//!   `--all-features` test runs require a BMI2/ADX CPU on supported x86_64 targets.
+//!   Read the [mining guide](https://zebra.zfnd.org/user/mining.html#optional-pasta-assembly)
+//!   for build instructions and measurements.
+//!
 //! ### Mining notifications
 //!
 //! * `zmq`: publish best-block hashes using zcashd's ZMQ protocol over TCP, implemented in Rust.

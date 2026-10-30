@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Changed
+body: Check BMI2 and ADX CPU support before decoding Orchard transactions in `block-template-to-proposal` and `zebra-checkpoints` when a shared build enables the Pasta assembly backend.
+time: 2026-10-25T02:23:04.96607603+02:00
