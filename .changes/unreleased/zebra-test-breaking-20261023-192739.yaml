@@ -1,4 +1,0 @@
-project: zebra-test
-kind: breaking
-body: Removed the `zebra_test::net::random_known_port` helper, which released its port before callers bound it. Bind to port 0 and read the bound address instead.
-time: 2026-10-23T19:27:39.469107561+02:00

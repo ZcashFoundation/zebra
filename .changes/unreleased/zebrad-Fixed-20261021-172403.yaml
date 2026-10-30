@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: Failed client connections to the tracing filter endpoint (built with the `filter-reload` feature) are now logged as warnings instead of errors, so they no longer create Sentry issues when Sentry is enabled.
-time: 2026-10-21T17:24:03.738892177Z

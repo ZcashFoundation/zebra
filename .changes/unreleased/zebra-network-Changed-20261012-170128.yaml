@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: "Disabled Nagle's algorithm (`TCP_NODELAY`) on inbound and outbound peer TCP connections, including isolated connections from `connect_isolated_tcp_direct`, so a small message sent right after another one no longer waits for the peer to acknowledge the first."
-time: 2026-10-12T17:01:28.000000000Z
