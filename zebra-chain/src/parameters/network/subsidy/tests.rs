@@ -9,7 +9,7 @@ use crate::parameters::{
     network::error::ParametersBuilderError,
     testnet::{ConfiguredActivationHeights, Parameters, ParametersBuilder, RegtestParameters},
 };
-use crate::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
+use crate::parameters::{subsidy::FundingStreamReceiver, Magic, NetworkKind};
 use crate::{
     amount::{Amount, DeferredPoolBalanceChange},
     block::Block,
@@ -19,6 +19,33 @@ use crate::{
 use color_eyre::Report;
 
 use super::*;
+
+/// Custom slow start intervals can produce subsidies that are not multiples of five.
+#[test]
+fn founders_reward_rounds_down_on_custom_testnet() -> Result<(), Report> {
+    let network = Parameters::build()
+        .with_network_magic(Magic([0; 4]))?
+        .with_slow_start_interval(Height(3))
+        .with_halving_interval(144)?
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(10),
+            canopy: Some(20),
+            ..Default::default()
+        })?
+        .with_funding_streams(Vec::new())
+        .to_network()?;
+
+    let height = Height(1);
+    assert_eq!(
+        scheduled_block_subsidy(height, &network)?,
+        Amount::<NonNegative>::try_from(833_333_332)?
+    );
+    assert_eq!(
+        founders_reward(&network, height),
+        Amount::<NonNegative>::try_from(166_666_666)?
+    );
+    Ok(())
+}
 
 /// Checks that the Mainnet funding stream values are correct.
 #[test]

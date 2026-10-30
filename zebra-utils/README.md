@@ -16,22 +16,19 @@ This command generates a list of zebra checkpoints, and writes them to standard 
 
 #### Automatic Checkpoint Generation in CI
 
-Zebra's GitHub workflows automatically generate checkpoints after every `main` branch update.
-These checkpoints can be copied into the `main-checkpoints.txt` and `test-checkpoints.txt` files.
+After a successful integration-test run on `main`, the
+[Checkpoint Update workflow](../.github/workflows/checkpoint-update.yml)
+downloads both networks' checkpoint artifacts, appends new entries, validates
+the lists, and opens or updates a pull request. Runs without both artifacts
+are skipped. Manual dispatch selects the latest successful run with both
+artifacts.
 
-To find the latest checkpoints on the `main` branch:
-
-1. Find the [latest completed integration tests workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml?query=branch%3Amain).
-   Due to GitHub UI issues, some runs will show as waiting, cancelled, or failed,
-   but the checkpoints have still been generated.
-2. From the list on the left, find the `Generate checkpoints mainnet` job, then click the
-   `Result of generate-checkpoints-mainnet` step.
-3. Scroll down until you see the list of checkpoints.
-4. Add those checkpoints to the end of `zebra-chain/src/parameters/checkpoint/main-checkpoints.txt`
-5. Repeat steps 2 to 4 for the `Generate checkpoints testnet` job
-6. Open a pull request at <https://github.com/ZcashFoundation/zebra/pulls>
+Checkpoints are consensus-critical. Review the new hashes against the linked
+source run before merging.
 
 #### Manual Checkpoint Generation
+
+Use manual generation as a fallback when the automated update is unavailable.
 
 To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`.
 `zebrad` can be queried directly or via an installed `zcash-cli` RPC client.

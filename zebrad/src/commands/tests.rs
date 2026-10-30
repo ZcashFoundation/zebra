@@ -1,8 +1,9 @@
 //! Tests for parsing zebrad commands
 
+use abscissa_core::Configurable;
 use clap::Parser;
 
-use crate::commands::ZebradCmd;
+use crate::{commands::ZebradCmd, config::ZebradConfig};
 
 use super::EntryPoint;
 
@@ -43,6 +44,43 @@ fn args_with_subcommand_pass_through() {
         );
 
         assert_eq!(matches!(args.cmd(), ZebradCmd::Start(_)), should_be_start,);
+    }
+}
+
+#[test]
+fn start_filters_override_config() {
+    let test_cases = [
+        (vec!["zebrad", "--filters", "warn"], "warn"),
+        (vec!["zebrad", "--filters", "warn", "start"], "warn"),
+        (
+            vec![
+                "zebrad",
+                "--filters",
+                "warn",
+                "start",
+                "info",
+                "zebra_network=debug",
+            ],
+            "info,zebra_network=debug",
+        ),
+    ];
+
+    for (args, expected_filter) in test_cases {
+        let processed_args = EntryPoint::process_cli_args(args.iter().map(Into::into).collect())
+            .expect("hardcoded args should process successfully");
+        let command = EntryPoint::try_parse_from(processed_args)
+            .expect("processed args should parse successfully");
+        let mut config = ZebradConfig::default();
+        config.tracing.filter = Some("error".to_owned());
+        let config = command
+            .process_config(config)
+            .expect("command filters should override the configured filter");
+
+        assert_eq!(
+            config.tracing.filter.as_deref(),
+            Some(expected_filter),
+            "{args:?}"
+        );
     }
 }
 

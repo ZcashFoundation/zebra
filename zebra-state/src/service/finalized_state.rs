@@ -193,7 +193,6 @@ impl FinalizedState {
         let elastic_db = if enable_elastic_db {
             use elasticsearch::{
                 auth::Credentials::Basic,
-                cert::CertificateValidation,
                 http::transport::{SingleNodeConnectionPool, TransportBuilder},
                 http::Url,
                 Elasticsearch,
@@ -204,7 +203,7 @@ impl FinalizedState {
                     .expect("configured elasticsearch url is invalid"),
             );
             let transport = TransportBuilder::new(conn_pool)
-                .cert_validation(CertificateValidation::None)
+                .cert_validation(config.elasticsearch_cert_validation())
                 .auth(Basic(
                     config.elasticsearch_username.clone(),
                     config.elasticsearch_password.as_str().to_string(),

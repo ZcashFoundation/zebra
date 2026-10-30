@@ -1,10 +1,14 @@
-# API Reference
+# API reference
 
-The Zcash Foundation maintains the following API documentation for Zebra:
+- [docs.rs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) documents the
+  latest published release of each crate.
+- The [internal documentation](https://zebra.zfnd.org/internal) documents
+  `main`, including private items; every push to `main` regenerates it.
+  Build it locally with:
 
-- The [documentation of the public
-  APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
-  releases of the individual Zebra crates.
+  ```sh
+  cargo doc --no-deps --workspace --all-features --document-private-items
+  ```
 
-- You can also build internal documentation locally by running
-  `cargo doc --document-private-items` in the Zebra repository.
+- [JSON-RPC server](user/rpc.md) documents the RPC interface; a running node
+  also describes its methods through the `rpc.discover` method (OpenRPC).

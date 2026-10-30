@@ -42,6 +42,10 @@ unit_tests:
   - "**/Cargo.toml"
   - "**/Cargo.lock"
   - ".config/nextest.toml"
+  # Pages that tests compare with the code.
+  - "book/src/README.md"
+  - "book/src/user/config.md"
+  - "book/src/user/rpc.md"
   - ".github/workflows/tests-unit.yml"
   - ".github/actions/setup-zebra-build/**"
   - ".github/scripts/apt-install.sh"
@@ -71,6 +75,8 @@ test_docker:
 
 book:
   - "book/**"
+  # The book includes this file.
+  - "CONTRIBUTING.md"
   - "katex-header.html"
   - "**/*.rs"
   - "**/Cargo.toml"
@@ -78,6 +84,15 @@ book:
   - ".cargo/config.toml"
   - "**/clippy.toml"
   - ".github/workflows/book.yml"
+  - ".github/workflows/docs-check.yml"
+  - ".github/path-filters.yml"
+
+# The mdBook build in docs-check.yml; a subset of `book`, without the Rust inputs that only
+# the internal rustdoc needs.
+book_links:
+  - "book/**"
+  - "CONTRIBUTING.md"
+  - ".github/workflows/docs-check.yml"
   - ".github/path-filters.yml"
 
 coverage:

@@ -30,6 +30,8 @@ use crate::{
 
 pub use check::{miner_fees_are_valid, subsidy_is_valid, CoinbaseTransactionError};
 
+use super::error::ParametersBuilderError;
+
 use constants::{
     BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
     FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY,
@@ -146,13 +148,32 @@ impl FundingStreams {
     /// Extends the addresses for all funding stream recipients by repeating their
     /// existing addresses until reaching the provided target number of addresses.
     pub fn extend_recipient_addresses(&mut self, target_len: usize) {
+        self.try_extend_recipient_addresses(target_len)
+            .expect("cannot extend addresses for empty recipient");
+    }
+
+    /// Extends recipient addresses, rejecting a required empty address list.
+    pub(super) fn try_extend_recipient_addresses(
+        &mut self,
+        target_len: usize,
+    ) -> Result<(), ParametersBuilderError> {
         for (receiver, recipient) in &mut self.recipients {
             if receiver.is_deferred() {
                 continue;
             }
 
+            if target_len > 0 && recipient.addresses().is_empty() {
+                return Err(ParametersBuilderError::InsufficientFundingStreamAddresses {
+                    receiver: *receiver,
+                    required: target_len,
+                    provided: 0,
+                });
+            }
+
             recipient.extend_addresses(target_len);
         }
+
+        Ok(())
     }
 }
 
@@ -177,17 +198,29 @@ impl FundingStreamRecipient {
         T: ToString,
         I: IntoIterator<Item = T>,
     {
-        Self {
+        Self::try_new(
+            numerator,
+            addresses.into_iter().map(|address| address.to_string()),
+        )
+        .expect("funding stream address must deserialize")
+    }
+
+    /// Parses configured addresses without assuming they are hard-coded constants.
+    pub(super) fn try_new(
+        numerator: u64,
+        addresses: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ParametersBuilderError> {
+        Ok(Self {
             numerator,
             addresses: addresses
                 .into_iter()
-                .map(|addr| {
-                    let addr = addr.to_string();
-                    addr.parse()
-                        .expect("funding stream address must deserialize")
+                .map(|address| {
+                    address.parse().map_err(|_| {
+                        ParametersBuilderError::InvalidFundingStreamAddress { address }
+                    })
                 })
-                .collect(),
-        }
+                .collect::<Result<_, _>>()?,
+        })
     }
 
     /// Returns the numerator for this funding stream.
@@ -1093,6 +1126,8 @@ pub fn founders_reward_address(net: &Network, height: Height) -> Option<transpar
 
 /// `FoundersReward(height)` as described in [§7.8].
 ///
+/// Fractional zatoshis are rounded down, including on custom Testnets.
+///
 /// [§7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
 pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // The founders reward is 20% of the block subsidy before the first halving, and 0 afterwards.
@@ -1102,7 +1137,7 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // Canopy, so we check if Canopy is active as well.
     if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
         scheduled_block_subsidy(height, net)
-            .map(|subsidy| subsidy.div_exact(5))
+            .and_then(|subsidy| (subsidy / 5).map_err(SubsidyError::from))
             .expect("block subsidy must be valid for founders rewards")
     } else {
         Amount::zero()

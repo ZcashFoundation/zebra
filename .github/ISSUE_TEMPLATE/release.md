@@ -70,7 +70,7 @@ If the release includes security fixes, do the following:
   - `git reset --hard upstream/main`
   - `git push` (you might need admin privileges in the private repo)
 - [ ] Create a new PR in zebra-private (**double check you are pushing to zebra-private**) with the combination of all the security
-      PRs to be merged; **ensure you add the `stateful-tests` tag to the PR**.
+      PRs to be merged; **ensure you add the `run-stateful-tests` label to the PR**.
   - You can do it with an octopus merge, e.g. `git merge branch-1 branch-2 ...`
       after you created a new branch. Other alternative is to squash merge each
       other PR, e.g. `git merge --squash branch-1` (repeat for other branches).
@@ -115,9 +115,11 @@ Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/
 - [ ] Approve and merge the release PR.
 - [ ] Approve the Release workflow (https://github.com/ZcashFoundation/zebra/actions/workflows/release.yml in the `release-...` branch)
 - [ ] Confirm that the Release workflow completed successfully
-- [ ] If it is a RC release, edit the just-created GitHub release to move it
-  from pre-release to latest.
-- [ ] Confirm the Release binaries workflow completed after the Release job created the GitHub release (https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
+- [ ] For an RC, follow the [preview release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#preview-releases):
+  keep the version-derived prerelease channel, which the release controller enforces. Production
+  handling of candidates is still open in [#11774](https://github.com/ZcashFoundation/zebra/issues/11774).
+- [ ] For stable versions, confirm the Release binaries workflow completed after the Release job created the GitHub release (https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml).
+  It runs only for non-prerelease releases, so RCs get no binaries or Docker images.
 - [ ] Post in #communications that the release is done
 
 If security release:

@@ -1,262 +1,213 @@
-# How to mine with Zebra on testnet
+# Mining on Testnet with s-nomp
 
-## Important
+The Zcash Foundation's s-nomp fork connects Equihash miners to Zebra through
+Stratum, a protocol for distributing mining jobs and collecting solutions.
+This is an **experimental Testnet setup**, not a production pool: custom
+coinbase construction and pool-fee outputs are disabled, and this procedure
+disables worker payments. All miner rewards go to `[mining] miner_address`
+in Zebra. A worker's Stratum username does not select a payment recipient.
 
-> **Note:** `s-nomp` has not been officially updated for NU5 or later network upgrades (NU6, NU6.1).
-> The ZcashFoundation fork below includes partial fixes, but this setup is provided for testing purposes only.
-> For production mining, consider using mining pool software that supports current Zcash network upgrades.
+## Compatibility and limitations
 
-The `zebra-mining` branch of the ZcashFoundation s-nomp fork includes fixes that:
+The public fork's default branch is `zebra-mining`. Its package version is
+`0.0.9`; the source revision used below is
+[`49fd89bf`](https://github.com/ZcashFoundation/s-nomp/tree/49fd89bf32fac6fe2440143d16622650e061e5a0).
+Use **Node.js 10.24.1** and Python 3.10, selected by the fork's container recipe,
+not the README's Node.js 8.11. Node.js 12 and later have incompatible Equihash
+native-module APIs.
 
-- Disable mining pool operator payments and miner payments (they just pay to the address configured for the node)
-- Provide basic compatibility with Zebra's RPC interface
+The pool's `stratum-pool` dependency passes Zebra's
+[`coinbasetxn.data` and `coinbasetxn.hash`](https://github.com/upbqdn/node-stratum-pool/blob/7fbb0685f8895abf1b746d6682de30dd814b9382/lib/transactions.js)
+through unchanged. Its
+[block assembly](https://github.com/upbqdn/node-stratum-pool/blob/7fbb0685f8895abf1b746d6682de30dd814b9382/lib/blockTemplate.js)
+forwards the supplied transactions and uses the legacy `finalsaplingroothash`
+field, which Zebra fills with the current block commitment. This bypasses the
+obsolete custom coinbase builder. It provides neither a current transaction
+parser nor a payment implementation.
+
+The fork supplies `pool_configs/zcash_testnet.json` for native use. Its
+container entrypoint generates a separate configuration but omits two
+settings required for this deployment:
+
+- The missing `switching` object causes
+  `Object.keys(portalConfig.switching)` to fail at startup.
+- Its generated Stratum port omits `tls: false`. The dependency selects TLS
+  unless that field is explicitly false, so a plain-TCP miner cannot use
+  the generated default.
+
+Use the fork's container build with Zebra's
+[`s-nomp-entrypoint.sh`](https://github.com/ZcashFoundation/zebra/blob/main/docker/mining/s-nomp-entrypoint.sh).
+The wrapper supplies both settings. The
+[repository Compose stack](mining-docker.md#repository-mining-compose-stack)
+has separate Zebra startup defects.
+
+## Prepare the sources
+
+Use a Linux x86-64 host with Docker, Git, and `jq`. Keep this old pool runtime
+on a dedicated Docker network. Do not expose its Redis, RPC, web interface,
+or Stratum listener to untrusted clients.
+
+Clone the sources into a working directory:
+
+```sh
+git clone --branch v7.0.0 --depth 1 https://github.com/ZcashFoundation/zebra.git zebra
+git clone --branch zebra-mining https://github.com/ZcashFoundation/s-nomp.git s-nomp
+git -C s-nomp checkout --detach 49fd89bf32fac6fe2440143d16622650e061e5a0
+```
+
+In `s-nomp/package.json`, pin the `stratum-pool` dependency:
+
+```json
+"stratum-pool": "git+https://github.com/upbqdn/node-stratum-pool.git#7fbb0685f8895abf1b746d6682de30dd814b9382"
+```
+
+Build the pool image:
+
+```sh
+docker build -f s-nomp/Dockerfile.arch -t zebra-s-nomp s-nomp
+```
+
+The Dockerfile installs Boost, libsodium, GMP, Redis, and native build tools,
+sets `CXXFLAGS=-std=gnu++17`, and patches the RPC transport. Other npm
+dependencies and the Arch base image remain unpinned; this is not a
+reproducible dependency build.
+
+The transport patch adds `"jsonrpc":"2.0"` to the startup batch, as required by
+[Zebra's batch protocol](rpc.md#transport-and-compatibility). A plain
+`npm install` leaves that batch incompatible.
 
 ## Install, run, and sync Zebra
 
-1. Configure `zebrad.toml`:
-   - change the `network.network` config to `Testnet`
-   - add your testnet transparent address in `mining.miner_address`, or you can use the ZF testnet address `t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v`
-   - ensure that there is an `rpc.listen_addr` in the config to enable the RPC server
-   - disable the cookie auth system by changing `rpc.enable_cookie_auth` to `false`
+Set `MINER_ADDRESS` in the shell to a **transparent Testnet address that you
+control**. This recipe also uses it for s-nomp's transparent-address startup
+check, even though Zebra itself supports additional
+[miner address kinds](mining.md#miner-address).
 
-   Example config:
-   <details>
-
-   ```console
-   [consensus]
-   checkpoint_sync = true
-
-   [mempool]
-   eviction_memory_time = '1h'
-   tx_cost_limit = 80000000
-
-   [metrics]
-
-   [network]
-   crawl_new_peer_interval = '1m 1s'
-   initial_mainnet_peers = [
-       'dnsseed.str4d.xyz:8233',
-       'dnsseed.z.cash:8233',
-       'mainnet.seeder.shieldedinfra.net:8233',
-       'mainnet.seeder.zfnd.org:8233',
-       'seeder.zec.rocks:8233',
-   ]
-   initial_testnet_peers = [
-       'dnsseed.testnet.z.cash:18233',
-       'seeder.testnet.zec.rocks:18233',
-       'testnet.seeder.zfnd.org:18233',
-   ]
-   listen_addr = '0.0.0.0:18233'
-   network = 'Testnet'
-   peerset_initial_target_size = 25
-
-   [rpc]
-   debug_force_finished_sync = false
-   parallel_cpu_threads = 1
-   listen_addr = '127.0.0.1:18232'
-   enable_cookie_auth = false
-
-   [state]
-   cache_dir = '/home/ar/.cache/zebra'
-   delete_old_database = true
-   ephemeral = false
-
-   [sync]
-   checkpoint_verify_concurrency_limit = 1000
-   download_concurrency_limit = 50
-   full_verify_concurrency_limit = 20
-   parallel_cpu_threads = 0
-
-   [tracing]
-   buffer_limit = 128000
-   force_use_color = false
-   use_color = true
-   use_journald = false
-
-   [mining]
-   miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
-   ```
-
-   </details>
-
-2. [Run Zebra](https://zebra.zfnd.org/user/run.html) with the config you created:
-
-   ```sh
-   zebrad -c zebrad.toml
-   ```
-
-3. Wait for Zebra to sync to the testnet tip. Sync times vary depending on hardware and network conditions, typically 8-12 hours on testnet or 2-3 days on mainnet.
-
-## Install `s-nomp`
-
-<details><summary>General instructions with Debian/Ubuntu examples</summary>
-
-#### Install dependencies
-
-1. Install `redis` and run it on the default port: <https://redis.io/docs/latest/get-started/>
-
-    ```sh
-    sudo apt-get install lsb-release
-    curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
-
-   echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
-
-   sudo apt-get update
-   sudo apt-get install redis
-   redis-server
-   ```
-
-2. Install and activate a node version manager (e.g. [`nodenv`](https://github.com/nodenv/nodenv#installation) or [`nvm`](https://github.com/nvm-sh/nvm#installing-and-updating))
-3. Install `boost` and `libsodium` development libraries
-
-   ```sh
-   sudo apt install libboost-all-dev
-   sudo apt install libsodium-dev
-   ```
-
-#### Install `s-nomp`
-
-1. `git clone https://github.com/ZcashFoundation/s-nomp`
-2. `cd s-nomp`
-3. Use the Zebra fixes: `git checkout zebra-mining`
-4. Use node 10:
-
-   ```sh
-   nodenv install 10
-   nodenv local 10
-   ```
-
-   or
-
-   ```sh
-   nvm install 10
-   nvm use 10
-   ```
-
-5. Update dependencies and install:
-
-   ```sh
-   export CXXFLAGS="-std=gnu++17"
-   npm update
-   npm install
-   ```
-
-</details>
-
-<details><summary>Arch-specific instructions</summary>
-
-#### Install `s-nomp`
-
-1. Install Redis, and development libraries required by S-nomp
-
-   ```sh
-   sudo pacman -S redis boost libsodium
-   ```
-
-2. Install `nvm`, Python 3.10 and `virtualenv`
-
-   ```sh
-   paru -S python310 nvm
-   sudo pacman -S python-virtualenv
-   ```
-
-3. Start Redis
-
-   ```sh
-   sudo systemctl start redis
-   ```
-
-4. Clone the repository
-
-   ```sh
-   git clone https://github.com/ZcashFoundation/s-nomp && cd s-nomp
-   ```
-
-5. Use Node 10:
-
-   ```sh
-   unset npm_config_prefix
-   source /usr/share/nvm/init-nvm.sh
-   nvm install 10
-   nvm use 10
-   ```
-
-6. Use Python 3.10
-
-   ```sh
-   virtualenv -p 3.10 s-nomp
-   source s-nomp/bin/activate
-   ```
-
-7. Update dependencies and install:
-
-   ```sh
-   npm update
-   npm install
-   ```
-
-</details>
-
-## Run `s-nomp`
-
-1. Edit `pool_configs/zcash.json` so `daemons[0].port` is your Zebra port
-2. Run `s-nomp` using `npm start`
-
-Note: the website will log an RPC error even when it is disabled in the config. This seems like a `s-nomp` bug.
-
-## Install a CPU or GPU miner
-
-#### Install dependencies
-
-<details><summary>General instructions</summary>
-
-1. Install a statically compiled `boost` and `icu`.
-2. Install `cmake`.
-
-</details>
-
-<details><summary>Arch-specific instructions</summary>
+Create a dedicated network and start Zebra:
 
 ```sh
-sudo pacman -S cmake boost icu
+docker network create zebra-mining
+
+docker run -d --name zebra-testnet \
+  --network zebra-mining \
+  -e ZEBRA_NETWORK__NETWORK=Testnet \
+  -e "ZEBRA_MINING__MINER_ADDRESS=${MINER_ADDRESS:?Set a Testnet MINER_ADDRESS}" \
+  -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232 \
+  -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=false \
+  -p 18233:18233 \
+  -v zebra-testnet-mining-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:7.0.0
 ```
 
-</details>
+The pool's generated daemon credentials are the fixed strings `x` and `x`;
+it does not load Zebra's cookie. This example therefore disables RPC
+authentication but **does not publish port 18232**. Attach only trusted
+containers to this network. The authenticated setup in
+[Mining with Docker](mining-docker.md#rpc-authentication) is preferable for
+pool software that supports it.
 
-#### Install `nheqminer`
-
-We're going to install `nheqminer`, which supports multiple CPU and GPU Equihash
-solvers, namely `djezo`, `xenoncat`, and `tromp`. We're using `tromp` on a CPU
-in the following instructions since it is the easiest to install and use.
-
-1. `git clone https://github.com/ZcashFoundation/nheqminer`
-2. `cd nheqminer`
-3. Use the Zebra fixes: `git checkout zebra-mining`
-4. Follow the build instructions at
-   <https://github.com/nicehash/nheqminer#general-instructions>, or run:
+Inspect synchronization:
 
 ```sh
-mkdir build
-cd build
-# Turn off `djezo` and `xenoncat`, which are enabled by default, and turn on `tromp` instead.
-cmake -DUSE_CUDA_DJEZO=OFF -DUSE_CPU_XENONCAT=OFF -DUSE_CPU_TROMP=ON ..
-make -j $(nproc)
+docker logs --follow zebra-testnet
 ```
 
-## Run miner
-
-1. Follow the run instructions at: <https://github.com/nicehash/nheqminer#run-instructions>
+Before starting s-nomp, request a template from inside the node container:
 
 ```sh
-# you can use your own testnet address here
-# miner and pool payments are disabled, configure your address on your node to get paid
-./nheqminer -l 127.0.0.1:1234 -u tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh.worker1 -t 1
+docker exec zebra-testnet curl --fail-with-body --silent --show-error \
+  --header 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"getblocktemplate","params":[]}' \
+  http://127.0.0.1:18232/ | jq
 ```
 
-Notes:
+Wait for a `result` containing a template, not an RPC error; see the
+[sync requirements](mining.md#running-zebra). The supplied coinbase handles
+[NU7 funding-stream and NSM fee accounting](mining.md#nu7-mining-rules).
 
-- A typical solution rate is 2-4 Sols/s per core
-- `nheqminer` sometimes ignores Control-C, if that happens, you can quit it using:
-  - `killall nheqminer`, or
-  - Control-Z then `kill %1`
-- Running `nheqminer` with a single thread (`-t 1`) can help avoid this issue
+## Run s-nomp
+
+Run these commands from the directory containing the `zebra` and `s-nomp`
+checkouts:
+
+```sh
+docker run -d --name s-nomp-testnet \
+  --network zebra-mining \
+  -e NETWORK=Testnet \
+  -e ZEBRA_HOST=zebra-testnet \
+  -e ZEBRA_RPC_PORT=18232 \
+  -e STRATUM_PORT=3333 \
+  -e "POOL_ADDRESS=${MINER_ADDRESS:?Set a Testnet MINER_ADDRESS}" \
+  -p 127.0.0.1:3333:3333 \
+  -p 127.0.0.1:8080:8080 \
+  --mount "type=bind,source=$PWD/zebra/docker/mining/s-nomp-entrypoint.sh,target=/app/s-nomp-entrypoint.sh,readonly" \
+  --entrypoint /bin/bash \
+  zebra-s-nomp /app/s-nomp-entrypoint.sh
+
+docker logs --follow s-nomp-testnet
+```
+
+The entrypoint generates `/app/config.json` and
+`/app/pool_configs/zcash.json`, selects `coins/testnet/zec.json`, disables
+payment processing, starts Redis on local port 6379, and runs `node init.js`.
+
+The pool polls for block templates every 500 milliseconds. Its website is
+available on the host at <http://127.0.0.1:8080>. The pool's startup message
+`Stratum Pool Server Started` indicates that it has created a job and started
+the listener; it does not establish that the pool has mined an accepted block.
+
+The entrypoint overwrites generated configuration on each start. Do not edit
+those files expecting the changes to survive a container restart.
+
+## Install and run a CPU miner
+
+The Zcash Foundation's nheqminer fork supplies a Dockerfile for a CPU-only
+build with the Xenoncat solver. This solver requires an x86-64 CPU with AVX
+support; it selects AVX2 when available. The following revision is from the
+`zebra-mining` branch:
+
+```sh
+git clone --branch zebra-mining https://github.com/ZcashFoundation/nheqminer.git nheqminer
+git -C nheqminer checkout --detach 72e320aacaa49c9e170be62d28a4189957767d3c
+docker build -t zebra-nheqminer nheqminer
+
+docker run -d --name nheqminer-testnet \
+  --network zebra-mining \
+  zebra-nheqminer \
+  -l s-nomp-testnet:3333 \
+  -u "${MINER_ADDRESS:?Set a Testnet MINER_ADDRESS}.worker1" \
+  -t 1
+
+docker logs --follow nheqminer-testnet
+```
+
+The miner's `-t 1` option selects one CPU thread. A native Equihash miner on
+the same host can instead connect to `127.0.0.1:3333`. Do not use port 18232
+as a Stratum endpoint; it belongs to Zebra's JSON-RPC server.
+
+A share accepted by the pool is not necessarily a block: it can meet the
+pool's easier share target without meeting the network target. Check Zebra's
+`submitblock` outcome and best chain when evaluating a mined block.
+
+## Diagnose failures
+
+| Symptom | Check |
+| --- | --- |
+| Missing `config.json` or no enabled pools | Start through the entrypoint; `npm start` alone does not generate configuration. |
+| Unauthorized RPC access | The generated `x` credentials do not authenticate against Zebra's default cookie authentication. Do not solve this by exposing unauthenticated RPC. |
+| Error `-10` from `getblocktemplate` | Wait for Zebra to synchronize. |
+| Mining-parameters error from `getblocktemplate` | Check Zebra's reward address, selected network, and memo length. |
+| Block rejected after changing coinbase or transactions | Restore the supplied template or implement current coinbase, commitment, and NU7 rules. |
+| Website logs `Could not dumpprivkey` | The website calls this unsupported wallet RPC even with payments disabled. Zebra holds no wallet keys; this error concerns the website's mining-key page, not block-template generation. |
+
+## Stop the experiment
+
+Stop the miner before the pool and node:
+
+```sh
+docker stop --timeout -1 nheqminer-testnet s-nomp-testnet zebra-testnet
+```
+
+The Zebra state volume remains available for reuse. The pool recipe does not
+mount a persistent Redis volume; do not treat its share statistics as durable
+payment records.

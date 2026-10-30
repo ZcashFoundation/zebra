@@ -21,6 +21,9 @@ use crate::{
     state_database_format_version_in_code, BoxError,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
 /// are not written to logs by types that derive `Debug`.
 ///
@@ -62,7 +65,7 @@ pub struct Config {
     ///
     /// This cache stores permanent blockchain state that can be replicated from
     /// the network, including the best chain, blocks, the UTXO set, and other indexes.
-    /// Any state that can be rolled back is only stored in memory.
+    /// Non-finalized state is held in memory and, by default, backed up to disk for restart.
     ///
     /// The `zebra-state` cache does *not* include any private data, such as wallet data.
     ///
@@ -93,11 +96,12 @@ pub struct Config {
     /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
     /// underneath the `cache_dir` path, where `N` is the state format version.
     ///
-    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
-    /// and re-syncs from genesis.
+    /// Compatible state formats can be upgraded in place or reused from the preceding major
+    /// version. Without a reusable database, Zebra creates a new state directory and re-syncs from
+    /// genesis.
     ///
-    /// Old state versions are automatically deleted at startup. You can also manually delete old
-    /// state versions.
+    /// Old state versions are deleted at startup when [`Self::delete_old_database`] is enabled.
+    /// You can also manually delete old state versions.
     pub cache_dir: PathBuf,
 
     /// Whether to use an ephemeral database.
@@ -170,6 +174,14 @@ pub struct Config {
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database password.
     pub elasticsearch_password: RedactedString,
+
+    #[cfg(feature = "elasticsearch")]
+    /// Skip TLS certificate validation when connecting to Elasticsearch.
+    ///
+    /// Defaults to `false`, so the server certificate is validated. Set to `true` only for a
+    /// trusted local cluster with a self-signed certificate: it exposes the connection, including
+    /// authentication credentials, to interception.
+    pub elasticsearch_skip_cert_validation: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -239,6 +251,18 @@ impl Config {
             ..Config::default()
         }
     }
+
+    /// Returns how the Elasticsearch server certificate is validated.
+    #[cfg(feature = "elasticsearch")]
+    pub(crate) fn elasticsearch_cert_validation(
+        &self,
+    ) -> elasticsearch::cert::CertificateValidation {
+        if self.elasticsearch_skip_cert_validation {
+            elasticsearch::cert::CertificateValidation::None
+        } else {
+            elasticsearch::cert::CertificateValidation::Default
+        }
+    }
 }
 
 impl Default for Config {
@@ -257,6 +281,8 @@ impl Default for Config {
             elasticsearch_username: "elastic".to_string(),
             #[cfg(feature = "elasticsearch")]
             elasticsearch_password: RedactedString::default(),
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_skip_cert_validation: false,
         }
     }
 }
@@ -614,29 +640,5 @@ pub(crate) mod hidden {
         atomic_write(version_path, changed_version.to_string().as_bytes())??;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redacted_string_hides_contents_from_debug() {
-        let secret = RedactedString::from("hunter2");
-
-        assert_eq!(format!("{secret:?}"), "[REDACTED]");
-        assert_eq!(secret.as_str(), "hunter2");
-    }
-
-    #[cfg(feature = "elasticsearch")]
-    #[test]
-    fn config_debug_does_not_contain_elasticsearch_password() {
-        let config = Config {
-            elasticsearch_password: RedactedString::from("hunter2"),
-            ..Config::default()
-        };
-
-        assert!(!format!("{config:?}").contains("hunter2"));
     }
 }
