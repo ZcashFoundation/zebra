@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Exported coinbase_is_first and difficulty_threshold_is_valid for compact-block admission checks.
+time: 2026-10-23T03:22:51.915023182+02:00
