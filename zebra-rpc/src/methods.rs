@@ -37,8 +37,8 @@ use std::{
     fmt,
     future::Future,
     ops::RangeInclusive,
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -960,6 +960,9 @@ where
     /// Read-only access to the block verifier's successful proposals for submission decoding.
     prepared_blocks: Option<zebra_consensus::PreparedBlockCache>,
 
+    /// Last best-tip publication served to a miner, shared by all RPC clones.
+    first_template_tip: Arc<Mutex<Option<(block::Hash, Instant)>>>,
+
     /// Per-instance wall clock for deterministic mining deadline and rollback tests.
     #[cfg(test)]
     template_clock: Option<Arc<std::sync::atomic::AtomicU32>>,
@@ -1069,6 +1072,7 @@ where
             last_warn_error_log_rx,
             gbt,
             prepared_blocks: None,
+            first_template_tip: Default::default(),
             #[cfg(test)]
             template_clock: None,
             #[cfg(test)]
@@ -1100,6 +1104,23 @@ where
     pub fn with_prepared_blocks(mut self, cache: zebra_consensus::PreparedBlockCache) -> Self {
         self.prepared_blocks = Some(cache);
         self
+    }
+
+    /// Records the first served template for each best-tip publication, including reorgs.
+    fn served_block_template(&self, template: BlockTemplateResponse) -> GetBlockTemplateResponse {
+        let mut recorded = self
+            .first_template_tip
+            .lock()
+            .expect("first-template bookkeeping does not panic while locked");
+        let hash = template.previous_block_hash;
+        if let Some(changed_at) = self.latest_chain_tip.best_tip_changed_at(hash) {
+            if *recorded != Some((hash, changed_at)) {
+                metrics::histogram!("rpc.getblocktemplate.first_template.duration_seconds")
+                    .record(changed_at.elapsed().as_secs_f64());
+                *recorded = Some((hash, changed_at));
+            }
+        }
+        template.into()
     }
 
     /// Reads wall time for template deadlines and serve-time timestamp validation.
@@ -3024,7 +3045,7 @@ where
             .precomputed_block_template(client_long_poll_id, long_poll_started)
             .await?
         {
-            return Ok(template.into());
+            return Ok(self.served_block_template(template));
         }
 
         // A fallback is only needed without a live updater. Its lock covers the snapshot,
@@ -3050,7 +3071,7 @@ where
                     .precomputed_block_template(client_long_poll_id, long_poll_started)
                     .await?
                 {
-                    return Ok(template.into());
+                    return Ok(self.served_block_template(template));
                 }
                 continue;
             }
@@ -3168,7 +3189,7 @@ where
                 if let Some(cache) = self.gbt.template_cache() {
                     cache.publish(template.clone());
                 }
-                return Ok(template.into());
+                return Ok(self.served_block_template(template));
             }
             drop(build_guard);
 
@@ -3225,7 +3246,7 @@ where
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
                         .await?
                     {
-                        return Ok(template.into());
+                        return Ok(self.served_block_template(template));
                     }
                 }
 
@@ -3241,7 +3262,7 @@ where
                         .precomputed_block_template(client_long_poll_id, long_poll_started)
                         .await?
                     {
-                        return Ok(template.into());
+                        return Ok(self.served_block_template(template));
                     }
                 }
 
@@ -3285,7 +3306,9 @@ where
                     "submit block failed: block bytes could not be deserialized into a structurally valid block"
                 );
 
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
+                return Ok(
+                    SubmitBlockResponse::from(SubmitBlockErrorResponse::Rejected).with_metrics(),
+                );
             }
         };
         let block = decoded.block();
@@ -3338,7 +3361,7 @@ where
             Ok(hash) => {
                 tracing::info!(?hash, ?height, "submit block accepted");
 
-                return Ok(SubmitBlockResponse::Accepted);
+                return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
@@ -3445,7 +3468,7 @@ where
             Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
         };
 
-        Ok(response.into())
+        Ok(SubmitBlockResponse::from(response).with_metrics())
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {

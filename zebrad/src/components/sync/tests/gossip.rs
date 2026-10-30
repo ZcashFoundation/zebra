@@ -144,6 +144,159 @@ fn set_tip(sender: &mut ChainTipSender, n: u32) -> block::Hash {
     hash
 }
 
+/// Only mined announcements record outcomes, after local writes finish, including readiness waits.
+#[test]
+fn gossip_mined_announcement_metrics() {
+    use metrics::{
+        atomics::AtomicU64, Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata,
+        Recorder, SharedString, Unit,
+    };
+    use std::{collections::HashMap, sync::atomic::Ordering};
+
+    #[derive(Default)]
+    struct Durations(Mutex<Vec<f64>>);
+
+    impl HistogramFn for Durations {
+        fn record(&self, value: f64) {
+            self.0.lock().unwrap().push(value);
+        }
+    }
+
+    #[derive(Default)]
+    struct AnnouncementRecorder {
+        counters: Mutex<HashMap<Key, Arc<AtomicU64>>>,
+        durations: Arc<Durations>,
+    }
+
+    impl AnnouncementRecorder {
+        fn outcome(&self, outcome: &'static str) -> u64 {
+            self.counters
+                .lock()
+                .unwrap()
+                .get(&Key::from_parts(
+                    "sync.mined.block.announcement.outcomes.total",
+                    &[("outcome", outcome)],
+                ))
+                .map_or(0, |value| value.load(Ordering::Relaxed))
+        }
+    }
+
+    impl Recorder for AnnouncementRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::from_arc(
+                self.counters
+                    .lock()
+                    .unwrap()
+                    .entry(key.clone())
+                    .or_default()
+                    .clone(),
+            )
+        }
+
+        fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+            Gauge::noop()
+        }
+
+        fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+            if key.name() == "sync.mined.block.announcement.duration_seconds" {
+                assert_eq!(key.labels().count(), 0);
+                Histogram::from_arc(self.durations.clone())
+            } else {
+                Histogram::noop()
+            }
+        }
+    }
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let recorder = AnnouncementRecorder::default();
+    metrics::with_local_recorder(&recorder, || {
+        runtime.block_on(async {
+            tokio::time::pause();
+            tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 4, async {
+                let (mut tip_sender, _latest_tip, tip_change) =
+                    ChainTipSender::new(None, &Network::Mainnet);
+                let (sync_status, mut recent_syncs) = SyncStatus::new();
+                recent_syncs.push_extend_tips_length(0);
+                let (peer_set, mut requests) = GatedPeerSet::new();
+                let channel = SubmitBlockChannel::new();
+                let sender = channel.sender();
+                let gossip = tokio::spawn(gossip_best_tip_block_hashes(
+                    sync_status,
+                    tip_change,
+                    peer_set.clone(),
+                    Some(channel.receiver()),
+                    Default::default(),
+                ));
+
+                peer_set.set_readiness(Readiness::Ready);
+                let tip = set_tip(&mut tip_sender, 1);
+                assert_eq!(
+                    requests.recv().await,
+                    Some(zn::Request::AdvertiseBlock(tip, None))
+                );
+                tokio::task::yield_now().await;
+                assert_eq!(recorder.outcome("completed"), 0);
+                assert!(recorder.durations.0.lock().unwrap().is_empty());
+
+                peer_set.set_readiness(Readiness::Pending);
+                let response = peer_set.hold_next_response();
+                sender.try_send(mined_block(2)).unwrap();
+                peer_set.waiting.notified().await;
+                tokio::time::advance(Duration::from_secs(2)).await;
+                peer_set.set_readiness(Readiness::Ready);
+                assert_eq!(
+                    requests.recv().await,
+                    Some(zn::Request::AdvertiseBlockToAll(mined_block(2).0)),
+                );
+                tokio::time::advance(Duration::from_secs(3)).await;
+                assert_eq!(recorder.outcome("completed"), 0);
+                assert!(recorder.durations.0.lock().unwrap().is_empty());
+                response.send(Ok(zn::Response::Nil)).unwrap();
+                tokio::task::yield_now().await;
+                assert_eq!(recorder.outcome("completed"), 1);
+                assert_eq!(*recorder.durations.0.lock().unwrap(), vec![5.0]);
+
+                let response = peer_set.hold_next_response();
+                sender.try_send(mined_block(3)).unwrap();
+                let accepted_at = tokio::time::Instant::now();
+                assert_eq!(
+                    requests.recv().await,
+                    Some(zn::Request::AdvertiseBlockToAll(mined_block(3).0)),
+                );
+                tokio::time::advance(Duration::from_secs(1)).await;
+                response.send(Err("local write failed".into())).unwrap();
+                tokio::task::yield_now().await;
+                assert_eq!(recorder.outcome("failed"), 1);
+                assert_eq!(recorder.durations.0.lock().unwrap().len(), 1);
+
+                let retry = peer_set.hold_next_response();
+                tokio::time::advance(TIPS_RESPONSE_TIMEOUT).await;
+                assert_eq!(
+                    requests.recv().await,
+                    Some(zn::Request::AdvertiseBlockToAll(mined_block(3).0)),
+                );
+                tokio::time::advance(Duration::from_secs(2)).await;
+                retry.send(Ok(zn::Response::Nil)).unwrap();
+                tokio::task::yield_now().await;
+                assert_eq!(recorder.outcome("completed"), 2);
+                assert_eq!(recorder.outcome("failed"), 1);
+                assert_eq!(
+                    *recorder.durations.0.lock().unwrap(),
+                    vec![5.0, accepted_at.elapsed().as_secs_f64()],
+                );
+                gossip.abort();
+                assert!(gossip.await.unwrap_err().is_cancelled());
+            })
+            .await
+            .expect("announcement metrics include bounded write attempts and retry delays");
+        });
+    });
+}
+
 /// A second tip one second after the first advertisement does not wait for a gossip interval.
 #[tokio::test(start_paused = true)]
 async fn gossip_consecutive_tips_without_batch_delay() {

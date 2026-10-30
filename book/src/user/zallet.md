@@ -58,15 +58,34 @@ In Zallet's config, `[indexer] validator_address` points at `listen_addr`,
 
 ## Keep the versions in step
 
-Zallet reads `zebrad`'s database through the `zebra-state` crate, so it can only
-read the database format that its `zebra-state` version understands. Zallet
-0.1.0-beta.3 reads format 28, which Zebra 6.x writes. Zebra 7.0.0-rc.0 writes
-format 29, so Zallet 0.1.0-beta.3 cannot read its state. Check Zallet's release
-notes for the Zebra versions a given release supports before upgrading either
-one.
+Zallet's direct-state backend reads `zebrad`'s database through the `zebra-state`
+crate, so the reader and writer must agree on the database format. As of 27 October 2026:
+
+| Zebra database format | Matching released Zallet direct-state backend |
+| --- | --- |
+| 28 (Zebra 6.x) | 0.1.0-beta.3, revision `987382f67e62`, using `zebra-state` 12.0.1 |
+| 29 (Zebra 7.0.0, before block-body pruning) | None |
+| 30 (Zebra with block-body pruning support, including archive mode) | None |
+
+Consult the release's [backend manifest][zallet-backend] and [lockfile][zallet-lockfile].
+Check its release notes before upgrading either component.
+
+No released Zallet's direct-state backend can read this Zebra's database.
+However, beta.3 also ships a [Zaino backend][zallet-zaino]: with `backend = "zaino"`
+and no `[indexer.read_state_service]`, it fetches chain data over JSON-RPC without
+opening Zebra's database. That topology is untested here. The
+[pool payout RPC gaps](mining-pools.md#wallet-rpc-compatibility) apply to either backend.
+For the tested alternative, see
+[pool payouts through the sidecar](mining-pools.md#tested-sidecar-payout-path).
+The sidecar reads blocks over P2P and requires an archive node.
 
 If the formats do not match, Zallet fails at startup with a
-`no zebra-state v… database found` error.
+`no zebra-state v… database found` error. Do not rename database directories
+to bypass this check.
+
+[zallet-backend]: https://github.com/zcash/zallet/blob/987382f67e622915228686e9f956c6a9c9a7514c/backends/zebra/Cargo.toml
+[zallet-lockfile]: https://github.com/zcash/zallet/blob/987382f67e622915228686e9f956c6a9c9a7514c/backends/zebra/Cargo.lock
+[zallet-zaino]: https://github.com/zcash/zallet/blob/987382f67e622915228686e9f956c6a9c9a7514c/backends/zaino/src/chain.rs#L203-L236
 
 ## Known issues
 
@@ -80,8 +99,6 @@ If the formats do not match, Zallet fails at startup with a
 - With the `indexer` feature, `zebrad` checks the spending-transaction index on
   every restart, which uses a lot of CPU
   ([#11090](https://github.com/ZcashFoundation/zebra/issues/11090)).
-- Zallet cannot use a `zebrad` on another machine. Zallet's maintainers plan to
-  propose a backend that reaches a remote `zebrad` over JSON-RPC and the
-  indexer gRPC service
-  ([zcash/wallet#899](https://github.com/zcash/zallet/issues/899)); it does not
-  exist yet.
+- The direct-state backend cannot use a `zebrad` on another machine. A replacement
+  remote backend using JSON-RPC and the indexer gRPC service is proposed in
+  [zcash/zallet#899](https://github.com/zcash/zallet/issues/899); it is not implemented.
