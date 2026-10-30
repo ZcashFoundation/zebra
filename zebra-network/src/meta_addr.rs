@@ -278,7 +278,6 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
-        services: PeerServices,
     },
 
     /// Updates an existing `MetaAddr` when an outbound connection attempt
@@ -460,14 +459,10 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::NewLocal`] for our listener address and advertised services.
-    pub fn new_local_listener_change(
-        addr: impl Into<PeerSocketAddr>,
-        services: PeerServices,
-    ) -> MetaAddrChange {
+    /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
+    pub fn new_local_listener_change(addr: impl Into<PeerSocketAddr>) -> MetaAddrChange {
         NewLocal {
             addr: canonical_peer_addr(addr),
-            services,
         }
     }
 
@@ -778,21 +773,9 @@ impl MetaAddr {
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
-    pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
-        if self
-            .services
-            .is_some_and(|services| !services.contains(PeerServices::NODE_NETWORK))
-        {
-            return None;
-        }
-
-        self.sanitize_address(network)
-    }
-
-    /// Sanitizes an address without requiring archive services, allowing local pruned listeners.
     #[allow(clippy::unwrap_in_result)]
-    pub(crate) fn sanitize_address(&self, network: &Network) -> Option<MetaAddr> {
-        if !self.address_is_valid_for_outbound(network) {
+    pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
+        if !self.last_known_info_is_valid_for_outbound(network) {
             return None;
         }
 
@@ -886,7 +869,8 @@ impl MetaAddrChange {
             NewGossiped {
                 untrusted_services, ..
             } => Some(*untrusted_services),
-            NewLocal { services, .. } => Some(*services),
+            // TODO: create a "services implemented by Zebra" constant (#2324)
+            NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
             UpdatePingSent { .. } => None,

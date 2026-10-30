@@ -201,8 +201,8 @@ pub fn reset(
 /// This allows us to fail the upgrade quickly in tests and during development,
 /// rather than waiting ~20 minutes to see if it failed.
 ///
-/// Before pruning, this calculates the first subtree without requiring stored subtree data, so
-/// it can run before the upgrade. After pruning, it checks the retained subtree against the vector.
+/// This check runs the first subtree calculation, but it doesn't read the subtree data in the
+/// database. So it can be run before the upgrade is started.
 pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String> {
     // Check the entire format before returning any errors.
     let sapling_result = quick_check_sapling_subtrees(db);
@@ -263,19 +263,6 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return Ok(());
     }
 
-    let expected_subtree = first_sapling_mainnet_subtree();
-    if !db
-        .history_capabilities()
-        .map_err(|_| "could not read historical body availability")?
-        .has_block_body(expected_subtree.end_height)
-    {
-        return if db.sapling_subtree_by_index(0) == Some(expected_subtree) {
-            Ok(())
-        } else {
-            Err("first stored sapling subtree did not match expected test vector")
-        };
-    }
-
     let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) =
         db.sapling_tree_for_tip().subtree_index()
     else {
@@ -304,6 +291,9 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return result;
     };
 
+    // Creating this test vector involves a cryptographic check, so only do it once.
+    let expected_subtree = first_sapling_mainnet_subtree();
+
     let db_subtree = calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
@@ -325,19 +315,6 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // We check the first orchard subtree on mainnet, so skip this check if it isn't available.
     if db.network() != Mainnet {
         return Ok(());
-    }
-
-    let expected_subtree = first_orchard_mainnet_subtree();
-    if !db
-        .history_capabilities()
-        .map_err(|_| "could not read historical body availability")?
-        .has_block_body(expected_subtree.end_height)
-    {
-        return if db.orchard_subtree_by_index(0) == Some(expected_subtree) {
-            Ok(())
-        } else {
-            Err("first stored orchard subtree did not match expected test vector")
-        };
     }
 
     let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) =
@@ -367,6 +344,9 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         error!(?result);
         return result;
     };
+
+    // Creating this test vector involves a cryptographic check, so only do it once.
+    let expected_subtree = first_orchard_mainnet_subtree();
 
     let db_subtree = calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
@@ -725,7 +705,6 @@ fn calculate_sapling_subtree(
         //       because we don't use the block header data at all.
         let block = read_db
             .block(end_height.into())
-            .expect("subtree reconstruction requires complete stored block bodies")
             .expect("height with note commitment tree should have block");
         let sapling_note_commitments = block
             .sapling_note_commitments()
@@ -850,7 +829,6 @@ fn calculate_orchard_subtree(
         //       because we don't use the block header data at all.
         let block = read_db
             .block(end_height.into())
-            .expect("subtree reconstruction requires complete stored block bodies")
             .expect("height with note commitment tree should have block");
         let orchard_note_commitments = block
             .orchard_note_commitments()

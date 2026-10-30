@@ -64,23 +64,6 @@ impl Runnable for GenerateCmd {
 # | Linux    | `$XDG_CONFIG_HOME` or `$HOME/.config` | `/home/alice/.config/zebrad.toml`              |
 # | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
 # | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
-#
-# OPTIONAL BLOCK-BODY PRUNING:
-#
-# Under [state], set prune_blocks_older_than = 10000 to retain that many recent
-# finalized block bodies. Omit it for archive operation (the default).
-# The minimum is 10000 on Mainnet/Testnet and MAX_BLOCK_REORG_HEIGHT + 1 (1001)
-# on Regtest; zero is invalid. Retention uses the durable finalized tip, not the
-# best tip. Genesis and all non-finalized blocks remain available.
-#
-# Pruning deletes historical transaction bodies, not validation state. Increasing
-# retention only widens the future window; deleted bodies are never restored.
-# After deletion, disabling pruning requires an archive snapshot or a full resync
-# in a separate cache directory. Check getblockchaininfo for actual availability.
-# Normal RocksDB compaction reclaims space eventually, with no immediate disk
-# reduction guaranteed. Retained indexes and validation state still grow.
-# Enabling pruning immediately stops advertising archive service and rejects
-# zcashd-compat sidecars, even before the first deletion.
 
 "
         .to_owned();

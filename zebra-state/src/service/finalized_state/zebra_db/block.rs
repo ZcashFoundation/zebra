@@ -25,7 +25,6 @@ use zebra_chain::{
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
-    primitives::byte_array::increment_big_endian,
     sapling,
     serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
     transaction::{self, Transaction},
@@ -34,7 +33,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    error::{BlockReadError, CommitCheckpointVerifiedError},
+    error::CommitCheckpointVerifiedError,
     request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
@@ -43,7 +42,7 @@ use crate::{
             transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        FromDisk, IntoDisk, RawBytes,
+        FromDisk, RawBytes,
     },
     HashOrHeight,
 };
@@ -137,38 +136,53 @@ impl ZebraDb {
         Some(header)
     }
 
-    /// Returns the complete block, or `None` if its hash or height is unknown.
-    ///
-    /// Returns an error for pruned bodies or incomplete primary data.
-    /// A torn secondary view returns `None`.
-    pub fn block(
-        &self,
-        hash_or_height: HashOrHeight,
-    ) -> Result<Option<Arc<Block>>, BlockReadError> {
-        Ok(self
-            .complete_block(hash_or_height, |header: &Arc<block::Header>| {
-                header.merkle_root
-            })?
-            .map(|(header, transactions)| {
-                Arc::new(Block {
-                    header,
-                    transactions,
-                })
-            }))
+    /// Returns the raw [`block::Header`] with [`block::Hash`] or [`Height`], if
+    /// it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_block_header(&self, hash_or_height: HashOrHeight) -> Option<RawBytes> {
+        // Block Header
+        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
+
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header: RawBytes = self.db.zs_get(&block_header_by_height, &height)?;
+
+        Some(header)
     }
 
-    /// Returns the complete block and its serialized size, or `None` for an unknown block.
-    ///
-    /// Returns an error for pruned bodies or incomplete primary data.
-    /// A torn secondary view returns `None`.
+    /// Returns the [`Block`] with [`block::Hash`] or
+    /// [`Height`], if it exists in the finalized chain.
+    //
+    // TODO: move this method to the start of the section
     #[allow(clippy::unwrap_in_result)]
-    pub fn block_and_size(
-        &self,
-        hash_or_height: HashOrHeight,
-    ) -> Result<Option<(Arc<Block>, usize)>, BlockReadError> {
-        let Some((raw_header, raw_txs)) = self.raw_block(hash_or_height)? else {
-            return Ok(None);
-        };
+    pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.block_header(height.into())?;
+
+        // Transactions
+
+        // TODO:
+        // - split disk reads from deserialization, and run deserialization in parallel,
+        //   this improves performance for blocks with multiple large shielded transactions
+        // - is this loop more efficient if we store the number of transactions?
+        // - is the difference large enough to matter?
+        let transactions = self
+            .transactions_by_height(height)
+            .map(|(_, tx)| tx)
+            .map(Arc::new)
+            .collect();
+
+        Some(Arc::new(Block {
+            header,
+            transactions,
+        }))
+    }
+
+    /// Returns the [`Block`] with [`block::Hash`] or [`Height`], if it exists
+    /// in the finalized chain, and its serialized size.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn block_and_size(&self, hash_or_height: HashOrHeight) -> Option<(Arc<Block>, usize)> {
+        let (raw_header, raw_txs) = self.raw_block(hash_or_height)?;
 
         let header = Arc::<block::Header>::from_bytes(raw_header.raw_bytes());
         let txs: Vec<_> = raw_txs
@@ -196,165 +210,25 @@ impl ZebraDb {
             header,
             transactions: txs,
         };
-        Ok(Some((Arc::new(block), size)))
+        Some((Arc::new(block), size))
     }
 
-    /// Returns the complete serialized header and transactions, or `None` for an unknown block.
-    fn raw_block(
-        &self,
-        hash_or_height: HashOrHeight,
-    ) -> Result<Option<(RawBytes, Vec<RawBytes>)>, BlockReadError> {
-        self.complete_block(hash_or_height, |header: &RawBytes| {
-            block::Header::from_bytes(header.raw_bytes()).merkle_root
-        })
-    }
-
-    /// Reads one complete body without intermediate serialized copies.
-    ///
-    /// Headers and transaction indexes are retained permanently. Check the body's contiguous
-    /// locations against the final indexed location, so deletion cannot produce a partial block.
-    /// This also works on secondary databases, which do not support RocksDB snapshots.
-    /// Secondary reads also check the Merkle root because catch-up can expose partial indexes.
+    /// Returns the raw [`Block`] with [`block::Hash`] or
+    /// [`Height`], if it exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
-    fn complete_block<H: FromDisk, T: FromDisk>(
-        &self,
-        hash_or_height: HashOrHeight,
-        header_merkle_root: impl FnOnce(&H) -> block::merkle::Root,
-    ) -> Result<Option<(H, Vec<T>)>, BlockReadError> {
-        let Some(height) = hash_or_height.height_or_else(|hash| self.height(hash)) else {
-            return Ok(None);
-        };
-        let incomplete = |error| {
-            // Secondary catch-up is not atomic across columns, so inconsistent retained metadata
-            // is not yet visible. Missing bodies are classified separately using the actual floor.
-            if self.db.is_read_only() {
-                Ok(None)
-            } else {
-                Err(error)
-            }
-        };
-        let headers = self.db.cf_handle("block_header_by_height").unwrap();
-        let header = match self.db.zs_get(&headers, &height) {
-            Some(header) => header,
-            None => {
-                #[cfg(test)]
-                tests::AFTER_MISSING_HEADER.with(|hook| {
-                    if let Some(commit) = hook.borrow_mut().take() {
-                        commit();
-                    }
-                });
-                if !matches!(hash_or_height, HashOrHeight::Hash(_)) && !self.contains_height(height)
-                {
-                    return Ok(None);
-                }
-                // A commit can land between the header and height reads.
-                match self.db.zs_get(&headers, &height) {
-                    Some(header) => header,
-                    None => return incomplete(BlockReadError::CorruptBlock { height }),
-                }
-            }
-        };
+    fn raw_block(&self, hash_or_height: HashOrHeight) -> Option<(RawBytes, Vec<RawBytes>)> {
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.raw_block_header(height.into())?;
 
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
-        let first = TransactionLocation::min_for_height(height).as_bytes();
-        let last = TransactionLocation::max_for_height(height).as_bytes();
-        let mut hashes = self
-            .db
-            .raw_iterator_cf_opt(&hash_by_tx_loc, Default::default());
-        hashes.seek_for_prev(last);
-        hashes.status().expect("unexpected database failure");
-        let Some(last_location) = hashes
-            .key()
-            .map(TransactionLocation::from_bytes)
-            .filter(|location| location.height == height)
-        else {
-            return incomplete(BlockReadError::CorruptBlock { height });
-        };
-        let expected_count = last_location.index.as_usize() + 1;
+        // Transactions
 
-        let mut upper_bound = Vec::with_capacity(last.len() + 1);
-        upper_bound.extend_from_slice(&last);
-        if increment_big_endian(&mut upper_bound) {
-            upper_bound.insert(0, 1);
-        }
-        let mut options = rocksdb::ReadOptions::default();
-        options.set_iterate_upper_bound(upper_bound);
-        let mut bodies = self.db.raw_iterator_cf_opt(&tx_by_loc, options);
-        bodies.seek(first);
-        let mut transactions = Vec::new();
-        while let Some(key) = bodies.key().filter(|key| *key <= last.as_ref()) {
-            let location = TransactionLocation::from_bytes(key);
-            if location.index.as_usize() != transactions.len() {
-                return self.missing_body_error(height).map_or(Ok(None), Err);
-            }
-            if transactions.len() >= expected_count {
-                return incomplete(BlockReadError::CorruptBlock { height });
-            }
-            transactions.push(T::from_bytes(
-                bodies.value().expect("a valid iterator has a value"),
-            ));
-            bodies.next();
-        }
-        bodies.status().expect("unexpected database failure");
-        if transactions.len() != expected_count {
-            return self.missing_body_error(height).map_or(Ok(None), Err);
-        }
-
-        if self.db.is_read_only() {
-            // Secondary WAL replay can expose matching prefixes of both columns. Only the header
-            // commits to the complete transaction list; primary write batches are atomically visible.
-            hashes.seek(first);
-            hashes.status().expect("unexpected database failure");
-            if hashes.key() != Some(first.as_ref()) {
-                return Ok(None);
-            }
-            let mut remaining = expected_count;
-            let root: block::merkle::Root = std::iter::from_fn(|| {
-                if remaining == 0 {
-                    return None;
-                }
-                let (key, value) = hashes.item()?;
-                if key > last.as_ref() {
-                    return None;
-                }
-                let hash = transaction::Hash::from_bytes(value);
-                remaining -= 1;
-                if remaining > 0 {
-                    hashes.next();
-                }
-                Some(hash)
-            })
+        let transactions = self
+            .raw_transactions_by_height(height)
+            .map(|(_, tx)| tx)
             .collect();
-            hashes.status().expect("unexpected database failure");
-            if remaining != 0 || root != header_merkle_root(&header) {
-                return Ok(None);
-            }
-        }
 
-        Ok(Some((header, transactions)))
-    }
-
-    /// Classifies missing transaction bytes without treating a torn secondary view as pruned.
-    fn missing_body_error(&self, height: Height) -> Option<BlockReadError> {
-        match self.history_capabilities() {
-            Ok(history) if height > Height::MIN && height < history.lowest_retained_height => {
-                return Some(BlockReadError::BlockBodyUnavailable { height });
-            }
-            Err(crate::StateInitError::HistoryRead { source, .. })
-                if source.is::<rocksdb::Error>() =>
-            {
-                panic!("unexpected database failure: {source}");
-            }
-            _ => {}
-        }
-
-        // An invalid suffix cannot establish pruning.
-        if self.db.is_read_only() {
-            None
-        } else {
-            Some(BlockReadError::CorruptBlock { height })
-        }
+        Some((header, transactions))
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
@@ -408,70 +282,32 @@ impl ZebraDb {
         self.tip().map(|(height, _)| height)
     }
 
-    /// Returns the complete tip block, or `None` for an empty database.
-    ///
-    /// Returns an error for pruned bodies or incomplete primary data.
-    /// A torn secondary view returns `None`.
-    pub fn tip_block(&self) -> Result<Option<Arc<Block>>, BlockReadError> {
-        match self.tip() {
-            Some((height, _)) => self.block(height.into()),
-            None => Ok(None),
-        }
+    /// Returns the tip block, if there is one.
+    pub fn tip_block(&self) -> Option<Arc<Block>> {
+        let (height, _hash) = self.tip()?;
+        self.block(height.into())
     }
 
     // Read transaction methods
 
-    /// Returns a known transaction, its height, and its block time, or `None` for an unknown hash.
-    ///
-    /// Missing bytes below the retained-body floor return
-    /// [`BlockReadError::BlockBodyUnavailable`]. Missing retained bytes or metadata return
-    /// [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn secondary view.
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
+    /// if a transaction with that hash exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
     pub fn transaction(
         &self,
         hash: transaction::Hash,
-    ) -> Result<Option<(Arc<Transaction>, Height, DateTime<Utc>)>, BlockReadError> {
-        let Some(location) = self.transaction_location(hash) else {
-            return Ok(None);
-        };
-        let height = location.height;
-        let Some(header) = self.block_header(height.into()) else {
-            return if self.db.is_read_only() {
-                Ok(None)
-            } else {
-                Err(BlockReadError::CorruptBlock { height })
-            };
-        };
+    ) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)> {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-        let Some(tx) = self.db.zs_get(&tx_by_loc, &location) else {
-            return self.missing_body_error(height).map_or(Ok(None), Err);
-        };
 
-        Ok(Some((tx, height, header.time)))
-    }
+        let transaction_location = self.transaction_location(hash)?;
 
-    /// Reads only the version header of a retained transaction body.
-    #[allow(clippy::unwrap_in_result)]
-    pub(crate) fn transaction_version(&self, hash: transaction::Hash) -> Option<u32> {
-        struct Version(u32);
-        impl FromDisk for Version {
-            fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-                let header = bytes.as_ref()[..4]
-                    .try_into()
-                    .expect("stored transaction headers contain four bytes");
-                // The high bit signals the Overwinter format, not the version number.
-                Self(u32::from_le_bytes(header) & 0x7fff_ffff)
-            }
-        }
+        let block_time = self
+            .block_header(transaction_location.height.into())
+            .map(|header| header.time);
 
-        let location = self.transaction_location(hash)?;
-        let transactions = self
-            .db
-            .cf_handle("tx_by_loc")
-            .expect("transaction column exists");
         self.db
-            .zs_get::<_, _, Version>(&transactions, &location)
-            .map(|version| version.0)
+            .zs_get(&tx_by_loc, &transaction_location)
+            .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
     }
 
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
@@ -481,6 +317,19 @@ impl ZebraDb {
         height: Height,
     ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_ {
         self.transactions_by_location_range(
+            TransactionLocation::min_for_height(height)
+                ..=TransactionLocation::max_for_height(height),
+        )
+    }
+
+    /// Returns an iterator of all raw [`Transaction`]s for a provided block
+    /// height in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_transactions_by_height(
+        &self,
+        height: Height,
+    ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_ {
+        self.raw_transactions_by_location_range(
             TransactionLocation::min_for_height(height)
                 ..=TransactionLocation::max_for_height(height),
         )

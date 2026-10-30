@@ -27,17 +27,12 @@ use rlimit::increase_nofile_limit;
 
 use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
-use zebra_chain::{
-    block::Height, parameters::Network, primitives::byte_array::increment_big_endian,
-};
+use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
     database_format_version_on_disk,
-    service::finalized_state::disk_format::{
-        block::TRANSACTION_LOCATION_DISK_BYTES, FromDisk, IntoDisk, TransactionIndex,
-        TransactionLocation,
-    },
-    write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, StateInitError,
+    service::finalized_state::disk_format::{FromDisk, IntoDisk},
+    write_database_format_version_to_disk, Config, StateInitError,
 };
 
 use super::zebra_db::transparent::{
@@ -1043,7 +1038,6 @@ impl DiskDb {
     /// # Errors
     ///
     /// - In read-only mode, if the cache directory is missing or unreadable.
-    /// - If pruning retention is invalid or an archive writer opens pruned history.
     ///
     /// # Panics
     ///
@@ -1057,8 +1051,6 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<DiskDb, StateInitError> {
-        config.validate_pruning(network)?;
-
         // `ephemeral` and `read_only` describe mutually-exclusive modes: an ephemeral
         // database is a read-write primary this process owns and deletes on drop, while
         // a read-only secondary follows another process's primary and must never delete
@@ -1128,41 +1120,6 @@ impl DiskDb {
                     cached_size: Arc::new(AtomicU64::new(0)),
                 };
 
-                // Guard the lowest writable entry point before launching migrations or checks.
-                let history = db.history_capabilities()?;
-                if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned() {
-                    return Err(StateInitError::PrunedDatabase {
-                        path,
-                        lowest_retained_height: history.lowest_retained_height,
-                    });
-                }
-                if !read_only && history.is_pruned() {
-                    // Hold the writer lock while checking, before any caller can commit a block.
-                    let invalid_version = |source| StateInitError::HistoryRead {
-                        path: path.clone(),
-                        source,
-                    };
-                    let disk_version = database_format_version_on_disk(
-                        config,
-                        db_kind,
-                        format_version_in_code.major,
-                        network,
-                    )
-                    .map_err(invalid_version)?
-                    .ok_or_else(|| {
-                        invalid_version("pruned state requires a stored format version".into())
-                    })?;
-                    let disk_indexer = disk_version.build.contains("indexer");
-                    let running_indexer = cfg!(feature = "indexer");
-                    if disk_indexer != running_indexer {
-                        return Err(StateInitError::PrunedIndexModeMismatch {
-                            path,
-                            disk_indexer,
-                            running_indexer,
-                        });
-                    }
-                }
-
                 db.assert_default_cf_is_empty();
                 let (size, complete) = db.measure_size();
                 if complete {
@@ -1186,23 +1143,6 @@ impl DiskDb {
     }
 
     // Accessor methods
-
-    /// Returns true for a secondary instance following a primary database.
-    pub(super) fn is_read_only(&self) -> bool {
-        self.mode.is_read_only()
-    }
-
-    /// Returns an iterator borrowing raw keys and values without serialized copies.
-    pub(super) fn raw_iterator_cf_opt<C>(
-        &self,
-        cf: &C,
-        options: ReadOptions,
-    ) -> rocksdb::DBRawIteratorWithThreadMode<'_, DB>
-    where
-        C: rocksdb::AsColumnFamilyRef,
-    {
-        self.db.raw_iterator_cf_opt(cf, options)
-    }
 
     /// Returns the configured database kind for this database.
     pub fn db_kind(&self) -> String {
@@ -1235,49 +1175,6 @@ impl DiskDb {
         &self.db
     }
 
-    /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
-    pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
-        let invalid = |source: BoxError| StateInitError::HistoryRead {
-            path: self.path().to_path_buf(),
-            source,
-        };
-        let Some(index) = self.cf_handle("hash_by_tx_loc") else {
-            return Ok(HistoryCapabilities::default());
-        };
-        let first = TransactionLocation::min_for_height(Height(1)).as_bytes();
-        if self
-            .db
-            .get_pinned_cf(&index, first)
-            .map_err(|error| invalid(error.into()))?
-            .is_none()
-        {
-            return Ok(HistoryCapabilities::default());
-        }
-        let transactions = self
-            .cf_handle("tx_by_loc")
-            .ok_or_else(|| invalid("indexed blocks have no transaction column family".into()))?;
-        let mut bodies = self.db.raw_iterator_cf(&transactions);
-        bodies.seek(first);
-        bodies.status().map_err(|error| invalid(error.into()))?;
-        let location = bodies
-            .key()
-            .filter(|key| key.len() == TRANSACTION_LOCATION_DISK_BYTES)
-            .map(TransactionLocation::from_bytes)
-            .ok_or_else(|| invalid("indexed blocks have no valid retained body suffix".into()))?;
-        if location.index != TransactionIndex::MIN {
-            return Err(invalid(
-                "the first retained body is missing its coinbase".into(),
-            ));
-        }
-        Ok(HistoryCapabilities {
-            lowest_retained_height: if location.height == Height(1) {
-                Height::MIN
-            } else {
-                location.height
-            },
-        })
-    }
-
     /// Returns the column family handle for `cf_name`.
     pub fn cf_handle(&self, cf_name: &str) -> Option<rocksdb::ColumnFamilyRef<'_>> {
         // Note: the lifetime returned by this method is subtly wrong. As of December 2023 it is
@@ -1301,13 +1198,12 @@ impl DiskDb {
 
     /// Tries to reuse an existing db after a major upgrade.
     ///
-    /// If the current db version belongs to `restorable_db_versions`, moves the previous major
-    /// database to the current path and updates its version file.
+    /// If the current db version belongs to `restorable_db_versions`, the function moves a previous
+    /// db to a new path so it can be used again. It does so by merely trying to rename the path
+    /// corresponding to the db version directly preceding the current version to the path that is
+    /// used by the current db. If successful, it also deletes the db version file.
     ///
-    /// In `read_only` mode, returns the candidate's stored version without modifying either path.
-    /// The caller must check that its records and directory version permit read-only reuse.
-    ///
-    /// Returns the old disk version if a candidate was found or moved, or `None` otherwise.
+    /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
     // TODO: Update this function to rename older major db format version to the current version (#9565).
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
@@ -1316,7 +1212,6 @@ impl DiskDb {
         config: &Config,
         db_kind: impl AsRef<str>,
         network: &Network,
-        read_only: bool,
     ) -> Option<Version> {
         if let Some(&major_db_ver) = restorable_db_versions
             .iter()
@@ -1368,16 +1263,6 @@ impl DiskDb {
             let new_db_exists = DB::list_cf(&opts, &new_path).is_ok_and(|cf| !cf.is_empty());
 
             if old_db_exists && !new_db_exists {
-                if read_only {
-                    return database_format_version_on_disk(
-                        config,
-                        db_kind,
-                        old_major_db_ver,
-                        network,
-                    )
-                    .expect("unable to read database format version file");
-                }
-
                 // Create the parent directory for the new db. This is because we can't directly
                 // rename e.g. `state/v25/mainnet/` to `state/v26/mainnet/` with `fs::rename()` if
                 // `state/v26/` does not exist.

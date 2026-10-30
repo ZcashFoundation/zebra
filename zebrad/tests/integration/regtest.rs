@@ -28,7 +28,6 @@ use crate::common::{
 
 mod compact_relay;
 mod nu7;
-mod pruning;
 
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]

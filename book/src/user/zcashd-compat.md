@@ -54,13 +54,6 @@ There are two ways to run the pair:
   `[zcashd_compat].manage_zcashd = true`, passing the peer-pinning arguments
   automatically.
 
-Both modes require Zebra to retain complete block history. Startup rejects zcashd-compat mode
-when `state.prune_blocks_older_than` is set or historical bodies are unavailable, even before the
-first deletion or if the sidecar is already synchronized.
-A pruned node cannot be the sidecar's archive source: it does not advertise `NODE_NETWORK`,
-returns `notfound` for unavailable blocks, and stops block inventory at missing history.
-Historical headers remain available, but they do not replace the blocks needed by the sidecar.
-
 For mining pools, see the [tested reward-to-payout procedure](mining-pools.md#tested-sidecar-payout-path)
 and its wallet RPC, fee, and privacy-policy limits.
 

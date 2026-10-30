@@ -1,8 +1,0 @@
-project: zebra-state
-kind: breaking
-body: >-
-  Replaced `IsTransparentOutputSpent` read requests and responses with `UnspentOutput` and
-  `OutputWithMetadata`, and added `KnownTransaction` for body-independent best-chain membership
-  checks. Output metadata queries retry when concurrent finalization advances past the captured
-  tip.
-time: 2026-10-24T23:13:51.707382797+02:00

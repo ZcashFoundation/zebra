@@ -153,9 +153,9 @@ fn ephemeral_database_reads_back_its_format_version() {
     db.shutdown(true);
 }
 
-/// A v29 cache is reused without rewriting legacy pool records, then accepts new blocks.
+/// A pre-NU7 v28 cache is reused without rewriting legacy records, then accepts new v29 blocks.
 #[tokio::test]
-async fn v29_cache_is_reused_with_legacy_value_pools() {
+async fn v28_cache_is_reused_with_legacy_value_pools() {
     use std::{sync::Arc, time::Duration};
 
     use semver::Version;
@@ -183,7 +183,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         delete_old_database: true,
         ..Config::default()
     };
-    let old_version = Version::new(29, 0, 0);
+    let old_version = Version::new(28, 0, 0);
     let old_path = config.db_path(STATE_DATABASE_KIND, old_version.major, &network);
     let mut state = FinalizedState {
         db: ZebraDb::new(
@@ -210,7 +210,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         .unwrap();
     state.db.mark_finished_format_upgrades();
 
-    // Commit real blocks to a v29 database, retaining its backwards-compatible v28 pool records.
+    // Commit real blocks to a persistent v28 database, then encode its pool records at v28 widths.
     let legacy_block_info = |info: &BlockInfo| {
         let mut bytes = [0; 52];
         bytes[..48].copy_from_slice(&info.value_pools().to_bytes()[..48]);
@@ -227,7 +227,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
             .commit_finalized_direct(
                 CheckpointVerifiedBlock::from(block).into(),
                 None,
-                "archive cache reuse test",
+                "v28 cache reuse test",
             )
             .unwrap();
         let info = state.db.block_info(height.into()).unwrap();
@@ -250,16 +250,6 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         )
         .unwrap();
     assert!(!expected_pools.transparent_amount().is_zero());
-
-    let mut batch = crate::DiskWriteBatch::new();
-    let error = batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "body deletion requires database format v30 or newer"
-    );
-    assert_eq!(batch, crate::DiskWriteBatch::new());
     drop(state);
 
     // Startup cleanup must not remove the cache before the upgrader has a chance to reuse it.
@@ -272,10 +262,10 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
     .unwrap();
     assert!(
         old_path.exists(),
-        "cleanup must protect a reusable v29 cache"
+        "cleanup must protect a reusable v28 cache"
     );
 
-    // Disabling cleanup is not a rollback backup: startup moves the v29 directory to v30.
+    // Disabling cleanup is not a rollback backup: startup moves the v28 directory to v29.
     config.delete_old_database = false;
     let mut state = FinalizedState::new(
         &config,
@@ -294,7 +284,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
     .unwrap();
     assert_eq!(
         state.db.format_version_on_disk().unwrap().unwrap().major,
-        30,
+        29,
     );
     assert!(
         !old_path.exists(),
@@ -331,7 +321,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         .commit_finalized_direct(
             CheckpointVerifiedBlock::from(next_block).into(),
             None,
-            "upgraded archive cache reuse test",
+            "v29 cache reuse test",
         )
         .unwrap();
     assert_eq!(state.db.finalized_tip_hash(), next_hash);

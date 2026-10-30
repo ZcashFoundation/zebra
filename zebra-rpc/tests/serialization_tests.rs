@@ -16,7 +16,6 @@ use vectors::{
 };
 
 use zebra_rpc::client::zebra_chain::{
-    block::Height,
     sapling::ValueCommitment,
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
@@ -142,7 +141,6 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let verification_progress = obj.verification_progress();
     let chain_work = obj.chain_work();
     let pruned = obj.pruned();
-    let prune_height = obj.prune_height();
     let size_on_disk = obj.size_on_disk();
     let commitments = obj.commitments();
     let best_block_hash = obj.best_block_hash();
@@ -166,22 +164,11 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
         verification_progress,
         chain_work,
         pruned,
-        prune_height,
         size_on_disk,
         commitments,
     );
 
     assert_eq!(obj, new_obj);
-    assert_eq!(prune_height, None);
-    let mut json = serde_json::to_value(&obj)?;
-    assert!(json.get("pruneheight").is_none());
-
-    json["pruned"] = serde_json::json!(true);
-    json["pruneheight"] = serde_json::json!(12_345);
-    let pruned: GetBlockchainInfoResponse = serde_json::from_value(json.clone())?;
-    assert!(pruned.pruned());
-    assert_eq!(pruned.prune_height(), Some(Height(12_345)));
-    assert_eq!(serde_json::to_value(pruned)?, json);
 
     Ok(())
 }

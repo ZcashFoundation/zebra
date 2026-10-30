@@ -131,9 +131,7 @@ async fn pushed_transaction_attributes_invalid_error_to_peer() {
         })),
         BoxCloneService::new(service_fn(|request| async move {
             match request {
-                zs::ReadRequest::KnownTransaction(_) => {
-                    Ok(zs::ReadResponse::KnownTransaction(false))
-                }
+                zs::ReadRequest::Transaction(_) => Ok(zs::ReadResponse::Transaction(None)),
                 zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(None)),
                 request => Err(format!("unexpected state request: {request:?}").into()),
             }
@@ -178,7 +176,7 @@ async fn completed_batch_keeps_queue_checker_awake() {
         service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
         service_fn(|request| async move {
             Ok(match request {
-                zs::ReadRequest::KnownTransaction(_) => zs::ReadResponse::KnownTransaction(false),
+                zs::ReadRequest::Transaction(_) => zs::ReadResponse::Transaction(None),
                 zs::ReadRequest::Tip => zs::ReadResponse::Tip(None),
                 _ => unreachable!("downloads only query transactions and the tip"),
             })
@@ -271,35 +269,4 @@ async fn full_queue_can_retry_before_completed_task_exits() {
         receiver.try_recv(),
         Err(oneshot::error::TryRecvError::Empty)
     ));
-}
-
-/// A known transaction is rejected without downloading its unavailable body.
-#[tokio::test]
-async fn mined_transaction_needs_no_body() {
-    let _init_guard = zebra_test::init();
-    let transaction = Network::Mainnet
-        .unmined_transactions_in_blocks(1..=1)
-        .next()
-        .expect("mainnet vectors contain a transaction")
-        .transaction;
-    let hash = transaction.id.mined_id();
-    let mut downloads = Downloads::new(
-        service_fn(|_| async { panic!("a mined transaction must not be downloaded") }),
-        service_fn(|_| async { panic!("a mined transaction must not be verified") }),
-        service_fn(move |request| async move {
-            assert_eq!(request, zs::ReadRequest::KnownTransaction(hash));
-            Ok::<_, BoxError>(zs::ReadResponse::KnownTransaction(true))
-        }),
-        Arc::new(Notify::new()),
-    );
-    downloads
-        .download_if_needed_and_verify(Gossip::Id(transaction.id), None, None)
-        .expect("the request can be queued");
-    let result = tokio::time::timeout(Duration::from_secs(1), downloads.next())
-        .await
-        .expect("membership lookup must finish")
-        .expect("the download returns its result")
-        .expect("the task did not time out");
-    let error = result.expect_err("a mined transaction is reported as already in the state");
-    assert!(matches!(error.1, TransactionDownloadVerifyError::InState));
 }

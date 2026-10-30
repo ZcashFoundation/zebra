@@ -414,12 +414,6 @@ proptest! {
                             max_time: DateTime32::now(),
                             chain_value_pools: Default::default(),
                         }));
-
-                    state
-                        .expect_request(zebra_state::ReadRequest::HistoryCapabilities)
-                        .await
-                        .expect("history is requested after the existing chain info requests")
-                        .respond(zebra_state::ReadResponse::HistoryCapabilities(Default::default()));
                 }
             };
 
@@ -495,12 +489,6 @@ proptest! {
                             max_time: DateTime32::now(),
                             chain_value_pools: Default::default(),
                         }));
-
-                    state
-                        .expect_request(zebra_state::ReadRequest::HistoryCapabilities)
-                        .await
-                        .expect("history is requested after the existing chain info requests")
-                        .respond(zebra_state::ReadResponse::HistoryCapabilities(Default::default()));
                 }
             };
 
@@ -514,8 +502,6 @@ proptest! {
                     prop_assert_eq!(info.best_block_hash, block_hash);
                     prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
                     prop_assert!(info.estimated_height < Height::MAX);
-                    prop_assert!(!info.pruned);
-                    prop_assert_eq!(info.prune_height, None);
 
                     prop_assert_eq!(
                         info.consensus.chain_tip.0,
@@ -601,11 +587,6 @@ proptest! {
                     .expect("getblockchaininfo should call mock state service with correct request")
                     .respond(Err(BoxError::from("chain info not available")));
 
-                    state
-                        .expect_request(zebra_state::ReadRequest::HistoryCapabilities)
-                        .await
-                        .expect("history is requested after the existing chain info requests")
-                        .respond(zebra_state::ReadResponse::HistoryCapabilities(Default::default()));
                 }
             };
 
@@ -790,8 +771,8 @@ proptest! {
                 .respond(response);
 
             // the runner will also query the state again for the transaction
-            let expected_request = zebra_state::ReadRequest::KnownTransaction(transaction_hash);
-            let response = zebra_state::ReadResponse::KnownTransaction(false);
+            let expected_request = zebra_state::ReadRequest::Transaction(transaction_hash);
+            let response = zebra_state::ReadResponse::Transaction(None);
 
             state
                 .expect_request(expected_request)
@@ -874,12 +855,12 @@ proptest! {
 
             // the runner will also query the state again for each transaction
             for _tx in txs.clone() {
-                let response = zebra_state::ReadResponse::KnownTransaction(false);
+                let response = zebra_state::ReadResponse::Transaction(None);
 
                 // we use `expect_request_that` because we can't guarantee the state request order
                 state
                     .expect_request_that(|request| {
-                        matches!(request, zebra_state::ReadRequest::KnownTransaction(_))
+                        matches!(request, zebra_state::ReadRequest::Transaction(_))
                     })
                     .await?
                     .respond(response);
