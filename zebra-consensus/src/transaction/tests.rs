@@ -39,7 +39,7 @@ use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
-use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
+use crate::error::TransactionError;
 
 use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerifier};
 
@@ -991,7 +991,7 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_unmined_output_spends_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
     let verifier = MempoolTxVerifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
     mempool_setup_tx
@@ -1089,9 +1089,12 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
         "spent_mempool_outpoints in tx verifier response should match input_outpoint"
     );
 
-    tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
-    // polled before AwaitOutput request and after a mempool transaction with transparent outputs
-    // is successfully verified
+    mempool
+        .expect_request(mempool::Request::CheckForVerifiedTransactions)
+        .await
+        .expect("successful verification should trigger a mempool check")
+        .respond(mempool::Response::CheckedForVerifiedTransactions);
+    // The service is polled before requesting the output and before checking verified transactions.
     assert_eq!(
         mempool.poll_count(),
         2,
@@ -1107,7 +1110,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
 #[tokio::test(flavor = "multi_thread")]
 async fn block_verification_does_not_use_mempool_verified_state() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
     let mempool_verifier = Buffer::new(
         MempoolTxVerifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx),
@@ -1190,9 +1193,6 @@ async fn block_verification_does_not_use_mempool_verified_state() {
             .respond(mempool::Response::UnspentOutput(output));
     });
 
-    // Briefly yield and sleep so the spawned task can first expect an await output request.
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
     let verifier_response = mempool_verifier
         .clone()
         .oneshot(MempoolRequest {
@@ -1245,9 +1245,6 @@ async fn block_verification_does_not_use_mempool_verified_state() {
             .respond(zebra_state::Response::Utxo(utxo));
     });
 
-    // Briefly yield and sleep so the spawned task can first expect the requests.
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
     let crate::transaction::BlockResponse { .. } = block_verifier
         .clone()
         .oneshot(make_request())
@@ -1260,9 +1257,12 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         .await
         .expect("should succeed after calling state service");
 
-    tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
-    // polled before AwaitOutput request and after a mempool transaction with transparent outputs
-    // is successfully verified.
+    mempool
+        .expect_request(mempool::Request::CheckForVerifiedTransactions)
+        .await
+        .expect("successful verification should trigger a mempool check")
+        .respond(mempool::Response::CheckedForVerifiedTransactions);
+    // The service is polled before requesting the output and before checking verified transactions.
     assert_eq!(
         mempool.poll_count(),
         2,
