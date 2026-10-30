@@ -72,6 +72,14 @@ Zebra names its Sentry release after its build version, which `zebrad --version`
 prints, for example `7.0.0-rc.0+git.6d1e414`. Set `SENTRY_RELEASE` to use a
 different name.
 
+Errors and panics include stack traces, with Zebra's own frames marked in-app.
+In the official Docker images, Zebra's source files appear under `/zebra/`.
+Sentry doesn't create code mappings for Rust, so to show suspect commits, connect
+Sentry to GitHub and add a code mapping with the stack trace root `/zebra/`, an
+empty source code root, the `ZcashFoundation/zebra` repository, and the `main`
+branch. The release binaries on GitHub are stripped, so their stack frames have
+no function names or source locations.
+
 [tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter
 [flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.flamegraph
