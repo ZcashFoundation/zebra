@@ -54,7 +54,7 @@ jobs:
       - name: Generate release app token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 #v3.3.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -67,7 +67,7 @@ jobs:
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Create or update Release PR
         id: release-plz-pr
-        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 #v0.5.131
+        uses: release-plz/action@f67a7e724bdad4a0f6875f186060a0ca2770d76c #v0.5.147
         with:
           command: release-pr
           version: "0.3.160"
@@ -315,7 +315,7 @@ jobs:
           TARGET_SHA: ${{ needs.release-target.outputs.target_sha }}
         run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
       - name: Install Cargo 1.91
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f #v2.0.0
         with:
           toolchain: 1.91.0
           cache-workspaces: release-source -> target
@@ -400,7 +400,7 @@ jobs:
           TARGET_SHA: ${{ needs.release-target.outputs.target_sha }}
         run: .github/scripts/validate-release-changelogs.sh "${BASE_SHA}" "${TARGET_SHA}"
       - name: Install Cargo 1.91
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 #v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f #v2.0.0
         with:
           toolchain: 1.91.0
           cache-workspaces: release-source -> target
@@ -411,7 +411,7 @@ jobs:
       - name: Generate release app token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 #v3.3.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -423,7 +423,7 @@ jobs:
           exit 1
       - name: Authenticate to crates.io
         id: crates-io-auth
-        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 #v1.0.5
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 #v1.0.6
       - name: Publish and verify missing crates
         id: cargo-release-publish
         uses: ZcashFoundation/cargo-release@f212e2569995d569baeb6cdeb7ed99b7602303a4 # v0.1.1
