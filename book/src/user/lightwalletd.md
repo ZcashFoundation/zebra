@@ -80,8 +80,9 @@ Restart lightwalletd when switching the backend network.
 
 For containers, use the backend service hostname instead of loopback. The
 [repository's Compose setup](docker.md#running-zebra-with-lightwalletd)
-publishes unauthenticated RPC and uses plaintext gRPC; restrict access before
-using it outside a trusted test environment.
+connects lightwalletd to `zebra:8232` without publishing RPC to the host. It
+still publishes plaintext gRPC and HTTP; restrict access before using it
+outside a trusted test environment.
 
 Current upstream lightwalletd also accepts a Zebra `.toml` file through
 `--zcash-conf-path`, reading `[rpc] listen_addr`, but not Zebra's cookie.

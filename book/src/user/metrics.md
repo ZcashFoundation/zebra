@@ -155,12 +155,14 @@ Grafana, Jaeger, and Alertmanager using configuration in
 Grafana, and Alertmanager in volumes.
 
 The supplied stack is a development deployment, not a hardened public
-service. Its port mappings bind on all host interfaces, and its Zebra RPC
-server disables cookie authentication. Restrict the published management
-ports to loopback or a private network before starting it. Configure RPC
-access controls before exposing port 8232.
+service. Zebra's RPC and metrics ports stay on the Compose network, and RPC
+requires cookie authentication. The remaining port mappings bind on all host
+interfaces; restrict published management ports to loopback or a private
+network before starting it. Prometheus's admin and lifecycle APIs are
+disabled.
 
-Run from the repository root:
+Export `GF_SECURITY_ADMIN_PASSWORD` with a strong, unique password; Compose
+rejects an unset or empty value. Run from the repository root:
 
 ```sh
 docker compose -f docker/docker-compose.observability.yml up -d
@@ -173,12 +175,13 @@ docker compose -f docker/docker-compose.observability.yml logs -f zebra
 | Prometheus | <http://localhost:9094> |
 | Jaeger | <http://localhost:16686> |
 | Alertmanager | <http://localhost:9093> |
-| Zebra metrics | <http://localhost:9999/metrics> |
 
-Grafana's initial credentials are `admin` / `admin`; change the password at
-first login. The stack provisions the Prometheus and Jaeger data sources and
-the dashboards in `docker/observability/grafana/dashboards/`. The home
-dashboard is `zebra_overview.json`; other dashboards include `peers.json`,
+Log in to Grafana as `admin` with the password supplied through
+`GF_SECURITY_ADMIN_PASSWORD`. It initializes new Grafana volumes only; change
+existing account passwords in Grafana. The stack provisions the Prometheus
+and Jaeger data sources and the dashboards in
+`docker/observability/grafana/dashboards/`. The home dashboard is
+`zebra_overview.json`; other dashboards include `peers.json`,
 `network_health.json`, `syncer.json`, `mempool.json`, `rocksdb.json`,
 `rpc_metrics.json`, `rpc_tracing.json`, and `value_pools.json`. For a separate
 Grafana deployment, import the JSON files and select its Prometheus data

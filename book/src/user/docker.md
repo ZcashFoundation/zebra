@@ -338,10 +338,9 @@ configured listen address, and the published P2P port.
 
 ### Running Zebra with lightwalletd
 
-The supplied example disables Zebra's cookie authentication and publishes
-RPC port `8232` on all host interfaces. Remove the `8232:8232` entry from the
-Zebra service's `ports` list before starting it. Lightwalletd connects to
-`zebra` over the Compose network and does not need a host RPC port.
+The supplied example disables Zebra's cookie authentication but does not
+publish RPC to the host. Lightwalletd connects to `zebra:8232` over the Compose
+network. Keep that network limited to trusted containers.
 
 The example also runs lightwalletd with `--no-tls-very-insecure`. For local
 testing, restrict its port mappings to `127.0.0.1:9067:9067` (gRPC) and
@@ -367,14 +366,17 @@ It sets `ZEBRA_TRACING__OPENTELEMETRY_ENDPOINT=http://jaeger:4318`, service name
 `ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT` when full trace collection is not
 required; see [OpenTelemetry export](tracing.md#opentelemetry-export).
 
-Before starting it, remove the Zebra RPC `8232:8232` mapping. Restrict the
-remaining non-P2P published ports to host loopback by prefixing each mapping
-with `127.0.0.1:`. These include Zebra metrics, the monitoring interfaces,
-Jaeger's receivers, and Jaeger's span-metrics endpoint. For example, replace
-`9094:9090` with `127.0.0.1:9094:9090`. Keep RPC disabled altogether if no
-trusted client needs it by removing `ZEBRA_RPC__LISTEN_ADDR`.
+Zebra's RPC and metrics ports are not published to the host; Prometheus
+scrapes `zebra:9999` over the Compose network. Restrict the remaining non-P2P
+published ports to host loopback by prefixing each mapping with `127.0.0.1:`.
+These include the monitoring interfaces, Jaeger's receivers, and Jaeger's
+span-metrics endpoint. For example, replace `9094:9090` with
+`127.0.0.1:9094:9090`. Keep RPC disabled altogether if no trusted client needs
+it by removing `ZEBRA_RPC__LISTEN_ADDR`.
 
-Then build and start the stack:
+Export `GF_SECURITY_ADMIN_PASSWORD` with a strong, unique password in the
+shell running Compose. An unset or empty value prevents startup. Then build
+and start the stack:
 
 ```sh
 docker compose -f docker/docker-compose.observability.yml up -d --build
@@ -386,13 +388,14 @@ docker compose -f docker/docker-compose.observability.yml up -d --build
 | Prometheus | <http://127.0.0.1:9094> (container port `9090`) |
 | Jaeger UI | <http://127.0.0.1:16686> |
 | Alertmanager | <http://127.0.0.1:9093> |
-| Zebra metrics | <http://127.0.0.1:9999/metrics> |
 | Jaeger trace receivers | gRPC on `127.0.0.1:4317`; HTTP on `127.0.0.1:4318`. |
 | Jaeger span metrics | <http://127.0.0.1:8889/metrics> |
 
 Grafana provisions the supplied dashboards and Prometheus/Jaeger data
-sources. Its documented initial login is `admin` / `admin`; change it before
-allowing other users access. The supplied Jaeger configuration stores traces
+sources. Log in as `admin` with the password supplied through
+`GF_SECURITY_ADMIN_PASSWORD`. This initializes new Grafana volumes only;
+change existing account passwords in Grafana. Prometheus's admin and
+lifecycle APIs are disabled. The supplied Jaeger configuration stores traces
 in memory, capped at `100000` traces. Alertmanager defines receiver names but
 no notification destinations; configure receivers before relying on alerts.
 The configuration and dashboard files are under
