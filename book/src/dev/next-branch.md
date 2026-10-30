@@ -99,6 +99,7 @@ instead.
 
 Never promote it to a full release: that would make it the Latest release
 and trigger a production deployment.
+
 ## Compare next with main
 
 Compare nodes on the same network and zone, such as
