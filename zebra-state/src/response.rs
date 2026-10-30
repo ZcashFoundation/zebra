@@ -34,9 +34,82 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Keeps early mining work alive and reserves its slot until block verification finishes.
+#[derive(Clone, Debug)]
+pub struct MiningCandidateGuard(
+    pub(crate) tokio::sync::watch::Sender<Arc<tokio::sync::OwnedSemaphorePermit>>,
+);
+
+impl PartialEq for MiningCandidateGuard {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+}
+
+impl Eq for MiningCandidateGuard {}
+
+/// A persistent early-work subscription. A default subscription never reports changes.
+#[derive(Clone, Debug)]
+pub struct MiningCandidateChanges(
+    pub(crate) tokio::sync::watch::Receiver<Option<crate::service::MiningCandidate>>,
+    pub(crate) Option<crate::ReadStateService>,
+);
+
+impl Default for MiningCandidateChanges {
+    fn default() -> Self {
+        Self(tokio::sync::watch::channel(None).1, None)
+    }
+}
+
+impl PartialEq for MiningCandidateChanges {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+}
+
+impl Eq for MiningCandidateChanges {}
+
+impl MiningCandidateChanges {
+    /// Returns whether `hash` is live, unexpired, and still extends the committed best tip.
+    ///
+    /// Check after selecting cached work: a detached chain-info response can outlive its guard.
+    pub fn is_current(&self, hash: block::Hash) -> bool {
+        self.0
+            .borrow()
+            .as_ref()
+            .is_some_and(|(parent, info, cancelled, deadline)| {
+                info.tip_hash == hash
+                    && cancelled.has_changed().is_ok()
+                    && tokio::time::Instant::now() < *deadline
+                    && self
+                        .1
+                        .as_ref()
+                        .and_then(|state| state.best_tip())
+                        .map(|(_, hash)| hash)
+                        == Some(*parent)
+            })
+    }
+
+    /// Marks earlier notifications as observed before reading the current candidate.
+    pub fn mark_seen(&mut self) {
+        self.0.borrow_and_update();
+    }
+
+    /// Waits for a publication or withdrawal, or indefinitely if the source closes.
+    pub async fn changed(&mut self) {
+        if self.0.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
+    /// Response to [`Request::MiningCandidate`], absent if mining is inactive or its worker is busy.
+    /// Dropping the guard withdraws early work.
+    MiningCandidate(Option<MiningCandidateGuard>),
+
     /// Response to [`Request::CommitSemanticallyVerifiedBlock`] and [`Request::CommitCheckpointVerifiedBlock`]
     /// indicating that a block was successfully committed to the state.
     Committed(block::Hash),
@@ -375,6 +448,12 @@ impl Eq for NonFinalizedBlocksListener {}
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
+    /// The currently verified mining parent's child context, if it extends the best tip.
+    MiningCandidate(Option<Arc<GetBlockTemplateChainInfo>>),
+
+    /// Response to [`ReadRequest::MiningCandidateChanges`].
+    MiningCandidateChanges(MiningCandidateChanges),
+
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
@@ -651,6 +730,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
+            | ReadResponse::MiningCandidate(_)
+            | ReadResponse::MiningCandidateChanges(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_) => {
