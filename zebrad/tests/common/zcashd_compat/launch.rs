@@ -141,7 +141,7 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
     let work_dir = dir.path().to_path_buf();
 
     // The sidecar does not report its bound RPC port. Keep the reservation through config writing.
-    // ponytail: release-before-spawn still races; use port 0 when upstream reports its bound address.
+    // TODO: release-before-spawn still races; use port 0 when upstream reports its bound address.
     let port_reservation = TcpListener::bind("127.0.0.1:0")?;
     let zcashd_own_rpc_addr = port_reservation.local_addr()?;
     let compat_cfg: ZcashdCompatConfig = build_zcashd_compat_config(work_dir, zcashd_own_rpc_addr)?;
