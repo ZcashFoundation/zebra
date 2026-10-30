@@ -111,7 +111,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 fn zebra_metrics_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // ponytail: exporter hides its bound address; this handoff can race until it accepts a listener.
+    // TODO: exporter hides its bound address; this handoff can race until it accepts a listener.
     // Keep the reservation through config writing, then release it immediately before spawning.
     let reservation = std::net::TcpListener::bind("127.0.0.1:0")?;
 

@@ -378,7 +378,7 @@ pub fn check_sync_logs_until(
         let matching_logs = regex::RegexSet::new([expected_log, OPENED_RPC_ENDPOINT_MSG])?;
         loop {
             let line = zebrad.expect_stdout_line_matches(&matching_logs)?;
-            if line.contains(OPENED_RPC_ENDPOINT_MSG) {
+            if rpc_address.is_none() && line.contains(OPENED_RPC_ENDPOINT_MSG) {
                 rpc_address = Some(parse_listen_addr(&line, OPENED_RPC_ENDPOINT_MSG)?);
             }
             if matching_logs.matches(&line).matched(0) {

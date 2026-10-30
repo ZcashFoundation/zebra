@@ -304,7 +304,7 @@ where
 
         // The external server logs its configured address, not its bound address, so clients cannot
         // discover a port-0 listener. Reserve the port until immediately before spawning it.
-        // ponytail: release-before-spawn still races; use port 0 when upstream reports its address.
+        // TODO: release-before-spawn still races; use port 0 when upstream reports its address.
         let port_reservation = TcpListener::bind("127.0.0.1:0")?;
         let address = port_reservation.local_addr()?;
         args.set_parameter("--grpc-bind-addr", address.to_string());

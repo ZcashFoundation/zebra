@@ -743,7 +743,7 @@ fn non_blocking_logger() -> Result<()> {
         let result: Result<()> = async {
             // This test configures zebrad to drop log lines, so it can't learn an OS-assigned port
             // by reading the logs: the line reporting that port is dropped like any other line.
-            // ponytail: release-before-spawn still races; a non-log address channel would remove it.
+            // TODO: release-before-spawn still races; a non-log address channel would remove it.
             let port_reservation = TcpListener::bind("127.0.0.1:0")?;
             let mut config =
                 rpc_port_config(port_reservation.local_addr()?.port(), false, &Mainnet)?;
