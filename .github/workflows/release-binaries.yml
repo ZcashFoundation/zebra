@@ -104,8 +104,9 @@ jobs:
     with:
       release_tag: ${{ github.event.release.tag_name }}
 
+  # Pre-releases leave the Docker Hub description alone: it is pushed from the release commit's README.
   dockerhub-description:
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
