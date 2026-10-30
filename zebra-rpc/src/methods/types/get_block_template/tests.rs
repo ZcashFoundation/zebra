@@ -157,7 +157,6 @@ fn template_reports_selected_transaction_dependencies() {
         &miner_params,
         vec![child, unrelated, parent],
         dependencies,
-        None,
         Some(Amount::zero()),
     );
     let chain_info = GetBlockTemplateChainInfo {
@@ -205,13 +204,11 @@ fn template_reports_selected_transaction_dependencies() {
     );
 }
 
-/// Tests that coinbase transactions can be generated.
-///
-/// This test needs to be run with the `--release` flag so that it runs for ~ 30 seconds instead of
-/// ~ 90.
+/// Differential sizing against real proofs, including funding streams and lockbox activation.
+/// Run in release mode because shielded coinbases are expensive to prove.
 #[test]
 #[ignore]
-fn coinbase() -> anyhow::Result<()> {
+fn coinbase_resources_match_built_transactions() -> anyhow::Result<()> {
     let regtest = testnet::Parameters::build()
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
@@ -223,7 +220,9 @@ fn coinbase() -> anyhow::Result<()> {
             nu5: Some(6),
             nu6: Some(7),
             nu6_1: Some(8),
-            nu7: Some(9),
+            nu6_2: Some(9),
+            nu6_3: Some(10),
+            nu7: Some(11),
             ..Default::default()
         })?
         .with_funding_streams(vec![
@@ -254,26 +253,132 @@ fn coinbase() -> anyhow::Result<()> {
         for nu in NetworkUpgrade::iter().filter(|nu| nu >= &NetworkUpgrade::Sapling) {
             if let Some(height) = nu.activation_height(&net) {
                 for addr_type in MinerAddressType::iter() {
-                    TransactionTemplate::new_coinbase_with_parent_pools(
-                        &net,
-                        height,
-                        &MinerParams::from(
-                            Address::decode(&net, default_miner_address(net.kind(), &addr_type))
-                                .ok_or(anyhow!("hard-coded addr must be valid"))?,
-                        ),
-                        Amount::zero(),
-                        Some(Amount::zero()),
-                    )?
-                    .data()
-                    .as_ref()
-                    // Deserialization contains checks for elementary consensus rules, which must
-                    // pass.
-                    .zcash_deserialize_into::<Transaction>()?;
+                    let mut miner = MinerParams::from(
+                        Address::decode(&net, default_miner_address(net.kind(), &addr_type))
+                            .ok_or(anyhow!("hard-coded addr must be valid"))?,
+                    );
+                    // Build expensive shielded proofs on Mainnet at every upgrade. Keep transparent
+                    // coinbases on every network to cover their subsidy, funding-stream, and
+                    // lockbox rules.
+                    if addr_type != MinerAddressType::Transparent && net.is_a_test_network() {
+                        continue;
+                    }
+                    for tag_len in [None, Some(75), Some(76), Some(92)] {
+                        miner.data =
+                            tag_len.and_then(|len| zcash_script::pv::push_value(&vec![b'x'; len]));
+                        assert_coinbase_resources(&net, height, &miner)?;
+                    }
                 }
             }
         }
     }
 
+    Ok(())
+}
+
+/// Compares the analytic reservation with an independently serialized, fee-bearing coinbase.
+fn assert_coinbase_resources(
+    net: &Network,
+    height: Height,
+    miner: &MinerParams,
+) -> anyhow::Result<()> {
+    use zebra_chain::serialization::ZcashSerialize;
+    use zebra_consensus::ShieldedActionCounts;
+    use zebra_script::Sigops;
+
+    let parent_balance = Some(1_000_000_000u64.try_into()?);
+    let resources =
+        TransactionTemplate::coinbase_resource_usage(net, height, miner, parent_balance)?;
+    let template = TransactionTemplate::new_coinbase_with_parent_pools(
+        net,
+        height,
+        miner,
+        10_000u64.try_into()?,
+        parent_balance,
+    )?;
+    let transaction: Transaction = template.data().as_ref().zcash_deserialize_into()?;
+    assert_eq!(
+        resources.serialized_size,
+        transaction.zcash_serialized_size()
+    );
+    assert_eq!(resources.sigops, transaction.sigops()?);
+    assert_eq!(
+        resources.shielded_actions,
+        ShieldedActionCounts::from_transaction(&transaction)
+    );
+    Ok(())
+}
+
+#[test]
+fn transparent_coinbase_resources_cover_encoding_boundaries() -> anyhow::Result<()> {
+    use zcash_script::opcode::Evaluable;
+    use zcash_transparent::address::TransparentAddress;
+
+    // No funding outputs, except at NU6.1, where the total crosses CompactSize's 253 boundary.
+    for lockbox_outputs in [251, 252, 253] {
+        let net = testnet::Parameters::build()
+            .with_slow_start_interval(Height::MIN)
+            .with_activation_heights(ConfiguredActivationHeights {
+                sapling: Some(1),
+                nu5: Some(2),
+                nu6_1: Some(3),
+                nu6_3: Some(4),
+                ..Default::default()
+            })?
+            .clear_funding_streams()
+            .with_lockbox_disbursements(vec![
+                testnet::ConfiguredLockboxDisbursement {
+                    address: default_miner_address(
+                        zebra_chain::parameters::NetworkKind::Testnet,
+                        &MinerAddressType::Transparent,
+                    )
+                    .to_string(),
+                    amount: Amount::zero(),
+                };
+                lockbox_outputs
+            ])
+            .to_network()?;
+        for address in [
+            TransparentAddress::PublicKeyHash([7; 20]),
+            TransparentAddress::ScriptHash([7; 20]),
+        ] {
+            let mut miner = MinerParams::from(Address::from(address));
+            for height in [
+                1, 2, 3, 4, 16, 17, 127, 128, 32_767, 32_768, 8_388_607, 8_388_608,
+            ] {
+                let max_tag = zcash_transparent::coinbase::MAX_COINBASE_SCRIPT_LEN
+                    - zcash_script::pattern::push_num(i64::from(height)).byte_len()
+                    - 2;
+                for tag_len in [None, Some(0), Some(75), Some(76), Some(92), Some(max_tag)] {
+                    miner.data =
+                        tag_len.and_then(|len| zcash_script::pv::push_value(&vec![b'x'; len]));
+                    assert_coinbase_resources(&net, Height(height), &miner)?;
+                }
+            }
+            // Before NU5 an Orchard-only shielded receiver falls back to transparent.
+            let Address::Unified(unified) = Address::decode(
+                &net,
+                default_miner_address(net.kind(), &MinerAddressType::Unified),
+            )
+            .ok_or(anyhow!("hard-coded unified address must be valid"))?
+            else {
+                panic!("the unified address fixture contains a unified address");
+            };
+            let unified = zcash_keys::address::UnifiedAddress::from_receivers(
+                unified.orchard().copied(),
+                None,
+                Some(address),
+                None,
+                None,
+            )
+            .expect("the Orchard receiver makes the unified address valid");
+            assert_coinbase_resources(
+                &net,
+                Height(1),
+                &MinerParams::from(Address::Unified(Box::new(unified))),
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -384,11 +489,9 @@ fn coinbase_cache_reuses_built_coinbase() {
     );
 }
 
-/// Verifies the fix for #10907: the multi-entry coinbase cache retains both the zero-fee fake
-/// coinbase (used for ZIP-317 weight sizing) and the real-fee coinbase simultaneously, so
-/// `getblocktemplate` doesn't rebuild shielded proofs on every short-poll.
+/// Coinbase-only and fee-bearing templates must coexist without rebuilding their proofs.
 #[test]
-fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
+fn coinbase_cache_retains_empty_and_fee_bearing_templates() {
     use super::CoinbaseCache;
 
     let height = Height(1_000_000);
@@ -398,9 +501,8 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
 
     let cache = CoinbaseCache::default();
 
-    // Simulate what getblocktemplate does: store a fake coinbase at zero fee (ZIP-317 sizing),
-    // then store the real coinbase at the actual fee.
-    let fake_coinbase = TransactionTemplate::new_coinbase(
+    // Publish a coinbase-only template, followed by one including mempool transactions.
+    let empty_coinbase = TransactionTemplate::new_coinbase(
         &Network::Mainnet,
         height,
         &MinerParams::from(
@@ -434,14 +536,14 @@ fn coinbase_cache_retains_both_fake_and_real_fee_entries() {
     )
     .unwrap();
 
-    cache.store(height, zero_fee, None, fake_coinbase.clone());
+    cache.store(height, zero_fee, None, empty_coinbase.clone());
     cache.store(height, real_fee, None, real_coinbase.clone());
 
-    // Both entries coexist — the zero-fee sizing coinbase survives the real-fee store.
+    // Publishing fee-bearing work does not evict the coinbase-only template.
     assert_eq!(
         cache.get(height, zero_fee, None),
-        Some(fake_coinbase),
-        "zero-fee fake coinbase should still be cached after storing real-fee coinbase"
+        Some(empty_coinbase),
+        "coinbase-only work should remain cached after storing a fee-bearing coinbase"
     );
     assert_eq!(
         cache.get(height, real_fee, None),
@@ -532,9 +634,7 @@ fn coinbase_cache_discards_late_old_parent_builds() {
     );
 }
 
-/// Verifies that fee churn beyond the cache cap (4 entries) evicts stale nonzero-fee entries
-/// while preserving the zero-fee sizing coinbase. Without this, the cap would clear the
-/// entire map — including the zero-fee entry — recreating the original #10907 churn.
+/// Fee churn beyond the cache cap retains the proof needed for coinbase-only work.
 #[test]
 fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     use super::CoinbaseCache;
@@ -558,30 +658,24 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
         TransactionTemplate::new_coinbase(&Network::Mainnet, height, &miner_params, fee).unwrap()
     };
 
-    // Store the zero-fee sizing coinbase first.
-    let fake_coinbase = make_coinbase(zero_fee);
-    cache.store(height, zero_fee, None, fake_coinbase.clone());
+    // Store the coinbase-only template's proof first.
+    let empty_coinbase = make_coinbase(zero_fee);
+    cache.store(height, zero_fee, None, empty_coinbase.clone());
 
-    // Fill to capacity with distinct fee values (simulating mempool fee churn).
+    // Reuse one shielded coinbase transaction across distinct fee keys to avoid generating
+    // a proof for each entry. Eviction depends only on the keys, so the transaction's fee
+    // need not match each key. Keep it distinct from the zero-fee entry to detect replacement.
+    let paid_coinbase = make_coinbase(Amount::try_from(1_000).expect("valid amount"));
     for i in 1..=5u64 {
         let fee = Amount::try_from(i * 1_000).expect("valid amount");
-        cache.store(height, fee, None, make_coinbase(fee));
-        assert!(
-            cache
-                .0
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .transactions
-                .len()
-                <= 4
-        );
+        cache.store(height, fee, None, paid_coinbase.clone());
     }
 
     // The zero-fee entry must survive eviction at capacity.
     assert_eq!(
         cache.get(height, zero_fee, None),
-        Some(fake_coinbase.clone()),
-        "zero-fee sizing coinbase must survive fee churn at capacity"
+        Some(empty_coinbase.clone()),
+        "coinbase-only work must survive fee churn at capacity"
     );
 
     // Updating an existing key at capacity should not trigger eviction.
@@ -596,7 +690,7 @@ fn coinbase_cache_preserves_zero_fee_entry_at_capacity() {
     );
     assert_eq!(
         cache.get(height, zero_fee, None),
-        Some(fake_coinbase),
+        Some(empty_coinbase),
         "zero-fee entry must still be present after in-place update"
     );
 }

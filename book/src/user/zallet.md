@@ -19,7 +19,10 @@ backend is released. If its required format is absent, startup fails with
 The beta.3 `zaino` backend is unaffected when
 `[indexer.read_state_service]` is absent: it
 [fetches chain data over JSON-RPC](https://github.com/zcash/zallet/blob/v0.1.0-beta.3/backends/zaino/src/chain.rs#L203-L233)
-without reading Zebra's database.
+without reading Zebra's database. That topology is untested here. The
+[pool payout RPC gaps](mining-pools.md#wallet-rpc-compatibility) apply to
+either backend. For the tested alternative, see
+[pool payouts through the sidecar](mining-pools.md#tested-sidecar-payout-path).
 
 Check the backend's release notes and `zebra-state` dependency before
 [upgrading Zebra](upgrading.md). Zallet opens state read-only and cannot

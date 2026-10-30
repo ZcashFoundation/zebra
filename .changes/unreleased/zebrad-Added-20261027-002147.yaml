@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Export mining metrics for template construction, block submission outcomes, and mined-block announcement outcomes and latency.
+time: 2026-10-27T00:21:47.167082584+01:00

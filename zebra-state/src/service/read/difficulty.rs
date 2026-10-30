@@ -19,7 +19,7 @@ use crate::{
             difficulty::{
                 pow_adjustment_block_span, BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN,
             },
-            AdjustedDifficulty,
+            difficulty_threshold_and_time_are_valid, AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
         read::{
@@ -82,6 +82,188 @@ pub fn get_block_template_chain_info(
         chain_value_pools,
         DateTime32::now(),
     )
+}
+
+/// Checks a committed parent, contextual header rules, and history/body commitments.
+///
+/// Callers must first check PoW, size, transaction structure, and the transaction Merkle root.
+/// Before NU5 this does not check the final Sapling root; mining checks it after tree updates,
+/// and early relay declines those blocks.
+pub(crate) fn authenticated_candidate_header(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    block: Arc<block::Block>,
+    best_tip_only: bool,
+) -> Result<Option<Arc<HistoryTree>>, crate::ValidateContextError> {
+    let Some(height) = block.coinbase_height() else {
+        return Ok(None);
+    };
+    let Some(history) = candidate_header_context(
+        non_finalized_state,
+        db,
+        network,
+        &block.header,
+        height,
+        best_tip_only,
+    )?
+    else {
+        return Ok(None);
+    };
+    let parent = block.header.previous_block_hash;
+    crate::service::check::block_commitment_is_valid_for_chain_history(
+        block, network, &history, None,
+    )?;
+    Ok((!best_tip_only
+        || read::best_tip(non_finalized_state, db).is_some_and(|(tip_height, tip_hash)| {
+            tip_hash == parent && tip_height.next().ok() == Some(height)
+        }))
+    .then_some(history))
+}
+
+/// Checks parent, height, contextual difficulty/time, and retrieves the matching history context.
+pub(crate) fn candidate_header_context(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    header: &block::Header,
+    height: Height,
+    best_tip_only: bool,
+) -> Result<Option<Arc<HistoryTree>>, crate::ValidateContextError> {
+    let hash = header.hash();
+    if non_finalized_state.is_block_invalidated(hash) {
+        return Err(crate::ValidateContextError::BlockPreviouslyInvalidated { block_hash: hash });
+    }
+    let tip_hash = header.previous_block_hash;
+    let chain = non_finalized_state
+        .chain_iter()
+        .find(|chain| chain.height_by_hash.contains_key(&tip_hash));
+    let Some(tip_height) = read::height_by_hash(chain, db, tip_hash) else {
+        return Ok(None);
+    };
+    if best_tip_only && read::best_tip(non_finalized_state, db) != Some((tip_height, tip_hash)) {
+        return Ok(None);
+    }
+    if tip_height.next().ok() != Some(height) {
+        return Err(crate::ValidateContextError::NonSequentialBlock {
+            candidate_height: height,
+            parent_height: tip_height,
+        });
+    }
+    if header.difficulty_threshold.to_work().is_none() || DateTime32::try_from(header.time).is_err()
+    {
+        return Ok(None);
+    }
+    let mut relevant_data =
+        any_chain_ancestor_iter::<block::Header>(non_finalized_state, db, tip_hash)
+            .take(pow_adjustment_block_span(network, height))
+            .map(|header| (header.difficulty_threshold, header.time))
+            .peekable();
+    if relevant_data.peek().is_none() {
+        return Ok(None);
+    }
+    difficulty_threshold_and_time_are_valid(
+        header.difficulty_threshold,
+        AdjustedDifficulty::new_from_header_time(header.time, tip_height, network, relevant_data),
+    )?;
+    // Disk retains only the finalized tip's history tree, not arbitrary historical roots.
+    // Bind it to this parent before and after reading; never score a body against another root.
+    let history = if let Some(chain) = chain {
+        chain.history_tree(tip_hash.into())
+    } else if db.finalized_tip_hash() == tip_hash {
+        let history = db.history_tree();
+        (db.finalized_tip_hash() == tip_hash).then_some(history)
+    } else {
+        None
+    };
+    let Some(history) = history else {
+        return Ok(None);
+    };
+    Ok(
+        (!best_tip_only || read::best_tip(non_finalized_state, db) == Some((tip_height, tip_hash)))
+            .then_some(history),
+    )
+}
+
+/// Computes child context after checking candidate header rules and commitments, without committing.
+pub(crate) fn mining_candidate_chain_info(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    block: Arc<block::Block>,
+) -> Option<GetBlockTemplateChainInfo> {
+    let (tip_height, tip_hash) = read::best_tip(non_finalized_state, db)?;
+    let height = tip_height.next().ok()?;
+    let child_height = height.next().ok()?;
+    // ponytail: NSM needs validated value pools; use committed work once reissuance activates.
+    if block.header.previous_block_hash != tip_hash
+        || block.coinbase_height() != Some(height)
+        || zebra_chain::parameters::subsidy::nsm_reissuance_is_active(child_height, network)
+    {
+        return None;
+    }
+    let mut history =
+        authenticated_candidate_header(non_finalized_state, db, network, block.clone(), true)
+            .ok()??;
+    let chain = non_finalized_state.best_chain();
+    let mut sapling = read::tree::sapling_tree(chain, db, tip_hash.into())?;
+    let mut orchard = read::tree::orchard_tree(chain, db, tip_hash.into())?;
+    let mut ironwood = read::tree::ironwood_tree(chain, db, tip_hash.into())?;
+    let commitments: Vec<_> = block.sapling_note_commitments().collect();
+    if !commitments.is_empty() {
+        Arc::make_mut(&mut sapling)
+            .append_batch(&commitments)
+            .ok()?;
+    }
+    let commitments: Vec<_> = block.orchard_note_commitments().collect();
+    if !commitments.is_empty() {
+        Arc::make_mut(&mut orchard)
+            .append_batch(&commitments)
+            .ok()?;
+    }
+    let commitments: Vec<_> = block.ironwood_note_commitments().collect();
+    if !commitments.is_empty() {
+        Arc::make_mut(&mut ironwood)
+            .append_batch(&commitments)
+            .ok()?;
+    }
+    let sapling_root = sapling.root();
+    if let block::Commitment::FinalSaplingRoot(root) = block.commitment(network).ok()? {
+        if root != sapling_root {
+            return None;
+        }
+    }
+    Arc::make_mut(&mut history)
+        .push(
+            network,
+            block.clone(),
+            zebra_chain::primitives::zcash_history::BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard.root(),
+                ironwood: &ironwood.root(),
+            },
+        )
+        .ok()?;
+    let relevant_data = std::iter::once((block.header.difficulty_threshold, block.header.time))
+        .chain(
+            any_chain_ancestor_iter::<block::Header>(non_finalized_state, db, tip_hash)
+                .map(|header| (header.difficulty_threshold, header.time)),
+        )
+        .take(pow_adjustment_block_span(network, child_height))
+        .collect();
+    if read::best_tip(non_finalized_state, db) != Some((tip_height, tip_hash)) {
+        return None;
+    }
+    difficulty_time_and_history_tree(
+        relevant_data,
+        height,
+        block.hash(),
+        network,
+        history,
+        Default::default(),
+        DateTime32::now(),
+    )
+    .ok()
 }
 
 /// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.

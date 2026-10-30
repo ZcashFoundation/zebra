@@ -23,6 +23,7 @@
   - [zcashd-compat mode](user/zcashd-compat.md)
     - [Migrating an existing zcashd node](user/zcashd-compat-migration.md)
   - [Mining](user/mining.md)
+    - [Getting new work to mining pools](user/mining-pools.md)
     - [Mining with Docker](user/mining-docker.md)
     - [Testnet mining with s-nomp](user/mining-testnet-s-nomp.md)
   - [Custom testnets](user/custom-testnets.md)

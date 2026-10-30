@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added `Request::MiningCandidate`, `Response::MiningCandidate`, and `ReadRequest::{MiningCandidate, MiningCandidateChanges}` with matching `ReadResponse` variants for bounded early child-template context. Exhaustive enum matches must handle the new variants.'
+time: 2026-10-11T00:00:00Z

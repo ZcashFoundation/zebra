@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Raise the Halo2 batch threshold to 128 actions, counting each bundle as at least two actions to retain the 64-bundle invalid-proof fallback bound ([#11951](https://github.com/ZcashFoundation/zebra/issues/11951)).
+time: 2026-10-23T17:46:19,043440595+02:00

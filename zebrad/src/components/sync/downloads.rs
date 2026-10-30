@@ -32,7 +32,7 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    BLOCK_DOWNLOAD_ROUND_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
+    BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
     FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
@@ -69,6 +69,9 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// Bounds a drop path that also fires for honest old blocks. Timing out is treated as "no proof",
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Avoid repeatedly revalidating a body while retention capacity or its checkpoint ancestor recovers.
+const RESOURCE_PRESSURE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
@@ -410,7 +413,9 @@ where
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
-                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
+                let early_relay = matches!(rsp, zn::Response::EarlyBlocks(_));
+                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
+                    | zn::Response::EarlyBlocks(blocks) = rsp {
                     assert_eq!(
                         blocks.len(),
                         1,
@@ -599,11 +604,37 @@ where
                     verifier = readiness => verifier,
                 };
 
-                // Verify the block.
+                // Retain this body in the existing task during local pressure or range recovery.
+                // One deadline covers every retry, including readiness and backoff; the tower
+                // timeout on an individual verifier call must not restart the overall deadline.
                 let verify_start = std::time::Instant::now();
-                let mut rsp = verifier
-                    .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
-                    .call(zebra_consensus::Request::Commit(block)).boxed();
+                let verifier = verifier
+                    .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?;
+                let verification = async move {
+                    loop {
+                        let request = if early_relay {
+                            zebra_consensus::Request::CommitEarlyRelay(block.clone())
+                        } else {
+                            zebra_consensus::Request::Commit(block.clone())
+                        };
+                        let result = verifier
+                            .call(request)
+                            .await;
+                        let pressure = result.as_ref().err()
+                            .and_then(|error| error.downcast_ref::<zebra_consensus::RouterError>())
+                            .is_some_and(zebra_consensus::RouterError::is_resource_pressure);
+                        if !pressure {
+                            return result;
+                        }
+                        tokio::time::sleep(RESOURCE_PRESSURE_RETRY_DELAY).await;
+                        verifier.ready().await?;
+                    }
+                };
+                let mut rsp = timeout(BLOCK_VERIFY_TIMEOUT, verification)
+                    // Preserve the long-timeout classification used by the syncer.
+                    .map_err(|_| BoxError::from(tower::timeout::error::Elapsed::new()))
+                    .map(|result| result.and_then(convert::identity))
+                    .boxed();
 
                 // Add a shorter timeout to workaround a known bug (#5125)
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");

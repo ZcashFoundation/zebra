@@ -2,7 +2,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    ops::{Add, Deref, DerefMut, RangeInclusive},
+    mem::{size_of, size_of_val},
+    ops::{Add, Deref, RangeInclusive},
     pin::Pin,
     sync::Arc,
     time::Instant,
@@ -11,15 +12,15 @@ use std::{
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
-    block::{self, Block, HeightDiff},
+    block::{self, merkle::AuthDataRoot, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
-    serialization::SerializationError,
+    serialization::{SerializationError, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
-    transparent::{self, utxos_from_ordered_utxos},
+    transparent,
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
@@ -297,8 +298,24 @@ pub struct SemanticallyVerifiedBlock {
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+///
+/// The wrapped block is immutable so a cached authorizing-data root cannot be paired with another
+/// block body:
+///
+/// ```compile_fail
+/// use std::sync::Arc;
+/// use zebra_chain::block::Block;
+/// use zebra_state::CheckpointVerifiedBlock;
+///
+/// fn replace_body(mut verified: CheckpointVerifiedBlock, block: Arc<Block>) {
+///     verified.block = block;
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+pub struct CheckpointVerifiedBlock {
+    verified: SemanticallyVerifiedBlock,
+    auth_data_root: Option<AuthDataRoot>,
+}
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -330,7 +347,7 @@ pub struct ContextuallyVerifiedBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub(crate) new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
 
     /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
     /// [`OutPoint`](transparent::OutPoint).
@@ -339,7 +356,7 @@ pub struct ContextuallyVerifiedBlock {
     /// or earlier blocks in the chain.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub(crate) spent_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
 
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
@@ -510,12 +527,58 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Conservative retained-content charge for caches, including decoded metadata and output scripts.
+    ///
+    /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.
+    /// Computing the charge serializes the block without copying its bytes; use a blocking worker.
+    pub fn retained_bytes(&self) -> usize {
+        block_wire_and_retained_bytes(&self.block, &self.transaction_hashes)
+            .1
+            .saturating_add(self.contextual_data_retained_bytes())
+    }
+
+    /// Contextual metadata and output maps, excluding the shared block and transaction hashes.
+    pub(crate) fn contextual_data_retained_bytes(&self) -> usize {
+        size_of::<Self>()
+            .saturating_add(output_retained_bytes(&self.new_outputs))
+            .saturating_add(output_retained_bytes(&self.spent_outputs))
+    }
+
+    /// Rebind a successfully validated proposal to its solved block.
+    ///
+    /// The caller must verify proof of work and ensure every serialized byte except nonce and
+    /// solution matches the proposal. Receipt time tracks the solved block, not the proposal.
+    pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        self.hash = block.hash();
+        self.block = block;
+        self.received_time = Some(received_time);
+    }
+
+    /// Converts an exact successful proposal result, rebound to its solved block, into a mined commit.
+    ///
+    /// The caller must first verify solved proof of work, current time, serialized size, and exact
+    /// proposal equality except nonce and solution. Moves the output map into the queue metadata.
+    pub fn into_mined_request(mut self, notifications: MinedBlockNotifications) -> Request {
+        let block = SemanticallyVerifiedBlock {
+            block: self.block.clone(),
+            hash: self.hash,
+            height: self.height,
+            new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut self.new_outputs)),
+            transaction_hashes: self.transaction_hashes.clone(),
+            received_time: self.received_time,
+        };
+        Request::CommitMinedBlock {
+            block,
+            contextual: Some(Box::new(self)),
+            notifications,
+        }
+    }
+
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
-    /// When combined, `semantically_verified.new_outputs` and `spent_utxos` must contain
-    /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
-    /// including UTXOs created by earlier transactions in this block.
+    /// `spent_outputs` must contain the [`Utxo`](transparent::Utxo)s spent by every transparent
+    /// input in this block, including UTXOs created by earlier transactions in this block.
     ///
     /// `previous_value_pools` and `deferred_pool_balance_change` must use the exact parent.
     /// This constructor calculates ledger changes, but does not validate coinbase payouts or
@@ -546,7 +609,7 @@ impl ContextuallyVerifiedBlock {
     /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
     pub(crate) fn with_block_spent_utxos_and_fees(
         semantically_verified: SemanticallyVerifiedBlock,
-        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
@@ -560,18 +623,8 @@ impl ContextuallyVerifiedBlock {
             received_time,
         } = semantically_verified;
 
-        // This is redundant for the non-finalized state,
-        // but useful to make some tests pass more easily.
-        //
-        // TODO: fix the tests, and stop adding unrelated outputs.
-        spent_outputs.extend(new_outputs.clone());
-
         let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
-            &utxos_from_ordered_utxos(
-                spent_outputs
-                    .iter()
-                    .map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
-            ),
+            &spent_outputs,
             deferred_pool_balance_change,
             network,
             previous_value_pools,
@@ -582,8 +635,8 @@ impl ContextuallyVerifiedBlock {
                 block,
                 hash,
                 height,
-                new_outputs,
-                spent_outputs,
+                new_outputs: Arc::new(new_outputs),
+                spent_outputs: Arc::new(spent_outputs),
                 transaction_hashes,
                 chain_value_pool_change,
                 received_time,
@@ -591,6 +644,59 @@ impl ContextuallyVerifiedBlock {
             transaction_fees,
         ))
     }
+}
+
+/// Wire size and conservative decoded-content/metadata charge, computed in one serialization pass.
+pub(crate) fn block_wire_and_retained_bytes(
+    block: &Block,
+    transaction_hashes: &[transaction::Hash],
+) -> (usize, usize) {
+    let wire_bytes = block.zcash_serialized_size();
+    let mut bytes = wire_bytes
+        .saturating_add(size_of::<Block>())
+        .saturating_add(size_of::<block::Header>())
+        .saturating_add(
+            block
+                .transactions
+                .capacity()
+                .saturating_mul(size_of::<Arc<transaction::Transaction>>()),
+        )
+        .saturating_add(size_of_val(transaction_hashes));
+    for transaction in &block.transactions {
+        bytes = bytes.saturating_add(size_of_val(transaction.as_ref()));
+        if let Some(bundle) = transaction.transparent_bundle() {
+            bytes = bytes
+                .saturating_add(size_of_val(bundle.vin.as_slice()))
+                .saturating_add(size_of_val(bundle.vout.as_slice()));
+        }
+        if let Some(bundle) = transaction.sprout_bundle() {
+            bytes = bytes.saturating_add(size_of_val(bundle.joinsplits.as_slice()));
+        }
+        if let Some(bundle) = transaction.sapling_bundle() {
+            bytes = bytes
+                .saturating_add(size_of_val(bundle.shielded_spends()))
+                .saturating_add(size_of_val(bundle.shielded_outputs()));
+        }
+        for action in transaction
+            .orchard_actions()
+            .chain(transaction.ironwood_actions())
+        {
+            bytes = bytes.saturating_add(size_of_val(action));
+        }
+    }
+    (wire_bytes, bytes)
+}
+
+/// Include scripts from prior transactions, not just the current block's wire bytes.
+pub(crate) fn output_retained_bytes(
+    outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> usize {
+    outputs.values().fold(
+        outputs
+            .capacity()
+            .saturating_mul(size_of::<(transparent::OutPoint, transparent::OrderedUtxo)>()),
+        |bytes, output| bytes.saturating_add(output.utxo.output.lock_script.as_raw_bytes().len()),
+    )
 }
 
 impl CheckpointVerifiedBlock {
@@ -605,7 +711,18 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
+        Self::from(SemanticallyVerifiedBlock::with_hash(block, hash))
+    }
+
+    /// Computes and caches the authorizing-data root from this immutable block body.
+    pub fn with_precomputed_auth_data_root(mut self) -> Self {
+        self.auth_data_root = Some(self.block.auth_data_root());
+        self
+    }
+
+    /// Returns the cached root, if it was computed before the block reached the writer.
+    pub(crate) fn precomputed_auth_data_root(&self) -> Option<AuthDataRoot> {
+        self.auth_data_root
     }
 }
 
@@ -631,7 +748,16 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        Self::from(SemanticallyVerifiedBlock::from(block))
+    }
+}
+
+impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
+    fn from(verified: SemanticallyVerifiedBlock) -> Self {
+        Self {
+            verified,
+            auth_data_root: None,
+        }
     }
 }
 
@@ -661,7 +787,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             block: valid.block,
             hash: valid.hash,
             height: valid.height,
-            new_outputs: valid.new_outputs,
+            new_outputs: Arc::unwrap_or_clone(valid.new_outputs),
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
         }
@@ -684,7 +810,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
 
 impl From<CheckpointVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(checkpoint_verified: CheckpointVerifiedBlock) -> Self {
-        checkpoint_verified.0
+        checkpoint_verified.verified
     }
 }
 
@@ -692,12 +818,7 @@ impl Deref for CheckpointVerifiedBlock {
     type Target = SemanticallyVerifiedBlock;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for CheckpointVerifiedBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &self.verified
     }
 }
 
@@ -843,19 +964,144 @@ impl MappedRequest for AwaitUtxoRequest {
     }
 }
 
+/// State-owned relay notifications for a locally mined block.
+///
+/// Once queued, these senders live with the commit rather than its response future. The single
+/// state writer reserves a slot without waiting immediately before processing the commit. A full or
+/// closed channel rejects the mined request before mutation or early relay, without blocking other
+/// writes. An ordinary same-hash replacement retains the observer as best-effort: unavailable
+/// notification capacity cannot reject that ordinary commit. Otherwise, after success (including
+/// side-chain commits), the writer inserts the notification before replying. Channel insertion does
+/// not guarantee peer delivery; subsequent receiver closure cannot turn a successful commit into an
+/// error. Dropping a response future alone never changes notification requirements.
+#[derive(Clone, Debug)]
+pub struct MinedBlockNotifications {
+    pub(crate) committed: tokio::sync::mpsc::Sender<(block::Hash, block::Height)>,
+    pub(crate) validated: tokio::sync::watch::Sender<Option<Arc<Block>>>,
+    /// Whether notification capacity is required by the current commit request.
+    required: bool,
+}
+
+impl MinedBlockNotifications {
+    /// Creates notifications using the existing bounded committed channel and validated-body watch.
+    ///
+    /// No channel capacity is reserved while a queued block waits for its parent. The validated
+    /// watch is updated only for an exact successful proposal result after live parent, local
+    /// invalidation, and current header-time checks, immediately before applying the block.
+    pub fn new(
+        committed: tokio::sync::mpsc::Sender<(block::Hash, block::Height)>,
+        validated: tokio::sync::watch::Sender<Option<Arc<Block>>>,
+    ) -> Self {
+        Self {
+            committed,
+            validated,
+            required: true,
+        }
+    }
+
+    /// Retains a superseded mined observer without imposing its requirements on an ordinary commit.
+    ///
+    /// Use only when an ordinary same-hash request supersedes the mined request, not when its
+    /// response future is dropped. Healthy observers still receive the commit; a full or closed
+    /// channel no longer rejects it. Capacity is checked only at the writer's commit boundary.
+    pub fn allow_ordinary_commit(&mut self) {
+        self.required = false;
+    }
+
+    /// Reserves only at the writer's commit boundary, never while waiting for a queued parent.
+    pub(crate) fn try_reserve_committed(
+        &self,
+    ) -> Result<
+        Option<tokio::sync::mpsc::OwnedPermit<(block::Hash, block::Height)>>,
+        crate::CommitBlockError,
+    > {
+        let result = self
+            .committed
+            .clone()
+            .try_reserve_owned()
+            .map_err(|error| match error {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    crate::CommitBlockError::MinedBlockNotificationFull
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    crate::CommitBlockError::MinedBlockNotificationClosed
+                }
+            });
+        match result {
+            Ok(permit) => Ok(Some(permit)),
+            Err(error) if !self.required => {
+                tracing::warn!(
+                    ?error,
+                    "superseded mined notification observer unavailable; continuing ordinary commit"
+                );
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl PartialEq for MinedBlockNotifications {
+    fn eq(&self, other: &Self) -> bool {
+        self.committed.same_channel(&other.committed)
+            && self.validated.same_channel(&other.validated)
+            && self.required == other.required
+    }
+}
+
+impl Eq for MinedBlockNotifications {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
+    /// Authenticates a NU5-or-later body against its committed parent's header context.
+    ///
+    /// The caller must first check PoW/Equihash, size, cheap structure/resource limits, transaction
+    /// Merkle root, duplicates, and branch consistency. Returns [`Response::EarlyRelay`]; only
+    /// current-best-tip children can be cached, and only while an early-relay subscription exists.
+    EarlyRelay {
+        /// The immutable block whose transaction authorization commitment must be checked.
+        block: Arc<Block>,
+        /// If true, authenticate even when caching is disabled or full, against any retained
+        /// committed parent context. Missing or changing context returns no guard. Finalized
+        /// history roots are retained only for the tip.
+        /// If false, skip disabled caching and restrict admission to the current best tip.
+        require_authentication: bool,
+    },
+
+    /// Authenticates an early-relay body without publishing it or reserving publication capacity.
+    ///
+    /// Uses the same caller preconditions and response as [`Request::EarlyRelay`], against any
+    /// retained committed parent. Missing or changing context returns no guard; callers bound
+    /// any retries. Use this before assigning peer punishment after deferred authentication.
+    AuthenticateEarlyRelay(Arc<Block>),
+
+    /// Announces a block after proof-of-work and transaction Merkle-root checks.
+    ///
+    /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
+    /// without full transaction and contextual validation, and withdrawn on guard drop or after
+    /// 30 seconds.
+    MiningCandidate(Arc<Block>),
+
     /// Performs contextual validation of the given semantically verified block,
     /// committing it to the state if successful.
     ///
-    /// This request can be made out-of-order; the state service will queue it
-    /// until its parent is ready.
+    /// This request can be made out-of-order; the state service queues it until its parent is ready.
+    /// The orphan queue retains at most [`crate::MAX_BLOCK_REORG_HEIGHT`] payloads and a 320 MiB
+    /// content/metadata resource charge, including cached spent outputs, not exact allocator RSS.
+    /// Highest-height orphans are evicted with [`crate::CommitBlockError::OrphanQueueFull`].
+    /// Commit-ready parents and descendants are dispatched before eviction, so a full queue cannot
+    /// prevent their progress. One incoming payload can temporarily exceed the limits during dispatch.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if
     /// the block fails contextual validation or otherwise could not be committed.
+    ///
+    /// Success acknowledges publication in the non-finalized state, before older blocks past the
+    /// reorg limit are written to the finalized database. The same writer completes those writes
+    /// before processing another block. A finalization failure remains fatal; success is not a
+    /// durability guarantee for the new block or completion of older blocks' finalization.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed. A
@@ -870,6 +1116,42 @@ pub enum Request {
     ///
     /// [0]: (crate::error::CommitSemanticallyVerifiedError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
+
+    /// Commits a locally mined block with state-owned relay notifications.
+    ///
+    /// Uses the queue, cancellation, error, and response semantics of
+    /// [`Request::CommitSemanticallyVerifiedBlock`]. Replacing a queued request retains its block
+    /// and cached verdict. An ordinary replacement retains its notifications as best-effort:
+    /// healthy observers still receive the commit, but full or closed channels cannot reject the
+    /// ordinary request. Another mined replacement installs its own required notifications.
+    ///
+    /// A full or closed required notification channel returns an operational
+    /// [`crate::CommitBlockError`] before mutation or early relay. Successful required notifications
+    /// are inserted before the response; ordinary commits do not require notification capacity.
+    CommitMinedBlock {
+        /// The solved block after semantic validation.
+        block: SemanticallyVerifiedBlock,
+        /// An exact successful proposal result rebound to this solved block, if available.
+        ///
+        /// The caller must check solved proof of work, current time, and serialized size.
+        /// Only this path can publish a validated body before applying it to the live state.
+        contextual: Option<Box<ContextuallyVerifiedBlock>>,
+        /// Notifications owned by the queued block, independent of its caller.
+        notifications: MinedBlockNotifications,
+    },
+
+    /// Commits a locally mined checkpoint-verified block with durable commit notification.
+    ///
+    /// Uses [`Request::CommitCheckpointVerifiedBlock`] semantics and never publishes an early
+    /// validated-body notification. Notifications survive cancellation of the response future.
+    /// Full or closed required notification channels reject before mutation. An ordinary same-hash
+    /// replacement retains the observer as best-effort, as with [`Request::CommitMinedBlock`].
+    CommitMinedCheckpointVerifiedBlock {
+        /// The block verified against a checkpoint.
+        block: CheckpointVerifiedBlock,
+        /// Notifications owned by the queued block, independent of its caller.
+        notifications: MinedBlockNotifications,
+    },
 
     /// Commit a checkpointed block to the state, skipping most but not all
     /// contextual validation.
@@ -1126,18 +1408,42 @@ pub enum Request {
     /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
+    /// Prefers the given block over equal-work chain tips in the non-finalized state.
+    ///
+    /// Finalized blocks, known non-tip blocks, and lower-work tips succeed without changing state.
+    /// The latest call wins; the preference is lost when the tip changes or the node restarts.
+    ///
+    /// Returns [`Response::Precious`] with the requested hash, or a
+    /// [`PreciousError`](crate::error::PreciousError) if the block was not found or the request
+    /// could not be processed.
+    PreciousBlock(block::Hash),
+
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Commit a successful proposal result rebound to a solved block, without contextual rechecks.
+    ///
+    /// The caller must check proof of work, current time and serialized size after rebinding.
+    /// Returns [`Response::Committed`], with the same queue semantics as a semantic commit.
+    CommitContextuallyVerifiedBlock(Box<ContextuallyVerifiedBlock>),
 }
 
 impl Request {
     /// Returns a [`&'static str`](str) name of the variant representing this value.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            Request::MiningCandidate(_) => "mining_candidate",
+            Request::EarlyRelay { .. } => "early_relay",
+            Request::AuthenticateEarlyRelay(_) => "authenticate_early_relay",
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
+            Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
+            Request::CommitMinedBlock { .. } => "commit_mined_block",
+            Request::CommitMinedCheckpointVerifiedBlock { .. } => {
+                "commit_mined_checkpoint_verified_block"
+            }
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
@@ -1160,6 +1466,7 @@ impl Request {
             Request::KnownBlock(_) => "known_block",
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
+            Request::PreciousBlock(_) => "precious_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
@@ -1179,8 +1486,39 @@ impl Request {
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
+    /// Returns the current early mining context in [`ReadResponse::MiningCandidate`].
+    MiningCandidate,
+
+    /// Subscribes to early mining changes and enables candidate computation while held.
+    /// Returns [`ReadResponse::MiningCandidateChanges`].
+    MiningCandidateChanges,
+
+    /// Returns [`ReadResponse::EarlyRelayCache`], enabling early block retention while the cache
+    /// or one of its subscribers is held. Independent of mining and never enabled by default.
+    EarlyRelayCache,
+
+    /// Checks height and contextual difficulty/time for a direct child of the committed best tip.
+    /// Rejects locally invalidated or recently deterministically rejected block hashes.
+    ///
+    /// Returns [`ReadResponse::ValidBestTipHeader`] or an error, without caching a verdict.
+    /// Callers must independently check proof of work and bound compact-body resources.
+    CheckBestTipHeader {
+        /// The candidate header.
+        header: Arc<block::Header>,
+        /// The height from its prefilled coinbase.
+        height: block::Height,
+    },
+
+    /// Authenticates a NU5-or-later body's history and authorization commitments at the best tip.
+    ///
+    /// Callers must first bound the body and check transaction Merkle roots and duplicates.
+    /// Returns [`ReadResponse::ValidBestTipBlockCommitments`] or an error. Neither result updates
+    /// rejection, mining, or early-relay caches; success does not imply transaction validity.
+    CheckBestTipBlockCommitments(Arc<Block>),
+
     /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
-    /// with the current disk space usage in bytes.
+    /// with the latest disk space usage estimate in bytes. Primary services normally refresh
+    /// it every 30 seconds; read-only services measure it on demand.
     UsageInfo,
 
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
@@ -1687,6 +2025,11 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
+            ReadRequest::MiningCandidate => "mining_candidate",
+            ReadRequest::MiningCandidateChanges => "mining_candidate_changes",
+            ReadRequest::EarlyRelayCache => "early_relay_cache",
+            ReadRequest::CheckBestTipHeader { .. } => "check_best_tip_header",
+            ReadRequest::CheckBestTipBlockCommitments(_) => "check_best_tip_block_commitments",
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
@@ -1744,8 +2087,15 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitContextuallyVerifiedBlock(_)
+            | Request::CommitMinedBlock { .. }
+            | Request::CommitMinedCheckpointVerifiedBlock { .. }
+            | Request::MiningCandidate(_)
+            | Request::EarlyRelay { .. }
+            | Request::AuthenticateEarlyRelay(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
+            | Request::PreciousBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \

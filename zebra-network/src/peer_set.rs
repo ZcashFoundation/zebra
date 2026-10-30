@@ -44,10 +44,11 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct BlockAdvert {
     pub(crate) hash: block::Hash,
+    pub(crate) compact_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) result: oneshot::Sender<Result<(), BoxError>>,
 }
 
-type AdvertPeers = HashMap<PeerSocketAddr, (Version, bool, mpsc::Sender<BlockAdvert>)>;
+type AdvertPeers = HashMap<PeerSocketAddr, (Version, bool, bool, mpsc::Sender<BlockAdvert>)>;
 
 /// Discovery and maintenance requests wake both an active worker and the idle-buffer self-poller.
 #[derive(Debug, Default)]
@@ -69,7 +70,8 @@ impl Wake for PeerSetWaker {
 
 /// Bounded block fanout independent of ordinary peer request readiness.
 ///
-/// Accepts only `AdvertiseBlock` (sampled peers plus sidecars) and `AdvertiseBlockToAll`.
+/// Accepts `AdvertiseBlock` (sampled peers plus sidecars), `AdvertiseBlockToAll`, and
+/// `AdvertiseEarlyBlock` (the same sample, restricted to bilaterally negotiated connections).
 /// Readiness reconciles pending discovery and waits for an eligible connected peer, even if busy.
 /// Success requires every selected connection to complete its local write. Full queues, revoked
 /// connections, write failures, and losing all eligible peers after readiness are errors.
@@ -153,9 +155,10 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
 
     fn call(&mut self, request: Request) -> Self::Future {
         self.maintained = false;
-        let (hash, all) = match request {
-            Request::AdvertiseBlock(hash, _) => (hash, false),
-            Request::AdvertiseBlockToAll(hash) => (hash, true),
+        let (hash, all, early) = match request {
+            Request::AdvertiseBlock(hash, _) => (hash, false, false),
+            Request::AdvertiseBlockToAll(hash) => (hash, true, false),
+            Request::AdvertiseEarlyBlock(hash) => (hash, false, true),
             _ => return futures::future::ready(Err("not a block advertisement".into())).boxed(),
         };
         let minimum = self.minimum_version.current();
@@ -163,8 +166,11 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
         let peers = self.peers.borrow();
         let mut selected: Vec<_> = peers
             .iter()
-            .filter(|(addr, (version, _, sender))| {
-                *version >= minimum && !bans.is_banned(addr.ip()) && !sender.is_closed()
+            .filter(|(addr, (version, _, early_block_relay, sender))| {
+                *version >= minimum
+                    && (!early || *early_block_relay)
+                    && !bans.is_banned(addr.ip())
+                    && !sender.is_closed()
             })
             .map(|(_, entry)| entry)
             .collect();
@@ -172,7 +178,8 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
         let sample = broadcast_peer_count(&self.network, selected.len());
         let mut writes = FuturesUnordered::new();
         let mut sampled = 0;
-        for (_, sidecar, sender) in selected {
+        let compact_slots = Arc::new(tokio::sync::Semaphore::new(3));
+        for (_, sidecar, _, sender) in selected {
             if !all && !*sidecar {
                 if sampled >= sample {
                     continue;
@@ -181,7 +188,11 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
             }
             let (result, receiver) = oneshot::channel();
             let admission = sender
-                .try_send(BlockAdvert { hash, result })
+                .try_send(BlockAdvert {
+                    hash,
+                    compact_slots: compact_slots.clone(),
+                    result,
+                })
                 .map_err(|error| -> BoxError { error.to_string().into() });
             writes.push(async move {
                 admission?;

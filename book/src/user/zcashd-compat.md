@@ -34,6 +34,9 @@ The [migration configuration](zcashd-compat-migration.md#2-write-the-config)
 keeps the legacy wallet endpoint for existing clients; see
 [ports](run.md#ports) for network defaults.
 
+For mining pools, see the [tested reward-to-payout procedure](mining-pools.md#tested-sidecar-payout-path)
+and its wallet RPC, fee, and privacy-policy limits.
+
 ## Quick start: the installer
 
 Download and inspect the [installer][installer], then run it:

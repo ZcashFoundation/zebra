@@ -97,6 +97,74 @@ reload it after each restart. Bind RPC to loopback for a local pool; use a
 protected tunnel or TLS proxy for remote connections. Disable authentication
 only when an isolated network or an authenticating proxy controls access.
 
+Submitted blocks are advertised early only when they exactly match a successful local proposal
+verdict, except for the nonce and Equihash solution. Solved proof of work, size, current time, live
+parent eligibility and local invalidation are checked before the body becomes available to peers.
+Changed or uncached proposals undergo normal full validation; checkpoint-era blocks wait for commit.
+Early advertisements use ordinary block gossip; all-peer advertisements are reserved for committed
+submissions. The RPC response still waits for verification and commit.
+
+Committed notifications belong to the state writer, so cancelling an RPC does not discard a later
+successful commit notification. The default notification channel holds at most 10,000 messages.
+A full or closed channel produces an operational error before committing a mined block, without
+blocking ordinary state writes. Notification insertion does not guarantee delivery to peers.
+Restrict RPC access to trusted miners.
+
+### ZMQ block notifications
+
+Pools using zcashd's `hashblock` subscription can receive the same multipart messages from Zebra.
+Build or install Zebra with `--features zmq`, then add this to `zebrad.toml`:
+
+```toml
+[notify]
+zmqpubhashblock = "tcp://127.0.0.1:28332"
+```
+
+This is equivalent to zcashd's `-zmqpubhashblock=tcp://127.0.0.1:28332`. The Cargo feature is off by
+default and uses a pure-Rust implementation; no system ZMQ package is needed. Only TCP is supported.
+Official default binaries and Docker images do not include it. Without the feature, configuring the
+endpoint is a startup error.
+With no endpoint configured, no ZMQ socket is opened.
+
+Subscribe to `hashblock`. Each notification has three frames:
+
+1. The nine ASCII bytes `hashblock`, with no null terminator.
+2. The 32 hash bytes in display order: hex-encoding them gives the `getbestblockhash` RPC result.
+3. A four-byte little-endian sequence number, starting at zero, wrapping after `2^32 - 1`, and
+   resetting when Zebra restarts.
+
+Like block notify, notifications are suppressed until Zebra is close to the network tip.
+Only best-chain tip changes are reported, including reorganizations; this is not a per-block archive
+or a same-tip transaction update feed. Intermediate tips may be coalesced. A bounded local queue
+holds up to 1,000 messages and drops on overflow, never delaying validation. Each subscriber has
+its own 64-message queue. A full queue or a write taking more than one second disconnects only
+that subscriber; other subscribers continue receiving notifications.
+
+The server accepts at most 64 connections, including handshakes in progress. Handshakes and
+incomplete incoming frames have five-second deadlines. After the handshake, a client must send its
+first valid subscription within five seconds; other frames do not extend that deadline. Subscribed
+clients may remain silent indefinitely without heartbeats. Only ZMTP 3.x NULL connections with a
+SUB or XSUB socket type are supported. Inbound frames must use short lengths (at most 255 bytes),
+with at most 16 distinct subscription prefixes of up to 64 bytes each. Each connection may send
+at most 128 frames and 16 KiB, including frame headers, per one-second window after the handshake.
+Exceeding either budget disconnects the client. The budgets renew so periodic heartbeats do not
+exhaust a lifetime allowance. Invalid clients are disconnected.
+Heartbeat intervals shorter than about 10 ms can exceed the 128-frame-per-second inbound budget and
+disconnect the subscriber; ordinary intervals of 100 ms or more are unaffected.
+Heartbeat requests receive bounded PONG replies through the same per-subscriber queue, even when
+the chain tip is unchanged. Reply contexts are capped at 16 bytes.
+
+Subscribers must fetch fresh work over RPC and reconcile after sequence gaps, reconnects, or
+restarts.
+Keep periodic RPC polling as a backstop: coalesced tips do not necessarily create sequence gaps.
+
+**ZMQ has no authentication or encryption.** Restrict the endpoint to trusted clients using firewall
+rules or a private network, and account for untrusted local applications even on loopback.
+Never expose it directly to the public Internet. These limits do not provide fair admission:
+a misbehaving trusted client can still occupy all slots by subscribing, even to an unused topic
+or subsequently cancelling, or repeatedly reconnect to obtain fresh inbound budgets. Restrict
+access to well-behaved clients; the endpoint is not a defense against hostile clients.
+
 ## Running Zebra
 
 Start Zebra with the configuration file:
@@ -116,6 +184,31 @@ tip-age limit. This permits mining to resume after a Testnet stall. Networks
 with proof of work disabled, including default Regtest, bypass this sync
 check. The `[rpc] debug_force_finished_sync` field changes only the estimate
 in `getblockchaininfo`; it does not bypass the mining check.
+
+## Reusing proposal validation
+
+Zebra validates transaction-bearing templates in the background. If you change the coinbase,
+transactions, timestamp or another header field, submit the modified block with
+`getblocktemplate` parameters `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it.
+A successful proposal lets a later `submitblock` reuse verification when only the nonce and
+Equihash solution differ. Proof of work, current time, size and state application are still checked.
+The cache holds up to eight recent successful proposals within a 576 MiB retained-content budget,
+including spent-output scripts. This uses a conservative retention charge, not measured heap usage.
+It keeps eight representative full-size proposals with 19,215 transactions using 104-byte
+one-input/one-P2PKH-output payments, charged at about 66.2 MB per proposal. Proposals packed with
+smaller consensus-valid transactions or large spent-output scripts can retain fewer entries.
+An evicted or changed proposal is verified normally: eviction loses cache hits, not correctness.
+
+Template requests share the updater's work during startup and refreshes, rather than starting a
+separate coinbase proof for each waiting miner. On-demand construction runs off the async executor
+and rechecks the committed parent, synchronization, timestamp range and difficulty before returning.
+Long polls also recheck synchronization after waking. Expanding a clock-capped timestamp range does
+not cancel still-valid work; a genuine difficulty-boundary transition still replaces it.
+New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
+If the updater stops, cached work is refreshed at the normal mempool polling interval.
+Long polls continue observing shared template publications after switching to on-demand refresh.
+When no usable work exists, snapshot failures are returned to the RPC caller rather than hidden
+behind an indefinite cache wait.
 
 ## Testing the setup
 
@@ -264,7 +357,9 @@ coinbase, commitment roots, long polling, and NU7 fee split. Pool accounting
 and payments to individual workers are the pool's responsibility, not
 Zebra's.
 
-The [s-nomp Testnet setup](mining-testnet-s-nomp.md) is experimental.
+See [Getting new work to mining pools](mining-pools.md) for long polling, block notifications,
+separate payout wallets, and recovery planning. The
+[s-nomp Testnet setup](mining-testnet-s-nomp.md) is experimental.
 
 ## Testnet, Regtest, and the internal miner
 

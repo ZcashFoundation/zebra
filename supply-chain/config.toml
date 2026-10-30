@@ -128,6 +128,11 @@ criteria = "safe-to-deploy"
 version = "0.1.88"
 criteria = "safe-to-deploy"
 
+[[exemptions.asynchronous-codec]]
+version = "0.7.0"
+criteria = "safe-to-run"
+notes = "Development-only ZMQ interoperability client."
+
 [[exemptions.aws-lc-rs]]
 version = "1.16.3"
 criteria = "safe-to-deploy"
@@ -394,6 +399,11 @@ criteria = "safe-to-deploy"
 [[exemptions.crossbeam-epoch]]
 version = "0.9.18"
 criteria = "safe-to-deploy"
+
+[[exemptions.crossbeam-queue]]
+version = "0.3.14"
+criteria = "safe-to-run"
+notes = "Development-only ZMQ interoperability client."
 
 [[exemptions.crossbeam-utils]]
 version = "0.8.20"
@@ -1417,6 +1427,11 @@ criteria = "safe-to-deploy"
 version = "1.0.23"
 criteria = "safe-to-deploy"
 
+[[exemptions.saa]]
+version = "5.6.2"
+criteria = "safe-to-run"
+notes = "Development-only ZMQ interoperability client."
+
 [[exemptions.same-file]]
 version = "1.0.6"
 criteria = "safe-to-deploy"
@@ -1426,6 +1441,11 @@ notes = "Sentry 0.47 upgrade"
 [[exemptions.sapling-crypto]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.scc]]
+version = "3.8.8"
+criteria = "safe-to-run"
+notes = "Development-only ZMQ interoperability client."
 
 [[exemptions.schannel]]
 version = "0.1.29"
@@ -1444,6 +1464,11 @@ criteria = "safe-to-deploy"
 [[exemptions.scopeguard]]
 version = "1.2.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.sdd]]
+version = "4.8.11"
+criteria = "safe-to-run"
+notes = "Development-only ZMQ interoperability client."
 
 [[exemptions.secp256k1]]
 version = "0.29.1"
@@ -2126,6 +2151,11 @@ criteria = "safe-to-deploy"
 [[exemptions.zeroize_derive]]
 version = "1.4.3"
 criteria = "safe-to-deploy"
+
+[[exemptions.zeromq]]
+version = "0.6.0"
+criteria = "safe-to-run"
+notes = "Development-only interoperability client; not used to parse production network input."
 
 [[exemptions.zip32]]
 version = "0.2.1"

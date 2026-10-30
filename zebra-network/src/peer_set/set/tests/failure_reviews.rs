@@ -53,6 +53,60 @@ async fn finish_download(
     );
 }
 
+/// A source-less sync download prefers the negotiated compact sender over another ready upstream.
+#[tokio::test(start_paused = true)]
+async fn compact_advertisement_routes_sourceless_sync_to_its_sender() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let Response::Blocks(blocks) = &response else {
+        unreachable!("the fixture contains a block response");
+    };
+    let InventoryResponse::Available((block, _)) = &blocks[0] else {
+        unreachable!("the fixture contains an available block");
+    };
+    let message = Message::CompactBlock(Arc::new(
+        crate::compact::CompactBlock::from_block(block, 7).unwrap(),
+    ));
+    let source = ConnectedAddr::new_outbound_direct(addrs[1]);
+    let collector = guard.inventory_sender().as_ref().unwrap().clone();
+
+    crate::peer::register_inventory_status(Ok(message.clone()), source, false, collector.clone())
+        .await
+        .unwrap();
+    peer_set.ready().await.unwrap();
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .advertising_peers(inventory)
+            .count(),
+        0
+    );
+
+    assert_eq!(
+        crate::peer::register_inventory_status(Ok(message.clone()), source, true, collector)
+            .await
+            .unwrap(),
+        message,
+    );
+    let request = Request::BlockDownload {
+        hash: block.hash(),
+        advertiser: None,
+    };
+    let download = peer_set.ready().await.unwrap().call(request.clone());
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .advertising_peers(inventory)
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![addrs[1]],
+    );
+    assert_eq!(received_request(&mut handles[0]), None);
+    finish_download(&mut handles[1], request, response, download).await;
+}
+
 /// Carried provenance cannot override explicit missing inventory or a completed peer failure.
 #[tokio::test(start_paused = true)]
 async fn carried_advertiser_respects_missing_and_failed_candidates() {
@@ -298,6 +352,7 @@ async fn connection_block_error_attribution(not_found: bool) {
         (
             client_rx,
             advert_rx,
+            tokio::sync::watch::channel(None).1,
             peer_set.minimum_peer_version.clone(),
             peer_set.bans_receiver.clone(),
         ),

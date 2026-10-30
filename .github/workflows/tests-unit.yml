@@ -81,6 +81,7 @@ jobs:
       # binaries Zebra ships. This is job-level so the Rust cache key includes
       # it, and dependencies built with and without LTO are never mixed.
       CARGO_PROFILE_RELEASE_LTO: "false"
+      JUNIT_REPORT: target/nextest/ci/junit.xml
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -102,6 +103,35 @@ jobs:
 
       - name: Run unit tests
         run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
+
+      - name: Summarize flaky and failed unit tests
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os
+          import xml.etree.ElementTree as ET
+
+          rows = []
+          for case in ET.parse(os.environ["JUNIT_REPORT"]).iter("testcase"):
+              tags = {child.tag for child in case}
+              if tags & {"failure", "error"}:
+                  status = "Failed"
+              elif tags & {"flakyFailure", "flakyError"}:
+                  status = "Flaky"
+              else:
+                  continue
+              # Each flaky or rerun element is one attempt before the final result.
+              attempts = 1 + sum(child.tag.startswith(("flaky", "rerun")) for child in case)
+              rows.append(f"| {status} | `{case.get('classname')} {case.get('name')}` | {attempts} |")
+
+          print("## Unit test retries and failures\n")
+          if rows:
+              print("| Result | Test | Attempts |\n| --- | --- | ---: |")
+              print("\n".join(rows))
+          else:
+              print("No flaky or failed tests.")
+          PY
 
   run-zebra-test-windows:
     name: zebra-test Windows 1.97.0

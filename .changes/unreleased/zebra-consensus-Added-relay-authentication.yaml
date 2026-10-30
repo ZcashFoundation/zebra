@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: "Exposed `equihash_solution_is_valid` and `merkle_root_validity` for authenticating blocks before relay."
+time: 2026-10-11T12:00:00.000000000+00:00

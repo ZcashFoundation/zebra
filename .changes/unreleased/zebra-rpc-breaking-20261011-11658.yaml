@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: 'Validate published transaction-bearing templates in the background for exact proposal reuse. This requires the matching `zebra-consensus` and `zebra-state` proposal APIs; upgrade these crates together ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658)).'
+time: 2026-10-11T00:00:00Z

@@ -9,7 +9,10 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crossbeam_channel::bounded;
 use semver::Version;
@@ -17,7 +20,11 @@ use semver::Version;
 use zebra_chain::{block::Height, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
-    config::database_format_version_on_disk,
+    config::{
+        database_format_version_at_path, database_format_version_on_disk,
+        write_database_format_version_at_path,
+    },
+    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -26,10 +33,17 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    write_database_format_version_to_disk, BoxError, Config, StateInitError,
+    BoxError, Config, StateInitError,
 };
 
 use super::disk_format::upgrade::restorable_db_versions;
+
+/// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
+/// than parallel serialization saves.
+const PARALLEL_BLOCK_TX_THRESHOLD: usize = 64;
+
+/// Minimum input or address count for parallel finalized-state lookups.
+const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
 
 pub mod block;
 pub mod chain;
@@ -119,6 +133,9 @@ impl ZebraDb {
 
             database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
                 .expect("unable to read database format version file")
+        } else if config.ephemeral {
+            // An ephemeral database lives in a new temporary directory, so it is always new.
+            None
         } else {
             DiskDb::try_reusing_previous_db_after_major_upgrade(
                 &restorable_db_versions(),
@@ -258,11 +275,10 @@ impl ZebraDb {
     ///
     /// See `database_format_version_on_disk()` for details.
     pub fn format_version_on_disk(&self) -> Result<Option<Version>, BoxError> {
-        database_format_version_on_disk(
-            self.config(),
-            self.db_kind(),
+        database_format_version_at_path(
+            &self.version_file_path(),
+            self.path(),
             self.major_version(),
-            &self.network(),
         )
     }
 
@@ -273,13 +289,15 @@ impl ZebraDb {
         &self,
         new_version: &Version,
     ) -> Result<(), BoxError> {
-        write_database_format_version_to_disk(
-            self.config(),
-            self.db_kind(),
-            self.major_version(),
-            new_version,
-            &self.network(),
-        )
+        write_database_format_version_at_path(self.version_file_path(), new_version)
+    }
+
+    /// Returns the path of this database's format version file.
+    ///
+    /// An ephemeral config gives every [`Config::db_path`] call a new temporary directory, so the
+    /// version file path comes from the path of the open database instead.
+    fn version_file_path(&self) -> PathBuf {
+        self.path().join(DATABASE_FORMAT_VERSION_FILE_NAME)
     }
 
     /// Returns the configured network for this database.
@@ -341,6 +359,12 @@ impl ZebraDb {
         if !self.debug_skip_format_upgrades && is_shutdown {
             if let Some(format_change_handle) = self.format_change_handle.as_mut() {
                 format_change_handle.force_cancel();
+
+                // An ephemeral database's files are deleted below, and the format change thread
+                // reads and writes its version file, so the thread has to stop first.
+                if self.config.ephemeral {
+                    format_change_handle.wait_for_exit();
+                }
             }
 
             // # Correctness
@@ -355,13 +379,9 @@ impl ZebraDb {
             // which would then make unrelated PRs fail when Zebra starts up.
 
             // If the upgrade has completed, or we've done a downgrade, check the state is valid.
-            let disk_version = database_format_version_on_disk(
-                &self.config,
-                self.db_kind(),
-                self.major_version(),
-                &self.network(),
-            )
-            .expect("unexpected invalid or unreadable database version file");
+            let disk_version = self
+                .format_version_on_disk()
+                .expect("unexpected invalid or unreadable database version file");
 
             if let Some(disk_version) = disk_version {
                 // We need to keep the cancel handle until the format check has finished,
@@ -425,6 +445,11 @@ impl ZebraDb {
     /// Call this periodically (e.g., every 30 seconds) from a background task.
     pub(crate) fn export_metrics(&self) {
         self.db.export_metrics();
+    }
+
+    /// Returns the latest disk usage estimate, measuring read-only secondaries on demand.
+    pub(crate) fn cached_size(&self) -> u64 {
+        self.db.cached_size()
     }
 
     /// Returns the estimated total disk space usage of the database.

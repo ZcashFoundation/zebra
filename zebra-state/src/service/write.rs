@@ -3,6 +3,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 use indexmap::IndexMap;
@@ -21,7 +22,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
+        ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
     },
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -145,13 +146,16 @@ struct WriteBlockWorkerTask {
     /// If `Some`, the non-finalized state is written to this backup directory
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
+    /// Excludes authentication against a snapshot during retention-changing mutations.
+    early_relay: Arc<super::early_relay::EarlyRelayState>,
 }
 
 /// The message type for the non-finalized block write task channel.
 pub enum NonFinalizedWriteMessage {
     /// A newly downloaded and semantically verified block prepared for
-    /// contextual validation and insertion into the non-finalized state.
-    Commit(QueuedSemanticallyVerified),
+    /// contextual validation and insertion into the non-finalized state,
+    /// with the time it was sent to the writer.
+    Commit(QueuedSemanticallyVerified, Instant),
     /// The hash of a block that should be invalidated and removed from
     /// the non-finalized state, if present.
     Invalidate {
@@ -164,12 +168,11 @@ pub enum NonFinalizedWriteMessage {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     },
-}
-
-impl From<QueuedSemanticallyVerified> for NonFinalizedWriteMessage {
-    fn from(block: QueuedSemanticallyVerified) -> Self {
-        NonFinalizedWriteMessage::Commit(block)
-    }
+    /// The hash of a block to prefer over equal-work chain tips.
+    Precious {
+        hash: block::Hash,
+        rsp_tx: oneshot::Sender<Result<block::Hash, PreciousError>>,
+    },
 }
 
 /// A worker with a task that reads, validates, and writes blocks to the
@@ -205,6 +208,7 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
+        early_relay: Arc<super::early_relay::EarlyRelayState>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -235,6 +239,7 @@ impl BlockWriteSender {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
+                    early_relay,
                 }
                 .run()
             })
@@ -275,6 +280,7 @@ impl WriteBlockWorkerTask {
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
+            early_relay,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -282,6 +288,7 @@ impl WriteBlockWorkerTask {
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
         while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+            let _context_update = early_relay.updating_context();
             // TODO: split these checks into separate functions
 
             if invalid_block_reset_sender.is_closed() {
@@ -315,14 +322,38 @@ impl WriteBlockWorkerTask {
                 continue;
             }
 
-            // Try committing the block
-            match finalized_state
-                .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
+            let committed_permit = match ordered_block
+                .2
+                .as_ref()
+                .map(crate::MinedBlockNotifications::try_reserve_committed)
+                .transpose()
             {
+                Ok(permit) => permit.flatten(),
+                Err(error) => {
+                    drop(_context_update);
+                    // Publish the reset before replying so an immediate retry can make progress.
+                    let _ = invalid_block_reset_sender.send((
+                        finalized_state.db.finalized_tip_height(),
+                        finalized_state.db.finalized_tip_hash(),
+                    ));
+                    let _ = ordered_block.1.send(Err(error.into()));
+                    continue;
+                }
+            };
+
+            // Try committing the block, but keep notifications until its context is published.
+            let (checkpoint_verified, rsp_tx, _) = ordered_block;
+            let height = checkpoint_verified.height;
+            let result = match finalized_state.commit_finalized(
+                checkpoint_verified,
+                prev_finalized_note_commitment_trees.take(),
+            ) {
                 Ok((finalized, note_commitment_trees)) => {
+                    let hash = finalized.hash;
                     let tip_block = ChainTipBlock::from(finalized);
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
+                    Ok(hash)
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
@@ -346,10 +377,18 @@ impl WriteBlockWorkerTask {
                         info!(
                             "StateService closed the block reset channel. Is Zebra shutting down?"
                         );
+                        drop(_context_update);
+                        let _ = rsp_tx.send(Err(error));
                         return;
                     }
+                    Err(error)
                 }
+            };
+            drop(_context_update);
+            if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
+                permit.send((*hash, height));
             }
+            let _ = rsp_tx.send(result);
         }
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
@@ -363,8 +402,11 @@ impl WriteBlockWorkerTask {
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+            let _context_update = early_relay.updating_context();
             let queued_child_and_rsp_tx = match msg {
-                NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
+                NonFinalizedWriteMessage::Commit(queued_child, queued_at) => {
+                    Some((queued_child, queued_at))
+                }
                 NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
                     tracing::info!(?hash, "invalidating a block in the non-finalized state");
                     let _ = rsp_tx.send(non_finalized_state.invalidate_block(hash));
@@ -376,9 +418,25 @@ impl WriteBlockWorkerTask {
                         .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
                     None
                 }
+                NonFinalizedWriteMessage::Precious { hash, rsp_tx } => {
+                    tracing::info!(?hash, "preferring a block in the non-finalized state");
+                    let result = non_finalized_state.precious_block(hash, &finalized_state.db);
+                    update_latest_chain_channels(
+                        non_finalized_state,
+                        &finalized_state.db,
+                        chain_tip_sender,
+                        non_finalized_state_sender,
+                        backup_dir_path.as_deref(),
+                    );
+                    drop(_context_update);
+                    let _ = rsp_tx.send(result);
+                    continue;
+                }
             };
 
-            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+            let Some(((queued_child, rsp_tx, contextual, notifications), queued_at)) =
+                queued_child_and_rsp_tx
+            else {
                 update_latest_chain_channels(
                     non_finalized_state,
                     &finalized_state.db,
@@ -389,9 +447,32 @@ impl WriteBlockWorkerTask {
                 continue;
             };
 
+            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue")
+                .record(queued_at.elapsed().as_secs_f64());
+
             let child_hash = queued_child.hash;
+            let child_height = queued_child.height;
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
+
+            // Never wait for relay capacity or reserve it while a block is queued for its parent.
+            // Admission failure is operational, not evidence that this block or its children are invalid.
+            let committed_permit = if parent_error.is_none() {
+                match notifications
+                    .as_ref()
+                    .map(crate::MinedBlockNotifications::try_reserve_committed)
+                    .transpose()
+                {
+                    Ok(permit) => permit.flatten(),
+                    Err(error) => {
+                        let _ = non_finalized_rejected_sender.send(child_hash);
+                        let _ = rsp_tx.send(Err(error.into()));
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
 
             // If the parent block was marked as rejected, also reject all its children.
             //
@@ -405,17 +486,30 @@ impl WriteBlockWorkerTask {
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
             } else {
-                tracing::trace!(?child_hash, "validating queued child");
-                validate_and_commit_non_finalized(
-                    &finalized_state.db,
-                    non_finalized_state,
-                    queued_child,
+                // Measure only commits here, not proposals or restored backup blocks.
+                let phase_start = Instant::now();
+                let result = if let Some(mut contextual) = contextual {
+                    contextual.new_outputs = Arc::new(queued_child.new_outputs);
+                    non_finalized_state.commit_prevalidated_contextual(
+                        *contextual,
+                        &finalized_state.db,
+                        notifications.as_ref(),
+                    )
+                } else {
+                    tracing::trace!(?child_hash, "validating queued child");
+                    validate_and_commit_non_finalized(
+                        &finalized_state.db,
+                        non_finalized_state,
+                        queued_child,
+                    )
+                };
+                metrics::histogram!(
+                    "state.block_writer.phase.duration_seconds",
+                    "phase" => "contextual_commit"
                 )
+                .record(phase_start.elapsed().as_secs_f64());
+                result
             };
-
-            // TODO: fix the test timing bugs that require the result to be sent
-            //       after `update_latest_chain_channels()`,
-            //       and send the result on rsp_tx here
 
             if let Err(ref error) = result {
                 // If the block is invalid, mark any descendant blocks as rejected.
@@ -426,6 +520,11 @@ impl WriteBlockWorkerTask {
                     // We only add one hash at a time, so we only need to remove one extra here.
                     parent_error_map.shift_remove_index(0);
                 }
+
+                // Failed commits leave the read snapshot unchanged. Release authentication and
+                // relay capacity before either notification can wake an immediate replay.
+                drop(_context_update);
+                drop(committed_permit);
 
                 // Signal the StateService to drop this hash from
                 // `non_finalized_block_write_sent_hashes`, so a subsequent
@@ -448,13 +547,7 @@ impl WriteBlockWorkerTask {
             // A successfully committed block supersedes any contextual error
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
-
-            // Committing blocks to the finalized state keeps the same chain,
-            // so we can update the chain seen by the rest of the application now.
-            //
-            // TODO: if this causes state request errors due to chain conflicts,
-            //       fix the `service::read` bugs,
-            //       or do the channel update after the finalized state commit
+            let phase_start = Instant::now();
             let tip_block_height = update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
@@ -463,15 +556,30 @@ impl WriteBlockWorkerTask {
                 backup_dir_path.as_deref(),
             )
             .expect("just successfully inserted a non-finalized block above");
+            metrics::histogram!(
+                "state.block_writer.phase.duration_seconds",
+                "phase" => "update_latest_chain_channels"
+            )
+            .record(phase_start.elapsed().as_secs_f64());
+            drop(_context_update);
 
-            // Update the caller with the result.
+            // Ownership stays in this writer even if the caller dropped its response future.
+            // Notify side-chain commits too, using the committed block rather than the best tip.
+            if let Some(permit) = committed_permit {
+                permit.send((child_hash, child_height));
+            }
+
+            // Acknowledge published state, not completion of older blocks' retention writes.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
+            // Finish retention before receiving another block; finalization errors remain fatal.
+            let phase_start = Instant::now();
             while non_finalized_state
                 .best_chain_len()
                 .expect("just successfully inserted a non-finalized block above")
                 > MAX_BLOCK_REORG_HEIGHT
             {
+                let _context_update = early_relay.updating_context();
                 tracing::trace!("finalizing block past the reorg limit");
                 let contextually_verified_with_trees = non_finalized_state.finalize();
                 prev_finalized_note_commitment_trees = finalized_state
@@ -479,7 +587,21 @@ impl WriteBlockWorkerTask {
                             .expect(
                                 "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                             ).1.into();
+
+                // Keep the old snapshot's root visible until the database contains it.
+                update_latest_chain_channels(
+                    non_finalized_state,
+                    &finalized_state.db,
+                    chain_tip_sender,
+                    non_finalized_state_sender,
+                    backup_dir_path.as_deref(),
+                );
             }
+            metrics::histogram!(
+                "state.block_writer.phase.duration_seconds",
+                "phase" => "finalization"
+            )
+            .record(phase_start.elapsed().as_secs_f64());
 
             // Update the metrics if semantic and contextual validation passes
             //

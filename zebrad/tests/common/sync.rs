@@ -18,13 +18,15 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_network::{AddressBook, InventoryResponse, Request, Response};
-use zebrad::{components::sync, config::ZebradConfig};
+use zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+use zebrad::config::ZebradConfig;
 
 use color_eyre::eyre::eyre;
 use zebra_test::{args, prelude::*};
 
 use super::{
-    config::{live_peers, persistent_test_config, testdir, use_live_peers},
+    config::{live_peers, parse_listen_addr, persistent_test_config, testdir, use_live_peers},
     launch::ZebradTestDirExt,
 };
 
@@ -95,8 +97,9 @@ pub const FINISH_FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(72 * 60 * 60)
 ///
 /// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
 /// so that the sync is faster. This can increase the RAM needed for tests.
+// The 1,000-block default and its three-window lookahead fit in u32.
 pub const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height =
-    Height(3 * sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
+    Height(3 * DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
 
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -259,8 +262,7 @@ pub fn sync_until_with_peers(
     // Use the default lookahead limit if we're syncing lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
     if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
-        config.sync.checkpoint_verify_concurrency_limit =
-            sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+        config.sync.checkpoint_verify_concurrency_limit = DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
     }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
@@ -277,7 +279,7 @@ pub fn sync_until_with_peers(
         // require that the mempool activated,
         // checking logs as they arrive
 
-        let mut child = check_sync_logs_until(
+        let (mut child, _) = check_sync_logs_until(
             child,
             network,
             stop_regex,
@@ -345,7 +347,7 @@ pub fn sync_until_with_peers(
 ///
 /// ## Test Status
 ///
-/// Returns the provided `zebrad` [`TestChild`] when `stop_regex` is encountered.
+/// Returns the child and any bound RPC address logged before `stop_regex`.
 ///
 /// Returns an error if the child exits or `timeout` elapses before `stop_regex` is found.
 #[tracing::instrument(skip(zebrad))]
@@ -356,28 +358,37 @@ pub fn check_sync_logs_until(
     // Test Settings
     mempool_behavior: MempoolBehavior,
     check_legacy_chain: bool,
-) -> Result<TestChild<TempDir>> {
-    zebrad.expect_stdout_line_matches(format!("network: {network},"))?;
+) -> Result<(TestChild<TempDir>, Option<SocketAddr>)> {
+    let network_log = format!("network: {network},");
+    let expected_logs = [
+        Some(network_log.as_str()),
+        check_legacy_chain.then_some("starting legacy chain check"),
+        check_legacy_chain.then_some("no legacy chain found"),
+        check_legacy_chain.then_some("starting state checkpoint validation"),
+        check_legacy_chain.then_some("finished state checkpoint validation"),
+        mempool_behavior
+            .require_forced_activation()
+            .then_some("enabling mempool for debugging"),
+        Some("activating mempool"),
+        Some(stop_regex),
+    ];
+    let mut rpc_address = None;
 
-    if check_legacy_chain {
-        zebrad.expect_stdout_line_matches("starting legacy chain check")?;
-        zebrad.expect_stdout_line_matches("no legacy chain found")?;
-
-        zebrad.expect_stdout_line_matches("starting state checkpoint validation")?;
-        // TODO: what if the mempool is enabled for debugging before this finishes?
-        zebrad.expect_stdout_line_matches("finished state checkpoint validation")?;
+    // Preserve the startup checks' order while collecting the independently spawned RPC endpoint.
+    for expected_log in expected_logs.into_iter().flatten() {
+        let matching_logs = regex::RegexSet::new([expected_log, OPENED_RPC_ENDPOINT_MSG])?;
+        loop {
+            let line = zebrad.expect_stdout_line_matches(&matching_logs)?;
+            if rpc_address.is_none() && line.contains(OPENED_RPC_ENDPOINT_MSG) {
+                rpc_address = Some(parse_listen_addr(&line, OPENED_RPC_ENDPOINT_MSG)?);
+            }
+            if matching_logs.matches(&line).matched(0) {
+                break;
+            }
+        }
     }
 
-    // before the stop regex, expect mempool activation
-    if mempool_behavior.require_forced_activation() {
-        zebrad.expect_stdout_line_matches("enabling mempool for debugging")?;
-    }
-    zebrad.expect_stdout_line_matches("activating mempool")?;
-
-    // then wait for the stop log, which must happen after the mempool becomes active
-    zebrad.expect_stdout_line_matches(stop_regex)?;
-
-    Ok(zebrad)
+    Ok((zebrad, rpc_address))
 }
 
 /// Returns the cache directory for Zebra's state, as configured with [`ZebradConfig::load`] with config-rs.
@@ -402,7 +413,7 @@ pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<Zebr
     // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
     // But the extra downloaded blocks shouldn't slow down the test that much,
     // and testing with the defaults gives us better test coverage.
-    config.sync.checkpoint_verify_concurrency_limit = sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+    config.sync.checkpoint_verify_concurrency_limit = DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
     Ok(config)
 }

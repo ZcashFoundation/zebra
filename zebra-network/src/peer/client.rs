@@ -51,6 +51,9 @@ pub struct Client {
     /// Sends block adverts without waiting for an outstanding request's response.
     pub(crate) block_advert_tx: tokio::sync::mpsc::Sender<crate::peer_set::BlockAdvert>,
 
+    /// Receives high-bandwidth compacts only while selected by the peer set.
+    pub(crate) compact_receive_tx: tokio::sync::watch::Sender<Option<Arc<tokio::sync::Semaphore>>>,
+
     /// Used to register missing inventory in client [`Response`]s,
     /// so that the peer set can route retries to other clients.
     pub(crate) inv_collector: broadcast::Sender<InventoryChange>,
@@ -371,11 +374,13 @@ impl MissingInventoryCollector {
     pub fn send(self, response: &Result<Response, SharedPeerError>) {
         let missing_inv: HashSet<InventoryHash> = match (self.request, response) {
             // Missing block hashes from partial responses.
-            (_, Ok(Response::Blocks(block_statuses))) => block_statuses
-                .iter()
-                .filter_map(|b| b.missing())
-                .map(InventoryHash::Block)
-                .collect(),
+            (_, Ok(Response::Blocks(block_statuses) | Response::EarlyBlocks(block_statuses))) => {
+                block_statuses
+                    .iter()
+                    .filter_map(|b| b.missing())
+                    .map(InventoryHash::Block)
+                    .collect()
+            }
 
             // Missing transaction IDs from partial responses.
             (_, Ok(Response::Transactions(tx_statuses))) => tx_statuses

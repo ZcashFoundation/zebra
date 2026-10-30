@@ -498,7 +498,7 @@ pub fn state_database_format_version_on_disk(
 /// returns `Ok(Some(major_version.0.0))`.
 /// (This happens even if the database directory was just newly created.)
 ///
-/// If there is no existing on-disk database, returns `Ok(None)`.
+/// If there is no existing on-disk database, or `config` is ephemeral, returns `Ok(None)`.
 ///
 /// This is the format of the data on disk, the version
 /// implemented by the running Zebra code can be different.
@@ -508,6 +508,11 @@ pub fn database_format_version_on_disk(
     major_version: u64,
     network: &Network,
 ) -> Result<Option<Version>, BoxError> {
+    // Each ephemeral database is created in a new temporary directory when it is opened.
+    if config.ephemeral {
+        return Ok(None);
+    }
+
     let version_path = config.version_file_path(&db_kind, major_version, network);
     let db_path = config.db_path(db_kind, major_version, network);
 
@@ -564,7 +569,8 @@ pub(crate) fn database_format_version_at_path(
 // Hide this destructive method from the public API, except in tests.
 #[allow(unused_imports)]
 pub(crate) use hidden::{
-    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+    write_database_format_version_at_path, write_database_format_version_to_disk,
+    write_state_database_format_version_to_disk,
 };
 
 pub(crate) mod hidden {
@@ -616,12 +622,22 @@ pub(crate) mod hidden {
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
+        write_database_format_version_at_path(
+            config.version_file_path(db_kind, major_version_in_code, network),
+            changed_version,
+        )
+    }
+
+    /// Writes `changed_version` to the version file at `version_path`.
+    ///
+    /// See [`write_database_format_version_to_disk()`] for details.
+    pub(crate) fn write_database_format_version_at_path(
+        version_path: PathBuf,
+        changed_version: &Version,
+    ) -> Result<(), BoxError> {
         // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
         // crashes.
-        atomic_write(
-            config.version_file_path(db_kind, major_version_in_code, network),
-            changed_version.to_string().as_bytes(),
-        )??;
+        atomic_write(version_path, changed_version.to_string().as_bytes())??;
 
         Ok(())
     }

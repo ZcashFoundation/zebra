@@ -5,7 +5,10 @@
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use tokio::time::{self, timeout};
+use tokio::{
+    sync::Notify,
+    time::{self, timeout},
+};
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
@@ -16,7 +19,7 @@ use zebra_chain::{
         testnet::{ConfiguredActivationHeights, ParametersBuilder},
         Network, NetworkUpgrade,
     },
-    serialization::ZcashDeserializeInto,
+    serialization::{TrustedPreallocate, ZcashDeserializeInto},
     transaction::{Transaction, VerifiedUnminedTx},
     transparent::{self, OutPoint},
 };
@@ -25,7 +28,7 @@ use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::{
-    mempool::{self, *},
+    mempool::{self, queue_checker::RATE_LIMIT_DELAY, *},
     sync::{RecentSyncLengths, SyncStatus},
 };
 
@@ -341,6 +344,190 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     assert_eq!(actual_usage, expected_usage, "QueueStats usage mismatch");
 
     Ok(())
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_returns_requested_subset() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        let transactions: Vec<_> = network.unmined_transactions_in_blocks(1..=4).collect();
+        for (index, transaction) in transactions[..3].iter().enumerate() {
+            service
+                .storage()
+                .insert(
+                    transaction.clone(),
+                    Vec::new(),
+                    (index == 0).then_some(Height(0)),
+                )
+                .unwrap();
+        }
+
+        let hashes: Vec<_> = transactions
+            .iter()
+            .map(|transaction| transaction.transaction.id.mined_id())
+            .collect();
+        let expected = [hashes[2], hashes[0]]
+            .into_iter()
+            .map(|hash| (hash, service.storage().transactions()[&hash].clone()))
+            .collect();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let response = service
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![hashes[2], hashes[3], hashes[0]].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert_eq!(candidates, expected);
+        assert_eq!(candidates[&hashes[2]].height, None);
+        assert_eq!(candidates[&hashes[0]].height, Some(Height(0)));
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_requires_last_seen_tip() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let hash = transaction.transaction.id.mined_id();
+        service
+            .storage()
+            .insert(transaction, Vec::new(), Some(Height(0)))
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let ActiveState::Enabled {
+            last_seen_tip_hash, ..
+        } = &mut service.active_state
+        else {
+            panic!("mempool was enabled");
+        };
+        *last_seen_tip_hash = block::Hash([0; 32]);
+        assert_ne!(*last_seen_tip_hash, parent_hash);
+
+        let response = service
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![hash].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_disabled_returns_empty() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            _recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        assert!(!service.is_enabled());
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+
+        let response = (&mut service)
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![transaction.transaction.id.mined_id()].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+        assert!(!service.is_enabled());
+    })
+    .await
+    .expect("mempool candidate query must finish");
+}
+
+#[tokio::test]
+async fn mempool_verified_transactions_for_block_rejects_oversized_batch() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut service,
+            _peer_set,
+            _state_service,
+            _chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+        service.enable(&mut recent_syncs).await;
+
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .unwrap();
+        let hash = transaction.transaction.id.mined_id();
+        service
+            .storage()
+            .insert(transaction, Vec::new(), Some(Height(0)))
+            .unwrap();
+        let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
+        let max_transactions = usize::try_from(Transaction::max_allocation()).unwrap();
+        let response = service
+            .oneshot(Request::VerifiedTransactionsForBlock {
+                transaction_hashes: vec![hash; max_transactions + 1].into(),
+                parent_hash,
+            })
+            .await
+            .unwrap();
+        let Response::VerifiedTransactionsForBlock(candidates) = response else {
+            panic!("expected verified block candidates");
+        };
+        assert!(candidates.is_empty());
+    })
+    .await
+    .expect("mempool candidate query must finish");
 }
 
 #[tokio::test]
@@ -1234,6 +1421,61 @@ async fn poll_ready_succeeds_with_no_mempool_change_subscribers() -> Result<(), 
     Ok(())
 }
 
+/// Verification wakes the idle mempool before the queue checker's backstop fires.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn verified_transaction_is_announced_without_the_queue_checker_rate_limit() {
+    let network = Network::Mainnet;
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+        mut changes,
+    ) = setup_with_mempool_config(&network, mempool::Config::default(), true, false).await;
+    mempool.enable(&mut recent_syncs).await;
+
+    let tx = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("mainnet test vectors contain transactions")
+        .transaction;
+    let queued = mempool
+        .ready()
+        .await
+        .expect("the enabled mempool is ready")
+        .call(Request::Queue(vec![tx.clone().into()]))
+        .await
+        .expect("the mempool accepts queue requests");
+    assert!(matches!(queued, Response::Queued(_)));
+    let verification = tx_verifier.expect_request_that(|_| true).await;
+
+    // Start the backstop only after setup, so paused time cannot consume part of its delay.
+    // From here until the announcement, only the queue checker can poll the mempool.
+    let transaction_verified = mempool.transaction_verified.clone();
+    let mempool = Buffer::new(BoxService::new(mempool), 1);
+    let queue_checker = QueueChecker::spawn(mempool, transaction_verified);
+    verification.respond(transaction::MempoolResponse::from(
+        VerifiedUnminedTx::new(
+            tx.clone(),
+            Amount::try_from(1_000_000).expect("valid fee"),
+            0,
+            0,
+            Arc::new(vec![]),
+        )
+        .expect("transaction passes ZIP-317 checks"),
+    ));
+
+    // Storage insertion publishes to this same channel for gossip and mining subscribers.
+    let change = timeout(RATE_LIMIT_DELAY / 2, changes.recv())
+        .await
+        .expect("verification must wake the queue checker before its backstop")
+        .expect("the mempool keeps the change channel open");
+    assert_eq!(change, MempoolChange::added([tx.id].into_iter().collect()));
+    queue_checker.abort();
+}
+
 /// Check if a transaction that fails download is _not_ rejected.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
@@ -1551,20 +1793,16 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         panic!("wrong response from mempool to Queued request");
     };
 
-    let result_rx = results.remove(0).expect("should pass initial checks");
+    let mut result_rx = results.remove(0).expect("should pass initial checks");
     assert!(results.is_empty(), "should have 1 result for 1 queued tx");
 
-    // Wait for post-verification steps in mempool's Downloads
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // Drive the unbuffered mempool when its download task wakes us, until insertion completes.
+    let verification_result = futures::future::poll_fn(|cx| {
+        futures::ready!(mempool.poll_ready(cx)).expect("polling mempool should succeed");
+        result_rx.poll_unpin(cx)
+    });
 
-    // Note: Buffered services shouldn't be polled without being called.
-    //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
-    mempool
-        .ready()
-        .await
-        .expect("polling mempool should succeed");
-
-    tokio::time::timeout(Duration::from_secs(10), result_rx)
+    tokio::time::timeout(Duration::from_secs(10), verification_result)
         .await
         .expect("should not time out")
         .expect("mempool tx verification result channel should not be closed")
@@ -2281,7 +2519,7 @@ async fn setup_with_mempool_config(
 
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
-    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+    let (state, read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
@@ -2289,11 +2527,12 @@ async fn setup_with_mempool_config(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _transaction_verified) = Mempool::new(
         network,
         &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
+        tower::util::BoxCloneService::new(read_only_state_service),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
@@ -2366,7 +2605,7 @@ async fn cancel_handles_drained_after_verification_timeout() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2374,6 +2613,7 @@ async fn cancel_handles_drained_after_verification_timeout() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
@@ -2454,7 +2694,7 @@ async fn verification_timeout_releases_peer_slot() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2462,6 +2702,7 @@ async fn verification_timeout_releases_peer_slot() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let source: SocketAddr = "127.0.0.1:8233".parse().expect("valid socket addr");
@@ -2532,7 +2773,7 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
     let _init_guard = zebra_test::init();
 
     let peer_set: MockPeerSet = MockService::build().for_unit_tests();
-    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+    let state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
         MockService::build().for_unit_tests();
     let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
 
@@ -2540,6 +2781,7 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
         Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
         Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
         state,
+        Arc::new(Notify::new()),
     ));
 
     let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
@@ -2568,4 +2810,55 @@ async fn per_peer_cap_is_keyed_on_ip_not_socket_addr() {
         matches!(result, Err(MempoolError::FullQueue)),
         "a transaction from the same IP on a different port must share the per-peer bucket, got {result:?}"
     );
+}
+
+/// Queue checks reap abandoned output channels without waiting for a new block.
+#[tokio::test]
+async fn stalled_tip_queue_check_prunes_abandoned_output_waiters() {
+    let network = Network::Mainnet;
+    let (mut mempool, _peers, _state, _tip_changes, _verifier, mut recent_syncs, _changes) =
+        timeout(Duration::from_secs(30), setup(&network, u64::MAX, true))
+            .await
+            .expect("the ephemeral state initializes within the test deadline");
+    mempool.enable(&mut recent_syncs).await;
+
+    let live_outpoint = OutPoint::from_usize(zebra_chain::transaction::Hash([0x31; 32]), 0);
+    let live_waiter = mempool
+        .ready()
+        .await
+        .expect("enabled mempool accepts output requests")
+        .call(Request::AwaitOutput(live_outpoint));
+
+    for round in 0..2 {
+        for index in 0..8 {
+            let outpoint = OutPoint::from_usize(
+                zebra_chain::transaction::Hash([0x32; 32]),
+                round * 8 + index,
+            );
+            let abandoned = mempool
+                .ready()
+                .await
+                .expect("enabled mempool accepts output requests")
+                .call(Request::AwaitOutput(outpoint));
+            drop(abandoned);
+        }
+        mempool.dummy_call().await;
+        assert_eq!(
+            mempool.storage().pending_outputs.len(),
+            1,
+            "queue checks retain only the live waiter while the chain tip remains fixed"
+        );
+    }
+
+    let expected = transparent::Output::new(Amount::zero(), transparent::Script::new(&[]));
+    mempool
+        .storage()
+        .pending_outputs
+        .respond(&live_outpoint, expected.clone());
+    let response = timeout(Duration::from_secs(1), live_waiter)
+        .await
+        .expect("pruning must preserve the live receiver")
+        .expect("live output request receives its matching output");
+    assert!(matches!(response, Response::UnspentOutput(output) if output == expected));
+    assert_eq!(mempool.storage().pending_outputs.len(), 0);
 }

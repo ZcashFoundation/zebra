@@ -505,11 +505,8 @@ impl DiskWriteBatch {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
 
-        // Update the in-memory `address_balances` transaction-by-transaction, debiting inputs
-        // before crediting outputs within each transaction. This ordering keeps every
-        // intermediate per-address balance within the consensus range, even when the block
-        // contains a same-address transparent self-spend chain whose batch credit-first
-        // intermediate balance would otherwise exceed MAX_MONEY.
+        // Debit each transaction before crediting it, and defer coinbase payouts until their
+        // fees have been debited. Preserve first-output locations independently of balance order.
         Self::prepare_transparent_address_balance_updates(
             network,
             *height,
@@ -552,15 +549,10 @@ impl DiskWriteBatch {
         self.prepare_transparent_balances_batch(db, address_balances);
     }
 
-    /// Update `address_balances` in memory for the transparent transfers in `transactions`,
-    /// processed transaction-by-transaction in block order, debiting inputs before crediting
-    /// outputs within each transaction.
+    /// Update address balances by debiting each transaction before crediting its outputs.
     ///
-    /// This mirrors `zcashd`'s `UpdateCoins` and is what allows a same-address transparent
-    /// self-spend chain in one block to be applied without the intermediate per-address
-    /// balance exceeding `MAX_MONEY`. For any consensus-valid block, every per-step
-    /// intermediate balance stays inside the [`Amount`] constraint of the enclosing
-    /// `AddressBalanceLocationUpdates` variant.
+    /// Coinbase credits follow fee-paying transactions, keeping intermediate balances within the
+    /// [`Amount`] constraint. Coinbase address locations are registered first to preserve block order.
     ///
     /// This function does not touch the RocksDB batch; index writes are still handled by
     /// [`Self::prepare_new_transparent_outputs_batch`] and
@@ -584,7 +576,24 @@ impl DiskWriteBatch {
             transactions: &[Arc<Transaction>],
             spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         ) {
-            for (tx_index, transaction) in transactions.iter().enumerate() {
+            let mut coinbase_outputs = transactions.first().map(|tx| tx.outputs());
+            if let Some(outputs) = &coinbase_outputs {
+                for (output_index, output) in outputs.iter().enumerate() {
+                    if let Some(address) = output.address(network) {
+                        addr_locs.entry(address).or_insert_with(|| {
+                            AddressBalanceLocationInner::new(OutputLocation::from_usize(
+                                height,
+                                0,
+                                output_index,
+                            ))
+                            .into()
+                        });
+                    }
+                }
+            }
+            let transactions = transactions.iter().enumerate();
+            for (tx_index, transaction) in transactions.clone().skip(1).chain(transactions.take(1))
+            {
                 // Debit transparent inputs first. Coinbase inputs have no outpoint, so
                 // `filter_map(Input::outpoint)` skips them.
                 for spent_outpoint in transaction.inputs().iter().filter_map(Input::outpoint) {
@@ -603,7 +612,14 @@ impl DiskWriteBatch {
                 }
 
                 // Then credit transparent outputs.
-                for (output_index, output) in transaction.outputs().iter().enumerate() {
+                let outputs = if tx_index == 0 {
+                    coinbase_outputs
+                        .take()
+                        .expect("the first transaction's outputs were cached before iteration")
+                } else {
+                    transaction.outputs()
+                };
+                for (output_index, output) in outputs.iter().enumerate() {
                     if let Some(receiving_address) = output.address(network) {
                         let new_output_location =
                             OutputLocation::from_usize(height, tx_index, output_index);

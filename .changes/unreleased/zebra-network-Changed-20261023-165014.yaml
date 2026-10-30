@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Experimental compact relay selects at most three receive sources, crediting first announcements only after local commitment and releasing demoted or failed delivery slots before waiting for peer writes.
+time: 2026-10-23T16:50:14.33258229+02:00

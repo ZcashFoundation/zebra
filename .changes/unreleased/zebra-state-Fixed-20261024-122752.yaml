@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Publish and answer non-finalized block commits before finalizing older roots past the reorg limit ([#12009](https://github.com/ZcashFoundation/zebra/issues/12009)).
+time: 2026-10-24T12:27:52.556322817+02:00

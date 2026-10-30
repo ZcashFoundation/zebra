@@ -12,7 +12,7 @@ use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    config::{default_test_config, random_known_rpc_port_config, use_live_peers},
+    config::{default_test_config, os_assigned_rpc_port_config, use_live_peers},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
         PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
@@ -224,7 +224,7 @@ impl TestType {
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
-            random_known_rpc_port_config(true, network)
+            os_assigned_rpc_port_config(true, network)
         } else {
             Ok(default_test_config(network))
         };
@@ -261,7 +261,7 @@ impl TestType {
 
             // And reset the concurrency to the default value
             config.sync.checkpoint_verify_concurrency_limit =
-                zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+                zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
         }
 
         Some(Ok(config))

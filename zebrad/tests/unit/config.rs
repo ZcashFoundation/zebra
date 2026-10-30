@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     env, fs,
     io::Write as _,
+    net::TcpListener,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
@@ -19,7 +20,7 @@ use crate::common::{
     check::{EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config,
-        random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
+        read_listen_addr_from_logs, rpc_port_config, testdir,
     },
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
     sync::TINY_CHECKPOINT_TIMEOUT,
@@ -327,20 +328,15 @@ fn app_no_args() -> Result<()> {
 
     tracing::info!(?testdir, "running zebrad with no config (default settings)");
 
-    let mut child = testdir.spawn_child(args![])?;
+    let mut child = testdir.spawn_child(args![])?.with_timeout(LAUNCH_DELAY)?;
 
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    child.expect_stdout_line_matches("Starting zebrad")?;
+    child.expect_stdout_line_matches("starting legacy chain check")?;
+    child.expect_stdout_line_matches("no legacy chain found")?;
     child.kill(true)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    output.stdout_line_contains("Starting zebrad")?;
-
-    // Make sure the command passed the legacy chain check
-    output.stdout_line_contains("starting legacy chain check")?;
-    output.stdout_line_contains("no legacy chain found")?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;
@@ -376,15 +372,14 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
     tracing::info!(?generated_config_path, "testing valid config parsing");
 
-    // Run command using temp dir and kill it after a few seconds
-    let mut child = testdir.spawn_child(args![command])?;
-    std::thread::sleep(LAUNCH_DELAY);
+    let mut child = testdir
+        .spawn_child(args![command])?
+        .with_timeout(LAUNCH_DELAY)?;
+    child.expect_stdout_line_matches(regex::escape(expect_stdout_line_contains))?;
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    output.stdout_line_contains(expect_stdout_line_contains)?;
 
     // [Note on port conflict](#Note on port conflict)
     output.assert_was_killed().wrap_err("Possible port or cache conflict. Are there other zebrad tests, zebrad, or zcashd processes running?")?;
@@ -567,23 +562,13 @@ fn invalid_generated_config() -> Result<()> {
     tracing::info!(?config_path, "testing invalid config parsing");
 
     // Run Zebra in a temp dir so that it loads the config.
-    let mut child = testdir.spawn_child(args!["start"])?;
+    let child = testdir
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(2))?;
 
-    // Return an error if Zebra is running for more than two seconds.
-    //
-    // Since the config is invalid, Zebra should terminate instantly after its
-    // start. Two seconds should be sufficient for Zebra to read the config file
-    // and terminate.
-    std::thread::sleep(Duration::from_secs(2));
-    if child.is_running() {
-        // We're going to error anyway, so return an error that makes sense to the developer.
-        child.kill(true)?;
-        return Err(eyre!(
-            "Zebra should have exited after reading the invalid config"
-        ));
-    }
-
-    let output = child.wait_with_output()?;
+    let output = child
+        .wait_with_output()
+        .wrap_err("Zebra should have exited after reading the invalid config")?;
 
     // Check that Zebra produced an informative message.
     output.stderr_contains(
@@ -758,8 +743,10 @@ fn non_blocking_logger() -> Result<()> {
         let result: Result<()> = async {
             // This test configures zebrad to drop log lines, so it can't learn an OS-assigned port
             // by reading the logs: the line reporting that port is dropped like any other line.
-            // [Note on port conflict](#Note on port conflict)
-            let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+            // TODO: release-before-spawn still races; a non-log address channel would remove it.
+            let port_reservation = TcpListener::bind("127.0.0.1:0")?;
+            let mut config =
+                rpc_port_config(port_reservation.local_addr()?.port(), false, &Mainnet)?;
             config.tracing.filter = Some("trace".to_string());
             config.tracing.buffer_limit = 100;
 
@@ -769,6 +756,7 @@ fn non_blocking_logger() -> Result<()> {
                 .expect("config was just created with a known RPC port");
 
             let dir = testdir()?.with_config(&mut config)?;
+            drop(port_reservation);
             let mut child = dir
                 .spawn_child(args!["start"])?
                 .with_timeout(TINY_CHECKPOINT_TIMEOUT)?;

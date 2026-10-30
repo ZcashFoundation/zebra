@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Added an optional block-mempool setup channel to `router::init` for same-epoch transaction verification reuse; pass `None` to retain standalone verification. The semantic block verifier no longer implements `Sync`, including when mempool reuse is disabled.
+time: 2026-10-23T09:18:47.748153694+02:00
