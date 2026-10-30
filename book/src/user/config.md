@@ -351,6 +351,7 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `elasticsearch_url` | String; `elasticsearch` feature only | `"https://localhost:9200"` | Elasticsearch service URL for experimental indexing. |
 | `elasticsearch_username` | String; `elasticsearch` feature only | `"elastic"` | Elasticsearch HTTP Basic authentication username. |
 | `elasticsearch_password` | String; `elasticsearch` feature only | `""` | Elasticsearch HTTP Basic authentication password. Redacted from debug output, but stored in plaintext in the configuration file. Environment overrides are rejected. |
+| `elasticsearch_skip_cert_validation` | Boolean; `elasticsearch` feature only | `false` | Disable HTTPS certificate validation. Use only for trusted local clusters with self-signed certificates; credentials and indexed data can be intercepted. |
 
 Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
 7.0.0. Non-finalized backups use
@@ -358,8 +359,9 @@ Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.
 
-The Elasticsearch client disables TLS certificate validation. Keep it on a
-trusted connection; an `https` URL alone does not authenticate the server.
+The Elasticsearch client validates HTTPS certificates by default. Configure a
+trusted server certificate, or explicitly opt out for a trusted local cluster
+with `elasticsearch_skip_cert_validation = true`. HTTP never protects credentials.
 See [Elasticsearch indexing](elasticsearch.md).
 
 ## `[sync]`

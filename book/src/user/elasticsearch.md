@@ -19,12 +19,17 @@ Install and configure the services using the
 [Elasticsearch documentation](https://www.elastic.co/docs/deploy-manage/deploy/self-managed)
 and [Kibana documentation](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-kibana).
 
-Zebra connects to one configured URL using HTTP Basic authentication. The
-current transport **disables TLS certificate validation**, including when
-using HTTPS. It has no configuration field for a certificate authority or
-certificate pinning. Keep the Elasticsearch connection on a trusted,
-isolated network or the same host; do not send credentials across an
-untrusted network with this integration.
+Zebra connects to one configured URL using HTTP Basic authentication. HTTPS
+validates the server certificate and hostname by default. Configure
+Elasticsearch with a certificate signed by a CA trusted by the client's bundled
+root store. Zebra has no configuration field for a custom CA or certificate
+pinning; adding a CA to the operating system's trust store is not sufficient.
+
+For a trusted local cluster with a self-signed certificate, set
+`[state] elasticsearch_skip_cert_validation = true`. This disables certificate
+validation and exposes credentials and indexed data to interception. Leave it
+`false` for network-facing clusters, and use HTTPS: HTTP does not protect
+credentials regardless of this setting.
 
 The password remains plaintext in TOML despite being redacted from debug output.
 Store the configuration file where only the Zebra account can read it, or mount
@@ -56,6 +61,8 @@ listen_addr = "[::]:18233"
 cache_dir = "./zebra-elasticsearch-state"
 elasticsearch_url = "https://localhost:9200"
 elasticsearch_username = "elastic"
+# Only for a local cluster with a self-signed certificate.
+elasticsearch_skip_cert_validation = true
 ```
 
 Set `[state] elasticsearch_password` in the configuration file before starting
