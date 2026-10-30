@@ -126,7 +126,12 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        // The major directory isolates body deletion from older archive readers.
+        Box::new(no_migration::NoMigration::new(
+            "isolate pruned state from archive readers",
+            Version::new(30, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -303,7 +308,6 @@ impl DbFormatChange {
     }
 
     /// Returns true if this format change/check happens at startup.
-    #[allow(dead_code)]
     pub fn is_run_at_startup(&self) -> bool {
         !matches!(self, CheckNewBlocksCurrent { .. })
     }
@@ -577,7 +581,10 @@ impl DbFormatChange {
                 db.path()
             )
         });
-        db.mark_ready_for_pruning();
+        // Runtime and shutdown checks do not finish cancelled spending-index conversions.
+        if self.is_run_at_startup() {
+            db.mark_ready_for_pruning();
+        }
 
         let initial_disk_version = self
             .initial_disk_version()

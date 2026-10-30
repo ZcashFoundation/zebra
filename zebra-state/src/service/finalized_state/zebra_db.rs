@@ -118,6 +118,8 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<ZebraDb, StateInitError> {
+        config.validate_pruning(network)?;
+
         // A read-only secondary instance must never modify the primary's cache directory, so it
         // skips the post-major-upgrade DB reuse (which can create directories and rename the
         // on-disk database) and reads the on-disk format version directly. The cache directory is
@@ -272,7 +274,8 @@ impl ZebraDb {
     /// Returns whether migrations, spending-index conversion, and initial format checks completed.
     ///
     /// This is an in-memory startup gate, not evidence of historical body availability. Skipped,
-    /// cancelled, or failed checks leave it false, including on read-only instances.
+    /// cancelled, or failed startup checks leave it false, including on read-only instances.
+    /// Runtime and shutdown checks cannot enable pruning or replace startup's conversions.
     pub fn ready_for_pruning(&self) -> bool {
         self.ready_for_pruning.load(Ordering::Acquire)
     }
