@@ -1970,7 +1970,7 @@ impl Service<ReadRequest> for ReadStateService {
                     known_blocks,
                     stop,
                     MAX_FIND_BLOCK_HASHES_RESULTS,
-                )))
+                )?))
             }
 
             // Used by the StateService.

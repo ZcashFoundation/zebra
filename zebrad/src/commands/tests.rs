@@ -73,3 +73,52 @@ async fn halo2_key_preload_panic_exits_zebra() {
         .expect("startup task must finish");
     super::start::StartCmd::halo2_key_preload_should_exit(result);
 }
+
+#[test]
+fn pruned_network_services_preserve_independent_capabilities() {
+    use zebra_chain::block::Height;
+    use zebra_network::types::PeerServices;
+    use zebra_state::HistoryCapabilities;
+
+    let mut config = crate::config::ZebradConfig::default();
+    config.network.local_services |= PeerServices::NODE_EARLY_BLOCK_RELAY;
+    let archive_services = config.network.local_services;
+    assert_eq!(
+        super::StartCmd::network_services(&config, HistoryCapabilities::default()).unwrap(),
+        archive_services,
+    );
+    assert_eq!(
+        super::StartCmd::network_services(
+            &config,
+            HistoryCapabilities {
+                lowest_retained_height: Height(10_000),
+            },
+        )
+        .unwrap(),
+        archive_services & !PeerServices::NODE_NETWORK,
+    );
+}
+
+#[test]
+fn pruned_history_rejects_both_sidecar_modes() {
+    use zebra_chain::block::Height;
+    use zebra_state::HistoryCapabilities;
+
+    let mut config = crate::config::ZebradConfig::default();
+    config.zcashd_compat.enabled = true;
+    for managed in [false, true] {
+        config.zcashd_compat.manage_zcashd = managed;
+        super::StartCmd::network_services(&config, HistoryCapabilities::default())
+            .expect("archive nodes can serve sidecars");
+        let error = super::StartCmd::network_services(
+            &config,
+            HistoryCapabilities {
+                lowest_retained_height: Height(10_000),
+            },
+        )
+        .expect_err("sidecars require complete block history");
+        assert!(error
+            .to_string()
+            .contains("zcashd-compat requires an archive node"));
+    }
+}

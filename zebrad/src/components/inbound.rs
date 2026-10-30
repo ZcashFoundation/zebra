@@ -553,7 +553,14 @@ impl Service<zn::Request> for Inbound {
                         let response = if let Some(block) = cached {
                             zs::Response::Block(Some(block))
                         } else {
-                            state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?
+                            match state.clone().ready().await?.call(zs::Request::Block(hash.into())).await {
+                                Ok(response) => response,
+                                Err(error) if matches!(
+                                    error.downcast_ref::<zs::BlockReadError>(),
+                                    Some(zs::BlockReadError::BlockBodyUnavailable { .. })
+                                ) => zs::Response::Block(None),
+                                Err(error) => return Err(error),
+                            }
                         };
 
                         // Add the block responses to the list, while updating the size limit.

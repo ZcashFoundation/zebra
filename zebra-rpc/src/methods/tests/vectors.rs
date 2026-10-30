@@ -8237,6 +8237,7 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
 
     let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
         ([127, 0, 0, 1], Mainnet.default_port()).into(),
+        zebra_network::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
         tracing::Span::none(),

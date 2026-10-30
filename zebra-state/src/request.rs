@@ -1339,8 +1339,9 @@ pub enum Request {
     ///
     /// Stops the list of hashes after:
     ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding 500 hashes to the list.
+    ///   * adding the `stop` hash to the list, if it is in the best chain,
+    ///   * adding 500 hashes to the list, or
+    ///   * reaching a height whose block body is unavailable.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -1712,8 +1713,9 @@ pub enum ReadRequest {
     ///
     /// Stops the list of hashes after:
     ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding [`MAX_FIND_BLOCK_HASHES_RESULTS`] hashes to the list.
+    ///   * adding the `stop` hash to the list, if it is in the best chain,
+    ///   * adding [`MAX_FIND_BLOCK_HASHES_RESULTS`] hashes to the list, or
+    ///   * reaching a height whose block body is unavailable.
     ///
     /// Returns an empty list if the state is empty.
     ///
