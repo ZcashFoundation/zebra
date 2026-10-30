@@ -269,6 +269,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .expect("hashes up to tip have heights");
             let stored_block = state
                 .block(query_height.into())
+                .expect("stored block body is complete")
                 .expect("heights up to tip have blocks");
 
             // Check the shielded note commitment trees.

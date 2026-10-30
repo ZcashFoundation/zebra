@@ -384,6 +384,62 @@ async fn get_block_data(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_rejects_incomplete_stored_bodies() {
+    use zebra_state::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, tip, _) =
+            zebra_state::populated_state_with_debug(blocks, &Mainnet, true).await;
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &read_state.db().cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        read_state.db().write_batch(batch).unwrap();
+
+        let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool, 1),
+            Buffer::new(state, 1),
+            Buffer::new(read_state, 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let expected = BlockReadError::BlockBodyUnavailable { height }.to_string();
+        for verbosity in [0, 2, 3] {
+            for query in [height.0.to_string(), block.hash().to_string()] {
+                let error = rpc.get_block(query, Some(verbosity)).await.unwrap_err();
+                assert_eq!(error.message(), expected);
+            }
+        }
+        let error = rpc.get_block("2".to_owned(), Some(0)).await.unwrap_err();
+        assert_eq!(error.message(), "Block not found");
+        rpc_tx_queue.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
     let _init_guard = zebra_test::init();
 

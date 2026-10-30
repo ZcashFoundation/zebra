@@ -341,12 +341,13 @@ pub(crate) fn legacy_chain<I>(
     max_legacy_chain_blocks: usize,
 ) -> Result<(), BoxError>
 where
-    I: Iterator<Item = Arc<Block>>,
+    I: Iterator<Item = Result<Arc<Block>, crate::BlockReadError>>,
 {
-    let mut ancestors = ancestors.peekable();
-    let tip_height = ancestors.peek().and_then(|block| block.coinbase_height());
+    let mut tip_height = None;
 
     for (index, block) in ancestors.enumerate() {
+        let block = block?;
+        tip_height = tip_height.or_else(|| block.coinbase_height());
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
         //
