@@ -1,313 +1,197 @@
-# Running lightwalletd with zebra
+# Running lightwalletd with Zebra
 
-Zebra's RPC methods can support a lightwalletd service backed by zebrad. We
-recommend using
-[zcash/lightwalletd](https://github.com/zcash/lightwalletd) because we
-use it in testing. Other `lightwalletd` forks have limited support, see the
-[Sync lightwalletd](#sync-lightwalletd) section for more info.
+[lightwalletd](https://github.com/zcash/lightwalletd) serves compact blocks and
+transaction queries to light wallets over gRPC. Zebra validates the chain;
+lightwalletd reads Zebra's JSON-RPC API and maintains its own compact-block
+cache. Wallets connect to lightwalletd, not to Zebra's JSON-RPC port.
 
-> [!NOTE]
-> You can also use `docker` to run lightwalletd with zebra. Please see our [docker documentation](./docker.md#running-zebra-with-lightwalletd) for more information.
+[Zaino](https://github.com/zingolabs/zaino), a Rust indexer, serves the same
+light-wallet `CompactTxStreamer` gRPC protocol but uses different backend and
+server configuration. Follow its deployment instructions.
 
-Contents:
+The [Docker deployment](docker.md#running-zebra-with-lightwalletd) runs Zebra
+and lightwalletd as separate services. Zebra also has an
+[experimental direct gRPC service](#experimental-serving-light-clients-directly-from-zebra).
 
-- [Running lightwalletd with zebra](#running-lightwalletd-with-zebra)
-  - [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
-    - [JSON-RPC](#json-rpc)
-  - [Sync Zebra](#sync-zebra)
-  - [Download and build lightwalletd](#download-and-build-lightwalletd)
-  - [Sync lightwalletd](#sync-lightwalletd)
-  - [Run tests](#run-tests)
-  - [Connect a wallet to lightwalletd](#connect-a-wallet-to-lightwalletd)
-    - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
-    - [Run the wallet](#run-the-wallet)
-  - [Experimental: serving light clients directly from Zebra](#experimental-serving-light-clients-directly-from-zebra)
-    - [The port is not protected](#the-port-is-not-protected)
-    - [Do not run it on a user's machine](#do-not-run-it-on-a-users-machine)
-    - [Serving mobile wallets through a TLS proxy](#serving-mobile-wallets-through-a-tls-proxy)
-    - [What has not been verified](#what-has-not-been-verified)
+## Configure Zebra for lightwalletd
 
-## Configure zebra for lightwalletd
+Generate a Zebra configuration file:
 
-[#configure-zebra-for-lightwalletd]: #configure-zebra-for-lightwalletd
-
-We need a zebra configuration file. First, we create a file with the default settings:
-
-```console
-zebrad generate -o ~/.config/zebrad.toml
+```sh
+zebrad generate -o zebrad.toml
 ```
 
-The above command places the generated `zebrad.toml` config file in the default preferences directory of Linux. For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
+Edit the existing sections rather than adding duplicate TOML tables.
 
-Tweak the following option in order to prepare for lightwalletd setup.
+## JSON-RPC
 
-### JSON-RPC
-
-[#rpc-section]: #json-rpc
-
-We need to configure Zebra to behave as an RPC endpoint. The standard RPC port
-for Zebra is:
-
-- `8232` for Mainnet, and
-- `18232` for Testnet.
-
-Starting with Zebra v2.0.0, a cookie authentication method like the one used by the `zcashd` node is enabled by default for the RPC server. However, lightwalletd currently [does not support cookie authentication](https://github.com/zcash/lightwalletd/blob/master/docs/docker-compose-setup.md#edit-the-two-zcashconf-files), so we need to disable this authentication method to use Zebra as a backend for lightwalletd.
-
-For example, to use Zebra as a `lightwalletd` backend on Mainnet, give it this
-`~/.config/zebrad.toml`:
+Set these fields in `zebrad.toml` for a Mainnet backend:
 
 ```toml
 [rpc]
-# listen for RPC queries on localhost
-listen_addr = '127.0.0.1:8232'
-
-# automatically use multiple CPU threads
-parallel_cpu_threads = 0
-
-# disable cookie auth
+listen_addr = "127.0.0.1:8232"
 enable_cookie_auth = false
 ```
 
-**WARNING:** This config allows multiple Zebra instances to share the same RPC port.
-See the [RPC config documentation](https://docs.rs/zebra-rpc/latest/zebra_rpc/config/rpc/struct.Config.html) for details.
+For Testnet, set `[network] network = "Testnet"` and use the conventional
+[RPC port](run.md#ports), `127.0.0.1:18232`.
+
+Lightwalletd does not read Zebra's
+[authentication cookie](rpc.md#authentication), so this setup disables
+authentication. Keep the listener on loopback or an isolated container
+network; do not expose it to wallet users.
+
+Lightwalletd does not require Zebra's `indexer` Cargo feature or the
+`[rpc] indexer_listen_addr` endpoint. It uses JSON-RPC rather than direct
+access to Zebra's database.
 
 ## Sync Zebra
 
-[#sync-zebra]: #sync-zebra
+Start Zebra with the configured listener:
 
-With the configuration in place you can start synchronizing Zebra with the Zcash blockchain. This may take a while depending on your hardware.
-
-```console
-zebrad start
+```sh
+zebrad -c zebrad.toml start
 ```
 
-Zebra will display information about sync process:
+Keep Zebra running while lightwalletd serves clients. Monitor
+[synchronization](startup.md), or start from a [state snapshot](snapshots.md).
+A successful RPC connection does not establish that Zebra has reached the tip.
 
-```console
-...
-zebrad::commands::start: estimated progress to chain tip sync_percent=10.783 %
-...
+## Configure lightwalletd
+
+Install the `zcash/lightwalletd` implementation using its
+[installation instructions](https://github.com/zcash/lightwalletd#lightwalletd).
+Create its backend connection file, `zcash.conf`:
+
+```text
+rpcbind=127.0.0.1
+rpcport=8232
+rpcuser=lightwalletd
+rpcpassword=unused
 ```
 
-Until eventually it will get there:
+Zebra does not read this file. Lightwalletd's parser requires a nonempty
+`rpcpassword` even though Zebra ignores it with authentication disabled;
+an empty file is insufficient, and the sample password is not access control.
 
-```console
-...
-zebrad::commands::start: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 %
-...
-```
+For Testnet, change `rpcport` to `18232`. The parser uses `testnet=1` only to
+choose that port when `rpcport` is absent; it does not change Zebra's network.
+Restart lightwalletd when switching the backend network.
 
-You can interrupt the process at any time with `ctrl-c` and Zebra will resume the next time at around the block you were downloading when stopping the process.
+For containers, use the backend service hostname instead of loopback. The
+[repository's Compose setup](docker.md#running-zebra-with-lightwalletd)
+publishes unauthenticated RPC and uses plaintext gRPC; restrict access before
+using it outside a trusted test environment.
 
-When deploying for production infrastructure, the above command can be run as a service or daemon.
-
-For implementing zebra as a service please see the [zebrad systemd service file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/systemd/zebrad.service).
-
-## Download and build lightwalletd
-
-[#download-and-build-lightwalletd]: #download-and-build-lightwalletd
-
-While you synchronize Zebra you can install [lightwalletd](https://github.com/zcash/lightwalletd).
-
-Before installing, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
-
-With go installed and in your path, download and install lightwalletd:
-
-```console
-git clone https://github.com/zcash/lightwalletd
-cd lightwalletd
-make
-make install
-```
-
-If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
+Current upstream lightwalletd also accepts a Zebra `.toml` file through
+`--zcash-conf-path`, reading `[rpc] listen_addr`, but not Zebra's cookie.
 
 ## Sync lightwalletd
 
-[#sync-lightwalletd]: (#sync-lightwalletd)
+For local testing, start lightwalletd with an explicit loopback gRPC listener:
 
-Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
-
-- `lightwalletd` requires a `zcash.conf` file, however this file can be empty if you are using the default Zebra rpc endpoint (`127.0.0.1:8232`) and the `zcash/lightwalletd` fork.
-  - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, but Zebra ignores them if it receives them from `lightwalletd`
-  - When using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
-  - When using testnet, use `testnet=1`
-
-- For production setups `lightwalletd` requires a `cert.pem`. For more information on how to do this please [see here](https://github.com/zcash/lightwalletd#production-usage).
-
-- `lightwalletd` can run without the certificate (with the `--no-tls-very-insecure` flag) however this is not recommended for production environments.
-
-With the cert in `./` and an empty `zcash.conf` we can start the sync with:
-
-```console
-lightwalletd --zcash-conf-path ~/.config/zcash.conf --data-dir ~/.cache/lightwalletd --log-file /dev/stdout
+```sh
+mkdir -p "$HOME/.cache/lightwalletd"
+lightwalletd \
+  --zcash-conf-path ./zcash.conf \
+  --data-dir "$HOME/.cache/lightwalletd" \
+  --grpc-bind-addr 127.0.0.1:9067 \
+  --http-bind-addr 127.0.0.1:9068 \
+  --no-tls-very-insecure \
+  --log-file /dev/stdout
 ```
 
-By default lightwalletd service will listen on `127.0.0.1:9067`
+Lightwalletd serves requests while filling its compact-block cache; uncached
+requests read from Zebra. A quiet log does not prove either service is synced.
 
-Lightwalletd will do its own synchronization, while it is doing you will see messages as:
+Query the service with
+[grpcurl](https://github.com/fullstorydev/grpcurl):
 
-```json
-{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 748000","time":"..."}
-{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 749540","time":"..."}
-{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 751074","time":"..."}
+```sh
+grpcurl -plaintext 127.0.0.1:9067 \
+  cash.z.wallet.sdk.rpc.CompactTxStreamer/GetLightdInfo
 ```
 
-Wait until lightwalletd is in sync before connecting any wallet into it. You will know when it is in sync as those messages will not be displayed anymore.
-
-## Run tests
-
-[#run-tests]: (#run-tests)
-
-The Zebra team created tests for the interaction of `zebrad` and `lightwalletd`.
-
-To run all the Zebra `lightwalletd` tests:
-
-1. install `lightwalletd`
-2. install `protoc`
-3. build Zebra with `--features=lightwalletd-grpc-tests`
-
-See the [zebrad test entry point](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/main.rs) for the current test categories and commands. When running tests that use a cached lightwalletd state, the test harness will use a platform default cache directory (for example, `~/.cache/lwd` on Linux) unless overridden via the `LWD_CACHE_DIR` environment variable.
+At its default log level, lightwalletd enables gRPC reflection, so this command
+needs no local protocol files. The response reports the backend network,
+height, and version. Compare the height with Zebra's sync status before
+connecting wallets.
 
 ## Connect a wallet to lightwalletd
 
-[#connect-wallet-to-lightwalletd]: (#connect-wallet-to-lightwalletd)
+Configure the wallet's server address to point at lightwalletd's gRPC
+listener. The local test example uses `127.0.0.1:9067`; loopback on another
+device refers to that device, not to the server.
 
-The final goal is to connect wallets to the lightwalletd service backed by Zebra.
+For a network-facing deployment, remove `--no-tls-very-insecure` and supply
+`--tls-cert` and `--tls-key` with a certificate and private key trusted by the
+wallet clients. Keep the backend JSON-RPC listener and lightwalletd's HTTP
+listener private. Follow lightwalletd's
+[production deployment instructions](https://github.com/zcash/lightwalletd#production-usage)
+for certificate configuration.
 
-For demo purposes we used [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with the [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) fork.
-We didn't test [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli) with [zcash/lightwalletd](https://github.com/zcash/lightwalletd) yet.
+## Run tests
 
-Make sure both `zebrad` and `lightwalletd` are running and listening.
+Zebra's [lightwalletd integration tests](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/stateful/lightwalletd.rs)
+launch a separate lightwalletd process. Install `lightwalletd` and `protoc`,
+enable the `lightwalletd-grpc-tests` Cargo feature, and set
+`TEST_LIGHTWALLETD=1`. These tests are ignored by default; select them using
+the [stateful test instructions](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/main.rs#L24-L43).
 
-### Download and build the cli-wallet
-
-[#download-and-build-the-cli-wallet]: (#download-and-build-the-cli-wallet)
-
-```console
-cargo install --locked --git https://github.com/adityapk00/zecwallet-light-cli
-```
-
-zecwallet-cli binary will be at `~/.cargo/bin/zecwallet-cli`.
-
-### Run the wallet
-
-[#run-the-wallet]: (#run-the-wallet)
-
-```console
-$ zecwallet-cli --server 127.0.0.1:9067
-Lightclient connecting to http://127.0.0.1:9067/
-{
-  "result": "success",
-  "latest_block": 1683911,
-  "total_blocks_synced": 49476
-}
-Ready!
-(main) Block:1683911 (type 'help') >>
-```
+Sync and wallet tests also need cached Zebra state. Tests that reuse
+lightwalletd state accept `LWD_CACHE_DIR`; without it, the harness looks for
+the platform cache directory, such as `$HOME/.cache/lwd` on Linux. Use
+disposable test copies, not the directories of running production services.
 
 ## Experimental: serving light clients directly from Zebra
 
-[#experimental-serving-light-clients-directly-from-zebra]: #experimental-serving-light-clients-directly-from-zebra
+Zebra's experimental `CompactTxStreamer` service runs without lightwalletd.
+Its behavior and configuration can change incompatibly in any release.
 
-Everything above runs `lightwalletd` as a separate service in front of Zebra, which is
-the supported way to serve light clients.
-
-Zebra can also implement the `CompactTxStreamer` gRPC interface itself, so light clients
-connect to Zebra with no `lightwalletd` process in between. This is **experimental**: its
-behaviour and configuration may change in any release, including in ways that break
-clients, and it has had far less production exposure than `lightwalletd`. Do not depend
-on it for a service you operate for others yet: it has not been tested against the
-light-client SDKs that mobile wallets are built on (see
-[What has not been verified](#what-has-not-been-verified)). Read the caveats below before
-enabling it.
-
-It is disabled by default. To enable it, set a listen address:
+Enable it in Zebra's [`[rpc]` section](config.md#rpc):
 
 ```toml
 [rpc]
-lightwalletd_listen_addr = '127.0.0.1:9067'
+lightwalletd_listen_addr = "127.0.0.1:9067"
 ```
+
+The listener calls Zebra's RPC handlers in-process and reads state and mempool
+services directly. It needs no additional Cargo feature, JSON-RPC listener,
+`zcash.conf`, or lightwalletd cache. Do not bind lightwalletd to the same
+address and port.
+
+This is not [Zallet's indexer gRPC protocol](zallet.md):
+`[rpc] indexer_listen_addr` enables a different service.
 
 ### The port is not protected
 
-[#the-port-is-not-protected]: #the-port-is-not-protected
+The direct gRPC listener serves plaintext HTTP/2 without TLS or
+authentication. JSON-RPC cookie authentication does not apply. Anyone who
+can reach it can query chain data and submit transactions; network observers
+can read or modify unencrypted traffic, including transparent-address
+queries.
 
-The gRPC port serves plaintext HTTP/2, with no TLS and no authentication. Zebra will not
-terminate TLS for you, and there is no equivalent of the JSON-RPC server's cookie
-authentication.
-
-Anyone who can reach the port can query your node's state and submit transactions
-through it. Traffic to it is readable and modifiable in transit, which for a light client
-means the queries it makes — and therefore which addresses it is interested in — are
-visible to anyone on the path.
-
-If you serve clients over a network, put a reverse proxy in front of the port to
-terminate TLS, and bind Zebra itself to a loopback or private address so the plaintext
-port is not reachable from the internet.
+Bind it to loopback or a restricted private interface. For remote wallets,
+put a reverse proxy with gRPC support in front of it, terminate TLS at the
+proxy, and block direct access to Zebra's plaintext port. Configure proxy
+stream timeouts for long-lived block-range and mempool requests.
 
 ### Do not run it on a user's machine
 
-[#do-not-run-it-on-a-users-machine]: #do-not-run-it-on-a-users-machine
+Run this unauthenticated service on infrastructure you administer, not on
+end users' computers. A loopback bind limits network reachability but does
+not isolate the service from untrusted local processes.
 
-Run the server on infrastructure you operate, not on end users' computers.
+### Compatibility limits
 
-A port bound to `127.0.0.1` is not private to the applications you chose to run: any
-local process can reach it, and so can a web page loaded in a browser on that machine,
-which can make requests to loopback addresses. Since the port has no authentication, a
-page the user did not trust can use their node to submit transactions or to learn what
-their wallet is querying.
+The [direct service](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/lightwalletd/methods.rs)
+differs from lightwalletd:
 
-### Serving mobile wallets through a TLS proxy
-
-[#serving-mobile-wallets-through-a-tls-proxy]: #serving-mobile-wallets-through-a-tls-proxy
-
-Mobile light wallets connect to their server over TLS. To serve them from Zebra, bind the
-gRPC port to loopback and put a reverse proxy that supports gRPC in front of it:
-
-```toml
-[rpc]
-lightwalletd_listen_addr = '127.0.0.1:9067'
-```
-
-With nginx 1.25.1 or later:
-
-```nginx
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name lightwalletd.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/lightwalletd.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/lightwalletd.example.com/privkey.pem;
-
-    location / {
-        grpc_pass grpc://127.0.0.1:9067;
-        # Block range and mempool requests are long-lived streams.
-        grpc_read_timeout 1h;
-        grpc_send_timeout 1h;
-    }
-}
-```
-
-Or with Caddy, which obtains the certificate itself:
-
-```caddyfile
-lightwalletd.example.com {
-    reverse_proxy h2c://127.0.0.1:9067
-}
-```
-
-Wallet users then enter `lightwalletd.example.com:443` as a custom server in their
-wallet's settings.
-
-### What has not been verified
-
-[#what-has-not-been-verified]: #what-has-not-been-verified
-
-- No light-client SDK or mobile wallet has been tested against this server
-  ([#11158](https://github.com/ZcashFoundation/zebra/issues/11158)).
-- `Ping` returns `unimplemented`, as it does in `lightwalletd`'s default configuration.
-- `GetLightdInfo` leaves `git_commit`, `branch`, `build_date`, `build_user`, and
-  `donation_address` empty.
+- The `Ping` method returns gRPC `unimplemented`.
+- The `GetLightdInfo` response leaves `git_commit`, `branch`, `build_date`,
+  `build_user`, and `donation_address` empty.
 - Compact blocks have an empty `header` field.
+
+Test wallet synchronization, transaction submission, and recovery across chain
+reorganizations with the intended client before deployment; a successful
+connection does not establish interoperability.
