@@ -9,7 +9,7 @@ use zcash_script::script;
 
 use crate::{
     amount::{Amount, NonNegative},
-    serialization::ZcashSerialize,
+    serialization::CompactSizeMessage,
     transaction::{HashType, SigHash},
     transparent::{self, Script},
     Error,
@@ -156,11 +156,14 @@ impl TryFrom<&transparent::Output> for zcash_transparent::bundle::TxOut {
 
     #[allow(clippy::unwrap_in_result)]
     fn try_from(output: &transparent::Output) -> Result<Self, Self::Error> {
-        let serialized_output_bytes = output
-            .zcash_serialize_to_vec()
+        // Preserve the serialization limit for manually constructed scripts.
+        CompactSizeMessage::try_from(output.lock_script.as_raw_bytes().len())
+            .map_err(io::Error::from)
             .expect("zcash_primitives and Zebra transparent output formats must be compatible");
+        let value = Zatoshis::try_from(output.value)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
 
-        zcash_transparent::bundle::TxOut::read(&mut serialized_output_bytes.as_slice())
+        Ok(Self::new(value, (&output.lock_script).into()))
     }
 }
 
