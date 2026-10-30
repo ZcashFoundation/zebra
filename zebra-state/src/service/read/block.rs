@@ -38,7 +38,8 @@ use crate::request::Spend;
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chains` or finalized `db`.
 ///
-/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn any_block<'a, C: AsRef<Chain> + 'a>(
     mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
@@ -58,7 +59,8 @@ pub fn any_block<'a, C: AsRef<Chain> + 'a>(
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 ///
-/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn block<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -73,7 +75,8 @@ where
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 ///
-/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn block_and_size<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -124,11 +127,14 @@ where
 
 /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the
 /// non-finalized `chain` or finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)>
+) -> Result<Option<(Arc<Transaction>, Height, DateTime<Utc>)>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -144,7 +150,7 @@ where
                 .transaction(hash)
                 .map(|(tx, height, time)| (tx.clone(), height, time))
         })
-        .or_else(|| db.transaction(hash))
+        .map_or_else(|| db.transaction(hash), |tx| Ok(Some(tx)))
 }
 
 /// Returns whether the transaction is in the best chain, even if its body is unavailable.
@@ -158,11 +164,14 @@ where
 
 /// Returns a [`MinedTx`] for a [`Transaction`] with [`transaction::Hash`],
 /// if one exists in the non-finalized `chain` or finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn mined_transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<MinedTx>
+) -> Result<Option<MinedTx>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -172,11 +181,21 @@ where
     // can only add overlapping blocks, and hashes are unique.
     let chain = chain.as_ref();
 
-    let (tx, height, time) = transaction(chain, db, hash)?;
-    let (tip_height, tip_hash) = tip(chain, db)?;
+    let Some((tx, height, time)) = transaction(chain, db, hash)? else {
+        return Ok(None);
+    };
+    let Some((tip_height, tip_hash)) = tip(chain, db) else {
+        return Ok(None);
+    };
     let confirmations = 1 + tip_height.0 - height.0;
 
-    Some(MinedTx::new(tx, height, confirmations, time, tip_hash))
+    Ok(Some(MinedTx::new(
+        tx,
+        height,
+        confirmations,
+        time,
+        tip_hash,
+    )))
 }
 
 /// Returns the transparent outputs spent by the non-coinbase inputs of the block with
@@ -186,16 +205,16 @@ where
 /// Used by the `getblock` RPC at verbosity 3 to fill in each input's prevout and the
 /// transaction fee.
 ///
-/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+/// Returns an error if the block or a known parent transaction is pruned or corrupt.
+/// A torn secondary view returns `None`.
 ///
 /// # Correctness
 ///
 /// The block and all of its spent outputs are read from the same `chain`/`db` snapshot, so the
 /// prevouts are consistent with the block.
 ///
-/// A spent output that cannot be found (for example, an input of a side-chain block that spends
-/// an output not in the best chain) is omitted from the map. Callers must treat a missing
-/// outpoint as "prevout unknown", not as an error.
+/// An unknown parent or outpoint is omitted from the map. Callers must treat a missing outpoint
+/// as "prevout unknown", not as an error. Known parents with unavailable bodies are never omitted.
 ///
 /// Coinbase transactions spend no outputs, so they contribute nothing to the map.
 ///
@@ -252,7 +271,10 @@ where
     }
 
     for (parent_hash, outpoints) in by_parent {
-        let Some((parent_tx, height, _)) = transaction(chain, db, parent_hash) else {
+        let Some((parent_tx, height, _)) = transaction(chain, db, parent_hash)? else {
+            if known_transaction(chain, db, parent_hash) {
+                return Ok(None);
+            }
             continue;
         };
         let from_coinbase = parent_tx.is_coinbase();
@@ -270,11 +292,14 @@ where
 /// Returns a [`AnyTx`] for a [`Transaction`] with [`transaction::Hash`],
 /// if one exists in any chain in `chains` or finalized `db`.
 /// The first chain in `chains` must be the best chain.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn any_transaction<'a>(
     chains: impl Iterator<Item = &'a Arc<Chain>>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<AnyTx> {
+) -> Result<Option<AnyTx>, BlockReadError> {
     // # Correctness
     //
     // It is ok to do this lookup in multiple different calls. Finalized state updates
@@ -289,7 +314,7 @@ pub fn any_transaction<'a>(
     // still be used in find_map below.
     let mut chains = chains.peekable();
     let best_chain = chains.peek().copied();
-    let (tx, height, time, in_best_chain, containing_chain) = chains
+    let found = chains
         .enumerate()
         .find_map(|(i, chain)| {
             chain
@@ -297,24 +322,34 @@ pub fn any_transaction<'a>(
                 .transaction(hash)
                 .map(|(tx, height, time)| (tx.clone(), height, time, i == 0, Some(chain)))
         })
-        .or_else(|| {
-            db.transaction(hash)
-                .map(|(tx, height, time)| (tx.clone(), height, time, true, None))
-        })?;
+        .map_or_else(
+            || {
+                db.transaction(hash)
+                    .map(|tx| tx.map(|(tx, height, time)| (tx, height, time, true, None)))
+            },
+            |tx| Ok(Some(tx)),
+        )?;
+    let Some((tx, height, time, in_best_chain, containing_chain)) = found else {
+        return Ok(None);
+    };
 
     if in_best_chain {
-        let (tip_height, tip_hash) = tip(best_chain, db)?;
+        let Some((tip_height, tip_hash)) = tip(best_chain, db) else {
+            return Ok(None);
+        };
         let confirmations = 1 + tip_height.0 - height.0;
-        Some(AnyTx::Mined(MinedTx::new(
+        Ok(Some(AnyTx::Mined(MinedTx::new(
             tx,
             height,
             confirmations,
             time,
             tip_hash,
-        )))
+        ))))
     } else {
-        let block_hash = containing_chain?.block(height.into())?.hash;
-        Some(AnyTx::Side((tx, block_hash)))
+        let Some(block) = containing_chain.and_then(|chain| chain.block(height.into())) else {
+            return Ok(None);
+        };
+        Ok(Some(AnyTx::Side((tx, block.hash))))
     }
 }
 

@@ -11,7 +11,8 @@ use tracing::Span;
 use zebra_chain::{block, chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{
-    ReadRequest, ReadResponse, ReadState, MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    BlockReadError, ReadRequest, ReadResponse, ReadState,
+    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
 };
 
 use super::{
@@ -278,9 +279,17 @@ where
             }
             Ok(ReadResponse::Block(None)) => Err(Status::not_found("block not found")),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
-            Err(error) => Err(Status::unavailable(format!(
-                "failed to read block: {error}"
-            ))),
+            Err(error) => match error.downcast_ref::<BlockReadError>() {
+                Some(BlockReadError::BlockBodyUnavailable { height }) => {
+                    Err(Status::failed_precondition(format!(
+                        "block not available at height {} (pruned data)",
+                        height.0
+                    )))
+                }
+                _ => Err(Status::unavailable(format!(
+                    "failed to read block: {error}"
+                ))),
+            },
         }
     }
 }

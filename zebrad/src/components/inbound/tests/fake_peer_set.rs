@@ -91,10 +91,8 @@ async fn inbound_propagates_incomplete_block_body_errors() {
                     Ok(Response::Blocks(vec![Missing(hash)])),
                 ),
                 (
-                    Err(BoxError::from(BlockReadError::BlockBodyUnavailable {
-                        height,
-                    })),
-                    Err(BlockReadError::BlockBodyUnavailable { height }),
+                    Err(BoxError::from(BlockReadError::CorruptBlock { height })),
+                    Err(BlockReadError::CorruptBlock { height }),
                 ),
             ] {
                 let request = if early_relay {

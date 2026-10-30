@@ -68,6 +68,19 @@ impl HistoryCapabilities {
     }
 }
 
+/// A retained block header and its best-chain identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockHeader {
+    /// The header of the requested block.
+    pub header: Arc<block::Header>,
+    /// The hash of the requested block.
+    pub hash: block::Hash,
+    /// The height of the requested block.
+    pub height: block::Height,
+    /// The hash of the next block in the best chain, if known.
+    pub next_block_hash: Option<block::Hash>,
+}
+
 /// Keeps early mining work alive and reserves its slot until block verification finishes.
 #[derive(Clone, Debug)]
 pub struct MiningCandidateGuard(
@@ -208,17 +221,8 @@ pub enum Response {
     /// Response to [`Request::BlockAndSize`] with the specified block and size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
-    /// The response to a `BlockHeader` request.
-    BlockHeader {
-        /// The header of the requested block
-        header: Arc<block::Header>,
-        /// The hash of the requested block
-        hash: block::Hash,
-        /// The height of the requested block
-        height: block::Height,
-        /// The hash of the next block after the requested block
-        next_block_hash: Option<block::Hash>,
-    },
+    /// Response to [`Request::BlockHeader`], or `None` if the block is unknown.
+    BlockHeader(Option<BlockHeader>),
 
     /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
@@ -576,31 +580,29 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
     /// non-coinbase inputs of the specified block, keyed by the spending
-    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found.
+    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found or a secondary
+    /// view is torn.
     ///
-    /// An outpoint whose spent output could not be found in the best chain is
-    /// omitted from the map.
+    /// An unknown parent or outpoint is omitted from the map. Known pruned or corrupt parents
+    /// produce a service error instead of an incomplete map.
     SpentOutputs(Option<HashMap<transparent::OutPoint, transparent::Utxo>>),
 
-    /// The response to a `BlockHeader` request.
-    BlockHeader {
-        /// The header of the requested block
-        header: Arc<block::Header>,
-        /// The hash of the requested block
-        hash: block::Hash,
-        /// The height of the requested block
-        height: block::Height,
-        /// The hash of the next block after the requested block
-        next_block_hash: Option<block::Hash>,
-    },
+    /// Response to [`ReadRequest::BlockHeader`], or `None` if the block is unknown.
+    BlockHeader(Option<BlockHeader>),
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
+    ///
+    /// Unknown hashes and torn secondary views return `None`; known pruned or corrupt bodies
+    /// produce a service error instead.
     Transaction(Option<MinedTx>),
 
     /// Response to [`ReadRequest::KnownTransaction`], independent of body availability.
     KnownTransaction(bool),
 
-    /// Response to [`Request::Transaction`] with the specified transaction.
+    /// Response to [`ReadRequest::AnyChainTransaction`] with the specified transaction.
+    ///
+    /// Unknown hashes and torn secondary views return `None`; known pruned or corrupt bodies
+    /// produce a service error instead.
     AnyChainTransaction(Option<AnyTx>),
 
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
@@ -779,17 +781,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
-            ReadResponse::BlockHeader {
-                header,
-                hash,
-                height,
-                next_block_hash
-            } => Ok(Response::BlockHeader {
-                header,
-                hash,
-                height,
-                next_block_hash
-            }),
+            ReadResponse::BlockHeader(header) => Ok(Response::BlockHeader(header)),
             ReadResponse::Transaction(tx_info) => {
                 Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
             }

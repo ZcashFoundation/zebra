@@ -109,6 +109,7 @@ impl DiskFormatUpgrade for Upgrade {
                             if let Some(outpoint) = input.outpoint() {
                                 let (tx, h, _) = db
                                     .transaction(outpoint.hash)
+                                    .expect("block info reconstruction requires parent bodies")
                                     .expect("transaction should be in the database");
                                 let outputs = tx.outputs();
                                 let output = outputs

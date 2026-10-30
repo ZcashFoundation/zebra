@@ -7,18 +7,15 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, BoxError};
 
 use zebra_chain::{
-    block::Block,
+    block::{Block, Height},
     chain_sync_status::MockSyncStatus,
-    chain_tip::{
-        mock::{MockChainTip, MockChainTipSender},
-        NoChainTip,
-    },
+    chain_tip::mock::{MockChainTip, MockChainTipSender},
     parameters::Network::Mainnet,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool::{self, MempoolChange, MempoolTxSubscriber};
-use zebra_state::{ReadRequest, ReadResponse};
+use zebra_state::{BlockReadError, MinedTx, ReadRequest, ReadResponse, TransactionLocation};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
@@ -26,7 +23,8 @@ use zebra_test::{
 
 use crate::{
     lightwalletd::{
-        self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, CompactTx, Empty,
+        self, compact_tx_streamer_client::CompactTxStreamerClient, BlockId, BlockRange, CompactTx,
+        Empty, TransparentAddressBlockFilter, TxFilter,
     },
     methods::RpcImpl,
 };
@@ -36,6 +34,356 @@ type MockReadState = MockService<ReadRequest, ReadResponse, PanicAssertion, BoxE
 
 /// The mocked mempool service the server is built on.
 type MockMempool = MockService<mempool::Request, mempool::Response, PanicAssertion, BoxError>;
+
+/// Compact block lookups distinguish pruning from unknown blocks and other read failures.
+#[tokio::test]
+async fn compact_block_distinguishes_pruned_history() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server_task, client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let height = Height(42);
+
+    for nullifiers_only in [false, true] {
+        for (response, expected_code) in [
+            (Ok(ReadResponse::Block(None)), tonic::Code::NotFound),
+            (
+                Err(BoxError::from(BlockReadError::BlockBodyUnavailable {
+                    height,
+                })),
+                tonic::Code::FailedPrecondition,
+            ),
+            (
+                Err(BoxError::from(BlockReadError::CorruptBlock { height })),
+                tonic::Code::Internal,
+            ),
+            (
+                Err(BoxError::from(
+                    "block not available at height 42 (pruned data)",
+                )),
+                tonic::Code::Internal,
+            ),
+        ] {
+            let mut client = client.clone();
+            let request_task = tokio::spawn(async move {
+                let request = tonic::Request::new(BlockId {
+                    height: height.0.into(),
+                    hash: Vec::new(),
+                });
+                if nullifiers_only {
+                    client.get_block_nullifiers(request).await
+                } else {
+                    client.get_block(request).await
+                }
+            });
+            read_state
+                .expect_request(ReadRequest::Block(height.into()))
+                .await
+                .respond(response);
+
+            let status = tokio::time::timeout(Duration::from_secs(3), request_task)
+                .await??
+                .expect_err("an unavailable block must not be served");
+            assert_eq!(status.code(), expected_code);
+            if expected_code == tonic::Code::FailedPrecondition {
+                assert!(status.message().contains("42"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Raw transaction lookups preserve unknown and operational errors.
+#[tokio::test]
+async fn get_transaction_distinguishes_pruned_history() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server_task, client, mut read_state, mut mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let height = Height(42);
+    let hash = zebra_chain::transaction::Hash([7; 32]);
+
+    for (response, expected_code) in [
+        (
+            Ok(ReadResponse::AnyChainTransaction(None)),
+            tonic::Code::NotFound,
+        ),
+        (
+            Err(BoxError::from(BlockReadError::BlockBodyUnavailable {
+                height,
+            })),
+            tonic::Code::FailedPrecondition,
+        ),
+        (
+            Err(BoxError::from(BlockReadError::CorruptBlock { height })),
+            tonic::Code::Internal,
+        ),
+        (
+            Err(BoxError::from(
+                "transaction not available at height 42 (pruned data)",
+            )),
+            tonic::Code::Internal,
+        ),
+    ] {
+        let mut client = client.clone();
+        let request_task = tokio::spawn(async move {
+            client
+                .get_transaction(tonic::Request::new(TxFilter {
+                    hash: hash.0.to_vec(),
+                    ..Default::default()
+                }))
+                .await
+        });
+        read_state
+            .expect_request(ReadRequest::AnyChainTransaction(hash))
+            .await
+            .respond(response);
+        if expected_code == tonic::Code::NotFound {
+            mempool
+                .expect_request(mempool::Request::TransactionsByMinedId(
+                    [hash].into_iter().collect(),
+                ))
+                .await
+                .respond(mempool::Response::Transactions(Vec::new()));
+        }
+
+        let status = tokio::time::timeout(Duration::from_secs(3), request_task)
+            .await??
+            .expect_err("an unavailable transaction must not be served");
+        assert_eq!(status.code(), expected_code);
+        if expected_code == tonic::Code::FailedPrecondition {
+            assert!(status.message().contains("42"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Both treestate endpoints distinguish unknown blocks from failed header reads.
+#[tokio::test]
+async fn treestate_preserves_header_read_errors() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server_task, client, mut read_state, _mempool, chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let height = Height(42);
+    let hash = zebra_chain::block::Hash([7; 32]);
+    chain_tip_sender.send_best_tip_height(height);
+    chain_tip_sender.send_best_tip_hash(hash);
+
+    for latest in [false, true] {
+        for (response, code, message) in [
+            (
+                Ok(ReadResponse::BlockHeader(None)),
+                tonic::Code::NotFound,
+                "the requested block is not in the main chain".to_owned(),
+            ),
+            (
+                Err(BoxError::from("database read failed")),
+                tonic::Code::Internal,
+                "database read failed".to_owned(),
+            ),
+            (
+                Err(BoxError::from(BlockReadError::CorruptBlock { height })),
+                tonic::Code::Internal,
+                BlockReadError::CorruptBlock { height }.to_string(),
+            ),
+        ] {
+            let mut client = client.clone();
+            let request_task = tokio::spawn(async move {
+                if latest {
+                    client
+                        .get_latest_tree_state(tonic::Request::new(Empty {}))
+                        .await
+                } else {
+                    client
+                        .get_tree_state(tonic::Request::new(BlockId {
+                            height: height.0.into(),
+                            hash: Vec::new(),
+                        }))
+                        .await
+                }
+            });
+            let query = if latest { hash.into() } else { height.into() };
+            read_state
+                .expect_request(ReadRequest::BlockHeader(query))
+                .await
+                .respond(response);
+            let status = tokio::time::timeout(Duration::from_secs(3), request_task)
+                .await??
+                .expect_err("unknown or unreadable headers cannot produce a treestate");
+            assert_eq!(status.code(), code);
+            assert_eq!(status.message(), message);
+        }
+    }
+
+    Ok(())
+}
+
+/// A descending block stream delivers its retained block before the terminal pruning error.
+#[tokio::test]
+async fn block_range_ends_with_pruned_error_after_success() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server_task, client, mut read_state, _mempool, _chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES.zcash_deserialize_into()?;
+
+    for nullifiers_only in [false, true] {
+        let mut client = client.clone();
+        let request_task = tokio::spawn(async move {
+            let request = tonic::Request::new(BlockRange {
+                start: Some(BlockId {
+                    height: 3,
+                    hash: Vec::new(),
+                }),
+                end: Some(BlockId {
+                    height: 1,
+                    hash: Vec::new(),
+                }),
+            });
+            if nullifiers_only {
+                client.get_block_range_nullifiers(request).await
+            } else {
+                client.get_block_range(request).await
+            }
+        });
+        read_state
+            .expect_request(ReadRequest::Block(Height(3).into()))
+            .await
+            .respond(ReadResponse::Block(Some(block.clone())));
+        if !nullifiers_only {
+            for _ in 0..2 {
+                let handler = read_state
+                    .expect_request_that(|request| {
+                        matches!(
+                            request,
+                            ReadRequest::SaplingTree(_) | ReadRequest::OrchardTree(_)
+                        )
+                    })
+                    .await;
+                let response = match handler.request() {
+                    ReadRequest::SaplingTree(_) => {
+                        ReadResponse::SaplingTree(Some(Arc::new(Default::default())))
+                    }
+                    _ => ReadResponse::OrchardTree(Some(Arc::new(Default::default()))),
+                };
+                handler.respond(response);
+            }
+        }
+
+        let mut stream = tokio::time::timeout(Duration::from_secs(3), request_task)
+            .await???
+            .into_inner();
+        let first = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await?
+            .expect("the retained block must arrive")?;
+        assert_eq!(first.height, 3);
+
+        read_state
+            .expect_request(ReadRequest::Block(Height(2).into()))
+            .await
+            .respond_error(BlockReadError::BlockBodyUnavailable { height: Height(2) }.into());
+        let status = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await?
+            .expect("pruning must not become successful EOF")
+            .expect_err("the pruned block must fail");
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+        assert!(status.message().contains("height 2"));
+        assert!(tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await?
+            .is_none());
+    }
+
+    Ok(())
+}
+
+/// Address transaction streams report a pruning race after sending an earlier transaction.
+#[tokio::test]
+async fn address_transactions_end_with_pruned_error_after_success() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server_task, client, mut read_state, _mempool, chain_tip_sender, _mempool_change) =
+        start_server_and_get_client().await?;
+    let first: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let second: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+    let first_tx = first.transactions[0].clone();
+    let second_txid = second.transactions[0].hash();
+    chain_tip_sender.send_best_tip_height(Height(2));
+    chain_tip_sender.send_best_tip_hash(second.hash());
+
+    for legacy in [false, true] {
+        let mut client = client.clone();
+        let address = first_tx.outputs()[1].address(&Mainnet).unwrap();
+        let request_task = tokio::spawn(async move {
+            let request = tonic::Request::new(TransparentAddressBlockFilter {
+                address: address.to_string(),
+                range: Some(BlockRange {
+                    start: Some(BlockId {
+                        height: 1,
+                        hash: Vec::new(),
+                    }),
+                    end: Some(BlockId {
+                        height: 2,
+                        hash: Vec::new(),
+                    }),
+                }),
+            });
+            if legacy {
+                client.get_taddress_txids(request).await
+            } else {
+                client.get_taddress_transactions(request).await
+            }
+        });
+        read_state
+            .expect_request_that(|request| {
+                matches!(request, ReadRequest::TransactionIdsByAddresses { .. })
+            })
+            .await
+            .respond(ReadResponse::AddressesTransactionIds(
+                [
+                    (
+                        TransactionLocation::from_usize(Height(1), 0),
+                        first_tx.hash(),
+                    ),
+                    (TransactionLocation::from_usize(Height(2), 0), second_txid),
+                ]
+                .into_iter()
+                .collect(),
+            ));
+        read_state
+            .expect_request(ReadRequest::Transaction(first_tx.hash()))
+            .await
+            .respond(ReadResponse::Transaction(Some(MinedTx::new(
+                first_tx.clone(),
+                Height(1),
+                2,
+                first.header.time,
+                second.hash(),
+            ))));
+
+        let mut stream = tokio::time::timeout(Duration::from_secs(3), request_task)
+            .await???
+            .into_inner();
+        let first_response = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await?
+            .expect("the first transaction must arrive")?;
+        assert_eq!(first_response.data, first_tx.zcash_serialize_to_vec()?);
+        assert_eq!(first_response.height, 1);
+
+        read_state
+            .expect_request(ReadRequest::Transaction(second_txid))
+            .await
+            .respond_error(BlockReadError::BlockBodyUnavailable { height: Height(2) }.into());
+        let status = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await?
+            .expect("pruning must not become successful EOF")
+            .expect_err("the pruned transaction must fail");
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+        assert!(status.message().contains("height 2"));
+        assert!(tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await?
+            .is_none());
+    }
+
+    Ok(())
+}
 
 /// A missing note commitment tree must not be served as an empty tree.
 ///
@@ -417,7 +765,7 @@ async fn start_server_and_get_client() -> Result<(
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
-        NoChainTip,
+        chain_tip.clone(),
         MockAddressBookPeers::default(),
         misbehavior_rx,
         None,

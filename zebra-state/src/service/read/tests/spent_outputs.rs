@@ -272,6 +272,53 @@ fn spent_outputs_resolves_value_height_and_generated() {
     );
 }
 
+#[test]
+fn spent_outputs_rejects_pruned_and_corrupt_parent_bodies() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    for height in [Height(1), Height(2)] {
+        let (state, _, spender) = commit_chain(
+            vec![vec![small_output()], vec![small_output()]],
+            |parents| {
+                parents
+                    .iter()
+                    .map(|parent| OutPoint {
+                        hash: parent.transactions[0].hash(),
+                        index: 0,
+                    })
+                    .collect()
+            },
+        );
+        let query = spender.coinbase_height().unwrap().into();
+        assert_eq!(
+            spent_outputs_for_block(None::<Arc<Chain>>, &state.db, query)
+                .unwrap()
+                .unwrap()
+                .len(),
+            2
+        );
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &state.db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        state.db.write_batch(batch).unwrap();
+
+        assert!(state.db.block(query).unwrap().is_some());
+        let expected = if height == Height(1) {
+            BlockReadError::BlockBodyUnavailable { height }
+        } else {
+            BlockReadError::CorruptBlock { height }
+        };
+        assert_eq!(
+            spent_outputs_for_block(None::<Arc<Chain>>, &state.db, query).unwrap_err(),
+            expected
+        );
+    }
+}
+
 /// Every input spends a small output of a distinct large parent. The lookup must not keep all
 /// the parents in memory at once: peak heap should stay near one parent, not all of them.
 #[test]
