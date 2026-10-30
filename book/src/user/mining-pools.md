@@ -123,3 +123,9 @@ backend cannot also serve a zcashd sidecar.
   then let the node catch up before serving miners. Snapshots require trusting their producer's
   validation; checksums detect transfer corruption, not a malicious snapshot. Downloading, extracting,
   and catching up still take time, so snapshots complement a warm standby rather than replace one.
+
+## Monitor mining
+
+Use the [mining metrics](metrics.md#mining-metrics) to watch template build time, submission outcomes,
+and mined-block announcement failures and latency for signs of stale-block risk.
+Announcement completion measures local writes, not peer receipt or network-wide propagation.

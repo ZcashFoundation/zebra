@@ -306,6 +306,7 @@ impl BlockTemplateResponse {
         dependencies: TransactionDependencies,
     ) -> RpcResult<Self> {
         let height = chain_info.tip_height.next().map_misc_error()?;
+        let started = std::time::Instant::now();
         let parent_nsm_value_balance = nsm_value_balance_for_next_block(network, chain_info);
         let transactions = zip317::select_mempool_transactions(
             network,
@@ -315,7 +316,7 @@ impl BlockTemplateResponse {
             dependencies,
             parent_nsm_value_balance,
         );
-        Ok(Self::new_internal(
+        let template = Self::new_internal(
             network,
             coinbase_cache,
             miner_params,
@@ -323,7 +324,10 @@ impl BlockTemplateResponse {
             long_poll_id,
             transactions,
             None,
-        ))
+        );
+        metrics::histogram!("rpc.getblocktemplate.build.duration_seconds")
+            .record(started.elapsed().as_secs_f64());
+        Ok(template)
     }
 
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC

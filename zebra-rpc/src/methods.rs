@@ -3285,7 +3285,9 @@ where
                     "submit block failed: block bytes could not be deserialized into a structurally valid block"
                 );
 
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
+                return Ok(
+                    SubmitBlockResponse::from(SubmitBlockErrorResponse::Rejected).with_metrics(),
+                );
             }
         };
         let block = decoded.block();
@@ -3338,7 +3340,7 @@ where
             Ok(hash) => {
                 tracing::info!(?hash, ?height, "submit block accepted");
 
-                return Ok(SubmitBlockResponse::Accepted);
+                return Ok(SubmitBlockResponse::Accepted.with_metrics());
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
@@ -3445,7 +3447,7 @@ where
             Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
         };
 
-        Ok(response.into())
+        Ok(SubmitBlockResponse::from(response).with_metrics())
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {
