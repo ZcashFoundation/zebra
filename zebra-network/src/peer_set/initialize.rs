@@ -1359,7 +1359,7 @@ where
             } else {
                 debug!(?error, ?candidate.addr, "failed to make outbound connection to peer");
             }
-            report_failed(address_book_updater.clone(), candidate).await;
+            report_failed(address_book_updater.clone(), candidate, &error).await;
 
             // The demand signal that was taken out of the queue to attempt to connect to the
             // failed candidate never turned into a connection, so add it back.
@@ -1381,9 +1381,20 @@ where
 
 /// Mark `addr` as a failed peer to `address_book_updater`.
 #[instrument(skip(address_book_updater))]
-async fn report_failed(address_book_updater: AddressBookChangeSender, addr: MetaAddr) {
-    // The connection info is the same as what's already in the address book.
-    let addr = MetaAddr::new_errored(addr.addr, None);
+async fn report_failed(
+    address_book_updater: AddressBookChangeSender,
+    addr: MetaAddr,
+    error: &BoxError,
+) {
+    let addr = if matches!(
+        error.downcast_ref::<peer::HandshakeError>(),
+        Some(peer::HandshakeError::RemoteNonceReuse)
+    ) {
+        MetaAddr::new_self_connection(addr.addr)
+    } else {
+        // Preserve ordinary retry behavior for other connection failures.
+        MetaAddr::new_errored(addr.addr, None)
+    };
 
     // Ignore send errors on Zebra shutdown.
     let _ = address_book_updater.send(addr).await;

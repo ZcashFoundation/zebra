@@ -841,3 +841,162 @@ async fn a_lapsed_group_can_be_banned_again() {
         "the new ban should lapse BAN_DURATION after the re-ban"
     );
 }
+
+/// Inbound source ports must not displace listener addresses in the disk cache.
+#[test]
+fn cacheable_skips_inbound_addrs() {
+    let now = Utc::now();
+    let inbound = connected_test_addr("127.0.0.2:12345", true);
+    let outbound = connected_test_addr("127.0.0.3:8233", false);
+    let book = AddressBook::new_with_addrs(
+        "0.0.0.0:8233".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        [inbound, outbound.clone()],
+    );
+    assert_eq!(book.cacheable(now), vec![outbound]);
+}
+
+/// Even after liveness expires, inbound source ports are not dial targets.
+#[test]
+fn reconnection_peers_skips_inbound_addrs() {
+    let mut inbound = connected_test_addr("127.0.0.2:12345", true);
+    let mut outbound = connected_test_addr("127.0.0.3:8233", false);
+    inbound.set_last_response(DateTime32::MIN);
+    outbound.set_last_response(DateTime32::MIN);
+    let book = AddressBook::new_with_addrs(
+        "0.0.0.0:8233".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::current(),
+        [inbound, outbound.clone()],
+    );
+    assert_eq!(
+        book.reconnection_peers(Instant::now(), Utc::now())
+            .collect::<Vec<_>>(),
+        vec![outbound]
+    );
+}
+
+fn connected_test_addr(addr: &str, is_inbound: bool) -> MetaAddr {
+    MetaAddr::new_connected(
+        addr.parse().unwrap(),
+        &PeerServices::NODE_NETWORK,
+        is_inbound,
+        String::new(),
+        crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+    )
+    .into_new_meta_addr(Instant::now(), DateTime32::now())
+}
+
+/// Suppression survives queued updates, re-gossip, cloning, and batch application.
+#[test]
+fn self_connection_addr_is_removed_and_ignored() {
+    let self_peer = connected_test_addr("127.0.0.2:8233", false);
+    let other_peer = connected_test_addr("127.0.0.3:8233", false);
+    let addr = self_peer.addr();
+    let mut book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::none(),
+        [self_peer, other_peer.clone()],
+    );
+    let metrics = book.address_metrics_watcher();
+    book.extend([MetaAddr::new_self_connection(addr)]);
+    assert!(book.get(addr).is_none());
+    assert!(book.is_ready_for_connection_attempt_with_ip(&addr.ip(), Utc::now()));
+    assert_eq!(book.cacheable(Utc::now()), vec![other_peer.clone()]);
+    assert_eq!(metrics.borrow().num_addresses, 1);
+    assert!(!book
+        .sanitized(Utc::now())
+        .iter()
+        .any(|peer| peer.addr() == addr));
+    for mut book in [book.clone(), book] {
+        for change in [
+            gossiped_change(addr, PeerServices::NODE_NETWORK, DateTime32::now()),
+            MetaAddr::new_initial_peer(addr),
+            MetaAddr::new_responded(addr, None),
+            MetaAddr::new_errored(addr, None),
+        ] {
+            assert!(book.update(change).is_none());
+            assert!(book.get(addr).is_none());
+        }
+        assert_eq!(book.get(other_peer.addr()), Some(other_peer.clone()));
+    }
+}
+
+/// Remote-influenced suppression state has the same bound as the address book.
+#[test]
+fn self_connection_suppression_is_bounded() {
+    let mut book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        2,
+        Span::none(),
+        [],
+    );
+    let addrs: [crate::PeerSocketAddr; 3] = [
+        "127.0.0.2:8233".parse().unwrap(),
+        "127.0.0.3:8233".parse().unwrap(),
+        "127.0.0.4:8233".parse().unwrap(),
+    ];
+    for addr in addrs {
+        book.update(MetaAddr::new_self_connection(addr));
+        assert!(book.self_addrs.len() <= 2);
+    }
+    assert!(book.update(MetaAddr::new_initial_peer(addrs[0])).is_some());
+    for addr in &addrs[1..] {
+        assert!(book.update(MetaAddr::new_initial_peer(*addr)).is_none());
+    }
+}
+
+#[test]
+fn self_connection_suppression_preserves_misbehavior_bans() {
+    let addr = "127.0.0.2:8233".parse().unwrap();
+    let mut book = AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 1, Span::none());
+    book.update(MetaAddr::new_self_connection(addr));
+    book.update(MetaAddrChange::UpdateMisbehavior {
+        addr,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
+    });
+    assert!(book.bans.is_banned(addr.ip()));
+    assert!(book.get(addr).is_none());
+}
+
+/// Peer-cache serialization and startup loading must preserve only dialable listeners.
+#[tokio::test]
+async fn peer_cache_roundtrip_skips_inbound_addrs() {
+    let cache = tempfile::tempdir().unwrap();
+    let config = crate::Config {
+        cache_dir: crate::config::CacheDir::custom_path(cache.path()),
+        ..crate::Config::default()
+    };
+    let inbound = connected_test_addr("127.0.0.2:12345", true);
+    let outbound = connected_test_addr("127.0.0.3:8233", false);
+    let book = AddressBook::new_with_addrs(
+        "0.0.0.0:0".parse().unwrap(),
+        &Mainnet,
+        DEFAULT_MAX_CONNS_PER_IP,
+        MAX_ADDRS_IN_ADDRESS_BOOK,
+        Span::none(),
+        [inbound, outbound.clone()],
+    );
+    config
+        .update_peer_cache(
+            book.cacheable(Utc::now())
+                .into_iter()
+                .map(|peer| peer.addr())
+                .collect(),
+        )
+        .await
+        .unwrap();
+    let loaded = config.load_peer_cache().await.unwrap();
+    assert_eq!(loaded, [outbound.addr()].into_iter().collect());
+}

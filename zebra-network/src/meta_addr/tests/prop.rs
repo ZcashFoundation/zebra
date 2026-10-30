@@ -208,6 +208,11 @@ proptest! {
             // Check direct application
             let new_addr = change.apply_to_meta_addr(None, instant_now, chrono_now);
 
+            if matches!(change, MetaAddrChange::UpdateSelfConnection { .. }) {
+                prop_assert!(new_addr.is_none(), "self-connections must not create entries");
+                continue;
+            }
+
             prop_assert!(
                 new_addr.is_some(),
                 "applying a change to `None` should always result in a new address,\n \
