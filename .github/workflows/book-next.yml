@@ -1,0 +1,30 @@
+# Republish the docs site after a push to `next` changes its book. Only `main`
+# may deploy, so this starts `book.yml` there. See book/src/dev/next-branch.md.
+name: Book (next)
+
+on:
+  push:
+    branches: [next]
+    # The book's sources, including the root files it includes.
+    paths:
+      - "book/**"
+      - "README.md"
+      - "CONTRIBUTING.md"
+
+permissions: {}
+
+jobs:
+  republish:
+    name: Republish the docs site from main
+    if: github.repository_owner == 'ZcashFoundation'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      # GITHUB_TOKEN events start no workflow runs, except `workflow_dispatch`.
+      actions: write
+    steps:
+      - name: Start the Book workflow on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run book.yml --ref main

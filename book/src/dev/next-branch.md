@@ -27,3 +27,9 @@ Merge it with a merge commit. GitHub then marks the automatic sync pull request 
 ## Compare `next` With `main`
 
 `next` nodes report to Sentry in the `next` environment, and stage nodes in `stage`. Compare nodes on the same network and zone, for example `zebrad-next-mainnet-b` and `zebrad-main-mainnet-b`.
+
+## Read the `next` Book
+
+The book from `next` is published at [zebra.zfnd.org/next](https://zebra.zfnd.org/next/), beside the book from `main` at [zebra.zfnd.org](https://zebra.zfnd.org/). Compare the same page in both, for example `/dev/next-branch.html` and `/next/dev/next-branch.html`.
+
+GitHub Pages publishes the whole site in one deployment, and only `main` may deploy it, so every docs run on `main` also builds the `next` book. A push to `next` that changes the book starts that run through `book-next.yml`. If the `next` book fails to build, the run still publishes `main`'s docs, but without `/next` until a later run builds it.
