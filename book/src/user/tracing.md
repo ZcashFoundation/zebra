@@ -52,7 +52,8 @@ When Sentry is active, Zebra sends:
   the last one ends as exited on a clean shutdown and as crashed on a panic or a
   fatal error. Every session of a run has the same user ID, so Sentry's
   crash-free users rate is the share of runs without a crash;
-- the [block timing histograms](metrics.md#block-timing) as Sentry metrics.
+- the [block timing](metrics.md#block-timing) and
+  [sync stall](metrics.md#sync-stall-metrics) metrics as Sentry metrics.
 
 Events, logs, and metrics carry the `chain.network` tag. Once the node has a
 chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`.

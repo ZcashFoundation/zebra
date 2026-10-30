@@ -33,8 +33,10 @@ use crate::{
 };
 
 mod distributions;
+mod periodic;
 
 pub(crate) use distributions::SentryRecorder;
+pub(crate) use periodic::flush as flush_metrics;
 
 /// Keeps the Sentry client open until [`end`] drops it.
 ///
@@ -939,6 +941,68 @@ mod tests {
         assert_eq!(metric.unit, Some(Unit::Second));
         assert_eq!(attribute("phase"), Some("queue"));
         assert_eq!(attribute("chain.network"), Some("Mainnet"));
+    }
+
+    #[test]
+    fn listed_counters_and_gauges_are_sent_once_per_flush() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let envelopes = with_captured_envelopes_options(
+            || {
+                metrics::with_local_recorder(&SentryRecorder, || {
+                    for _ in 0..3 {
+                        metrics::counter!("sync.block.error.count", "kind" => "not_found")
+                            .increment(1);
+                    }
+                    metrics::counter!("sync.downloaded.block.count").increment(1);
+                    metrics::gauge!("sync.downloads.oldest_age_seconds").set(30.0);
+                    metrics::gauge!("sync.downloads.oldest_age_seconds").set(90.0);
+                });
+
+                super::flush_metrics();
+                // No new errors, so only the gauge's latest value is sent again.
+                super::flush_metrics();
+            },
+            metadata.client_options_with_release("zebrad@test".to_string()),
+        );
+
+        let mut metrics: Vec<_> = envelopes
+            .iter()
+            .flat_map(|envelope| envelope.items())
+            .filter_map(|item| match item {
+                EnvelopeItem::ItemContainer(ItemContainer::Metrics(metrics)) => Some(metrics),
+                _ => None,
+            })
+            .flatten()
+            .map(|metric| {
+                let kind = metric
+                    .attributes
+                    .get("kind")
+                    .and_then(|attr| attr.0.as_str().map(str::to_owned));
+                (metric.name.to_string(), metric.r#type, metric.value, kind)
+            })
+            .collect();
+        metrics.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let oldest_age = (
+            "sync.downloads.oldest_age_seconds".to_string(),
+            MetricType::Gauge,
+            90.0,
+            None,
+        );
+        assert_eq!(
+            metrics,
+            [
+                (
+                    "sync.block.error.count".to_string(),
+                    MetricType::Counter,
+                    3.0,
+                    Some("not_found".to_string()),
+                ),
+                oldest_age.clone(),
+                oldest_age,
+            ],
+        );
     }
 
     #[test]

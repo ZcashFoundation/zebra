@@ -1,7 +1,7 @@
 //! A download stream for Zebra's block syncer.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     convert,
     pin::Pin,
     sync::Arc,
@@ -246,8 +246,11 @@ where
     >,
 
     /// A list of channels that can be used to cancel pending block download and
-    /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    /// verify tasks, with the time each task was queued.
+    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, Instant)>,
+
+    /// The pending tasks in `cancel_handles`, ordered by the time they were queued.
+    queued_at: BTreeSet<(Instant, [u8; 32])>,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -277,17 +280,15 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
-
-                    Poll::Ready(Some(Ok((height, hash))))
-                }
-                Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
-                }
+            let result = join_result.expect("block download and verify tasks must not panic");
+            let hash = match &result {
+                Ok((_, hash)) | Err((_, hash)) => *hash,
+            };
+            if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
+                this.queued_at.remove(&(queued_at, hash.0));
             }
+
+            Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
         } else {
             Poll::Ready(None)
         }
@@ -345,6 +346,7 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            queued_at: BTreeSet::new(),
         }
     }
 
@@ -654,11 +656,15 @@ where
         // Try to start the spawned task before queueing the next block request
         tokio::task::yield_now().await;
 
+        let queued_at = Instant::now();
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(hash, (cancel_tx, queued_at))
+                .is_none(),
             "blocks are only queued once"
         );
+        self.queued_at.insert((queued_at, hash.0));
 
         Ok(())
     }
@@ -671,9 +677,11 @@ where
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        for (_hash, (cancel, _queued_at)) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
+
+        self.queued_at.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -692,6 +700,13 @@ where
     /// Get the number of currently in-flight download and verify tasks.
     pub fn in_flight(&mut self) -> usize {
         self.pending.len()
+    }
+
+    /// Returns when the oldest in-flight download and verify task was queued.
+    pub fn oldest_in_flight_since(&self) -> Option<std::time::Instant> {
+        self.queued_at
+            .first()
+            .map(|(queued_at, _hash)| queued_at.into_std())
     }
 
     /// Returns true if there are no in-flight download and verify tasks.

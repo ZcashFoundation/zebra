@@ -25,7 +25,7 @@ use zebra_state as zs;
 
 use crate::{
     components::{
-        sync::{self, downloads::BlockDownloadVerifyError, SyncStatus},
+        sync::{self, downloads::BlockDownloadVerifyError, RestartReason, SyncStatus},
         ChainSync,
     },
     config::ZebradConfig,
@@ -2219,6 +2219,118 @@ async fn verified_block_is_removed_from_reobtain_queue() {
     assert!(!chain_sync.block_reobtain_retries.contains_key(&hash));
 }
 
+/// Records counters, so tests can check what the syncer counts.
+#[derive(Default)]
+struct CounterRecorder(std::sync::Mutex<HashMap<metrics::Key, Arc<std::sync::atomic::AtomicU64>>>);
+
+impl CounterRecorder {
+    /// Returns the count of the counter with `name` and `labels`, in the order they're recorded.
+    fn count(&self, name: &'static str, labels: &[(&'static str, &'static str)]) -> u64 {
+        let labels: Vec<_> = labels
+            .iter()
+            .map(|&(key, value)| metrics::Label::new(key, value))
+            .collect();
+
+        self.0
+            .lock()
+            .expect("test recorder mutex is unpoisoned")
+            .get(&metrics::Key::from_parts(name, labels))
+            .map_or(0, |count| count.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl metrics::Recorder for CounterRecorder {
+    fn describe_counter(
+        &self,
+        _: metrics::KeyName,
+        _: Option<metrics::Unit>,
+        _: metrics::SharedString,
+    ) {
+    }
+
+    fn describe_gauge(
+        &self,
+        _: metrics::KeyName,
+        _: Option<metrics::Unit>,
+        _: metrics::SharedString,
+    ) {
+    }
+
+    fn describe_histogram(
+        &self,
+        _: metrics::KeyName,
+        _: Option<metrics::Unit>,
+        _: metrics::SharedString,
+    ) {
+    }
+
+    fn register_counter(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Counter {
+        metrics::Counter::from_arc(
+            self.0
+                .lock()
+                .expect("test recorder mutex is unpoisoned")
+                .entry(key.clone())
+                .or_default()
+                .clone(),
+        )
+    }
+
+    fn register_gauge(&self, _: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
+        metrics::Gauge::noop()
+    }
+
+    fn register_histogram(
+        &self,
+        _: &metrics::Key,
+        _: &metrics::Metadata<'_>,
+    ) -> metrics::Histogram {
+        metrics::Histogram::noop()
+    }
+}
+
+/// Block errors are counted by bounded kind, and restarts track whether the state tip advanced.
+#[tokio::test]
+async fn sync_diagnostics_count_block_errors_and_restarts() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let diagnostics = chain_sync.diagnostics.subscribe();
+    let hash = block::Hash::from([0xC1; 32]);
+    let recorder = CounterRecorder::default();
+
+    metrics::with_local_recorder(&recorder, || {
+        for error in [
+            BlockDownloadVerifyError::DownloadTimedOut { hash },
+            BlockDownloadVerifyError::DownloadTimedOut { hash },
+            BlockDownloadVerifyError::CancelledDuringDownload { hash },
+        ] {
+            let _ = chain_sync.handle_block_response(Err(error));
+        }
+
+        chain_sync.record_restart(RestartReason::BlockError, false);
+        chain_sync.record_restart(RestartReason::ExhaustedTips, false);
+        assert_eq!(diagnostics.borrow().restarts_without_progress, 2);
+
+        chain_sync.record_restart(RestartReason::ExhaustedTips, true);
+    });
+
+    let error_count = |kind| recorder.count("sync.block.error.count", &[("kind", kind)]);
+    assert_eq!(error_count("download_timed_out"), 2);
+    assert_eq!(error_count("cancelled"), 1);
+
+    let restart_count = |reason, made_progress| {
+        recorder.count(
+            "sync.restart.count",
+            &[("reason", reason), ("made_progress", made_progress)],
+        )
+    };
+    assert_eq!(restart_count("block_error", "false"), 1);
+    assert_eq!(restart_count("exhausted_tips", "false"), 1);
+    assert_eq!(restart_count("exhausted_tips", "true"), 1);
+
+    let diagnostics = diagnostics.borrow();
+    assert_eq!(diagnostics.last_restart, Some(RestartReason::ExhaustedTips));
+    assert_eq!(diagnostics.restarts_without_progress, 0);
+}
+
 /// A re-download that can't get network capacity before its deadline stays queued for a later
 /// sync round, along with the blocks queued after it, which don't wait out their own deadlines.
 #[tokio::test(start_paused = true)]
@@ -2250,8 +2362,11 @@ async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
     let missing = [block::Hash::from([0xB1; 32]), block::Hash::from([0xB2; 32])];
     chain_sync.reobtain_hashes.extend(missing);
 
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
     let started = tokio::time::Instant::now();
     chain_sync.reobtain_missing_blocks().await;
+    drop(metrics_guard);
 
     assert_eq!(
         chain_sync
@@ -2267,6 +2382,124 @@ async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
         sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT,
         "only the first block waits out its download deadline"
     );
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+        "a block that never got network capacity is counted once"
+    );
+}
+
+/// Blocks that fail to queue while obtaining or extending tips restart the sync as block errors,
+/// while other tip failures keep their stage.
+#[test]
+fn tip_block_submission_failures_restart_as_block_errors() {
+    type TestChainSync = ChainSync<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >;
+
+    let block = TestChainSync::tips_restart_error(
+        RestartReason::ExtendTipsError,
+        BlockDownloadVerifyError::Timeout.into(),
+    );
+    assert_eq!(block.reason, RestartReason::BlockError);
+    assert_eq!(block.kind, Some("network_ready_timeout"));
+
+    let other = TestChainSync::tips_restart_error(
+        RestartReason::ObtainTipsError,
+        color_eyre::eyre::eyre!("queued download of hash behind our chain tip"),
+    );
+    assert_eq!(other.reason, RestartReason::ObtainTipsError);
+    assert_eq!(other.kind, None);
+}
+
+/// A genesis block that can't get network capacity is counted as a block error.
+#[tokio::test(start_paused = true)]
+async fn genesis_submission_failures_are_counted() {
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        never_ready_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+    assert!(chain_sync.request_genesis_once().await.is_err());
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+    );
+}
+
+/// While a batch waits for network capacity, the published download state includes the blocks
+/// queued earlier in that batch.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_include_blocks_queued_before_a_readiness_wait() {
+    use indexmap::IndexSet;
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // The first download holds the only permit, so the second waits for network capacity.
+    let one_permit_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 1);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        one_permit_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let batch = IndexSet::from([block::Hash::from([0xD1; 32]), block::Hash::from([0xD2; 32])]);
+    let waiting = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_blocks(batch));
+    assert!(
+        waiting.await.is_err(),
+        "the second block waits for network capacity"
+    );
+
+    let diagnostics = diagnostics.borrow();
+    assert_eq!(diagnostics.in_flight, 1);
+    assert!(diagnostics.oldest_in_flight_since.is_some());
 }
 
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
