@@ -1,5 +1,21 @@
 # State Updates
 
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: the [state service](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service.rs), [write task](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/write.rs), and [non-finalized state](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/non_finalized_state.rs).
+
+- The in-memory/finalized boundary follows a [1,000-block rollback window](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/constants.rs), not 100.
+- Initialization is async; callers add buffering.
+- It returns a boxed read-write service and a separate `ReadStateService`.
+- It also returns `LatestChainTip` and `ChainTipChange`.
+- A separate task processes queued writes sequentially, not `Service::call`.
+- The [commit requests](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/request.rs) are `CommitSemanticallyVerifiedBlock` and `CommitCheckpointVerifiedBlock`.
+- Successful commits return `Response::Committed`, not `Response::Added`.
+- The [`AwaitUtxo` request](0004-asynchronous-script-verification.md) does not check spend restrictions.
+- Equal-work chains prefer the first-received tip, then [tip hash](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/non_finalized_state/chain.rs).
+
+---
+
 - Feature Name: state_updates
 - Start Date: 2020-08-14
 - Design PR: <https://github.com/ZcashFoundation/zebra/pull/902>
@@ -803,6 +819,8 @@ code review should not be a problem, but in the future, if we need to
 restrict access to write calls, we could implement a wrapper service that
 rejects these, and export "read" and "write" frontends to the same inner service.
 
+<a id="request-commit-block"></a>
+
 ### `Request::CommitBlock`
 
 [request-commit-block]: #request-commit-block
@@ -943,7 +961,7 @@ Then validating:
 - if the restrictions are satisfied, return the response;
 - if the spend is invalid, drop the request (and the caller will time out).
 
-[RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
+[RFC0004]: 0004-asynchronous-script-verification.md
 
 # Drawbacks
 

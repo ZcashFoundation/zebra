@@ -1,685 +1,579 @@
-# Zebra Cached State Database Implementation
+# State database format and upgrades
 
-## Adding a Column Family
+Zebra stores finalized chain data in RocksDB. A _column family_ is a named
+key-value map within that database. The database format includes the column
+family names, the byte encodings of their keys and values, and the
+relationships between records.
 
-Most Zebra column families are implemented using low-level methods that allow accesses using any
-type. But this is error-prone, because we can accidentally use different types to read and write
-them. (Or read using different types in different methods.)
+For deployment, direct-reader compatibility, and rollback, follow
+[Upgrading Zebra](../user/upgrading.md).
 
-If we type the column family name out every time, a typo can lead to a panic, because the column
-family doesn't exist.
+## Format versions and paths
 
-Instead:
+The database format version is independent of Zebra and Rust crate versions.
+Zebra 7.0.0 implements [format **29.0.0**][constants]:
 
-- define the name and type of each column family at the top of the implementation module,
-- add a method on the database that returns that type, and
-- add the column family name to the list of column families in the database
-  (in the `STATE_COLUMN_FAMILIES_IN_CODE` array):
+| Constant | Current value | Change requiring a bump |
+| --- | --- | --- |
+| `DATABASE_FORMAT_VERSION` | `29` | An incompatible encoding change or column family removal |
+| `DATABASE_FORMAT_MINOR_VERSION` | `0` | A significant compatible change, including a new column family |
+| `DATABASE_FORMAT_PATCH_VERSION` | `0` | A significant format compatibility fix |
 
-For example:
+A change that would otherwise be incompatible can use a minor bump only when
+all supported Zebra versions already contain the required compatibility code.
+The function `state_database_format_version_in_code()` returns the complete
+semantic version. Builds with the `indexer` feature return
+`29.0.0+indexer`; other builds return `29.0.0`.
+
+For persistent databases, the method `Config::db_path()` constructs this path:
+
+```text
+<state.cache_dir>/state/v<major>/<network>/
+```
+
+The network directory is `mainnet`, `testnet`, or `regtest` for the standard
+networks. A configured non-Regtest Testnet uses its lowercase name followed
+by `-` and its four-byte wire magic encoded as eight lowercase hexadecimal
+digits. The method [`Network::directory_name()`][network-directory] defines
+this namespace. Databases for the same network with different minor or patch
+versions still use the same major-version directory.
+
+The file `version` inside the database directory records the full semantic
+version, for example `29.0.0` or `29.0.0+indexer`, without a trailing newline.
+The [version reader][config] also accepts the legacy `minor.patch` form and
+supplies the major version from the requested database path. If the file is
+absent but the directory exists, it reports `<major>.0.0`. If both are absent,
+it reports no database. Malformed or unreadable version files are errors,
+not requests to resynchronize.
+
+The version writer replaces the file atomically. During a reusable
+major-version upgrade, the directory can temporarily contain a version file
+with the preceding major version while the format upgrade is pending.
+
+The [state configuration](../user/config.md#state) sets the cache root or selects
+a temporary directory named with the database kind, major version, and network.
+
+## Upgrading the state database
+
+A major version selects a different directory. It does not necessarily require
+resynchronization: a registered _reusable major upgrade_ permits the writer to
+move a compatible database from the immediately preceding major version into
+the new directory, then apply the required format changes.
+
+The registry [`restorable_db_versions()`][upgrade] contains destination majors
+`26`, `27`, `28`, and `29`. The [reuse implementation][disk-db] considers only
+`current_major - 1`: format 29 reuses format 28, not format 27 or earlier.
+
+Reuse requires all of the following:
+
+- The current major version has a registered reusable upgrade.
+- RocksDB recognizes the previous network directory as a database.
+- RocksDB does not recognize an existing database at the new path.
+- The canonical previous database path lies inside the canonical
+  `[state] cache_dir`.
+- The directory move succeeds.
+
+The writer renames the previous network directory into the new major-version
+path and records its old semantic version in the relocated `version` file.
+It removes the old major-version directory if that directory is now empty.
+It does not copy the database. A symlink to a database outside the cache root
+is not reused. If reuse does not occur, Zebra opens the current path or creates
+a new database there; an empty database requires synchronization from genesis.
+
+### The v28-to-v29 upgrade
+
+Format 29 adds the Network Sustainability Mechanism (NSM) balance to stored
+value pools. The registered upgrade uses `NoMigration`: existing records do
+not need rewriting because the new readers accept their older encodings.
+
+| Record | Format 28 writes | Format 29 writes |
+| --- | --- | --- |
+| `ValueBalance<NonNegative>` | 48 bytes | 56 bytes |
+| `BlockInfo` | 52 bytes | 60 bytes |
+
+Legacy records read with a zero NSM balance; new writes use the wider encoding
+even when that balance is zero. See the [byte layouts](#data-formats).
+
+### Old-database cleanup
+
+When enabled, the [cleanup task][config] scans major-version directories under
+the database-kind root, such as `<state.cache_dir>/state`, and removes older
+versions except predecessors of registered reusable upgrades. It skips current
+and newer versions, paths outside the canonical cache root, and ephemeral
+databases.
+
+The current registry protects `v25` through `v28`. Cleanup removes an eligible
+major-version directory as a whole, including its network subdirectories.
+
+### Upgrade execution and validity checks
+
+The wrapper [`ZebraDb::new()`][zebra-db] compares the on-disk version with the
+running format version and chooses one of four operations:
+
+| Database state | Operation |
+| --- | --- |
+| No database | Create the database and mark it with the running version |
+| Older version | Apply registered upgrades in version order |
+| Same version | Check the existing format |
+| Newer version | Mark it with the older running version, then check it |
+
+The last case applies to a database the binary actually opens. It is not a
+mechanism for opening another major-version directory. Within a compatible
+major version, recording the lower version makes a later newer writer repeat
+the required upgrades over data that the older writer could have changed.
+Compatibility remains the responsibility of the new format's implementation.
+
+The [upgrade framework][upgrade] runs on a separate thread. It captures the
+finalized tip at startup so migrations can process existing records while
+normal block commits write the current format above that tip. For each
+registered upgrade newer than the initial disk version, it:
+
+1. Calls `prepare()`, `run()`, and `validate()` if `needs_migration()` is true.
+2. Atomically records the completed upgrade's version.
+
+An empty finalized database skips record migrations and is marked with the
+running version. The trait `DiskFormatUpgrade` defaults `needs_migration()` to
+`true`. Its default `is_reusable_major_upgrade()` returns true for a version
+whose minor and patch components are both zero. The existing `NoMigration`
+implementation sets `needs_migration()` to `false` for reader-compatible
+changes that require no record rewrite.
+
+Detailed format checks run after startup format handling. They combine quick
+checks with every registered upgrade's `validate()` method. Quick checks cover
+the on-disk height limit and selected tree/subtree invariants; individual
+validators check their own formats. These checks do not reverify every block
+or prove every database record correct. An invalid result causes a panic with
+a delete-and-resynchronize diagnostic.
+
+Consensus separately checks cached chain hashes against the checkpoint list at
+startup. See [Checkpoint and full verification](overview.md#checkpoint-and-full-verification).
+
+Writer shutdown cancels the upgrade thread and checks the format if the recorded
+version has reached the running version. An interrupted upgrade retains the last
+completed version and resumes the remaining work on restart.
+[Periodic detailed checks](../user/config.md#state) are optional.
+Read-only secondary instances skip this upgrade/check thread.
+
+<a id="design"></a>
+
+### Design constraints
+
+Format upgrades run concurrently with block commits and state queries. A
+migration must preserve readable, correct data at every committed batch
+boundary, including cancellation and restart boundaries.
+
+- Make readers accept the old, partial, and new states that the migration can
+  expose. Return an explicit unavailable result when appropriate; do not
+  silently substitute incorrect wallet or validation data.
+- Reuse normal block-write calculations and encodings in migration code.
+  An upgraded database and a database synchronized from genesis must represent
+  the same chain identically.
+- Make repeat execution safe. Cancellation can occur after a batch is committed
+  but before the version file advances. Compatible downgrades can also require
+  an upgrade to run again.
+- Write related changes in one `DiskWriteBatch`. Separate successful writes do
+  not make a multi-column change atomic.
+- Check the cancellation receiver during long operations and before committing
+  batches. Return `CancelFormatChange` when cancellation is requested.
+- Bound work and memory use. Use bounded key ranges rather than retaining a
+  long-lived iterator over unrelated records.
+
+The current block writer demonstrates a concurrency-sensitive case: it uses
+merge operations for transparent address balances while format upgrades are
+pending, then switches to direct inserts after the format-upgrade flag is set.
+The migration and normal writes must not overwrite each other's balance
+changes. See [`ZebraDb::write_block()`][block-access] and the
+[address-received upgrade][block-info-upgrade].
+
+## Non-finalized state backup
+
+When [enabled](../user/config.md#state) for a persistent database, non-finalized
+backups use:
+
+```text
+<state.cache_dir>/non_finalized_state/<network>/<block-hash>
+```
+
+The network namespace matches the finalized database, but the backup path has
+no database-format version component. The [backup implementation][backup]
+stores an eight-byte little-endian signed deferred-pool balance change followed
+by the block's `ZcashSerialize` encoding. These are not RocksDB records and are
+not relocated by a major-version database move.
+
+The backup task writes blocks from all retained non-finalized chains, removes
+files for blocks no longer in that state, and waits at least five seconds
+between updates, so the backup can lag the in-memory tip.
+
+At startup, the [state service][service] restores backup blocks only when the
+finalized tip exists and is at or above the maximum checkpoint height supplied
+to the service. Otherwise it downloads and verifies blocks above the finalized
+tip again; subsequent backup updates remove files not retained in the new
+non-finalized state. Restoration deserializes blocks, skips already-finalized
+blocks, and reapplies contextual validation in height order. Invalid or
+unreadable backup blocks are logged and skipped.
+
+## Read-only and secondary instances
+
+An in-process `ReadStateService` reads the writer's shared database. The
+separate API `zebra_state::init_read_only()` instead opens an existing database
+as a RocksDB _secondary_: a reader that catches up with another instance's
+on-disk state. The function `spawn_init_read_only()` performs that initialization
+on a blocking task.
+
+The [secondary open path][disk-db] uses a separate temporary working directory.
+It does not create the primary cache, reuse an older major-version directory,
+run format upgrades, rewrite the primary version file, or flush or delete the
+primary database at shutdown. It requires an existing readable cache and
+database. Combining read-only mode with `[state] ephemeral = true` returns
+`StateInitError::ReadOnlyEphemeralConflict`.
+
+The returned `ZebraDb` exposes `try_catch_up_with_primary()` and
+`spawn_try_catch_up_with_primary()` for explicit refreshes. Initialization
+creates an empty non-finalized-state watch channel and returns its sender to
+the caller; it does not restore or automatically receive the writer's
+in-memory chains. Applications using this API must supply their own
+non-finalized updates if they need them.
+
+## Current state database format
+
+RocksDB orders keys lexicographically by bytes. Zebra encodes numeric index
+components in big-endian order so byte ordering matches chain ordering.
+Composite keys concatenate fixed-width components, allowing one-to-many
+indexes without storing a growing list in a single value.
+
+The array [`STATE_COLUMN_FAMILIES_IN_CODE`][families] registers all 29 families
+below, regardless of the `indexer` feature. The RocksDB `default` family is
+unused and must remain empty. Opening a database also preserves existing
+families not listed by the running code.
+
+For byte encodings, see [Data formats](#data-formats). For nullifier values,
+`SpendLocation` means `()` without `indexer`, or `TransactionLocation` with it;
+this is a table abbreviation, not a Rust type.
+
+| Column family | Key | Value |
+| --- | --- | --- |
+| `hash_by_height` | `block::Height` | `block::Hash` |
+| `height_by_hash` | `block::Hash` | `block::Height` |
+| `block_header_by_height` | `block::Height` | `block::Header` |
+| `tx_by_loc` | `TransactionLocation` | `transaction::Transaction` |
+| `hash_by_tx_loc` | `TransactionLocation` | `transaction::Hash` |
+| `tx_loc_by_hash` | `transaction::Hash` | `TransactionLocation` |
+| `balance_by_transparent_addr` | `transparent::Address` | `AddressBalanceLocation` |
+| `tx_loc_by_transparent_addr_loc` | `AddressTransaction` | `()` |
+| `utxo_by_out_loc` | `OutputLocation` | `transparent::Output` |
+| `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()` |
+| `tx_loc_by_spent_out_loc` | `OutputLocation` | `TransactionLocation` |
+| `sprout_nullifiers` | `sprout::Nullifier` | `SpendLocation` |
+| `sprout_anchors` | `sprout::tree::Root` | `sprout::tree::NoteCommitmentTree` |
+| `sprout_note_commitment_tree` | `()` | `sprout::tree::NoteCommitmentTree` |
+| `sapling_nullifiers` | `sapling::Nullifier` | `SpendLocation` |
+| `sapling_anchors` | `sapling::tree::Root` | `()` |
+| `sapling_note_commitment_tree` | `block::Height` | `sapling::tree::NoteCommitmentTree` |
+| `sapling_note_commitment_subtree` | `NoteCommitmentSubtreeIndex` | `NoteCommitmentSubtreeData<sapling_crypto::Node>` |
+| `orchard_nullifiers` | `orchard::Nullifier` | `SpendLocation` |
+| `orchard_anchors` | `orchard::tree::Root` | `()` |
+| `orchard_note_commitment_tree` | `block::Height` | `orchard::tree::NoteCommitmentTree` |
+| `orchard_note_commitment_subtree` | `NoteCommitmentSubtreeIndex` | `NoteCommitmentSubtreeData<orchard::tree::Node>` |
+| `ironwood_nullifiers` | `ironwood::Nullifier` | `SpendLocation` |
+| `ironwood_anchors` | `orchard::tree::Root` | `()` |
+| `ironwood_note_commitment_tree` | `block::Height` | `orchard::tree::NoteCommitmentTree` |
+| `ironwood_note_commitment_subtree` | `NoteCommitmentSubtreeIndex` | `NoteCommitmentSubtreeData<orchard::tree::Node>` |
+| `history_tree` | `()` | `HistoryTreeParts` |
+| `tip_chain_value_pool` | `()` | `ValueBalance<NonNegative>` |
+| `block_info` | `block::Height` | `BlockInfo` |
+
+### Indexer-dependent values
+
+The feature `indexer` populates `tx_loc_by_spent_out_loc` and records spending
+transaction locations in all four nullifier families. Without it, new
+nullifier values are empty and new transparent spending-location entries are
+not written.
+
+At startup, an indexer-enabled writer checks and backfills these indexes over
+existing blocks. A non-indexer writer opening a database marked `+indexer`
+removes the transparent spending-location entries, rewrites nullifier values
+as empty, and removes the build metadata after completion. During conversion,
+nullifier values can contain either encoding. The reader for
+`Option<TransactionLocation>` returns a location only for a five-byte value.
+This [feature conversion][upgrade] runs separately from numbered migrations.
+
+### Data formats
+
+The traits `IntoDisk` and `FromDisk` define serialization and deserialization
+in [`disk_format`][disk-format]. In the following tables, ‖ denotes byte
+concatenation; lengths are uncompressed byte counts, not RocksDB disk usage.
+
+| Type | Encoding | Bytes |
+| --- | --- | --- |
+| `block::Height` | Unsigned 24-bit big-endian integer | 3 |
+| `TransactionIndex` | Unsigned 16-bit big-endian integer | 2 |
+| `TransactionLocation` | `Height` ‖ `TransactionIndex` | 5 |
+| `OutputIndex` | Unsigned 24-bit big-endian integer | 3 |
+| `OutputLocation` | `TransactionLocation` ‖ `OutputIndex` | 8 |
+| `AddressLocation` | The first output location associated with the address | 8 |
+| `AddressTransaction` | `AddressLocation` ‖ `TransactionLocation` | 13 |
+| `AddressUnspentOutput` | `AddressLocation` ‖ `OutputLocation` | 16 |
+| `transparent::Address` | One-byte variant tag followed by its 20-byte hash | 21 |
+| `Amount` | Signed 64-bit little-endian integer | 8 |
+| `AddressBalanceLocation` | `Amount` ‖ `AddressLocation` ‖ `received`, with `received` an unsigned 64-bit little-endian integer | 24 |
+| `block::Hash`, `transaction::Hash` | Their raw internal bytes, not the displayed hexadecimal string | 32 |
+| Shielded nullifiers and anchor roots | Their pool-specific byte representation | 32 |
+| `NoteCommitmentSubtreeIndex` | Unsigned 16-bit big-endian integer | 2 |
+| `NoteCommitmentSubtreeData<Node>` | `end_height` ‖ `root`, using a three-byte height and 32-byte node | 35 |
+| `()` | Empty byte string | 0 |
+
+The [transparent address encoder][transparent-format] assigns tags `0` and `1`
+to Mainnet public-key-hash and script-hash addresses, `2` and `3` to their
+Testnet/Regtest equivalents, and `4` and `5` to Mainnet and Testnet/Regtest TEX
+addresses. A legacy 16-byte `AddressBalanceLocation` lacks `received`; its
+reader supplies zero until the relevant upgrade computes the total received.
+
+Block headers, transactions, and transparent outputs use `ZcashSerialize`
+encodings, with `ZcashDeserialize` on reads. Database location keys are
+Zebra-specific, not transaction outpoints or protocol height encodings.
+
+#### Value pools and block information
+
+The [value-pool encoding][value-balance] writes seven eight-byte amounts:
+transparent, Sprout, Sapling, Orchard, deferred, Ironwood, NSM. Readers also
+accept exactly 32, 40, or 48 bytes and supply zero for missing trailing pools.
+Other lengths are rejected.
+
+The [block-information encoding][chain-format] preserves the v28 prefix:
+
+```text
+Byte offsets   Field
+0..48          transparent, Sprout, Sapling, Orchard, deferred, Ironwood
+48..52         block size, unsigned 32-bit little-endian integer
+52..60         NSM balance, signed 64-bit little-endian amount
+```
+
+The reader also accepts the 44-byte pre-Ironwood layout, with its size at
+`40..44`, and the 52-byte pre-NSM layout. It ignores trailing bytes after the
+layout selected by the record length. This behavior does not make v28 readers
+compatible with v29 state as a whole; the value-pool decoder also has to
+support the new width.
+
+#### Tree records
+
+Note commitment trees use `bincode::DefaultOptions` with their `serde`
+implementations. Ironwood uses the Orchard tree, root, and subtree-node types
+but [stores them separately][shielded-format].
+
+The history-tree value is `HistoryTreeParts`: network kind, tree size, a map of
+peak positions to history entries, and current height. Its `bincode` encoding
+reconstructs `NonEmptyHistoryTree` using the configured network. The reader
+also accepts the legacy 253-byte history-entry width and zero-pads those entries
+to the current width.
+
+These derived encodings depend on struct layout and field order. Do not use
+`serde`-derived `bincode` formats for new database records. Define an explicit
+encoding and retain compatibility readers when required.
+
+### Record relationships and updates
+
+The block-height and block-hash families index each other. Transaction locations
+likewise index transaction hashes in both directions. Zebra stores headers and
+transactions separately: a block lookup resolves its height, reads the header,
+and collects that height's transactions in index order.
+
+The type `AddressLocation` aliases `OutputLocation` and identifies an address's
+first output even after it is spent. The address-balance record holds the
+current balance, that stable location, and the cumulative received amount.
+Address-transaction keys index transactions that send or receive funds;
+spending an output does not remove that history.
+
+For example, an address with first output at height 100, transaction 2, output
+3 has this eight-byte location:
+
+```text
+00 00 64 | 00 02 | 00 00 03
+height    tx      output
+```
+
+A transaction at height 101, index 4 that affects the same address has this
+13-byte `AddressTransaction` key:
+
+```text
+00 00 64 00 02 00 00 03 | 00 00 65 00 04
+address location         transaction location
+```
+
+Prefix-range reads over that address location retrieve its transaction or
+unspent-output locations in chain order. The values in those index families
+are empty. Spending an output removes both its `utxo_by_out_loc` entry and its
+`utxo_loc_by_transparent_addr_loc` entry. The stored output and its location
+supply the fields needed to reconstruct a `transparent::Utxo`.
+
+#### Address index diagram
+
+Solid arrows name column-family lookups; thick arrows show composite fields;
+dotted arrows show address-location prefix lookups.
+
+```mermaid
+flowchart TD
+    address["transparent::Address (21 bytes)"] -->|balance_by_transparent_addr| balance["AddressBalanceLocation (24 bytes)"]
+    balance ==>|balance| amount["Amount (8 bytes)"]
+    balance ==>|address_location| location["AddressLocation (8 bytes)"]
+    balance ==>|received| received["u64 (8 bytes)"]
+    location -.->|"tx_loc_by_transparent_addr_loc: AddressTransaction (13 bytes)"| transaction["TransactionLocation (5 bytes)"]
+    location -.->|"utxo_loc_by_transparent_addr_loc: AddressUnspentOutput (16 bytes)"| output_location["OutputLocation (8 bytes)"]
+    output_location -->|utxo_by_out_loc| output["transparent::Output"]
+    output_location ==> transaction
+    output_location ==> output_index["OutputIndex (3 bytes)"]
+    transaction ==> height["block::Height (3 bytes)"]
+    transaction ==> transaction_index["TransactionIndex (2 bytes)"]
+```
+
+#### Shielded and chain records
+
+The Sprout tree family stores the current tree under the empty key; Sprout
+anchors map roots to trees. The [tree writer][shielded-access] stores Sapling,
+Orchard, and Ironwood trees at genesis and when they change. Reads find the
+latest tree at or below the requested height. Subtree families use subtree
+indexes as keys and store each completion height and root.
+
+The history tree and tip value pools each use a single empty key. Per-block
+value pools and block sizes are stored separately in `block_info`.
+
+A normal finalized block commit writes its related records in one RocksDB
+write batch. Separate reads across families are not a shared snapshot merely
+because each block write is atomic. The
+[address-balance query][balance-query] detects intervening finalized commits and
+retries a bounded number of times. It then removes overlapping finalized blocks
+from its cached non-finalized chain before combining balances, avoiding
+double-counting. Preserve these consistency rules when extending state queries.
+
+## Adding a column family
+
+Use a named constant, a `TypedColumnFamily<Key, Value>` alias, and a database
+accessor instead of repeating a string and choosing types at every read or
+write. Add the name to `STATE_COLUMN_FAMILIES_IN_CODE`; declaring an accessor
+does not create the family.
+
+The [`block_info` accessor][chain-access] in `zebra_db` follows this pattern:
 
 ```rust
-/// The name of the sapling transaction IDs result column family.
-pub const SAPLING_TX_IDS: &str = "sapling_tx_ids";
+pub const BLOCK_INFO: &str = "block_info";
 
-/// The column families supported by the running `zebra-scan` database code.
-pub const SCANNER_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
-    sapling::SAPLING_TX_IDS,
-];
+pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
 
-/// The type for reading sapling transaction IDs results from the database.
-pub type SaplingTxIdsCf<'cf> =
-    TypedColumnFamily<'cf, SaplingScannedDatabaseIndex, Option<SaplingScannedResult>>;
-
-impl Storage {
-    /// Returns a typed handle to the `sapling_tx_ids` column family.
-    pub(crate) fn sapling_tx_ids_cf(&self) -> SaplingTxIdsCf {
-        SaplingTxIdsCf::new(&self.db, SAPLING_TX_IDS)
+impl ZebraDb {
+    pub(crate) fn block_info_cf(&self) -> BlockInfoCf<'_> {
+        BlockInfoCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }
 }
 ```
 
-Then, every read of the column family uses that method, which enforces the correct types:
-(These methods have the same name as the low-level methods, but are easier to call.)
-
-```rust
-impl Storage {
-    /// Returns the result for a specific database index (key, block height, transaction index).
-    pub fn sapling_result_for_index(
-        &self,
-        index: &SaplingScannedDatabaseIndex,
-    ) -> Option<SaplingScannedResult> {
-        self.sapling_tx_ids_cf().zs_get(index).flatten()
-    }
-
-    /// Returns the Sapling indexes and results in the supplied range.
-    fn sapling_results_in_range(
-        &self,
-        range: impl RangeBounds<SaplingScannedDatabaseIndex>,
-    ) -> BTreeMap<SaplingScannedDatabaseIndex, Option<SaplingScannedResult>> {
-        self.sapling_tx_ids_cf().zs_items_in_range_ordered(range)
-    }
-}
-```
-
-This simplifies the implementation compared with the raw `ReadDisk` methods.
-
-To write to the database, use the `new_batch_for_writing()` method on the column family type.
-This returns a batch that enforces the correct types. Use `write_batch()` to write it to the
-database:
-
-```rust
-impl Storage {
-    /// Insert a sapling scanning `key`, and mark all heights before `birthday_height` so they
-    /// won't be scanned.
-    pub(crate) fn insert_sapling_key(
-        &mut self,
-        storage: &Storage,
-        sapling_key: &SaplingScanningKey,
-        birthday_height: Option<Height>,
-    ) {
-        ...
-        self.sapling_tx_ids_cf()
-            .new_batch_for_writing()
-            .zs_insert(&index, &None)
-            .write_batch()
-            .expect("unexpected database write failure");
-    }
-}
-```
-
-To write to an existing batch in legacy code, use `with_batch_for_writing()` instead.
-This relies on the caller to write the batch to the database:
-
-```rust
-impl DiskWriteBatch {
-    /// Updates the history tree for the tip, if it is not empty.
-    ///
-    /// The batch must be written to the database by the caller.
-    pub fn update_history_tree(&mut self, db: &ZebraDb, tree: &HistoryTree) {
-        let history_tree_cf = db.history_tree_cf().with_batch_for_writing(self);
-
-        if let Some(tree) = tree.as_ref().as_ref() {
-            // The batch is modified by this method and written by the caller.
-            let _ = history_tree_cf.zs_insert(&(), tree);
-        }
-    }
-}
-```
-
-To write to a legacy batch, then write it to the database, you can use
-`take_batch_for_writing(batch).write_batch()`.
-
-During database upgrades, you might need to access the same column family using different types.
-[Define a type](https://github.com/ZcashFoundation/zebra/pull/8115/files#diff-ba689ca6516946a903da62153652d91dc1bb3d0100bcf08698cb3f38ead57734R36-R53)
-and [convenience method](https://github.com/ZcashFoundation/zebra/pull/8115/files#diff-ba689ca6516946a903da62153652d91dc1bb3d0100bcf08698cb3f38ead57734R69-R87)
-for each legacy type, and use them during the upgrade.
-
-Some full examples of legacy code conversions, and the typed column family implementation itself
-are in [PR #8112](https://github.com/ZcashFoundation/zebra/pull/8112/files) and
-[PR #8115](https://github.com/ZcashFoundation/zebra/pull/8115/files).
-
-## Current Implementation
-
-### Verification Modes
-
-[verification]: #verification
-
-Zebra's state has two verification modes:
-
-- block hash checkpoints, and
-- full verification.
-
-This means that verification uses two different codepaths, and they must produce the same results.
-
-By default, Zebra uses as many checkpoints as it can, because they are more secure against rollbacks
-(and some other kinds of chain attacks). Then it uses full verification for the last few thousand
-blocks.
-
-When Zebra gets more checkpoints in each new release, it checks the previously verified cached
-state against those checkpoints. This checks that the two codepaths produce the same results.
-
-## Upgrading the State Database
-
-[upgrades]: #upgrades
-
-For most state upgrades, we want to modify the database format of the existing database.
-Major version changes create a new cache and require a full resync unless a registered
-upgrade supports reusing the previous major version.
-
-The NU7/NSM format is v29. Its registered upgrade automatically reuses compatible v28
-state without resyncing or rewriting existing records. When no v29 database exists,
-the writer moves the v28 network directory into `state/v29`, provided the old state
-is inside `state.cache_dir`. Legacy 48-byte `ValueBalance` and 52-byte `BlockInfo`
-records remain readable with a zero NSM balance; new writes use 56 and 60 bytes.
-The NSM balance follows the existing 52-byte `BlockInfo` prefix, leaving the
-block-size offset unchanged.
-
-Before upgrading, stop Zebra and direct database readers and retain a v28 backup
-outside the active cache for rollback. A v28 reader cannot read the wider records
-written by v29. Setting `state.delete_old_database = false` only disables cleanup;
-it does not preserve the directory that the upgrade moves.
-
-Direct database readers must be upgraded with the writer: Zallet's Zebra backend,
-Zaino's Zebra read-state backend, and other consumers opening Zebra's cache need a
-v29-compatible `zebra-state` dependency. Start the writer before compatible readers;
-read-only instances do not perform the upgrade. Manually renaming or symlinking
-versioned directories is not a substitute for the supported upgrade.
-Integration builds and their binary caches must identify the Zebra revision used
-by each direct reader as well as the writer, rather than matching only the
-downstream application's revision.
-
-### Writing Blocks to the State
-
-[write-block]: #write-block
-
-Blocks can be written to the database via two different code paths, and both must produce the same results:
-
-- Upgrading a pre-existing database to the latest format
-- Writing newly-synced blocks in the latest format
-
-This code is high risk, because discovering bugs is tricky, and fixing bugs can require a full reset
-and re-write of an entire column family.
-
-Most Zebra instances will do an upgrade, because they already have a cached state, and upgrades are
-faster. But we run a full sync in CI every week, because new users use that codepath. (And it is
-their first experience of Zebra.)
-
-When Zebra starts up and shuts down (and periodically in CI tests), we run checks on the state
-format. This makes sure that the two codepaths produce the same state on disk.
-
-Within a major format version, to reduce code and testing complexity:
-
-- when a previous Zebra version opens a newer state, the entire state is considered to have that lower version, and
-- when a newer Zebra version opens an older state, each required upgrade is run on the entire state.
-
-### In-Place Upgrade Goals
-
-[upgrade-goals]: #upgrade-goals
-
-Here are the goals of in-place upgrades:
-
-- avoid a full download and rebuild of the state
-- Zebra must be able to upgrade the format from previous minor or patch versions of its disk format
-  (Major versions are breaking changes, but registered reusable major upgrades avoid a full resync.)
-  - this is checked the first time CI runs on a PR with a new state version.
-    After the first CI run, the cached state is marked as upgraded, so the upgrade doesn't run
-    again. If CI fails on the first run, any cached states with that version should be deleted.
-- the upgrade and full sync formats must be identical
-  - this is partially checked by the state validity checks for each upgrade (see above)
-- previous Zebra versions using the same major format should be able to load the new format
-  - this is checked by other PRs running using the upgraded cached state, but only if a Rust PR
-    runs after the new PR's CI finishes, but before it merges
-- best-effort loading of older supported states by newer Zebra versions
-- best-effort compatibility between newer states and older supported Zebra versions using the same major format
-
-### Design Constraints
-
-[design]: #design
-
-Upgrades run concurrently with state verification and RPC requests.
-
-This means that:
-
-- the state must be able to read the old and new formats
-  - it can't panic if the data is missing
-  - it can't give incorrect results, because that can affect verification or wallets
-  - it can return an error
-  - it can only return an `Option` if the caller handles it correctly
-- full syncs and upgrades must write the same format
-  - the same write method should be called from both the full sync and upgrade code,
-    this helps prevent data inconsistencies
-- repeated upgrades must produce a valid state format
-  - if Zebra is restarted, the format upgrade will run multiple times
-  - if an older Zebra version opens the state, data can be written in an older format
-- the format must be valid before and after each database transaction or API call, because an
-  upgrade can be cancelled at any time
-  - multi-column family changes should made in database transactions
-  - if you are building new column family:
-    - disable state queries, then enable them once it's done, or
-    - do the upgrade in an order that produces correct results
-      (for example, some data is valid from genesis forward, and some from the tip backward)
-  - if each database API call produces a valid format, transactions aren't needed
-
-If there is an upgrade failure, panic and tell the user to delete their cached state and re-launch
-Zebra.
-
-#### Performance Constraints
-
-[performance]: #performance
-
-Some column family access patterns can lead to very poor performance.
-
-Known performance issues include:
-
-- using an iterator on a column family which also deletes keys
-- creating large numbers of iterators
-- holding an iterator for a long time
-
-See the performance notes and bug reports in:
-
-- <https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound>
-- <https://tracker.ceph.com/issues/55324>
-- <https://jira.mariadb.org/browse/MDEV-19670>
-
-But we need to use iterators for some operations, so our alternatives are (in preferred order):
-
-1. Minimise the number of keys we delete, and how often we delete them
-2. Avoid using iterators on column families where we delete keys
-3. If we must use iterators on those column families, set read bounds to minimise the amount of deleted data that is read
-
-Currently only UTXOs require key deletion, and only `utxo_loc_by_transparent_addr_loc` requires
-deletion and iterators.
-
-### Required Tests
-
-[testing]: #testing
-
-State upgrades are a high-risk change. They permanently modify the state format on production Zebra
-instances. Format issues are tricky to diagnose, and require extensive testing and a new release to
-fix. Deleting and rebuilding an entire column family can also be costly, taking minutes or hours the
-first time a cached state is upgraded to a new Zebra release.
-
-Some format bugs can't be fixed, and require an entire rebuild of the state. For example, deleting
-or corrupting transactions or block headers.
-
-So testing format upgrades is extremely important. Every state format upgrade should test:
-
-- new format serializations
-- new calculations or data processing
-- the upgrade produces a valid format
-- a full sync produces a valid format
-
-Together, the tests should cover every code path. For example, the subtrees needed mid-block,
-end-of-block, sapling, and orchard tests. They mainly used the validity checks for coverage.
-
-Each test should be followed by a restart, a sync of 200+ blocks, and another restart. This
-simulates typical user behaviour.
-
-And ideally:
-
-- An upgrade from the earliest supported Zebra version
-  (the CI sync-past-mandatory-checkpoint tests do this on every PR)
-
-#### Manually Triggering a Format Upgrade
-
-[manual-upgrade]: #manual-upgrade
-
-Zebra stores the current state minor and patch versions in a `version` file in the database
-directory. This path varies based on the OS, major state version, network, and config.
-
-For example, the default mainnet state version on Linux is at:
-`~/.cache/zebra/state/v25/mainnet/version`
-
-To upgrade a cached Zebra state from `v25.0.0` to the latest disk format, delete the version file.
-To upgrade from a specific version `v25.x.y`, edit the file so it contains `x.y`.
-
-Editing the file and running Zebra will trigger a re-upgrade over an existing state.
-Re-upgrades can hide format bugs. For example, if the old code was correct, and the
-new code skips blocks, the validity checks won't find that bug.
-
-So it is better to test with a full sync, and an older cached state.
-
-## Current State Database Format
-
-[current]: #current
-
-rocksdb provides a persistent, thread-safe `BTreeMap<&[u8], &[u8]>`. Each map is
-a distinct "tree". Keys are sorted using lexicographic order (`[u8].sorted()`) on byte strings, so
-integer values should be stored using big-endian encoding (so that the lex
-order on byte strings is the numeric ordering).
-
-Note that the lex order storage allows creating 1-to-many maps using keys only.
-For example, the `tx_loc_by_transparent_addr_loc` allows mapping each address
-to all transactions related to it, by simply storing each transaction prefixed
-with the address as the key, leaving the value empty. Since rocksdb allows
-listing all keys with a given prefix, it will allow listing all transactions
-related to a given address.
-
-We use the following rocksdb column families:
-
-| Column Family                      | Keys                   | Values                        | Changes |
-| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
-| _Blocks_                           |                        |                               |         |
-| `hash_by_height`                   | `block::Height`        | `block::Hash`                 | Create  |
-| `height_by_hash`                   | `block::Hash`          | `block::Height`               | Create  |
-| `block_header_by_height`           | `block::Height`        | `block::Header`               | Create  |
-| _Transactions_                     |                        |                               |         |
-| `tx_by_loc`                        | `TransactionLocation`  | `Transaction`                 | Create  |
-| `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Create  |
-| `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Create  |
-| _Transparent_                      |                        |                               |         |
-| `balance_by_transparent_addr`      | `transparent::Address` | `AddressBalanceLocation`      | Update  |
-| `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
-| `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
-| `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
-| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
-| _Sprout_                           |                        |                               |         |
-| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
-| `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
-| `sprout_note_commitment_tree`      | `()`                   | `sprout::NoteCommitmentTree`  | Update  |
-| _Sapling_                          |                        |                               |         |
-| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
-| `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
-| `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
-| `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
-| _Orchard_                          |                        |                               |         |
-| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
-| `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
-| `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
-| `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
-| _Ironwood_                         |                        |                               |         |
-| `ironwood_nullifiers`              | `ironwood::Nullifier`  | `()`                          | Create  |
-| `ironwood_anchors`                 | `orchard::tree::Root`  | `()`                          | Create  |
-| `ironwood_note_commitment_tree`    | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
-| `ironwood_note_commitment_subtree` | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
-| _Chain_                            |                        |                               |         |
-| `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
-| `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
-| `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
-
-With the following additional modifications when compiled with the `indexer` feature
-(the column families themselves are always registered — see `STATE_COLUMN_FAMILIES_IN_CODE`
-in `zebra-state/src/service/finalized_state.rs` — but the nullifier column families store
-these richer values instead of `()`):
-
-| Column Family             | Keys                 | Values                | Changes |
-| ------------------------- | -------------------- | --------------------- | ------- |
-| _Sprout_                  |                      |                       |         |
-| `sprout_nullifiers`       | `sprout::Nullifier`  | `TransactionLocation` | Create  |
-| _Sapling_                 |                      |                       |         |
-| `sapling_nullifiers`      | `sapling::Nullifier` | `TransactionLocation` | Create  |
-| _Orchard_                 |                      |                       |         |
-| `orchard_nullifiers`      | `orchard::Nullifier` | `TransactionLocation` | Create  |
-| _Ironwood_                |                      |                       |         |
-| `ironwood_nullifiers`     | `ironwood::Nullifier` | `TransactionLocation` | Create |
-
-### Data Formats
-
-[rocksdb-data-format]: #rocksdb-data-format
-
-We use big-endian encoding for keys, to allow database index prefix searches.
-
-Most Zcash protocol structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
-Other structures are encoded using custom `IntoDisk`/`FromDisk` implementations.
-
-Block and Transaction Data:
-
-- `Height`: 24 bits, big-endian, unsigned (allows for ~30 years worth of blocks)
-- `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
-- `TransactionCount`: same as `TransactionIndex`
-- `TransactionLocation`: `Height \|\| TransactionIndex`
-- `AddressBalanceLocation`: `Amount \|\| u64 \|\| AddressLocation`
-- `OutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
-- transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
-- `OutputLocation`: `TransactionLocation \|\| OutputIndex`
-- `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
-  Always has the same value for each address, even if the first output is spent.
-- `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
-- `AddressUnspentOutput`: `AddressLocation \|\| OutputLocation`,
-  used instead of a `BTreeSet<OutputLocation>` value, to improve database performance
-- `AddressTransaction`: `AddressLocation \|\| TransactionLocation`
-  used instead of a `BTreeSet<TransactionLocation>` value, to improve database performance
-- `NoteCommitmentSubtreeIndex`: 16 bits, big-endian, unsigned
-- `NoteCommitmentSubtreeData<{sapling, orchard}::tree::Node>`: `Height \|\| {sapling, orchard}::tree::Node`
-
-Amounts:
-
-- `Amount`: 64 bits, little-endian, signed
-- `ValueBalance`: `[Amount; 4]`
-
-Derived Formats (legacy):
-
-- `*::NoteCommitmentTree`: `bincode` using `serde`
-  - stored note commitment trees always have cached roots
-- `NonEmptyHistoryTree`: `bincode` using `serde`, using our copy of an old `zcash_history` `serde`
-  implementation
-
-`bincode` is a risky format to use, because it depends on the exact order and type of struct fields.
-Do not use it for new column families.
-
-#### Address Format
-
-[rocksdb-address-format]: #rocksdb-address-format
-
-The following figure helps visualizing the address index, which is the most complicated part.
-Numbers in brackets are array sizes; bold arrows are compositions (i.e. `TransactionLocation` is the
-concatenation of `Height` and `TransactionIndex`); dashed arrows are compositions that are also 1-to-many
-maps (i.e. `AddressTransaction` is the concatenation of `AddressLocation` and `TransactionLocation`,
-but also is used to map each `AddressLocation` to multiple `TransactionLocation`s).
-
-```mermaid
-graph TD;
-    Address -->|"balance_by_transparent_addr<br/>"| AddressBalance;
-    AddressBalance ==> Amount;
-    AddressBalance ==> AddressLocation;
-    AddressLocation ==> FirstOutputLocation;
-    AddressLocation -.->|"tx_loc_by_transparent_addr_loc<br/>(AddressTransaction[13])"| TransactionLocation;
-    TransactionLocation ==> Height;
-    TransactionLocation ==> TransactionIndex;
-    OutputLocation -->|utxo_by_out_loc| Output;
-    OutputLocation ==> TransactionLocation;
-    OutputLocation ==> OutputIndex;
-    AddressLocation -.->|"utxo_loc_by_transparent_addr_loc<br/>(AddressUnspentOutput[16])"| OutputLocation;
-
-    AddressBalance["AddressBalance[16]"];
-    Amount["Amount[8]"];
-    Height["Height[3]"];
-    Address["Address[21]"];
-    TransactionIndex["TransactionIndex[2]"];
-    TransactionLocation["TransactionLocation[5]"];
-    OutputIndex["OutputIndex[3]"];
-    OutputLocation["OutputLocation[8]"];
-    FirstOutputLocation["First OutputLocation[8]"];
-    AddressLocation["AddressLocation[8]"];
-```
-
-### Implementing consensus rules using rocksdb
-
-[rocksdb-consensus-rules]: #rocksdb-consensus-rules
-
-Each column family handles updates differently, based on its specific consensus rules:
-
-- Create:
-  - Each key-value entry is created once.
-  - Keys are never deleted, values are never updated.
-- Delete:
-  - Each key-value entry is created once.
-  - Keys can be deleted, but values are never updated.
-  - Code called by ReadStateService must ignore deleted keys, or use a read lock.
-  - We avoid deleting keys, and avoid using iterators on `Delete` column families, for performance.
-  - TODO: should we prevent re-inserts of keys that have been deleted?
-- Update:
-  - Each key-value entry is created once.
-  - Keys are never deleted, but values can be updated.
-  - Code called by ReadStateService must handle old or new values, or use a read lock.
-
-We can't do some kinds of value updates, because they cause RocksDB performance issues:
-
-- Append:
-  - Keys are never deleted.
-  - Existing values are never updated.
-  - Sets of values have additional items appended to the end of the set.
-  - Code called by ReadStateService must handle shorter or longer sets, or use a read lock.
-- Up/Del:
-  - Keys can be deleted.
-  - Sets of values have items added or deleted (in any position).
-  - Code called by ReadStateService must ignore deleted keys and values,
-    accept shorter or longer sets, and accept old or new values.
-    Or it should use a read lock.
-
-Avoid using large sets of values as RocksDB keys or values.
-
-### RocksDB read locks
-
-[rocksdb-read-locks]: #rocksdb-read-locks
-
-The read-only ReadStateService needs to handle concurrent writes and deletes of the finalized
-column families it reads. It must also handle overlaps between the cached non-finalized `Chain`,
-and the current finalized state database.
-
-The StateService uses RocksDB transactions for each block write.
-So ReadStateService queries that only access a single key or value will always see
-a consistent view of the database.
-
-If a ReadStateService query only uses column families that have keys and values appended
-(`Create` in the Changes column of the tables above — entries are never updated or deleted),
-it should ignore extra appended values.
-Most queries do this by default.
-
-For more complex queries, there are several options:
-
-Reading across multiple column families:
-
-1. Ignore deleted values using custom Rust code
-2. Take a database snapshot - <https://docs.rs/rocksdb/latest/rocksdb/struct.DBCommon.html#method.snapshot>
-
-Reading a single column family: 3. multi_get - <https://docs.rs/rocksdb/latest/rocksdb/struct.DBCommon.html#method.multi_get_cf> 4. iterator - <https://docs.rs/rocksdb/latest/rocksdb/struct.DBCommon.html#method.iterator_cf>
-
-RocksDB also has read transactions, but they don't seem to be exposed in the Rust crate.
-
-### Low-Level Implementation Details
-
-[rocksdb-low-level]: #rocksdb-low-level
-
-RocksDB ignores duplicate puts and deletes, preserving the latest values.
-If rejecting duplicate puts or deletes is consensus-critical,
-check [`db.get_cf(cf, key)?`](https://docs.rs/rocksdb/0.16.0/rocksdb/struct.DBWithThreadMode.html#method.get_cf)
-before putting or deleting any values in a batch.
-
-Currently, these restrictions should be enforced by code review:
-
-- multiple `zs_insert`s are only allowed on Update column families, and
-- [`delete_cf`](https://docs.rs/rocksdb/0.16.0/rocksdb/struct.WriteBatch.html#method.delete_cf)
-  is only allowed on Delete column families.
-
-In future, we could enforce these restrictions by:
-
-- creating traits for Never, Delete, and Update
-- doing different checks in `zs_insert` depending on the trait
-- wrapping `delete_cf` in a trait, and only implementing that trait for types that use Delete column families.
-
-As of June 2021, the Rust `rocksdb` crate [ignores the delete callback](https://docs.rs/rocksdb/0.16.0/src/rocksdb/merge_operator.rs.html#83-94),
-and merge operators are unreliable (or have undocumented behaviour).
-So they should not be used for consensus-critical checks.
-
-### Notes on rocksdb column families
-
-[rocksdb-column-families]: #rocksdb-column-families
-
-- The `hash_by_height` and `height_by_hash` column families provide a bijection between
-  block heights and block hashes. (Since the rocksdb state only stores finalized
-  state, they are actually a bijection).
-
-- Similarly, the `tx_loc_by_hash` and `hash_by_tx_loc` column families provide a bijection between
-  transaction locations and transaction hashes.
-
-- The `block_header_by_height` column family provides a bijection between block
-  heights and block header data. There is no corresponding `height_by_block` column
-  family: instead, hash the block header, and use the hash from `height_by_hash`.
-  (Since the rocksdb state only stores finalized state, they are actually a bijection).
-  Similarly, there are no column families that go from transaction data
-  to transaction locations: hash the transaction and use `tx_loc_by_hash`.
-
-- Block headers and transactions are stored separately in the database,
-  so that individual transactions can be accessed efficiently.
-  Blocks can be re-created on request using the following process:
-  - Look up `height` in `height_by_hash`
-  - Get the block header for `height` from `block_header_by_height`
-  - Iterate from `TransactionIndex` 0,
-    to get each transaction with `height` from `tx_by_loc`,
-    stopping when there are no more transactions in the block
-
-- Block headers are stored by height, not by hash. This has the downside that looking
-  up a block by hash requires an extra level of indirection. The upside is
-  that blocks with adjacent heights are adjacent in the database, and many
-  common access patterns, such as helping a client sync the chain or doing
-  analysis, access blocks in (potentially sparse) height order. In addition,
-  the fact that we commit blocks in order means we're writing only to the end
-  of the rocksdb column family, which may help save space.
-
-- Similarly, transaction data is stored in chain order in `tx_by_loc` and `utxo_by_out_loc`,
-  and chain order within each vector in `utxo_loc_by_transparent_addr_loc` and
-  `tx_loc_by_transparent_addr_loc`.
-
-- `TransactionLocation`s are stored as a `(height, index)` pair referencing the
-  height of the transaction's parent block and the transaction's index in that
-  block. This would more traditionally be a `(hash, index)` pair, but because
-  we store blocks by height, storing the height saves one level of indirection.
-  Transaction hashes can be looked up using `hash_by_tx_loc`.
-
-- Similarly, UTXOs are stored in `utxo_by_out_loc` by `OutputLocation`,
-  rather than `OutPoint`. `OutPoint`s can be looked up using `tx_loc_by_hash`,
-  and reconstructed using `hash_by_tx_loc`.
-
-- The `Utxo` type can be constructed from the `OutputLocation` and `Output` data,
-  `height: OutputLocation.height`, and
-  `is_coinbase: OutputLocation.transaction_index == 0`
-  (coinbase transactions are always the first transaction in a block).
-
-- `balance_by_transparent_addr` is the sum of all `utxo_loc_by_transparent_addr_loc`s
-  that are still in `utxo_by_out_loc`. It is cached to improve performance for
-  addresses with large UTXO sets. It also stores the `AddressLocation` for each
-  address, which allows for efficient lookups.
-
-- `utxo_loc_by_transparent_addr_loc` stores unspent transparent output locations
-  by address. The address location and UTXO location are stored as a RocksDB key,
-  so they are in chain order, and get good database performance.
-  This column family includes also includes the original address location UTXO,
-  if it has not been spent.
-
-- When a block write deletes a UTXO from `utxo_by_out_loc`,
-  that UTXO location should be deleted from `utxo_loc_by_transparent_addr_loc`.
-  The deleted UTXO can be removed efficiently, because the UTXO location is part of the key.
-  This is an index optimisation, which does not affect query results.
-
-- `tx_loc_by_transparent_addr_loc` stores transaction locations by address.
-  This list includes transactions containing spent UTXOs.
-  The address location and transaction location are stored as a RocksDB key,
-  so they are in chain order, and get good database performance.
-  This column family also includes the `TransactionLocation`
-  of the transaction for the `AddressLocation`.
-
-- The `sprout_note_commitment_tree` stores the note commitment tree state
-  at the tip of the finalized state, for the specific pool. There is always
-  a single entry. Each tree is stored
-  as a "Merkle tree frontier" which is basically a (logarithmic) subset of
-  the Merkle tree nodes as required to insert new items.
-  For each block committed, the old tree is deleted and a new one is inserted
-  by its new height.
-
-- The `{sapling, orchard}_note_commitment_tree` stores the note commitment tree
-  state for every height, for the specific pool. Each tree is stored
-  as a "Merkle tree frontier" which is basically a (logarithmic) subset of
-  the Merkle tree nodes as required to insert new items.
-
-- The `{sapling, orchard}_note_commitment_subtree` stores the completion height and
-  root for every completed level 16 note commitment subtree, for the specific pool.
-
-- `history_tree` stores the ZIP-221 history tree state at the tip of the finalized
-  state. There is always a single entry for it. The tree is stored as the set of "peaks"
-  of the "Merkle mountain range" tree structure, which is what is required to
-  insert new items.
-
-- Each `*_anchors` stores the anchor (the root of a Merkle tree) of the note commitment
-  tree of a certain block. We only use the keys since we just need the set of anchors,
-  regardless of where they come from. The exception is `sprout_anchors` which also maps
-  the anchor to the matching note commitment tree. This is required to support interstitial
-  treestates, which are unique to Sprout.
-  **TODO:** store the `Root` hash in `sprout_note_commitment_tree`, and use it to look up the
-  note commitment tree. This de-duplicates tree state data. But we currently only store one sprout tree by height.
-
-- The value pools are only stored for the finalized tip. Per-block value pools
-  are stored in `block_info`, see below.
-
-- We do not store the cumulative work for the finalized chain,
-  because the finalized work is equal for all non-finalized chains.
-  So the additional non-finalized work can be used to calculate the relative chain order,
-  and choose the best chain.
-
-- The `block_info` contains additional per-block data. Currently it stores
-  the value pools after that block, and its size. It has been implemented
-  in a future-proof way so it is possible to add more data to it whiles
-  still allowing database downgrades (i.e. it does not require the
-  data length to match exactly what is expected and ignores the rest)
+The typed handle enforces the key and value types at its call sites. Both types
+must implement `IntoDisk` and `FromDisk`; the key also implements `Debug`.
+The method `zs_get(&height)` returns `Option<BlockInfo>` for this family.
+
+Use `with_batch_for_writing()` to add a typed write to an existing block or
+migration batch. The caller writes that batch only after all related changes
+are prepared. The method `new_batch_for_writing()` creates a separate owned
+batch; finish it with `write_batch()`. The method `take_batch_for_writing()`
+wraps an existing owned batch. See [`column_family.rs`][typed-family].
+
+When a migration needs a legacy encoding, define a separate legacy alias and
+accessor for the same family. The existing `HistoryTreePartsCf` and
+`LegacyHistoryTreePartsCf` distinguish empty keys from legacy height keys.
+Do not spread raw-byte casts or independently chosen read/write types through
+normal access paths.
+
+## Implementing a format change
+
+1. Classify compatibility using the version rules above. Check every supported
+   reader, including direct database consumers and both `indexer` builds.
+   Increment the appropriate constants and record the format change in
+   `constants.rs`. Reset lower components for a major or minor bump.
+2. Implement the new encoding and normal finalized-block write path. Keep
+   required legacy readers. Register new column families and update every
+   affected query.
+3. Add a `DiskFormatUpgrade` implementation under `disk_format/upgrade/` and
+   append it to `format_upgrades()` in increasing version order. Use
+   `NoMigration` only when existing records already satisfy the new reader's
+   requirements. Do not register a reusable major upgrade unless the preceding
+   major's database is safe to open and migrate.
+4. Implement cancellation-safe migration and validity checks. Account for the
+   startup tip, concurrent new blocks, partial migration, and repeat execution.
+   Let the framework advance the version only after completion.
+5. Add serialization, compatibility, migration, and normal-write tests. Update
+   the raw column-family snapshots when names or bytes intentionally change.
+6. Update this format reference and operator upgrade instructions. Add Changie
+   fragments for affected users and library consumers, including rollback and
+   coordinated-reader requirements. Follow the
+   [changelog guidelines](changelog-guidelines.md); do not hand-edit generated
+   changelogs.
+
+The format-28 [`add_ironwood_tree` migration][ironwood-upgrade] adds the empty
+Ironwood tree and anchor at genesis to existing databases through the normal
+`create_ironwood_tree()` batch method. It skips an already-populated genesis
+tree and validates the genesis tree and tip anchor.
+
+### Required tests
+
+Exercise both migration and normal writes; rerunning an upgrade over an
+already-correct database can hide skipped records.
+
+- Check current byte encodings and all supported legacy layouts. Include
+  nonzero values so offset or field-order mistakes are observable.
+- Upgrade an actual old-format database, not only a new database with a lowered
+  version marker. Compare its records and query results with normal writes.
+- Interrupt and repeat migration, then restart, commit more blocks, and restart
+  again. Check the recorded version and format validity at each completed step.
+- Test empty state, genesis, relevant activation boundaries, and partially
+  populated new indexes.
+- For reusable major changes, test directory movement, cleanup protection,
+  preservation of legacy records, and subsequent current-format writes.
+- Test both `indexer` configurations when spend indexes or feature metadata
+  are affected. Test read-only startup and refresh when reader behavior changes.
+
+The existing
+[`v28_cache_is_reused_with_legacy_value_pools` test][upgrade-tests] covers cleanup
+protection, directory reuse even with cleanup disabled, unchanged legacy bytes,
+and wider writes for subsequent blocks. The
+[`block_info_reads_every_record_layout` test][format-tests] checks old layouts
+and the NSM offset. The [raw column-family snapshot tests][snapshot-tests] cover
+family names and bytes for empty databases and the first three blocks; they do
+not replace tests for shielded data or later upgrades.
+
+### Manually triggering a format upgrade
+
+Use only a disposable copy of a test database. Stop all processes accessing it
+before changing its `version` file. Replace the file with the full semantic
+version whose registered upgrades the test needs to exercise, preserving the
+actual data layout and supported major-version path.
+
+Deleting the file does not select an arbitrary older format: it selects
+`<directory-major>.0.0`. Deleting `state/v29/<network>/version` therefore reports
+29.0.0 and does not trigger the 29.0.0 upgrade. Changing the marker does not
+convert record encodings, create an old-format fixture, or prove that a
+major-version move works. Use the persistent-cache upgrade test pattern for
+those cases; never use version-file edits as an operator recovery procedure.
+
+[constants]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/constants.rs
+[config]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/config.rs
+[network-directory]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network.rs
+[upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade.rs
+[disk-db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_db.rs
+[zebra-db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db.rs
+[service]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service.rs
+[backup]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/non_finalized_state/backup.rs
+[families]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state.rs
+[disk-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format.rs
+[transparent-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/transparent.rs
+[shielded-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/shielded.rs
+[chain-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/chain.rs
+[value-balance]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/value_balance.rs
+[block-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/block.rs
+[shielded-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/shielded.rs
+[chain-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/chain.rs
+[typed-family]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/column_family.rs
+[block-info-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/block_info_and_address_received.rs
+[ironwood-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/add_ironwood_tree.rs
+[upgrade-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/tests/vectors.rs
+[format-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/tests/prop.rs
+[snapshot-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
+[balance-query]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/read/address/balance.rs

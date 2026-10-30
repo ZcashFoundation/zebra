@@ -1,3 +1,18 @@
+# Pipelinable block syncing and lookup
+
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: the [`zebrad` syncer](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync.rs), [downloader](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/downloads.rs), and [block locators](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/read/find.rs).
+
+- The syncer downloads and verifies genesis before discovering tips.
+- The fanout is 3; `BLOCK_DOWNLOAD_RETRY_LIMIT` is 3.
+- The sync restart delay is 67 seconds, or 2 seconds on Regtest.
+- The downloader uses `Request::BlockDownload`, not `Request::Blocks`.
+- The network API also exposes [`Request::BlocksByHash`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/protocol/internal/request.rs).
+- The locator reaches the [1,000-block rollback boundary](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/constants.rs), not 99 blocks.
+
+---
+
 - Feature Name: Pipelinable Block Syncing and Lookup
 - Start Date: 2020-07-02
 - Design PR: [ZcashFoundation/zebra#583](https://github.com/ZcashFoundation/zebra/pull/583)

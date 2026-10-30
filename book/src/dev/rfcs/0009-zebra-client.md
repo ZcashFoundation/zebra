@@ -1,28 +1,20 @@
+# Zebra client
+
+Status (Zebra 7.0.0): **Superseded**.
+
+Code: [`zebra-rpc`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/methods.rs) and [chain-tip notifications](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/chain_tip.rs).
+
+- The `zebra-client`/`zebra-cli` crates and private scanning database are absent.
+- Wallets use external tools: [Zallet](../../user/zallet.md) or [lightwalletd](../../user/lightwalletd.md).
+- Clients submit serialized transactions through [`sendrawtransaction`](../../user/rpc.md), not `sendTransaction`.
+- Tip APIs: `LatestChainTip` and `ChainTipChange`, not `StateNotifications`.
+
+---
+
 - Feature Name: (`zebra-client`)
 - Start Date: (2020-10-14)
-- Design PR: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/pull/1163)
-- Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
-
-> **Status: SUPERSEDED**
->
-> This RFC proposed building wallet functionality directly into Zebra. After
-> initial development, the `zebra-client` and `zebra-cli` crates were removed
-> in May 2023 ([PR #6726](https://github.com/ZcashFoundation/zebra/pull/6726))
-> in favor of external wallet tools.
->
-> **Current Architecture:** Zebra now serves as a backend for external wallet
-> tools through:
->
-> - [Lightwalletd integration](../../user/lightwalletd.md) - handles blockchain
->   scanning and wallet synchronization
-> - Standard RPC methods (`sendrawtransaction`, `getrawtransaction`, etc.)
-> - External wallets like [Zecwallet](https://github.com/adityapk00/zecwallet-light-cli)
->
-> This approach provides better separation of concerns: Zebra remains a pure
-> full node with no user private data, while wallet functionality is handled
-> by specialized external tools.
->
-> This RFC is preserved for historical reference.
+- Design PR: [ZcashFoundation/zebra#1163](https://github.com/ZcashFoundation/zebra/pull/1163)
+- Zebra Issue: (not recorded in the original RFC)
 
 # Summary
 

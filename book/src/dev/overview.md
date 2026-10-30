@@ -1,376 +1,338 @@
-# Design Overview
-
-This document sketches the design for Zebra.
-
-## Desiderata
-
-The following are general desiderata for Zebra:
-
-- [George's list..]
-
-- As much as reasonably possible, it and its dependencies should be
-  implemented in Rust.  While it may not make sense to require this in
-  every case (for instance, it probably doesn't make sense to rewrite
-  libsecp256k1 in Rust, instead of using the same upstream library as
-  Bitcoin), we should generally aim for it.
-
-- As much as reasonably possible, Zebra should minimize trust in
-  required dependencies.  Note that "minimize number of dependencies"
-  is usually a proxy for this desideratum, but is not exactly the same:
-  for instance, a collection of crates like the tokio crates are all
-  developed together and have one trust boundary.
-
-- Zebra should be well-factored internally into a collection of
-  component libraries which can be used by other applications to
-  perform Zcash-related tasks.  Implementation details of each
-  component should not leak into all other components.
-
-- Zebra should checkpoint on Canopy activation and drop all
-  Sprout-related functionality not required post-Canopy.
-
-## Non-Goals
-
-- Zebra keeps a copy of the chain state, so it isn't intended for
-  lightweight applications like light wallets. Those applications
-  should use a light client protocol.
-
-## Notable Blog Posts
-
-- [A New Network Stack For Zcash](https://www.zfnd.org/blog/a-new-network-stack-for-zcash)
-- [Composable Futures-based Batch Verification](https://zfnd.org/composable-futures-based-batch-verification/)
-- [Decoding Bitcoin Messages with Tokio Codecs](https://www.zfnd.org/blog/decoding-bitcoin-messages-with-tokio-codecs)
-
-## Service Dependencies
-
-<div id="service-dep-diagram">
-{{#include diagrams/service-dependencies.svg}}
-</div>
-
-<!-- 
-Service dependencies diagram source:
-
-digraph services {
-    transaction_verifier -> state
-    mempool -> state
-    inbound -> state
-    rpc_server -> state
-    mempool -> transaction_verifier
-    block_verifier_router -> checkpoint_verifier
-    inbound -> mempool
-    rpc_server -> mempool
-    inbound -> block_verifier_router
-    syncer -> block_verifier_router
-    rpc_server -> block_verifier_router [style=dotted]
-    syncer -> peer_set
-    mempool -> peer_set
-    block_verifier -> state
-    checkpoint_verifier -> state
-    block_verifier -> transaction_verifier
-    block_verifier_router -> block_verifier
-    rpc_server -> inbound [style=invis] // for layout of the diagram
-}
-
-Render here: https://dreampuf.github.io/GraphvizOnline
- -->
-
-The dotted lines are for the `getblocktemplate` RPC.
-
-## Architecture
-
-Unlike `zcashd`, which originated as a Bitcoin Core fork and inherited its
-monolithic architecture, Zebra has a modular, library-first design, with the
-intent that each component can be independently reused outside of the `zebrad`
-full node. For instance, the `zebra-network` crate containing the network stack
-can also be used to implement anonymous transaction relay, network crawlers, or
-other functionality, without requiring a full node.
-
-At a high level, the fullnode functionality required by `zebrad` is factored
-into several components:
-
-- [`zebra-chain`](https://docs.rs/zebra_chain), providing
-  definitions of core data structures for Zcash, such as blocks, transactions,
-  addresses, etc., and related functionality.  It also contains the
-  implementation of the consensus-critical serialization formats used in Zcash.
-  The data structures in `zebra-chain` are defined to enforce
-  [_structural validity_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
-  by making invalid states unrepresentable. For instance, the
-  `Transaction` enum has variants for each transaction version, and it's
-  impossible to construct a transaction with, e.g., spend or output
-  descriptions but no binding signature, or, e.g., a version 2 (Sprout)
-  transaction with Sapling proofs. Currently, `zebra-chain` is oriented
-  towards verifying transactions, but will be extended to support creating them
-  in the future.
-
-- [`zebra-network`](https://docs.rs/zebra_network),
-  providing an asynchronous, multithreaded implementation of the Zcash network
-  protocol inherited from Bitcoin. In contrast to `zcashd`, each peer
-  connection has a separate state machine, and the crate translates the
-  external network protocol into a stateless, request/response-oriented
-  protocol for internal use. The crate provides two interfaces:
-  - an auto-managed connection pool that load-balances local node requests
-    over available peers, and sends peer requests to a local inbound service,
-    and
-  - a `connect_isolated` method that produces a peer connection completely
-    isolated from all other node state.  This can be used, for instance, to
-    safely relay data over Tor, without revealing distinguishing information.
-
-- [`zebra-script`](https://docs.rs/zebra_script) provides
-  script validation. Currently, this is implemented by linking to the C++
-  script verification code from `zcashd`, but in the future we may implement a
-  pure-Rust script implementation.
-
-- [`zebra-consensus`](https://docs.rs/zebra_consensus)
-  performs [_semantic validation_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
-  of blocks and transactions: all consensus
-  rules that can be checked independently of the chain state, such as
-  verification of signatures, proofs, and scripts. Internally, the library
-  uses [`tower-batch-control`](https://docs.rs/tower_batch_control) to
-  perform automatic, transparent batch processing of contemporaneous
-  verification requests.
-
-- [`zebra-state`](https://docs.rs/zebra_state) is
-  responsible for storing, updating, and querying the chain state. The state
-  service is responsible for [_contextual verification_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
-  all consensus rules
-  that check whether a new block is a valid extension of an existing chain,
-  such as updating the nullifier set or checking that transaction inputs remain
-  unspent.
-
-- [`zebrad`](https://docs.rs/zebrad) contains the full
-  node, which connects these components together and implements logic to handle
-  inbound requests from peers and the chain sync process.
-
-All of these components can be reused as independent libraries, and all
-communication between stateful components is handled internally by
-[internal asynchronous RPC abstraction](https://docs.rs/tower/)
-("microservices in one process").
-
-### `zebra-chain`
-
-#### Internal Dependencies
-
-None: these are the core data structure definitions.
-
-#### Responsible for
-
-- definitions of commonly used data structures, e.g.,
-  - `Block`,
-  - `Transaction`,
-  - `Address`,
-  - `KeyPair`...
-- parsing bytes into these data structures
-
-- definitions of core traits, e.g.,
-  - `ZcashSerialize` and `ZcashDeserialize`, which perform
-    consensus-critical serialization logic.
-
-#### Exported types
-
-- [...]
-
-### `zebra-network`
-
-#### Internal Dependencies
-
-- `zebra-chain`
-
-#### Responsible for
-
-- definition of a well structured, internal request/response protocol
-- provides an abstraction for "this node" and "the network" using the
-  internal protocol
-- dynamic, backpressure-driven peer set management
-- per-peer state machine that translates the internal protocol to the
-  Bitcoin/Zcash protocol
-- tokio codec for Bitcoin/Zcash message encoding.
-
-#### Exported types
-
-- `Request`, an enum representing all possible requests in the internal protocol;
-- `Response`, an enum representing all possible responses in the internal protocol;
-- `AddressBook`, a data structure for storing peer addresses;
-- `Config`, a configuration object for all networking-related parameters;
-- `init<S: Service>(Config, S) -> (impl Service,
-  Arc<Mutex<AddressBook>>)`, the main entry-point.
-
-The `init` entrypoint constructs a dynamically-sized pool of peers
-sending inbound requests to the provided `S: tower::Service`
-representing "this node", and returns a `Service` that can be used to
-send requests to "the network", together with an `AddressBook` updated
-with liveness information from the peer pool.  The `AddressBook` can
-be used to respond to inbound requests for peers.
-
-All peerset management (finding new peers, creating new outbound
-connections, etc) is completely encapsulated, as is responsibility for
-routing outbound requests to appropriate peers.
-
-### `zebra-state`
-
-#### Internal Dependencies
-
-- `zebra-chain` for data structure definitions.
-
-#### Responsible for
-
-- block storage API
-  - operates on parsed block structs
-    - these structs can be converted from and into raw bytes
-  - primarily aimed at network replication, not at processing
-  - can be used to rebuild the database below
-- maintaining a database of tx, address, etc data
-  - this database can be blown away and rebuilt from the blocks, which
-    are otherwise unused.
-  - threadsafe, typed lookup API that completely encapsulates the
-    database logic
-  - handles stuff like "transactions are reference counted by outputs"
-    etc.
-- providing `tower::Service` interfaces for all of the above to
-  support backpressure.
-
-#### Exported types
-
-- `Request`, an enum representing all possible requests in the internal protocol;
-  - blocks can be accessed via their chain height or hash
-  - confirmed transactions can be accessed via their block, or directly via their hash
-- `Response`, an enum representing all possible responses in the internal protocol;
-- `init() -> impl Service`, the main entry-point.
-
-The `init` entrypoint returns a `Service` that can be used to
-send requests for the chain state.
-
-All state management (adding blocks, getting blocks by index or hash) is completely
-encapsulated.
-
-### `zebra-script`
-
-#### Internal Dependencies
-
-#### Responsible for
-
-- the minimal Bitcoin script implementation required for Zcash
-- script parsing
-- context-free script validation
-
-#### Notes
-
-This can wrap an existing script implementation at the beginning.
-
-If this existed in a "good" way, we could use it to implement tooling
-for Zcash script inspection, debugging, etc.
-
-#### Questions
-
-- How does this interact with NU4 script changes?
-
-#### Exported types
-
-- [...]
-
-### `zebra-consensus`
-
-#### Internal Dependencies
-
-- `zebra-chain` for data structures and parsing.
-- `zebra-state` to read and update the state database.
-- `zebra-script` for script parsing and validation.
-
-#### Responsible for
-
-- consensus-specific parameters (network magics, genesis block, pow
-  parameters, etc) that determine the network consensus
-- consensus logic to decide which block is the current block
-- block and transaction verification
-  - context-free validation, e.g., signature, proof verification, etc.
-  - context-dependent validation, e.g., determining whether a
-    transaction is accepted in a particular chain state context.
-  - verifying mempool (unconfirmed) transactions
-- block checkpoints
-  - mandatory checkpoints (genesis block, canopy activation)
-  - optional regular checkpoints (every Nth block)
-- modifying the chain state
-  - adding new blocks to `ZebraState`, including chain reorganisation
-  - adding new transactions to `ZebraMempoolState`
-- storing the transaction mempool state
-  - mempool transactions can be accessed via their hash
-- providing `tower::Service` interfaces for all of the above to
-  support backpressure and batch validation.
-
-#### Exported types
-
-- `block::init() -> impl Service`, the main entry-point for block
-  verification.
-- `ZebraMempoolState`
-  - all state management (adding transactions, getting transactions
-    by hash) is completely encapsulated.
-- `mempool::init() -> impl Service`, the main entry-point for
-    mempool transaction verification.
-
-The `init` entrypoints return `Service`s that can be used to
-verify blocks or transactions, and add them to the relevant state.
-
-### `zebra-rpc`
-
-#### Internal Dependencies
-
-- `zebra-chain` for data structure definitions
-- `zebra-node-services` for shared request type definitions
-- `zebra-utils` for developer and power user tools
-
-#### Responsible for
-
-- rpc interface
-
-#### Exported types
-
-- [...]
-
-### `zebra-client`
-
-#### Internal Dependencies
-
-- `zebra-chain` for structure definitions
-- `zebra-state` for transaction queries and client/wallet state storage
-- `zebra-script` possibly? for constructing transactions
-
-#### Responsible for
-
-- implementation of some event a user might trigger
-- would be used to implement a full wallet
-- create transactions, monitors shielded wallet state, etc.
-
-#### Notes
-
-Communication between the client code and the rest of the node should be done
-by a tower service interface. Since the `Service` trait can abstract from a
-function call to RPC, this means that it will be possible for us to isolate
-all client code to a subprocess.
-
-#### Exported types
-
-- [...]
-
-### `zebrad`
-
-Abscissa-based application which loads configs, all application components,
-and connects them to each other.
-
-#### Responsible for
-
-- actually running the server
-- connecting functionality in dependencies
-
-#### Internal Dependencies
-
-- `zebra-chain`
-- `zebra-network`
-- `zebra-state`
-- `zebra-consensus`
-- `zebra-client`
-- `zebra-rpc`
-
-### Unassigned functionality
-
-Responsibility for this functionality needs to be assigned to one of
-the modules above (subject to discussion):
-
-- [ ... add to this list ... ]
+# Architecture
+
+Zebra separates protocol data, networking, consensus verification, chain state,
+and RPC into Rust crates. The [`zebrad` application][start] connects their
+services and runs synchronization and the mempool. A crate dependency is not
+necessarily a service call.
+
+## Crates
+
+The [root workspace][workspace] contains these crates:
+
+| Crate | Responsibility | Manifest |
+| --- | --- | --- |
+| [`zebra-chain`][chain] | Blocks, transactions, addresses, amounts, network parameters, serialization, and cryptographic data types. | [Cargo.toml][chain-manifest] |
+| [`zebra-network`][network] | Peer connections, wire messages, address discovery, inventory tracking, and outbound request routing. | [Cargo.toml][network-manifest] |
+| [`zebra-script`][script] | Transparent script verification through `libzcash_script`; the default interpreter is C++, with an optional C++/Rust comparison interpreter. | [Cargo.toml][script-manifest] |
+| [`zebra-consensus`][consensus] | Checkpoint verification, semantic block verification, block and mempool transaction verification, and cryptographic verification services. | [Cargo.toml][consensus-manifest] |
+| [`zebra-state`][state] | Contextual verification, finalized and non-finalized chain storage, chain queries, and tip notifications. | [Cargo.toml][state-manifest] |
+| [`zebra-node-services`][node-services] | Shared mempool request/response types, service traits, and an optional RPC client. It does not implement the mempool. | [Cargo.toml][node-services-manifest] |
+| [`zebra-rpc`][rpc] | JSON-RPC methods and server, RPC client, indexer gRPC server, and lightwalletd-compatible gRPC server. | [Cargo.toml][rpc-manifest] |
+| [`zebrad`][start] | CLI and configuration, service assembly, synchronization, inbound requests, mempool, monitoring, notifications, and optional zcashd supervision. | [Cargo.toml][zebrad-manifest] |
+| [`tower-batch-control`][batch] | Tower middleware that collects weighted requests and flushes batches by size or latency. | [Cargo.toml][batch-manifest] |
+| [`tower-fallback`][fallback] | Tower middleware that retries a request on a second service when its fallback policy selects it. Consensus uses it for individual verification after a batch fails. | [Cargo.toml][fallback-manifest] |
+| [`zebra-utils`][utils] | Developer tools, including `zebra-checkpoints`, `search-issue-refs`, and `block-template-to-proposal`. | [Cargo.toml][utils-manifest] |
+| [`zebra-test`][test] | Shared test harnesses, test vectors, service mocks, and test initialization. | [Cargo.toml][test-manifest] |
+
+The `zebra-fuzz/` directory contains the separate, unpublished
+[`zebra-fuzz-targets` workspace][fuzz-manifest]. Its executable targets exercise
+transaction and block decoding, consensus checks, scripts, P2P messages, and RPC.
+It is not a root-workspace member or a node runtime component.
+
+The `zebra-scan` and `zebra-grpc` crates were removed in
+[Zebra 2.4.0][removed-crates]; their names do not refer to the current gRPC servers.
+
+## Crate dependencies
+
+An arrow points from a crate to an in-repository crate it depends on, as
+declared in the manifests above. A crate also depends on every crate reachable
+from it, so the graph omits each edge that a longer path already implies: for
+example, `zebrad` and `zebra-rpc` both declare `zebra-chain` directly. The
+dotted arrow is an optional dependency. The graph omits external crates and
+`zebra-test`, which every crate in the graph except `zebra-node-services` and
+`zebra-utils` uses as a development dependency, and which `zebra-chain` and
+`zebra-state` also pull in optionally for their `proptest-impl` features (and
+`zebra-chain` for its `bench` feature).
+
+```mermaid
+flowchart TD
+    daemon["zebrad"] --> rpc["zebra-rpc"]
+    daemon -.-> utils["zebra-utils"]
+    utils --> rpc
+    rpc --> consensus["zebra-consensus"]
+    rpc --> network["zebra-network"]
+    consensus --> state["zebra-state"]
+    consensus --> script["zebra-script"]
+    consensus --> batch["tower-batch-control"]
+    consensus --> fallback["tower-fallback"]
+    state --> interfaces["zebra-node-services"]
+    interfaces --> chain["zebra-chain"]
+    network --> chain
+    script --> chain
+```
+
+The fuzz targets, in their own workspace, depend on `zebra-chain`,
+`zebra-consensus`, `zebra-network`, `zebra-node-services`, `zebra-rpc`,
+`zebra-script`, and `zebra-state`.
+
+The direct `zebrad` dependency on `zebra-script` forwards the optional
+[`comparison-interpreter` feature](../user/install.md#cargo-features).
+The daemon does not call the library directly.
+
+<a id="service-dep-diagram"></a>
+
+## Service dependencies
+
+A Tower service accepts typed requests and returns response futures. The
+[start command][start] wraps shared services in bounded buffers and connects them
+with cloned handles. The [consensus router initializer][router] constructs two
+transaction verifier services: `BlockTxVerifier` for transactions in blocks and
+`MempoolTxVerifier` for unmined transactions. The latter can query the mempool for
+outputs created by unconfirmed parent transactions.
+
+Arrows below point from a caller to a service it uses, omitting middleware and
+download queues. Peer connections call the inbound service; the peer set routes
+outbound requests to those connections. The state exposes read/write and
+read-only services over the same database.
+
+```mermaid
+flowchart TD
+    network["NetworkService / PeerSet"] --> connection["peer::Client / Connection"]
+    connection --> inbound["Inbound"]
+    inbound --> network
+    inbound --> mempool["Mempool"]
+    inbound --> router["BlockVerifierRouter"]
+    inbound --> state["StateService"]
+
+    sync["ChainSync"] --> network
+    sync --> router
+    sync --> state
+    sync --> read["ReadStateService"]
+
+    router --> checkpoint["CheckpointVerifier"]
+    router --> semantic["SemanticBlockVerifier"]
+    checkpoint --> state
+    semantic --> state
+    semantic --> blocktx["BlockTxVerifier"]
+    blocktx --> state
+
+    mempool --> network
+    mempool --> state
+    mempool --> mempooltx["MempoolTxVerifier"]
+    mempooltx --> state
+    mempooltx --> mempool
+
+    server["RpcServer"] --> rpc["RpcImpl"]
+    rpc --> mempool
+    rpc --> state
+    rpc --> read
+    rpc --> router
+
+    indexer["indexer::server::init"] --> read
+    lightwallet["lightwalletd::server::init"] --> rpc
+    lightwallet --> read
+    lightwallet --> mempool
+```
+
+The [startup function][start-tasks] also connects background tasks and optional
+endpoints. Arrows carry notifications or requests. The mempool's background
+tasks appear in the [mempool diagram](diagrams/mempool-architecture.md).
+
+```mermaid
+flowchart LR
+    state["StateService"] --> tip["LatestChainTip / ChainTipChange"]
+    sync["ChainSync"] --> status["SyncStatus"]
+    tip --> mempool["Mempool"]
+    tip --> progress["show_block_chain_progress"]
+    status --> progress
+    progress --> metrics_state["ChainTipMetrics"]
+    metrics_state --> health["health::init"]
+    status --> health
+    addresses["AddressBook"] --> health
+
+    tip --> block_gossip["gossip_best_tip_block_hashes"]
+    status --> block_gossip
+    submitted["SubmitBlockChannel"] --> block_gossip
+    block_gossip --> advertiser["BlockAdvertiser"]
+
+    tip --> notify["notify::run_block_notify"]
+    status --> notify
+    tip --> support["end_of_support::start"]
+    tip --> indexer["indexer::server::init"]
+    mempool -->|MempoolChange| indexer
+    tip --> lightwallet["lightwalletd::server::init"]
+    mempool -->|MempoolChange| lightwallet
+
+    addresses -->|P2P listener address| supervisor["zcashd_compat::run_supervisor"]
+    application["zebrad::application"] --> metrics["MetricsEndpoint"]
+    state -.->|metrics recorder| metrics
+    mempool -.->|metrics recorder| metrics
+```
+
+The [application][application] registers `MetricsEndpoint` outside
+`StartCmd::start`. For activation conditions, see the
+[configuration reference](../user/config.md) and
+[end-of-support policy](../user/run.md#end-of-support).
+
+## Verification stages
+
+Zebra separates checks to overlap independent work without accepting a block
+before its ancestors. The stages follow
+[RFC 0002](rfcs/0002-parallel-verification.md#verification-stages):
+
+1. **Structural verification** parses protocol bytes into valid data structures.
+   The [`zebra-chain` deserializers][serialization] enforce representation
+   constraints, including [transaction encodings][protocol-encoding] and bounded
+   fields.
+2. **Semantic verification** checks a block or transaction's
+   [internal rules][protocol-tx], signatures, proofs, and scripts, overlapping
+   with parent-block verification. Script checks still need spent outputs.
+   The [transaction verifiers][transactions] obtain them and assemble concurrent
+   checks; the [semantic block verifier][blocks] combines their results.
+3. **Contextual verification** checks the parent, height, difficulty, spent
+   outputs, nullifiers, commitments, and value-pool changes against a particular
+   chain. The [state write path][state-write] applies these
+   [checks][state-checks], including the protocol's
+   [block-header rules][protocol-block], before committing to non-finalized state.
+
+For transaction admission without a block commit, see
+[mempool contextual checks](mempool-specification.md#candidate-admission-and-verification).
+
+### Checkpoint and full verification
+
+A checkpoint is a configured block hash at a known height. The
+[`CheckpointVerifier`][checkpoints] checks linked ranges against the checkpoint
+list instead of individually verifying their transaction signatures and proofs.
+It still checks block heights, proof of work where enabled, Merkle roots, and
+transaction-hash uniqueness. The [finalized-state commit path][finalized] checks
+the chain-history and authorizing-data commitments before storing these blocks;
+a matching checkpoint hash alone does not authorize arbitrary transaction data.
+
+The [router][router] selects checkpoint verification at or below its maximum
+checkpoint height and full semantic verification above it. The maximum is
+either the last checkpoint or the first at or above the mandatory height,
+as set by [consensus configuration](../user/config.md#consensus). Mandatory
+checkpoints cannot be disabled: Zebra cannot fully verify
+[pre-Canopy history][mandatory-checkpoint].
+
+At startup, the [consensus initializer][router] also compares cached best-chain
+hashes with the checkpoint list, stopping at the first height not yet stored.
+This runs regardless of checkpoint-sync configuration. A mismatch panics.
+
+### Finalized and non-finalized state
+
+The [state implementation][state-service] maintains two parts:
+
+- **Finalized state** stores one chain in RocksDB. Checkpoint-verified blocks go
+  directly here, in chain order.
+- **Non-finalized state** holds recently verified competing chains in memory,
+  ordered by accumulated work. A full-verification commit first enters this
+  state. The write worker finalizes the oldest block of the best chain whenever
+  that chain exceeds the rollback window.
+
+The rollback window is **1,000 blocks**, defined by
+[`MAX_BLOCK_REORG_HEIGHT`][reorg-limit]. It is Zebra's local policy, not a Zcash
+consensus rule. Reorganizations cannot replace blocks already finalized by this
+node.
+
+With backups enabled, persistent state restores recent blocks from a
+[non-finalized backup](state-db-upgrades.md#non-finalized-state-backup);
+see the [state settings](../user/config.md#state).
+
+The [`StateService` interface][state-service] accepts mutations and queries.
+The `ReadStateService` interface processes `ReadRequest` queries without sharing
+the write service's request buffer. Both read the same finalized database and
+published non-finalized state. The `LatestChainTip` and `ChainTipChange` handles
+publish tip information without a state-service round trip.
+
+## Block flow
+
+1. The `ChainSync` task discovers block hashes through peers. The `Inbound`
+   service also accepts block advertisements. Their respective
+   [sync downloader][sync-downloads] and [inbound downloader][inbound-downloads]
+   request blocks through the network service.
+2. The [peer connection][network] decodes wire messages into `zebra-chain` data.
+   The downloaders submit `zebra_consensus::Request::Commit` to the
+   [block verifier router][router].
+3. The checkpoint path validates a hash-linked range and submits
+   `CommitCheckpointVerifiedBlock`. The full path runs `SemanticBlockVerifier`
+   and `BlockTxVerifier`, then submits `CommitSemanticallyVerifiedBlock`.
+   The [checkpoint][checkpoints] and [semantic][blocks] verifiers return success
+   only after their state commit succeeds.
+4. The [state service][state-service] queues out-of-order blocks until their
+   parents are available. Its [write worker][state-write] commits checkpoint
+   blocks to finalized state, or contextually verifies full-path blocks into
+   non-finalized state and later finalizes them at the rollback limit.
+5. The state publishes the changed best tip. The [block gossip task][start-tasks]
+   sends its hash through `BlockAdvertiser`; RPC and other tip subscribers can
+   observe the committed chain. A successful full-path commit does not mean the
+   new block has already reached finalized storage.
+
+## Transaction flow
+
+The mempool accepts candidates from inbound peers, its crawler, and RPC.
+The [admission pipeline](mempool-specification.md#candidate-admission-and-verification)
+downloads and verifies them before applying storage policy;
+[gossip](mempool-specification.md#crawling-queue-checks-and-gossip) advertises
+accepted IDs.
+
+## Concurrency
+
+The daemon creates a [multithreaded Tokio runtime][tokio]. Tower readiness and
+bounded buffers control admission to shared services; futures let independent
+network and verification operations overlap. Startup uses one-shot channels to
+complete the cycles between inbound networking, mempool, and transaction
+verification after the handles exist.
+
+Cryptographic services use [`tower-batch-control`][batch] to aggregate requests
+without requiring each caller to assemble a batch. The
+[`tower-fallback`][fallback] wrapper falls back to individual verification when
+a batch fails; for example, the [Ed25519 service][ed25519] composes both.
+
+CPU-heavy work runs outside ordinary asynchronous task polling. The
+[Ed25519 verifier][ed25519] submits work to Rayon, while the
+[Sapling verifier][sapling] uses `tokio::task::spawn_blocking` for batch validation.
+The [application][application] initializes Rayon; see
+[CPU-thread configuration](../user/config.md#sync). State reads use blocking
+tasks; state writes run in a dedicated [write-worker thread][state-write].
+Channels publish updated state to readers; block commits remain ordered even
+when verification completes out of order.
+
+[workspace]: https://github.com/ZcashFoundation/zebra/blob/main/Cargo.toml
+[chain]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/lib.rs
+[network]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/lib.rs
+[script]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-script/src/lib.rs
+[consensus]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/lib.rs
+[state]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/lib.rs
+[node-services]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-node-services/src/lib.rs
+[rpc]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/src/lib.rs
+[batch]: https://github.com/ZcashFoundation/zebra/blob/main/tower-batch-control/src/lib.rs
+[fallback]: https://github.com/ZcashFoundation/zebra/blob/main/tower-fallback/src/lib.rs
+[utils]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/src/lib.rs
+[test]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-test/src/lib.rs
+[chain-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/Cargo.toml
+[network-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/Cargo.toml
+[script-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-script/Cargo.toml
+[consensus-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/Cargo.toml
+[state-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/Cargo.toml
+[node-services-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-node-services/Cargo.toml
+[rpc-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/Cargo.toml
+[zebrad-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/Cargo.toml
+[batch-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/tower-batch-control/Cargo.toml
+[fallback-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/tower-fallback/Cargo.toml
+[utils-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/Cargo.toml
+[test-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-test/Cargo.toml
+[fuzz-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-fuzz/fuzz/Cargo.toml
+[removed-crates]: https://github.com/ZcashFoundation/zebra/blob/main/CHANGELOG.md#L1272-L1298
+[start]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/commands/start.rs#L341-L483
+[start-tasks]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/commands/start.rs#L488-L725
+[application]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/application.rs#L450-L524
+[router]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/router.rs
+[serialization]: https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain/src/serialization
+[transactions]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/transaction.rs
+[blocks]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/block.rs
+[checkpoints]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint.rs
+[mandatory-checkpoint]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network.rs#L258-L274
+[state-service]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service.rs
+[state-write]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/write.rs
+[state-checks]: https://github.com/ZcashFoundation/zebra/tree/main/zebra-state/src/service/check
+[finalized]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state.rs#L339-L437
+[reorg-limit]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/constants.rs#L20-L33
+[sync-downloads]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/downloads.rs
+[inbound-downloads]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/inbound/downloads.rs
+[tokio]: https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/tokio.rs
+[ed25519]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/primitives/ed25519.rs
+[sapling]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/primitives/sapling.rs
+[protocol-encoding]: https://zips.z.cash/protocol/protocol.pdf#txnencoding
+[protocol-tx]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+[protocol-block]: https://zips.z.cash/protocol/protocol.pdf#blockheader
