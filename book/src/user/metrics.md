@@ -194,10 +194,11 @@ Reduce `[tracing] opentelemetry_sample_percent` through the Compose environment
 when lower trace volume is required; see [OpenTelemetry export](tracing.md#opentelemetry-export).
 
 Review `docker/observability/prometheus/rules/zebra_alerts.yml` before relying
-on its alerts. In Zebra 7.0.0, its RPC and handshake latency rules query
-`_bucket` series that the default Zebra exporter does not produce. Its generic
-error-rate rule also refers to `zebra_errors_total`, which has no Zebra metric
-producer. Use the actual series listed above when adapting rules and panels.
+on its alerts. Its latency rules use exported summary quantiles: RPC p99 above
+two seconds and successful-handshake p95 above two seconds, each sustained for
+five minutes. Zebra abandons handshakes after three seconds, so slower ones
+never reach the handshake series. The RPC latency panels show per-method
+quantiles, not a combined percentile across methods or nodes.
 The receivers in `docker/observability/alertmanager/alertmanager.yml` have no
 notification destinations; configure them before expecting notifications.
 
