@@ -54,6 +54,7 @@ features = [
     "prometheus",
     "sentry",
     "indexer",
+    "zmq",
 ]
 
 [[test]]
@@ -72,6 +73,9 @@ default = ["default-release-binaries"]
 
 # Indexer support
 indexer = ["zebra-state/indexer"]
+
+# Zcashd-compatible block notifications using the in-tree ZMTP publisher.
+zmq = []
 
 # Experimental internal miner support
 internal-miner = [
@@ -287,6 +291,7 @@ http-body-util = { workspace = true }
 hyper-util = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
+zeromq = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }

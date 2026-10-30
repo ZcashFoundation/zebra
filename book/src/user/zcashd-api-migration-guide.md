@@ -316,11 +316,14 @@ or the sidecar.
 
 ## Notification transports
 
-`zcashd` publishes chain and mempool events over ZMQ. Zebra does not implement
-ZMQ today; publishing the `zcashd` topics is proposed in [#10881], [#11034], and
-[#11036].
+Zebra supports zcashd-compatible ZMQ `hashblock` notifications with the optional `zmq` Cargo
+feature. Set `zmqpubhashblock = "tcp://127.0.0.1:28332"` in the `[notify]` section of
+`zebrad.toml`. The publisher is off by default, has no authentication, and should be exposed only
+to trusted clients. Notifications are suppressed during initial sync, like block notify. See
+[ZMQ block notifications](mining.md#zmq-block-notifications) for framing, build requirements, and
+best-effort delivery semantics. The other ZMQ topics remain proposed in [#11034] and [#11036].
 
-Zebra's equivalent is the **indexer gRPC service**
+For broader event coverage, use Zebra's **indexer gRPC service**
 (`zebra-rpc/proto/indexer.proto`). It streams best-chain tip changes
 (`ChainTipChange`), non-finalized blocks (`NonFinalizedStateChange`), and
 mempool additions, invalidations, and mined transactions (`MempoolChange`), and
@@ -331,7 +334,7 @@ loopback or private address. Zallet uses this service; see
 
 | `zcashd` topic    | Owner | Status   | Notes                                                                                                                 |
 | ----------------- | ----- | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| `zmqpubhashblock` | Zebra | Replaced | Indexer `ChainTipChange` stream (hash and height), or `block_notify_command`. ZMQ publishing is proposed in [#10881]. |
+| `zmqpubhashblock` | Zebra | Done | Optional `zmq` feature and `[notify].zmqpubhashblock`. [#10881] |
 | `zmqpubrawblock`  | Zebra | Replaced | Indexer `NonFinalizedStateChange` stream. [#11034]                                                                    |
 | `zmqpubhashtx`    | Zebra | Replaced | Indexer `MempoolChange` stream. [#11036]                                                                              |
 | `zmqpubrawtx`     | Zebra | Replaced | Indexer `MempoolChange` stream plus `getrawtransaction`. [#11036]                                                     |

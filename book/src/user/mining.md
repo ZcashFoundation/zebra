@@ -10,6 +10,7 @@ Contents:
   - [Extra coinbase data](#extra-coinbase-data)
   - [Miner memo](#miner-memo)
   - [RPC section](#rpc-section)
+  - [ZMQ block notifications](#zmq-block-notifications)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
 - [Run a mining pool](#run-a-mining-pool)
@@ -115,6 +116,61 @@ successful commit notification. The default notification channel holds at most 1
 A full or closed channel produces an operational error before committing a mined block, without
 blocking ordinary state writes. Notification insertion does not guarantee delivery to peers.
 Restrict RPC access to trusted miners.
+
+### ZMQ block notifications
+
+Pools using zcashd's `hashblock` subscription can receive the same multipart messages from Zebra.
+Build or install Zebra with `--features zmq`, then add this to `zebrad.toml`:
+
+```toml
+[notify]
+zmqpubhashblock = "tcp://127.0.0.1:28332"
+```
+
+This is equivalent to zcashd's `-zmqpubhashblock=tcp://127.0.0.1:28332`. The Cargo feature is off by
+default and uses a pure-Rust implementation; no system ZMQ package is needed. Only TCP is supported.
+Official default binaries and Docker images do not include it. Without the feature, configuring the
+endpoint is a startup error.
+With no endpoint configured, no ZMQ socket is opened.
+
+Subscribe to `hashblock`. Each notification has three frames:
+
+1. The nine ASCII bytes `hashblock`, with no null terminator.
+2. The 32 hash bytes in display order: hex-encoding them gives the `getbestblockhash` RPC result.
+3. A four-byte little-endian sequence number, starting at zero, wrapping after `2^32 - 1`, and
+   resetting when Zebra restarts.
+
+Like block notify, notifications are suppressed until Zebra is close to the network tip.
+Only best-chain tip changes are reported, including reorganizations; this is not a per-block archive
+or a same-tip transaction update feed. Intermediate tips may be coalesced. A bounded local queue
+holds up to 1,000 messages and drops on overflow, never delaying validation. Each subscriber has
+its own 64-message queue. A full queue or a write taking more than one second disconnects only
+that subscriber; other subscribers continue receiving notifications.
+
+The server accepts at most 64 connections, including handshakes in progress. Handshakes and
+incomplete incoming frames have five-second deadlines. After the handshake, a client must send its
+first valid subscription within five seconds; other frames do not extend that deadline. Subscribed
+clients may remain silent indefinitely without heartbeats. Only ZMTP 3.x NULL connections with a
+SUB or XSUB socket type are supported. Inbound frames must use short lengths (at most 255 bytes),
+with at most 16 distinct subscription prefixes of up to 64 bytes each. Each connection may send
+at most 128 frames and 16 KiB, including frame headers, per one-second window after the handshake.
+Exceeding either budget disconnects the client. The budgets renew so periodic heartbeats do not
+exhaust a lifetime allowance. Invalid clients are disconnected.
+Heartbeat intervals shorter than about 10 ms can exceed the 128-frame-per-second inbound budget and
+disconnect the subscriber; ordinary intervals of 100 ms or more are unaffected.
+Heartbeat requests receive bounded PONG replies through the same per-subscriber queue, even when
+the chain tip is unchanged. Reply contexts are capped at 16 bytes.
+
+Subscribers must fetch fresh work over RPC and reconcile after sequence gaps, reconnects, or
+restarts.
+Keep periodic RPC polling as a backstop: coalesced tips do not necessarily create sequence gaps.
+
+**ZMQ has no authentication or encryption.** Restrict the endpoint to trusted clients using firewall
+rules or a private network, and account for untrusted local applications even on loopback.
+Never expose it directly to the public Internet. These limits do not provide fair admission:
+a misbehaving trusted client can still occupy all slots by subscribing, even to an unused topic
+or subsequently cancelling, or repeatedly reconnect to obtain fresh inbound budgets. Restrict
+access to well-behaved clients; the endpoint is not a defense against hostile clients.
 
 ## Running zebra
 

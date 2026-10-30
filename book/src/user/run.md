@@ -58,6 +58,7 @@ Additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.h
 
 - `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
 - `internal-miner` for [Regtest internal mining](https://zebra.zfnd.org/user/regtest.html)
+- `zmq` for [ZMQ block notifications](mining.md#zmq-block-notifications), implemented in Rust
 
 You can combine multiple features by listing them as parameters of the
 `--features` flag:

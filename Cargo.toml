@@ -181,6 +181,7 @@ vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "3.0.0"
 zcash_note_encryption = "0.5.1"
 zcash_script = "0.6"
+zeromq = { version = "0.6", default-features = false, features = ["tokio-runtime", "tcp-transport"] }
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
