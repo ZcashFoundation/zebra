@@ -1308,8 +1308,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8862c7f2d99964760016516103fcc621352e77a505b22b0fc25140f09e4b8bb0"
+source = "git+https://github.com/upbqdn/halo2?rev=c61deee3528a3526d73660f32525ff41599fb5c1#c61deee3528a3526d73660f32525ff41599fb5c1"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1333,8 +1332,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "800f76fa421515e2729192e3863bb0a58f30fe17a9a165ea5e778a157adeb579"
+source = "git+https://github.com/upbqdn/halo2?rev=c61deee3528a3526d73660f32525ff41599fb5c1#c61deee3528a3526d73660f32525ff41599fb5c1"
 dependencies = [
  "bitvec",
  "ff",
@@ -1345,8 +1343,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5af2a9457f494f862cd07b81c2e98a19f50b06a2057b7569450d7c26b167d1c"
+source = "git+https://github.com/upbqdn/halo2?rev=c61deee3528a3526d73660f32525ff41599fb5c1#c61deee3528a3526d73660f32525ff41599fb5c1"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2448,12 +2445,13 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.1"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=f29cb2ea155a2d0bf002b690c670d8e26aed19cf#f29cb2ea155a2d0bf002b690c670d8e26aed19cf"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=569f897edd5db401dafacca25d4760da533ad683#569f897edd5db401dafacca25d4760da533ad683"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
  "lazy_static",
+ "maybe-rayon",
  "rand 0.10.2",
  "static_assertions",
  "subtle",
