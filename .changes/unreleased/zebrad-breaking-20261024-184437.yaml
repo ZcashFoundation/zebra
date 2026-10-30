@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'A Regtest node no longer starts when `[network.testnet_parameters]` sets `network_magic`, `slow_start_interval`, `target_difficulty_limit`, `disable_pow`, `genesis_hash`, `pre_blossom_halving_interval`, or `temporary_orchard_disabling_soft_fork_height` to a value other than the one Regtest uses; Zebra previously ignored these values. Remove the field, or use a configured Testnet to change it. `network_name` is still ignored.'
+time: 2026-10-24T18:44:37.114942184+02:00
