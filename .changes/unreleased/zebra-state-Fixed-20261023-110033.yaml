@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Fixed read-only state databases leaving their secondary RocksDB directory in the system temporary directory: it is now removed when the database is dropped.'
+time: 2026-10-23T11:00:33.619622419Z

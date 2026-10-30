@@ -27,6 +27,7 @@ use rlimit::increase_nofile_limit;
 
 use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
+use tempfile::TempDir;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
@@ -110,6 +111,13 @@ pub struct DiskDb {
     /// In [`MultiThreaded`](rocksdb::MultiThreaded) mode,
     /// only [`Drop`] requires exclusive access.
     db: Arc<DB>,
+
+    /// The temporary directory a read-only secondary instance keeps its own files in,
+    /// removed when the last clone is dropped. `None` for read-write primaries.
+    ///
+    /// Declared after `db` so the database closes before its directory is removed.
+    #[allow(dead_code)]
+    secondary_dir: Option<Arc<TempDir>>,
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
@@ -393,8 +401,9 @@ enum DbMode {
     /// A read-write primary backed by temporary files that are deleted on drop.
     Ephemeral,
 
-    /// A read-only secondary that follows an existing primary's on-disk state. It owns
-    /// no files and never writes, flushes, or deletes them.
+    /// A read-only secondary that follows an existing primary's on-disk state. It never
+    /// writes, flushes, or deletes the primary's files, and only owns its temporary
+    /// secondary directory.
     ReadOnlySecondary,
 }
 
@@ -1046,22 +1055,26 @@ impl DiskDb {
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 
-        let db_result = if read_only {
-            // Use a tempfile for the secondary instance cache directory
-            let secondary_config = Config {
-                ephemeral: true,
-                ..config.clone()
-            };
-            let secondary_path =
-                secondary_config.db_path("secondary_state", format_version_in_code.major, network);
-            let create_dir_result = std::fs::create_dir_all(&secondary_path);
+        let secondary_dir = read_only.then(|| {
+            let secondary_dir = tempfile::Builder::new()
+                .prefix(&format!(
+                    "zebra-secondary_state-v{}-{}-",
+                    format_version_in_code.major,
+                    network.directory_name(),
+                ))
+                .tempdir()
+                .expect("temporary directory is created successfully");
 
-            info!(?create_dir_result, "creating secondary db directory");
+            info!(path = ?secondary_dir.path(), "created secondary db directory");
 
+            Arc::new(secondary_dir)
+        });
+
+        let db_result = if let Some(secondary_dir) = &secondary_dir {
             DB::open_cf_descriptors_as_secondary(
                 &db_options,
-                &path,
-                &secondary_path,
+                path.as_path(),
+                secondary_dir.path(),
                 column_families,
             )
         } else {
@@ -1078,6 +1091,7 @@ impl DiskDb {
                     network: network.clone(),
                     mode,
                     db: Arc::new(db),
+                    secondary_dir,
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                 };
 
