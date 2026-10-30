@@ -1,7 +1,8 @@
 # Keep `next` current with `main` through a reviewable pull request.
 #
 # After each push to `main`, moves the `sync/main-to-next` branch up to `main` and opens or
-# updates its auto-merging pull request into `next`. See book/src/dev/next-branch.md.
+# updates its pull request into `next` for a maintainer to merge. See
+# book/src/dev/next-branch.md.
 name: Sync main to next
 
 on:
@@ -51,6 +52,7 @@ jobs:
 
           # Create the branch, or fast-forward it, or merge main into it once a maintainer's
           # conflict resolution blocks the fast-forward. Never force it over that resolution.
+          BEHIND_MAIN=false
           if ! gh api "repos/${REPO}/git/refs" -f ref="refs/heads/${SYNC_BRANCH}" -f sha="${MAIN_SHA}" --silent 2>/dev/null &&
             ! gh api -X PATCH "repos/${REPO}/git/refs/heads/${SYNC_BRANCH}" -f sha="${MAIN_SHA}" -F force=false --silent 2>/dev/null &&
             ! MERGE=$(gh api "repos/${REPO}/merges" -f base="${SYNC_BRANCH}" -f head="${MAIN_SHA}" --silent 2>&1); then
@@ -58,7 +60,7 @@ jobs:
               echo "${MERGE}"
               exit 1
             fi
-            echo "::warning::main conflicts with ${SYNC_BRANCH}. Merge main into it, as described in book/src/dev/next-branch.md."
+            BEHIND_MAIN=true
           fi
 
           # `gh pr list --head` matches the branch name in any fork. The REST filter takes the owner.
@@ -67,7 +69,7 @@ jobs:
           if [ -z "${PR}" ]; then
             PR=$(gh pr create --repo "${REPO}" --base next --head "${SYNC_BRANCH}" \
               --title "chore: sync main to next" --body-file - <<'BODY'
-          Brings the commits merged to `main` into `next`. It merges itself with a merge commit once the required checks pass.
+          Brings the commits merged to `main` into `next`. A maintainer reviews it and merges it with a merge commit, which deploys the `next` nodes.
 
           If it conflicts with `next`, resolve the conflicts on this pull request's branch. The steps are in [The `next` branch](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/next-branch.md#resolve-sync-conflicts).
           BODY
@@ -75,18 +77,20 @@ jobs:
           fi
           echo "Sync pull request ${PR} has ${AHEAD} commit(s) from main."
 
+          # The branch no longer carries every commit on main, so a draft keeps it from
+          # being merged as if it did.
+          if [ "${BEHIND_MAIN}" = true ]; then
+            gh pr ready "${PR}" --undo
+            echo "::warning::main conflicts with ${SYNC_BRANCH}, so ${PR} is a draft. Merge main into the branch, as described in its body."
+          fi
+
           # GitHub computes mergeability asynchronously after the head moves.
           MERGEABLE=UNKNOWN
           for _ in $(seq 1 6); do
-            STATE=$(gh pr view "${PR}" --json mergeable,autoMergeRequest \
-              --jq '"\(.mergeable) \(.autoMergeRequest != null)"')
-            read -r MERGEABLE AUTO_MERGE <<< "${STATE}"
+            MERGEABLE=$(gh pr view "${PR}" --json mergeable --jq '.mergeable')
             [ "${MERGEABLE}" != "UNKNOWN" ] && break
             sleep 10
           done
-          # GitHub turns auto-merge off when a pull request conflicts, so turn it back on here.
           if [ "${MERGEABLE}" = "CONFLICTING" ]; then
             echo "::warning::Sync pull request ${PR} conflicts with next. Resolve it on ${SYNC_BRANCH}, as described in its body."
-          elif [ "${MERGEABLE}" = "MERGEABLE" ] && [ "${AUTO_MERGE}" = "false" ]; then
-            gh pr merge "${PR}" --auto --merge
           fi
