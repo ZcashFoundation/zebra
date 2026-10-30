@@ -69,7 +69,7 @@ derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "5.0.0"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
-equihash = "0.3"
+equihash = { version = "0.3.1", features = ["unsafe-verifier"] }
 ff = "0.14"
 futures = "0.3.32"
 futures-core = "0.3.31"
