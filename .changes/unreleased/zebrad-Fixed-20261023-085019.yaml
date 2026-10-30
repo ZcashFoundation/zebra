@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Fixed the startup panic when the state database cannot be opened: it now shows the underlying error, and only blames another running zebrad process when the database lock is actually held. Other I/O errors, such as an unmounted, unwritable, or full cache directory, get their own message.'
+time: 2026-10-23T08:50:19.324354823Z

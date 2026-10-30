@@ -1086,9 +1086,17 @@ impl DiskDb {
                 Ok(db)
             }
 
-            Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
-                "Database likely already open {path:?} \
-                         Hint: Check if another zebrad process is running."
+            Err(e) if DiskDb::is_lock_conflict(&e) => panic!(
+                "Database {path:?} is locked by another process. \
+                 Hint: Check if another zebrad process is running. \
+                 Error: {e}"
+            ),
+
+            Err(e) if matches!(e.kind(), ErrorKind::IOError) => panic!(
+                "I/O error opening database {path:?}. \
+                 Hint: Check that the state cache_dir exists, is mounted, \
+                 is writable by zebrad, and has free disk space. \
+                 Error: {e}"
             ),
 
             Err(e) => panic!(
@@ -1740,6 +1748,23 @@ impl DiskDb {
                 path: cache_dir.to_path_buf(),
                 source,
             }),
+        }
+    }
+
+    /// Returns `true` if `error` means another process or `DiskDb` instance holds the
+    /// database lock.
+    ///
+    /// RocksDB reports lock conflicts as I/O errors, so the message text is the only
+    /// way to tell them apart from other I/O errors.
+    fn is_lock_conflict(error: &rocksdb::Error) -> bool {
+        match error.kind() {
+            ErrorKind::Busy => true,
+            ErrorKind::IOError => {
+                let message = error.as_ref();
+                message.contains("While lock file")
+                    || message.contains("lock hold by current process")
+            }
+            _ => false,
         }
     }
 
