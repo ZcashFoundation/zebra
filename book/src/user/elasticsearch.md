@@ -1,101 +1,115 @@
-# Kibana blockchain explorer
+# Elasticsearch block export
 
-The goal here is to export block data from Zebra into an [elasticsearch](https://www.elastic.co/) database and visualize it with the [kibana](https://www.elastic.co/kibana/) front end.
+The optional `elasticsearch` Cargo feature exports newly finalized blocks
+as JSON documents to Elasticsearch. Kibana can query those documents through
+an Elasticsearch data view. This is separate from [Prometheus metrics](metrics.md)
+and does not replace Zebra's RocksDB chain state.
 
-**Attention:** This is an experimental feature tested only in the Zcash Testnet.
+This **experimental** exporter has
+[failure modes](#indexed-data-and-failure-behavior) that lose batches or interrupt
+node operation. Use a separate node rather than making production depend on it.
 
-Elasticsearch support was introduced to Zebra in [pull request #6274](https://github.com/ZcashFoundation/zebra/pull/6274).
+## Compatibility and security
 
-## Download, build and run Elasticsearch
+Zebra pins the Rust Elasticsearch client to `8.17.0-alpha.1`. That is the
+client library version, not a verified server-version requirement. The
+repository does not specify a tested Elasticsearch/Kibana server-version
+matrix. Do not assume compatibility with an arbitrary current server release.
+Install and configure the services using the
+[Elasticsearch documentation](https://www.elastic.co/docs/deploy-manage/deploy/self-managed)
+and [Kibana documentation](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-kibana).
 
-Installing elasticsearch is easy in linux and macOS by following the [.tar.gz installation guide](https://www.elastic.co/guide/en/elasticsearch/reference/current/targz.html).
+Zebra connects to one configured URL using HTTP Basic authentication. The
+current transport **disables TLS certificate validation**, including when
+using HTTPS. It has no configuration field for a certificate authority or
+certificate pinning. Keep the Elasticsearch connection on a trusted,
+isolated network or the same host; do not send credentials across an
+untrusted network with this integration.
 
-Make sure you end up with an `elasticsearch` binary. Run it:
+The password remains plaintext in TOML despite being redacted from debug output.
+Store the configuration file where only the Zebra account can read it, or mount
+it through the deployment's secret mechanism. The environment override
+[`ZEBRA_STATE__ELASTICSEARCH_PASSWORD` is rejected](config.md#environment-variables).
 
-```sh
-./bin/elasticsearch
-```
+## Build and configure Zebra
 
-The first time you run the database, `elastic` password and the enrollment token for Kibana will displayed in the screen (See the [Elasticsearch running guide](https://www.elastic.co/guide/en/elasticsearch/reference/current/targz.html#targz-running)). Please save these as you will need them.
-
-Elasticsearch will listen in <https://localhost:9200> by default.
-
-## Download, build and run Kibana
-
-Installing kibana is also easy in linux and macOS following the [.tar.gz installation guide](https://www.elastic.co/guide/en/kibana/current/targz.html).
-
-Make sure you end up with a `kibana` binary and run it:
-
-```sh
-./bin/kibana
-```
-
-The first time you run kibana, it will provide a link for configuration:
-
-```sh
-Kibana has not been configured.
-
-Go to http://localhost:5601/?code=405316 to get started.
-```
-
-Visit the url to get started, you will need the kibana enrollment token from elasticsearch and the elastic password from the previous step.
-
-Kibana will listen in <https://localhost:5601> by default.
-
-You are now ready to start bumping data into elasticsearch with Zebra.
-
-## Download and build zebra with `elasticsearch` feature
-
-Elasticsearch is an optional and experimental feature, we need to build and install with the `elasticsearch` rust feature enabled using the following command:
+From a source checkout, install with the
+[`elasticsearch` feature](install.md#cargo-features):
 
 ```sh
-cargo install --features elasticsearch --locked --git https://github.com/ZcashFoundation/zebra zebrad
+cargo install --locked --path zebrad --features elasticsearch
+zebrad generate -o zebrad-elasticsearch.toml
 ```
 
-Zebra binary will be at `~/.cargo/bin/zebrad`.
+Set the [`[state]` Elasticsearch fields](config.md#state) for an account
+authorized to create and write the target index. A build with this feature
+exports automatically during normal startup; there is no runtime enable switch.
 
-## Configure Zebra for `elasticsearch`
+For a Testnet experiment, edit the generated file's sections:
 
-Generate a configuration file with the default settings:
+```toml
+[network]
+network = "Testnet"
+listen_addr = "[::]:18233"
+
+[state]
+cache_dir = "./zebra-elasticsearch-state"
+elasticsearch_url = "https://localhost:9200"
+elasticsearch_username = "elastic"
+```
+
+Set `[state] elasticsearch_password` in the configuration file before starting
+Zebra. Use a dedicated empty `[state] cache_dir` if the index must include
+blocks from genesis. Enabling the feature on an existing state database
+exports only blocks finalized afterwards; it does not replay stored blocks.
+Do not delete an existing production state to populate an experimental index.
+
+Start the node:
 
 ```sh
-zebrad generate -o ~/.config/zebrad.toml
+zebrad -c zebrad-elasticsearch.toml start
 ```
 
-The following changes are needed:
+## Indexed data and failure behavior
 
-### `network` section
+The [exporter][export-source] runs after a block commits to RocksDB and serializes
+its Rust representation, not the JSON-RPC response format. It excludes
+non-finalized blocks.
 
-Change the `network` field to `Testnet`. The `Mainnet` should work but it is untested. Also ,the preferred p2p port for the testnet is 18233, so optionally change the `listen_addr` field to `0.0.0.0:18233`.
+Zebra constructs the index name as `zcash_` followed by the lowercase network
+name: `zcash_mainnet` on Mainnet and `zcash_testnet` on the default Testnet.
+Each document's `_id` is the decimal block height. Indexing that height again
+replaces the existing document.
 
-### `state` section
+During historical sync, Zebra sends batches of 24 blocks through the
+Elasticsearch bulk API. When the current block's header timestamp is less
+than four hours behind the local clock, it sends the accumulated batch on
+each finalized block instead. This batching heuristic is independent of the
+node's readiness checks.
 
-Add your elastic password generated when running the database for the first time into the `elasticsearch_password` field.
+The export path has these limitations:
 
-## Run Zebra
+- A failed ping request logs `Elasticsearch is not available, skipping block
+  indexing` and discards the queued batch. There is no retry queue.
+- A failed bulk request, an unreadable response, or a response reporting bulk
+  errors triggers a panic rather than a recoverable indexing error.
+- Export runs synchronously in the finalized-block commit path. Elasticsearch
+  delays therefore delay that commit path.
+- A partially filled batch has no shutdown flush or persistent storage. A
+  restart does not reconstruct it from blocks already in RocksDB.
 
-If the config is in the default path then just running the binary will start the sync.
+An Elasticsearch index can therefore have gaps even when Zebra's own state
+is complete. Monitor exporter errors and verify index completeness before
+using it for analysis that requires every block.
 
-```sh
-zebrad
-```
+## Query with Kibana
 
-Sync will take time, but you can use kibana to make sure blocks are being inserted during the process.
+After Elasticsearch accepts the first batch, create a Kibana data view for
+the generated index, such as `zcash_testnet`. The documents include the
+block header's `header.time` field. Select it as the time field if the
+Elasticsearch mapping exposes it as a date, and use a time range that includes
+the historical blocks being indexed.
 
-## Visualize your data
+Zebra does not provision Kibana, data views, index mappings, or dashboards.
 
-As soon as the first batch of data is inserted from Zebra into elasticsearch database, an index `zcash_testnet` will be created.
-
-To observe data, go to Analytics → Discover and create a new data view with the `zcash_testnet` index. Make sure you select `header.time` field as Timestamp field.
-
-To see the data, use the calendar to get records for the last 10 years, the first blocks that are inserted will be very old blocks following the chain genesis.
-
-![image info](elastic1.png)
-
-After a while the chain will be in sync.
-
-![image info](elastic2.png)
-
-You can now use all the kibana features. For example, creating dashboards for specific data visualization.
-
-![image info](elastic3.png)
+[export-source]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state.rs
