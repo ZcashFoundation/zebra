@@ -34,6 +34,40 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Availability of bodies for known blocks, independent of any retention setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryCapabilities {
+    /// The first retained non-genesis body height, or zero when no prefix is missing.
+    ///
+    /// Genesis remains available even when the suffix starts above it. Unknown blocks are not
+    /// made available by this boundary, and missing bodies within the suffix indicate corruption.
+    pub lowest_retained_height: block::Height,
+}
+
+impl Default for HistoryCapabilities {
+    fn default() -> Self {
+        Self {
+            lowest_retained_height: block::Height::MIN,
+        }
+    }
+}
+
+impl HistoryCapabilities {
+    /// Returns whether a non-genesis body prefix is unavailable.
+    ///
+    /// Missing bytes cannot distinguish intentional pruning from a corrupted archive prefix.
+    pub fn is_pruned(self) -> bool {
+        self.lowest_retained_height > block::Height::MIN
+    }
+
+    /// Returns whether a known block's body is retained, including the genesis exception.
+    ///
+    /// Callers must separately establish that the block exists.
+    pub fn has_block_body(self, height: block::Height) -> bool {
+        height == block::Height::MIN || height >= self.lowest_retained_height
+    }
+}
+
 /// Keeps early mining work alive and reserves its slot until block verification finishes.
 #[derive(Clone, Debug)]
 pub struct MiningCandidateGuard(
@@ -496,6 +530,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
+    /// Stored body availability, in response to [`ReadRequest::HistoryCapabilities`].
+    HistoryCapabilities(HistoryCapabilities),
+
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
@@ -754,6 +791,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
             ReadResponse::UsageInfo(_)
+            | ReadResponse::HistoryCapabilities(_)
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
