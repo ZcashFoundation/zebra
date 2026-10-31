@@ -300,6 +300,10 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         !old_path.exists(),
         "reuse moves rather than backs up the cache"
     );
+    assert!(
+        !state.db.history_capabilities().unwrap().is_pruned(),
+        "the move keeps every body, so a never-pruned v30 archive can be renamed back to v29",
+    );
     assert_eq!(state.db.finalized_tip_height(), Some(Height(1)));
     assert_eq!(state.db.finalized_tip_hash(), expected_tip_hash);
     assert_eq!(state.db.finalized_value_pool(), expected_pools);
@@ -343,6 +347,34 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         let cf = state.db.cf_handle(column).unwrap();
         let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
         assert_eq!(raw.len(), width);
+    }
+
+    // Rolling a never-pruned archive back to Zebra 7.0.0 renames v30 to v29. The v29 reader
+    // must see every block, including the one written by the v30 build, with complete bodies.
+    let expected_blocks: Vec<_> = (0..=2)
+        .map(|height| state.db.block(Height(height).into()).unwrap().unwrap())
+        .collect();
+    let new_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
+    drop(state);
+    std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+    std::fs::rename(&new_path, &old_path).unwrap();
+    let rolled_back = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &old_version,
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    assert_eq!(rolled_back.finalized_tip_hash(), next_hash);
+    assert!(!rolled_back.history_capabilities().unwrap().is_pruned());
+    for (height, expected) in (0..=2).zip(expected_blocks) {
+        let block = rolled_back.block(Height(height).into()).unwrap().unwrap();
+        assert_eq!(block, expected);
     }
 }
 
