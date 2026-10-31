@@ -83,7 +83,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{router::service_trait::BlockVerifierService, RouterError};
-use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService, MempoolTxSubscriber};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
@@ -3568,16 +3568,18 @@ where
 
         let protocol_version = zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0;
 
-        // TODO: return actual supported local services when Zebra exposes them
-        let local_services = format!("{:016x}", PeerServices::NODE_NETWORK);
-
         // Deprecated: zcashd always returns 0.
         let timeoffset = 0;
 
-        let connections = read_address_book(&self.address_book, |book| {
-            book.recently_live_peers(Utc::now()).len()
+        // Report what we advertise to peers: pruned nodes don't advertise `NODE_NETWORK`.
+        let (connections, local_services) = read_address_book(&self.address_book, |book| {
+            (
+                book.recently_live_peers(Utc::now()).len(),
+                book.local_services(),
+            )
         })
         .await?;
+        let local_services = format!("{:016x}", local_services);
 
         // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
         let networks = vec![

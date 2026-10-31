@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added `AddressBookPeers::local_services`, returning the services the node advertises to peers. It defaults to no services for implementers that do not track them.
+time: 2026-10-31T20:42:09.904691968Z
