@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Finalized block, block-and-size, and tip-block reads now return `Result<Option<_>, BlockReadError>`: handle incomplete primary data separately from unknown blocks. State service body requests propagate the same typed errors. Secondary readers return `None` until all required data is visible.'
+time: 2026-10-24T21:38:22.941017106+02:00

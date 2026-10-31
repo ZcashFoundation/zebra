@@ -1,0 +1,7 @@
+project: zebrad
+kind: Changed
+body: >-
+  State copying checks source history availability and reusable archive targets before
+  opening a writable target. Unavailable ranges and older-major targets with mismatched
+  recorded majors or required migrations are rejected without creating or changing the target.
+time: 2026-10-24T23:19:52.697473536+02:00

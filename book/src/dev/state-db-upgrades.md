@@ -11,11 +11,12 @@ For deployment, direct-reader compatibility, and rollback, follow
 ## Format versions and paths
 
 The database format version is independent of Zebra and Rust crate versions.
-Zebra 7.0.0 implements [format **29.0.0**][constants]:
+The current code implements [format **30.0.0**][constants]; Zebra 7.0.0
+implements format 29.0.0:
 
 | Constant | Current value | Change requiring a bump |
 | --- | --- | --- |
-| `DATABASE_FORMAT_VERSION` | `29` | An incompatible encoding change or column family removal |
+| `DATABASE_FORMAT_VERSION` | `30` | An incompatible encoding change or column family removal |
 | `DATABASE_FORMAT_MINOR_VERSION` | `0` | A significant compatible change, including a new column family |
 | `DATABASE_FORMAT_PATCH_VERSION` | `0` | A significant format compatibility fix |
 
@@ -23,7 +24,7 @@ A change that would otherwise be incompatible can use a minor bump only when
 all supported Zebra versions already contain the required compatibility code.
 The function `state_database_format_version_in_code()` returns the complete
 semantic version. Builds with the `indexer` feature return
-`29.0.0+indexer`; other builds return `29.0.0`.
+`30.0.0+indexer`; other builds return `30.0.0`.
 
 For persistent databases, the method `Config::db_path()` constructs this path:
 
@@ -39,7 +40,7 @@ this namespace. Databases for the same network with different minor or patch
 versions still use the same major-version directory.
 
 The file `version` inside the database directory records the full semantic
-version, for example `29.0.0` or `29.0.0+indexer`, without a trailing newline.
+version, for example `30.0.0` or `30.0.0+indexer`, without a trailing newline.
 The [version reader][config] also accepts the legacy `minor.patch` form and
 supplies the major version from the requested database path. If the file is
 absent but the directory exists, it reports `<major>.0.0`. If both are absent,
@@ -61,8 +62,8 @@ move a compatible database from the immediately preceding major version into
 the new directory, then apply the required format changes.
 
 The registry [`restorable_db_versions()`][upgrade] contains destination majors
-`26`, `27`, `28`, and `29`. The [reuse implementation][disk-db] considers only
-`current_major - 1`: format 29 reuses format 28, not format 27 or earlier.
+`26`, `27`, `28`, `29`, and `30`. The [reuse implementation][disk-db] considers only
+`current_major - 1`: format 30 reuses format 29, not format 28 or earlier.
 
 Reuse requires all of the following:
 
@@ -94,6 +95,24 @@ not need rewriting because the new readers accept their older encodings.
 Legacy records read with a zero NSM balance; new writes use the wider encoding
 even when that balance is zero. See the [byte layouts](#data-formats).
 
+### The v29-to-v30 upgrade
+
+Format 30 isolates state that may have pruned block bodies from older
+archive-only readers. Its registered upgrade moves compatible v29 archives into
+`state/v30` without rewriting records. The directory boundary keeps older
+readers from opening state that may be missing historical bodies, even when
+pruning is disabled.
+
+Retain a separate v29 archive backup for rollback; disabling old-database
+cleanup does not preserve the moved directory. A pruned database cannot change
+spending-index mode: writable opens reject incompatible builds before any blocks
+can be committed.
+
+Direct database readers must be upgraded with the writer. They need a
+v30-compatible `zebra-state` dependency that handles unavailable block bodies.
+Manually renaming or symlinking versioned directories bypasses the pruning
+safety boundary.
+
 ### Old-database cleanup
 
 When enabled, the [cleanup task][config] scans major-version directories under
@@ -102,7 +121,7 @@ versions except predecessors of registered reusable upgrades. It skips current
 and newer versions, paths outside the canonical cache root, and ephemeral
 databases.
 
-The current registry protects `v25` through `v28`. Cleanup removes an eligible
+The current registry protects `v25` through `v29`. Cleanup removes an eligible
 major-version directory as a whole, including its network subdirectories.
 
 ### Upgrade execution and validity checks
@@ -153,6 +172,40 @@ version has reached the running version. An interrupted upgrade retains the last
 completed version and resumes the remaining work on restart.
 [Periodic detailed checks](../user/config.md#state) are optional.
 Read-only secondary instances skip this upgrade/check thread.
+
+### Historical body availability
+
+Before changing the format, migrations that require historical bodies must
+reject a database with an unavailable body prefix. New migrations require full
+history by default; only migrations that use retained data may opt out through
+`DiskFormatUpgrade::requires_full_history()`. Spending-index build-mode changes
+also require archive history. Intermediate version writes preserve the stored
+spending-index build metadata until conversion finishes, so an interrupted
+upgrade cannot mislabel an unchanged index layout.
+
+The pruning startup gate is `ZebraDb::ready_for_pruning()`. It remains false
+until migrations, spending-index conversion, and detailed format checks finish
+successfully. The earlier `finished_format_upgrades()` flag only controls write
+compatibility and must not enable deletion. Read-only instances and skipped or
+cancelled checks never open the pruning gate.
+
+Restart checks still search at most 100,000 blocks for observed transaction
+branch IDs. Missing history is not evidence of a valid branch. Pruning caches a
+matching witness and checks new finalized blocks without rescanning a branchless
+suffix. Its initial search is bounded to 100,000 blocks; without a witness it
+waits without deleting bodies or rejecting the chain. Deletion preserves the
+witness even when it is older than the requested retention window.
+
+With `state.prune_blocks_older_than` set, one state-owned worker starts pruning
+after this gate opens, wakes at startup and on finalized-tip changes, and
+deletes at most 100 heights per batch. Only transaction bodies are deleted;
+genesis is retained. The retained floor is derived from transaction rows, with
+no new persisted marker or column family beyond the v30 format boundary. Normal
+RocksDB compaction reclaims disk space outside the commit path.
+
+State copying inspects source availability and the target tip before opening a
+writable target. An unavailable source range requires an archive snapshot or
+resync; genesis remains copyable.
 
 <a id="design"></a>
 

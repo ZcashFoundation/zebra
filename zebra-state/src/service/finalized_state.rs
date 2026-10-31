@@ -64,6 +64,7 @@ pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
     MAX_ON_DISK_HEIGHT,
 };
+pub(crate) use zebra_db::history::PruningWitness;
 pub use zebra_db::ZebraDb;
 
 #[cfg(any(test, feature = "proptest-impl"))]
