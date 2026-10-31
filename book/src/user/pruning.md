@@ -96,6 +96,11 @@ returns `notfound` for unavailable block bodies. Block inventory stops at missin
 than skipping the gap. Do not use this node as an archive source for other peers or a
 zcashd sidecar.
 
+Peers treat a node without `NODE_NETWORK` as unable to serve blocks. zcashd-derived nodes never
+download blocks from it, even near the tip, and syncing Zebra nodes do not keep it as an outbound
+peer. A pruned mining node should therefore also connect to archive nodes, or to Zebra peers that
+use [early block relay](mining.md#early-block-relay-and-compact-blocks), so that the blocks it finds still propagate.
+
 ## Watch pruning converge
 
 Enable the [Prometheus endpoint](metrics.md) and watch these metrics:
