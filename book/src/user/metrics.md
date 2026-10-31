@@ -106,6 +106,8 @@ when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
 The header time is set by the block's miner, so a single value is only approximate.
 Nodes that follow the same chain see the same header times, so comparing these
 values across nodes over the same period shows which nodes accept blocks sooner.
+In Sentry, each `zcash.chain.tip.block_delay_seconds` value also carries the block's
+`chain.height`, so nodes can be compared block by block.
 
 ## Network metric aggregation
 

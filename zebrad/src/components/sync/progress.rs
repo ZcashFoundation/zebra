@@ -410,12 +410,16 @@ pub async fn show_block_chain_progress(
 ///
 /// A block is only recorded if it was mined after its parent was already this node's tip, so a
 /// node catching up after a restart or a stall doesn't record its backlog.
+#[cfg_attr(not(feature = "sentry"), allow(unused_variables))]
 pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange) {
     let mut tip_block_delay = TipBlockDelay::new(Utc::now());
 
     while let Ok(tip_action) = chain_tip_change.wait_for_tip_change().await {
-        if let Some(delay) = tip_block_delay.observe(&tip_action, Utc::now()) {
+        if let Some((height, delay)) = tip_block_delay.observe(&tip_action, Utc::now()) {
             metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(delay);
+
+            #[cfg(feature = "sentry")]
+            crate::sentry::send_tip_block_delay(height, delay);
         }
     }
 }
@@ -432,14 +436,14 @@ impl TipBlockDelay {
         Self { tip_since: now }
     }
 
-    /// Returns the seconds from the header time of the block that `tip_action` added to `now`, if
-    /// it grew the tip by a block mined after its parent became this node's tip.
+    /// Returns the height of the block that `tip_action` added and the seconds from its header
+    /// time to `now`, if it grew the tip by a block mined after its parent became this node's tip.
     ///
-    /// The result is negative when the block's miner set its clock ahead of this node's.
-    fn observe(&mut self, tip_action: &TipAction, now: DateTime<Utc>) -> Option<f64> {
+    /// The delay is negative when the block's miner set its clock ahead of this node's.
+    fn observe(&mut self, tip_action: &TipAction, now: DateTime<Utc>) -> Option<(Height, f64)> {
         let delay = match tip_action {
             TipAction::Grow { block } if block.time >= self.tip_since => {
-                Some((now - block.time).as_seconds_f64())
+                Some((block.height, (now - block.time).as_seconds_f64()))
             }
             _ => None,
         };
@@ -486,8 +490,16 @@ mod tests {
             (Some(tip_block(12, 11, at(-225))), at(2), None),
             (Some(tip_block(13, 12, at(-150))), at(3), None),
             // Blocks mined after their parent was the tip.
-            (Some(tip_block(14, 13, at(60))), at(62), Some(2.0)),
-            (Some(tip_block(15, 14, at(130))), at(125), Some(-5.0)),
+            (
+                Some(tip_block(14, 13, at(60))),
+                at(62),
+                Some((block::Height(14), 2.0)),
+            ),
+            (
+                Some(tip_block(15, 14, at(130))),
+                at(125),
+                Some((block::Height(15), -5.0)),
+            ),
             // A different chain.
             (Some(tip_block(17, 16, at(200))), at(201), None),
         ];
