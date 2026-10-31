@@ -89,11 +89,11 @@ retries = 1
 
 # Run alone because the known-port helper releases the socket before zebrad binds it.
 [[profile.default.overrides]]
-filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart)'
+filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart) or test(=integration::regtest::pruning::pruned_node_never_advertises_unservable_blocks)'
 threads-required = "num-test-threads"
 
 [[profile.ci.overrides]]
-filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart)'
+filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart) or test(=integration::regtest::pruning::pruned_node_never_advertises_unservable_blocks)'
 threads-required = "num-test-threads"
 
 # Force live Testnet peer-limit tests to run serially with each other, while

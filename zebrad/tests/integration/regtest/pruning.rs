@@ -267,3 +267,195 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
     })
     .await?
 }
+
+/// A pruned node never advertises `NODE_NETWORK`, and never offers peers blocks it can't serve.
+///
+/// Pruned zcashd-derived nodes have advertised `NODE_NETWORK` and then failed to serve
+/// historical blocks, stalling peers that synced from them. This checks the wire behavior
+/// before and after deletion with a real handshake.
+#[tokio::test(flavor = "multi_thread")]
+async fn pruned_node_never_advertises_unservable_blocks() -> Result<()> {
+    use std::{collections::HashSet, str::FromStr};
+
+    use tower::{Service, ServiceExt};
+    use zebra_chain::block;
+    use zebra_network::{
+        connect_isolated_tcp_direct, types::PeerServices, Client, InventoryResponse,
+        Request as PeerRequest, Response as PeerResponse,
+    };
+
+    const RETENTION: u32 = MAX_BLOCK_REORG_HEIGHT + 1;
+    const MARGIN: u32 = 10;
+    const TIP: u32 = MAX_BLOCK_REORG_HEIGHT + RETENTION + MARGIN;
+    const FLOOR: u32 = MARGIN + 1;
+    const TEST_TIMEOUT: Duration = Duration::from_secs(300);
+    const PEER_TIMEOUT: Duration = Duration::from_secs(30);
+
+    async fn connect(network: &Network, p2p_address: std::net::SocketAddr) -> Result<Client> {
+        let client = tokio::time::timeout(
+            PEER_TIMEOUT,
+            connect_isolated_tcp_direct(network, p2p_address, String::new()),
+        )
+        .await
+        .map_err(|_| eyre!("handshake with the pruned node timed out"))?
+        .map_err(|err| eyre!(err))?;
+        assert!(
+            !client
+                .connection_info
+                .remote
+                .services
+                .contains(PeerServices::NODE_NETWORK),
+            "a node configured to prune must not advertise NODE_NETWORK",
+        );
+        Ok(client)
+    }
+
+    async fn call(client: &mut Client, request: PeerRequest) -> Result<PeerResponse> {
+        tokio::time::timeout(PEER_TIMEOUT, async {
+            client.ready().await?.call(request).await
+        })
+        .await
+        .map_err(|_| eyre!("peer request timed out"))?
+        .map_err(|err| eyre!("{err:?}"))
+    }
+
+    async fn local_services(client: &RpcRequestClient) -> Result<String> {
+        let info: Value = client
+            .json_result_from_call("getnetworkinfo", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+        Ok(info["localservices"]
+            .as_str()
+            .expect("getnetworkinfo reports localservices")
+            .to_owned())
+    }
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                nu5: Some(1),
+                ..Default::default()
+            }
+            .into(),
+        );
+        // Logs are filtered to warnings, so reserve both ports up front instead of reading the
+        // OS-assigned ports from the startup log.
+        let reserve_port = || -> Result<u16> {
+            Ok(std::net::TcpListener::bind("127.0.0.1:0")?
+                .local_addr()?
+                .port())
+        };
+        let mut config = rpc_port_config(reserve_port()?, false, &network)?;
+        let p2p_address: std::net::SocketAddr = ([127, 0, 0, 1], reserve_port()?).into();
+        config.network.listen_addr = p2p_address;
+        // The test handshakes before and after deletion, both from localhost.
+        config.network.max_connections_per_ip = 2;
+        config.state.ephemeral = false;
+        config.state.prune_blocks_older_than = Some(RETENTION);
+        config.mempool.debug_enable_at_height = Some(0);
+        config.mining.miner_address = Some(
+            TransparentSigningKey::random()
+                .address(network.kind())
+                .into(),
+        );
+        // Avoid filling the child's log pipe while generating thousands of blocks.
+        config.tracing.filter = Some("warn".to_owned());
+        let rpc_address = config.rpc.listen_addr.expect("the fixture enables RPC");
+        let mut child = testdir()?
+            .with_config(&mut config)?
+            .spawn_child(args!["start"])?
+            .with_timeout(TEST_TIMEOUT)?;
+        let rpc = RpcRequestClient::new_with_timeout(rpc_address, TEST_TIMEOUT);
+        wait_for_mempool_activation(&rpc).await?;
+
+        // Configuring pruning withdraws the service before anything has been deleted.
+        let info: Value = rpc
+            .json_result_from_call("getblockchaininfo", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert_eq!(info["pruned"], false);
+        drop(connect(&network, p2p_address).await?);
+        assert_eq!(local_services(&rpc).await?, "0000000000000000");
+
+        let genesis: String = rpc
+            .json_result_from_call("getblockhash", "[0]")
+            .await
+            .map_err(|err| eyre!(err))?;
+        let genesis = block::Hash::from_str(&genesis)?;
+        let hashes = rpc.generate(TIP).await?;
+        let height_of = |hash: &block::Hash| {
+            hashes
+                .iter()
+                .position(|generated| generated == hash)
+                .map(|index| index + 1)
+        };
+        pruned_info(&rpc, FLOOR).await?;
+
+        let mut peer = connect(&network, p2p_address).await?;
+        assert_eq!(local_services(&rpc).await?, "0000000000000000");
+
+        // A pruned block is answered with `notfound`, not an empty or partial block.
+        let pruned = hashes[0];
+        let error = call(
+            &mut peer,
+            PeerRequest::BlocksByHash(HashSet::from([pruned])),
+        )
+        .await
+        .expect_err("the pruned node must not serve a deleted body");
+        assert!(
+            error.to_string().contains("NotFoundResponse"),
+            "unexpected error for a pruned block: {error}",
+        );
+
+        // The connection survives, and retained bodies are still served.
+        let retained = hashes[usize::try_from(TIP - MAX_BLOCK_REORG_HEIGHT)? - 1];
+        let PeerResponse::Blocks(blocks) = call(
+            &mut peer,
+            PeerRequest::BlocksByHash(HashSet::from([retained])),
+        )
+        .await?
+        else {
+            panic!("block requests return blocks");
+        };
+        assert!(
+            matches!(
+                blocks.as_slice(),
+                [InventoryResponse::Available((block, _))] if block.hash() == retained
+            ),
+            "the retained finalized tip must be served",
+        );
+
+        // Block inventory never offers hashes below the retained floor. When the gap starts
+        // right after the locator, the node sends no inventory, so the request times out.
+        match call(
+            &mut peer,
+            PeerRequest::FindBlocks {
+                known_blocks: vec![genesis],
+                stop: None,
+            },
+        )
+        .await
+        {
+            Ok(PeerResponse::BlockHashes(offered)) => {
+                for hash in offered {
+                    let height = height_of(&hash).expect("offered hashes are on the best chain");
+                    assert!(
+                        height >= usize::try_from(FLOOR)?,
+                        "offered unservable block at height {height}",
+                    );
+                }
+            }
+            Ok(response) => panic!("unexpected getblocks response: {response:?}"),
+            Err(_) => {}
+        }
+
+        child.kill(false)?;
+        child
+            .wait_with_output()?
+            .assert_failure()?
+            .assert_was_killed()?;
+        Ok(())
+    })
+    .await?
+}
