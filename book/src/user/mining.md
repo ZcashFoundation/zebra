@@ -30,10 +30,14 @@ internal_miner = false
 [rpc]
 listen_addr = "127.0.0.1:8232"
 enable_cookie_auth = true
+
+[network]
+experimental_early_block_relay = true
 ```
 
 See the [mining configuration reference](config.md#mining) for field defaults
-and limits.
+and limits, and [Early block relay and compact blocks](#early-block-relay-and-compact-blocks)
+for the `[network]` setting.
 
 ### Miner address
 
@@ -97,12 +101,14 @@ reload it after each restart. Bind RPC to loopback for a local pool; use a
 protected tunnel or TLS proxy for remote connections. Disable authentication
 only when an isolated network or an authenticating proxy controls access.
 
-Submitted blocks are advertised early only when they exactly match a successful local proposal
-verdict, except for the nonce and Equihash solution. Solved proof of work, size, current time, live
-parent eligibility and local invalidation are checked before the body becomes available to peers.
-Changed or uncached proposals undergo normal full validation; checkpoint-era blocks wait for commit.
-Early advertisements use ordinary block gossip; all-peer advertisements are reserved for committed
-submissions. The RPC response still waits for verification and commit.
+A submitted block that exactly matches a successful local proposal verdict, except for the nonce and
+Equihash solution, reuses that verdict and is advertised before commit. Solved proof of work, size,
+current time, live parent eligibility and local invalidation are checked before the body becomes
+available to peers. Changed or uncached proposals undergo normal full validation; checkpoint-era
+blocks wait for commit. These advertisements use ordinary block gossip; all-peer advertisements are
+reserved for committed submissions. With [early block relay](#early-block-relay-and-compact-blocks),
+peers that also enable it can receive an uncached submitted block before its transaction
+verification finishes. The RPC response still waits for verification and commit.
 
 Committed notifications belong to the state writer, so cancelling an RPC does not discard a later
 successful commit notification. The default notification channel holds at most 10,000 messages.
@@ -164,6 +170,25 @@ Never expose it directly to the public Internet. These limits do not provide fai
 a misbehaving trusted client can still occupy all slots by subscribing, even to an unused topic
 or subsequently cancelling, or repeatedly reconnect to obtain fresh inbound budgets. Restrict
 access to well-behaved clients; the endpoint is not a defense against hostile clients.
+
+### Early block relay and compact blocks
+
+Set `[network] experimental_early_block_relay = true` on every mining node. Between two nodes that
+both enable it:
+
+- A node advertises a block extending its best tip once the header, proof of work and transaction
+  commitments check out, before transaction verification finishes. Each receiver still verifies
+  the block fully before committing it.
+- Up to three such peers per announcement receive a compact block: the header and short
+  transaction IDs. Each rebuilds the block from its mempool and requests missing transactions once;
+  if that fails, it fetches the full block.
+
+Other peers, including zcashd, other node implementations and Zebra releases without this setting,
+get ordinary full-block relay. Nodes negotiate the feature with experimental service bit 25 and a
+`sendcmpct` exchange. Neither is an allocated Zcash protocol, and the encoding may change in later
+releases; nodes without a common encoding version fall back to full blocks.
+[Experimental early block relay](regtest.md#experimental-early-block-relay) describes the limits and
+failure handling.
 
 ## Running Zebra
 
