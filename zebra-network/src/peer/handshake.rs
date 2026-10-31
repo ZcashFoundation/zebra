@@ -544,9 +544,10 @@ where
         self
     }
 
-    /// Provide the services this node advertises to other peers.  Optional.
+    /// Provide the base services this node advertises to other peers. Optional.
     ///
-    /// If this is unset, the node will advertise itself as a client.
+    /// Defaults to [`PeerServices::NODE_NETWORK`]. The config controls early block relay
+    /// independently, and isolated connections advertise no services.
     pub fn with_advertised_services(mut self, services: PeerServices) -> Self {
         self.our_services = Some(services);
         self
@@ -613,7 +614,7 @@ where
         });
         let nonces = Arc::new(futures::lock::Mutex::new(IndexSet::new()));
         let user_agent = self.user_agent.unwrap_or_default();
-        let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
+        let our_services = self.our_services.unwrap_or(PeerServices::NODE_NETWORK);
         let relay = self.relay.unwrap_or(false);
         let network = config.network.clone();
         let minimum_peer_version = MinimumPeerVersion::new(self.latest_chain_tip, &network);
@@ -754,7 +755,8 @@ where
         .is_at_or_near_network_tip(Utc::now());
 
     let network = config.network.clone();
-    let (their_addr, mut our_services, our_listen_addr) = match connected_addr {
+    let our_services = config.advertised_services(our_services);
+    let (their_addr, our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
         // an unspecified address for Isolated connections
         Isolated => {
@@ -778,10 +780,6 @@ where
             (their_addr, our_services, advertise_addr)
         }
     };
-    our_services.set(
-        PeerServices::NODE_EARLY_BLOCK_RELAY,
-        config.experimental_early_block_relay && !matches!(connected_addr, Isolated),
-    );
 
     let start_height = minimum_peer_version
         .chain_tip()
@@ -1301,10 +1299,10 @@ where
             let alternate_addrs = connected_addr
                 .get_alternate_addrs(remote_canonical_addr)
                 .map(|addr| {
-                    // Assume the connecting node is a server node, and it's available now.
+                    // Use the same capabilities as handshake validation, not the address field.
                     MetaAddr::new_gossiped_meta_addr(
                         addr,
-                        PeerServices::NODE_NETWORK,
+                        connection_info.remote.services(),
                         DateTime32::now(),
                     )
                 });

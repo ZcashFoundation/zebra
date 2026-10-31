@@ -52,6 +52,7 @@ use crate::{
         PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::PeerServices,
     AddressBook, BanList, BoxError, Config, MisbehaviorReport, NetworkService, PeerSocketAddr,
     Request, Response,
 };
@@ -76,8 +77,12 @@ pub use v2::close_v2_endpoint;
 /// - tower::Discover interprets an error as stream termination
 type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 
-/// Initialize a peer set, using a network `config`, `inbound_service`,
+/// Initialize a peer set, using a network `config`, `local_services`, `inbound_service`,
 /// and `latest_chain_tip`.
+///
+/// `local_services` supplies the base capabilities advertised in version messages and local
+/// address gossip. Pass [`PeerServices::NODE_NETWORK`] only if the node serves full block history.
+/// [`Config::experimental_early_block_relay`] controls the early-relay service bit independently.
 ///
 /// The peer set abstracts away peer management to provide a
 /// [`tower::Service`] representing "the network" that load-balances requests
@@ -121,6 +126,7 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// [1]: zebra_chain::chain_tip::NoChainTip
 pub async fn init<S, C>(
     config: Config,
+    local_services: PeerServices,
     inbound_service: S,
     latest_chain_tip: C,
     user_agent: String,
@@ -137,6 +143,7 @@ where
 {
     init_with_block_gossip_peer_ips(
         config,
+        local_services,
         inbound_service,
         latest_chain_tip,
         user_agent,
@@ -154,6 +161,7 @@ where
 /// single P2P connection to this node and must reliably learn about new blocks.
 pub async fn init_with_block_gossip_peer_ips<S, C>(
     config: Config,
+    local_services: PeerServices,
     inbound_service: S,
     latest_chain_tip: C,
     user_agent: String,
@@ -178,7 +186,7 @@ where
         address_book_service,
         address_metrics,
         address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, listen_addr);
+    ) = AddressBookUpdater::spawn(&config, listen_addr, local_services);
 
     let (misbehavior_tx, misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
         // Leave enough room for a misbehaviour update on every peer connection
@@ -213,14 +221,13 @@ where
     let (listen_handshaker, outbound_connector) = {
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
-        use crate::protocol::external::types::PeerServices;
         let hs = peer::Handshake::builder()
             .with_config(config.clone())
             .with_inbound_service(inbound_service.clone())
             .with_inventory_collector(inv_sender.clone())
             .with_address_book_updater(address_book_updater.clone())
             .with_bans(bans_receiver.clone())
-            .with_advertised_services(PeerServices::NODE_NETWORK)
+            .with_advertised_services(local_services)
             .with_user_agent(user_agent.clone())
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)

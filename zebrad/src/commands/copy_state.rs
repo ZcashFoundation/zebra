@@ -32,6 +32,11 @@
 //!      receiving blocks in the new format
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
+//!
+//! Source availability and target history are inspected read-only before opening a writable
+//! target. A copy that needs unavailable history requires an archive source.
+//! Target pruning is disabled for replay and comparison, without changing the saved config.
+//! Pruned targets require an archive snapshot or a fresh cache directory.
 
 use std::{cmp::min, path::PathBuf};
 
@@ -54,6 +59,9 @@ use crate::{
 /// How often we log info-level progress messages
 const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
 
+#[cfg(test)]
+mod tests;
+
 /// copy cached chain state (expert users only)
 #[derive(Command, Debug, clap::Parser)]
 pub struct CopyStateCmd {
@@ -64,8 +72,8 @@ pub struct CopyStateCmd {
     /// Path to a Zebra config.toml for the target state.
     /// Uses an ephemeral config by default.
     ///
-    /// Zebra only uses the state options from this config.
-    /// All other options are ignored.
+    /// Zebra only uses the state options from this config, with target pruning disabled.
+    /// All other options are ignored. Normal startup applies the saved retention setting.
     #[clap(
         long,
         short,
@@ -113,8 +121,11 @@ impl CopyStateCmd {
         &self,
         network: &Network,
         source_config: old_zs::Config,
-        target_config: new_zs::Config,
+        mut target_config: new_zs::Config,
     ) -> Result<(), BoxError> {
+        // Copying must preserve both replayed and pre-existing bodies through comparison.
+        target_config.prune_blocks_older_than = None;
+
         info!(
             ?source_config,
             "initializing source state service (old format)"
@@ -128,6 +139,114 @@ impl CopyStateCmd {
 
         let elapsed = source_start_time.elapsed();
         info!(?elapsed, "finished initializing source state service");
+
+        let source_tip = source_read_only_state_service
+            .ready()
+            .await?
+            .call(old_zs::ReadRequest::Tip)
+            .await?;
+        let source_tip = match source_tip {
+            old_zs::ReadResponse::Tip(Some(source_tip)) => source_tip,
+            old_zs::ReadResponse::Tip(None) => Err("empty source state: no blocks to copy")?,
+
+            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
+        };
+        let source_tip_height = source_tip.0 .0;
+
+        // Inspect an existing target without starting migrations or creating its cache directory.
+        let initial_target_tip = if target_config.ephemeral {
+            None
+        } else {
+            match new_zs::spawn_init_read_only(target_config.clone(), network).await? {
+                Ok((target_reader, _target_db, _target_sender)) => {
+                    let history = target_reader
+                        .clone()
+                        .oneshot(new_zs::ReadRequest::HistoryCapabilities)
+                        .await?;
+                    let new_zs::ReadResponse::HistoryCapabilities(history) = history else {
+                        return Err(format!(
+                            "unexpected target history capabilities response: {history:?}"
+                        )
+                        .into());
+                    };
+                    if history.is_pruned() {
+                        return Err(format!(
+                            "copy target has unavailable block history below {:?}; restore an \
+                             archive snapshot or copy into a separate cache directory",
+                            history.lowest_retained_height
+                        )
+                        .into());
+                    }
+                    match target_reader.oneshot(new_zs::ReadRequest::Tip).await? {
+                        new_zs::ReadResponse::Tip(tip) => tip,
+                        response => {
+                            return Err(
+                                format!("unexpected target Tip response: {response:?}").into()
+                            )
+                        }
+                    }
+                }
+                Err(new_zs::StateInitError::ReadOnlyDatabaseNotFound { .. }) => None,
+                Err(new_zs::StateInitError::ReadOnlyCacheDirUnreadable { source, .. })
+                    if source.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    None
+                }
+                Err(error) => return Err(error.into()),
+            }
+        };
+        let min_target_height = initial_target_tip
+            .map(|target_tip| target_tip.0 .0 + 1)
+            .unwrap_or(0);
+
+        let max_copy_height = self
+            .max_source_height
+            .map(|max_source_height| min(source_tip_height, max_source_height))
+            .unwrap_or(source_tip_height);
+
+        if min_target_height > max_copy_height {
+            info!(
+                ?min_target_height,
+                ?max_copy_height,
+                max_source_height = ?self.max_source_height,
+                ?source_tip,
+                ?initial_target_tip,
+                "target is already at or after max copy height"
+            );
+
+            return Ok(());
+        }
+
+        let history = source_read_only_state_service
+            .ready()
+            .await?
+            .call(old_zs::ReadRequest::HistoryCapabilities)
+            .await?;
+        let old_zs::ReadResponse::HistoryCapabilities(history) = history else {
+            return Err(format!("unexpected history capabilities response: {history:?}").into());
+        };
+        if max_copy_height > 0 && !history.has_block_body(Height(min_target_height.max(1))) {
+            return Err(format!(
+                "source copy range {min_target_height}..={max_copy_height} requires unavailable \
+                 block history below {:?}; restore an archive snapshot or resync the source",
+                history.lowest_retained_height
+            )
+            .into());
+        }
+
+        if let Some((height, hash)) = initial_target_tip {
+            let depth = source_read_only_state_service
+                .ready()
+                .await?
+                .call(old_zs::ReadRequest::Depth(hash))
+                .await?;
+            if !matches!(
+                depth,
+                old_zs::ReadResponse::Depth(Some(depth)) if depth == source_tip_height - height.0
+            ) {
+                return Err("target tip does not match the source chain".into());
+            }
+        }
 
         info!(
             ?target_config, target_config_path = ?self.target_config_path,
@@ -150,50 +269,21 @@ impl CopyStateCmd {
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");
 
-        info!("fetching source and target tip heights");
-
-        let source_tip = source_read_only_state_service
-            .ready()
-            .await?
-            .call(old_zs::ReadRequest::Tip)
-            .await?;
-        let source_tip = match source_tip {
-            old_zs::ReadResponse::Tip(Some(source_tip)) => source_tip,
-            old_zs::ReadResponse::Tip(None) => Err("empty source state: no blocks to copy")?,
-
-            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
-        };
-        let source_tip_height = source_tip.0 .0;
-
-        let initial_target_tip = target_state
+        // Initialization may reuse an older archive database or restore non-finalized blocks.
+        let target_tip = target_state
             .ready()
             .await?
             .call(new_zs::Request::Tip)
             .await?;
-        let initial_target_tip = match initial_target_tip {
-            new_zs::Response::Tip(target_tip) => target_tip,
-
-            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
+        let new_zs::Response::Tip(target_tip) = target_tip else {
+            return Err(format!("unexpected target Tip response: {target_tip:?}").into());
         };
-        let min_target_height = initial_target_tip
-            .map(|target_tip| target_tip.0 .0 + 1)
-            .unwrap_or(0);
-
-        let max_copy_height = self
-            .max_source_height
-            .map(|max_source_height| min(source_tip_height, max_source_height))
-            .unwrap_or(source_tip_height);
-
-        if min_target_height >= max_copy_height {
-            info!(
-                ?min_target_height,
-                ?max_copy_height,
-                max_source_height = ?self.max_source_height,
-                ?source_tip,
-                ?initial_target_tip,
-                "target is already at or after max copy height"
-            );
-
+        let next_height = target_tip.map_or(0, |(height, _)| height.0 + 1);
+        if next_height < min_target_height {
+            return Err("target tip moved backwards after copy preflight".into());
+        }
+        let min_target_height = next_height;
+        if min_target_height > max_copy_height {
             return Ok(());
         }
 

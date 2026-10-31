@@ -395,6 +395,7 @@ impl PeerSetGuard {
             .expect("Invalid local listener address");
         let address_book = AddressBook::new(
             local_listener,
+            crate::types::PeerServices::NODE_NETWORK,
             &Network::Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             Span::none(),

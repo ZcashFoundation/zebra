@@ -405,6 +405,7 @@ fn early_relay_rejected_commit_releases_context_before_response() {
         None,
         relay.clone(),
         None,
+        None,
     );
     let (version_tx, version_rx) = std::sync::mpsc::channel();
     let waker = Waker::from(Arc::new(ContextAtWake {
@@ -480,6 +481,7 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
         true,
         None,
         relay.clone(),
+        None,
         None,
     );
     let (observed_tx, observed_rx) = std::sync::mpsc::channel();

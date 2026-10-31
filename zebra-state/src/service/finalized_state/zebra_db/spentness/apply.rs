@@ -237,6 +237,8 @@ fn cursor(
             // in the UTXO set, so its bits must be zero.
             let genesis = db
                 .block(Height(0).into())
+                .ok()
+                .flatten()
                 .ok_or(SpentnessError::Inconsistent("the genesis block is missing"))?;
             let mut ordinal = 0;
             for _ in output_locations(&genesis, Height(0)) {

@@ -111,6 +111,7 @@ async fn write_worker_survives_rejected_root_invalidation() {
         None,
         super::super::early_relay::EarlyRelayState::new(None),
         None,
+        None,
     );
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -185,6 +186,7 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
         false,
         None,
         super::super::early_relay::EarlyRelayState::new(None),
+        None,
         None,
     );
     let tx = sender.non_finalized.as_ref().unwrap();
@@ -316,6 +318,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         backup_dir_path: None,
         early_relay: super::super::early_relay::EarlyRelayState::new(None),
         spentness_hints: None,
+        pruning_wake: None,
     };
     tracing::subscriber::with_default(
         CloseStateOnError {
@@ -414,6 +417,7 @@ fn precious_response_follows_tip_and_snapshot_publication() {
         backup_dir_path: None,
         early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
         spentness_hints: None,
+        pruning_wake: None,
     };
     worker.run();
     assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), second.hash());
@@ -461,7 +465,8 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
                     [block.hash().into(), block.coinbase_height().unwrap().into()]
                         .into_iter()
                         .all(|key| {
-                            read::block(snapshot.best_chain(), &self.db, key) == Some(block.clone())
+                            read::block(snapshot.best_chain(), &self.db, key)
+                                == Ok(Some(block.clone()))
                         })
                 })
         }
@@ -493,7 +498,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
                 observation.readable()
                     && observation.wakes.load(Ordering::SeqCst) == 2
                     && observation.db.block(observation.root.hash().into())
-                        == Some(observation.root.clone())
+                        == Ok(Some(observation.root.clone()))
                     && observation
                         .snapshot
                         .borrow()
@@ -592,6 +597,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
     }
     drop(queued);
     let writes = Arc::new(AtomicUsize::new(0));
+    let (pruning_wake, pruning_notifications) = crossbeam_channel::bounded(1);
     let worker = WriteBlockWorkerTask {
         finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
         non_finalized_block_write_receiver,
@@ -604,6 +610,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         backup_dir_path: None,
         early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
         spentness_hints: None,
+        pruning_wake: Some(pruning_wake),
     };
     // Observe the synchronous batch write even when release builds compile out trace events.
     let recorder = FinalizedWriteRecorder(Arc::new(AtFinalizedWrite {
@@ -612,6 +619,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
     }));
     metrics::with_local_recorder(&recorder, || worker.run());
     assert_eq!(writes.load(Ordering::SeqCst), 2);
+    assert_eq!(pruning_notifications.len(), 1);
     assert_eq!(
         snapshot.borrow().best_chain_len(),
         Some(MAX_BLOCK_REORG_HEIGHT)
@@ -643,7 +651,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         for chain in [snapshot.borrow().best_chain(), retained.best_chain()] {
             assert_eq!(
                 read::block(chain, &db, observation.root.hash().into()),
-                Some(observation.root.clone()),
+                Ok(Some(observation.root.clone())),
             );
         }
         assert!(retained.any_chain_contains(&observation.root.hash()));

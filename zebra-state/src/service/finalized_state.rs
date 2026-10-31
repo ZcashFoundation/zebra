@@ -66,6 +66,7 @@ pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
     MAX_ON_DISK_HEIGHT,
 };
+pub(crate) use zebra_db::history::PruningWitness;
 pub(crate) use zebra_db::spentness::{has_incomplete_spentness_hints, SpentnessWriter};
 pub use zebra_db::{
     spentness::{SpentnessError, SpentnessHintsReceiver},

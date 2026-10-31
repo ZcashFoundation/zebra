@@ -40,6 +40,7 @@ use crate::{
         v2::object::ObjectSource,
     },
     sync_peer::SyncPeersSender,
+    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -334,6 +335,18 @@ pub struct Config {
 }
 
 impl Config {
+    /// Applies configured experimental services to the caller's base service capabilities.
+    ///
+    /// Leaves out `NODE_SYNC_ARTIFACTS`, which ZIP 204 does not define for legacy peers.
+    pub(crate) fn advertised_services(&self, mut services: PeerServices) -> PeerServices {
+        services.remove(PeerServices::NODE_SYNC_ARTIFACTS);
+        services.set(
+            PeerServices::NODE_EARLY_BLOCK_RELAY,
+            self.experimental_early_block_relay,
+        );
+        services
+    }
+
     /// The maximum number of outbound connections that Zebra will open at the same time.
     /// When this limit is reached, Zebra stops opening outbound connections.
     ///
