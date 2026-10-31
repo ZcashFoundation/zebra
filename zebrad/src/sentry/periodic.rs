@@ -54,10 +54,17 @@ fn recorded(key: &Key, kind: Kind) -> Arc<Periodic> {
 
 /// Sends each listed counter's total since the previous call, and each listed gauge's latest
 /// value.
+///
+/// Sends after releasing the lock, so it can also run from the panic hook.
 pub(crate) fn flush() {
-    let recorded = RECORDED.lock().unwrap_or_else(PoisonError::into_inner);
+    let recorded: Vec<_> = RECORDED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|(key, periodic)| (key.clone(), periodic.clone()))
+        .collect();
 
-    for (key, periodic) in recorded.iter() {
+    for (key, periodic) in recorded {
         let name = key.name().to_owned();
         let labels = key
             .labels()

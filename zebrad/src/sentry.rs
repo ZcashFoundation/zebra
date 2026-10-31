@@ -318,10 +318,13 @@ fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
     SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Ends the release health session with `status`, then closes the client.
+/// Sends the counter totals and gauge values recorded since the last flush, ends the release
+/// health session with `status`, then closes the client.
 ///
-/// Returns `false` if queued events and logs could not be sent before the shutdown timeout.
+/// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
+/// timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
+    periodic::flush();
     end_session(status);
 
     let guard = CLIENT_GUARD
@@ -1113,6 +1116,24 @@ mod tests {
                 oldest_age,
             ],
         );
+    }
+
+    #[test]
+    fn counts_since_the_last_flush_are_sent_at_shutdown() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            metrics::counter!("sync.restart.count", "reason" => "sync_step_timeout").increment(1);
+
+            super::end(SessionStatus::Crashed);
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected the restart count, got {metrics:?}");
+        };
+
+        assert_eq!(metric.name, "sync.restart.count");
+        assert_eq!(metric.value, 1.0);
     }
 
     #[test]
