@@ -877,8 +877,10 @@ async fn rpc_getblockheader_distinguishes_missing_and_failed_reads() {
                         .await
                         .respond(response);
                 };
-                let (response, _) =
-                    tokio::join!(rpc.get_block_header(query.to_string(), Some(false)), handler);
+                let (response, _) = tokio::join!(
+                    rpc.get_block_header(query.to_string(), Some(false)),
+                    handler
+                );
                 let error = response.unwrap_err();
                 assert_eq!(error.code(), code);
                 assert_eq!(error.message(), message);
@@ -8686,6 +8688,52 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
         vec![],
         None,
     )
+}
+
+/// `getnetworkinfo` reports the services the node advertises, so a pruned node that cleared
+/// `NODE_NETWORK` never claims over RPC that it serves historical blocks.
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_getnetworkinfo_reports_advertised_services() {
+    use zebra_network::types::PeerServices;
+
+    let _init_guard = zebra_test::init();
+
+    for (services, expected) in [
+        (PeerServices::NODE_NETWORK, "0000000000000001"),
+        (PeerServices::empty(), "0000000000000000"),
+    ] {
+        let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
+            ([127, 0, 0, 1], Mainnet.default_port()).into(),
+            services,
+            &Mainnet,
+            zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
+            tracing::Span::none(),
+        )));
+
+        let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            address_book,
+            log_rx,
+            None,
+        );
+
+        let response = rpc
+            .get_network_info()
+            .await
+            .expect("getnetworkinfo reads only the address book");
+        assert_eq!(response.local_services, expected);
+    }
 }
 
 /// A contended address book must not prevent other RPC runtime tasks from progressing.

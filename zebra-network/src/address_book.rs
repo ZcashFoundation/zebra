@@ -1001,6 +1001,10 @@ impl AddressBookPeers for AddressBook {
     fn misbehavior_score(&self, addr: PeerSocketAddr) -> u32 {
         AddressBook::misbehavior_score(self, addr)
     }
+
+    fn local_services(&self) -> PeerServices {
+        self.local_services
+    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -1020,6 +1024,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .misbehavior_score(addr)
+    }
+
+    fn local_services(&self) -> PeerServices {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .local_services
     }
 }
 
