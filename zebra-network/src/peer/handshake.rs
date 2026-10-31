@@ -456,7 +456,7 @@ where
         self
     }
 
-    /// Share the live ban list with connection advert delivery.
+    /// Share the live ban list with connection request and advert delivery.
     pub fn with_bans(mut self, bans: tokio::sync::watch::Receiver<crate::BanList>) -> Self {
         self.bans_receiver = Some(bans);
         self
