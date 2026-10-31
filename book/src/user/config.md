@@ -354,8 +354,8 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `elasticsearch_password` | String; `elasticsearch` feature only | `""` | Elasticsearch HTTP Basic authentication password. Redacted from debug output, but stored in plaintext in the configuration file. Environment overrides are rejected. |
 | `elasticsearch_skip_cert_validation` | Boolean; `elasticsearch` feature only | `false` | Disable HTTPS certificate validation. Use only for trusted local clusters with self-signed certificates; credentials and indexed data can be intercepted. |
 
-Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
-7.0.0. Non-finalized backups use
+Persistent state uses `<cache_dir>/state/v30/<network-directory>`; Zebra 7.0.0
+used `state/v29`. Non-finalized backups use
 `<cache_dir>/non_finalized_state/<network-directory>`. Do not share a live state
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.

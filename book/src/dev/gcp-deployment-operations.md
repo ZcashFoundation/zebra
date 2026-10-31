@@ -376,11 +376,11 @@ query. Branch slugs can collide after truncation; selection does not require
 the current commit. Inspect the chosen image in the job output.
 
 The `allow_missing` input permits an empty selected name, not a failed
-image-list query. List recent v29 Mainnet tip images with:
+image-list query. List recent v30 Mainnet tip images with:
 
 ```sh
 gcloud compute images list --project zfnd-dev-zebra \
-  --filter='status=READY AND name~^zebrad-cache-.*-v29-mainnet-tip' \
+  --filter='status=READY AND name~^zebrad-cache-.*-v30-mainnet-tip' \
   --sort-by='~creationTimestamp' --limit=5
 ```
 
