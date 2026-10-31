@@ -228,6 +228,7 @@ compact encoding would not save bytes.
 This uses experimental service bit 25 from the
 [temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).
 Bit 25 avoids bit 24, which another implementation already uses for a different
-capability. This is not a production protocol
-allocation: use it only with explicitly coordinated participants. Regtest's disabled
-proof of work does not measure the cost of authenticated admission on a public network.
+capability. This is not a production protocol allocation;
+[Mining Zcash with Zebra](mining.md#early-block-relay-and-compact-blocks) covers its use on mining
+nodes. Regtest's disabled proof of work does not measure the cost of authenticated admission on a
+public network.
