@@ -192,7 +192,7 @@ async fn same_effects_variants_share_pending_slot_per_peer() {
         MockService::build().for_unit_tests();
     let state = service_fn(|request| async move {
         match request {
-            zs::ReadRequest::Transaction(_) => Ok(zs::ReadResponse::Transaction(None)),
+            zs::ReadRequest::KnownTransaction(_) => Ok(zs::ReadResponse::KnownTransaction(false)),
             zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(None)),
             request => Err(BoxError::from(format!(
                 "unexpected state request: {request:?}"
@@ -336,7 +336,7 @@ async fn unverified_witnessed_id_does_not_reserve_other_sources() {
         MockService::build().for_unit_tests();
     let state = service_fn(|request| async move {
         match request {
-            zs::ReadRequest::Transaction(_) => Ok(zs::ReadResponse::Transaction(None)),
+            zs::ReadRequest::KnownTransaction(_) => Ok(zs::ReadResponse::KnownTransaction(false)),
             zs::ReadRequest::Tip => Ok(zs::ReadResponse::Tip(None)),
             request => Err(BoxError::from(format!(
                 "unexpected state request: {request:?}"
