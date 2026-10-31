@@ -344,6 +344,7 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | --- | --- | --- | --- |
 | `cache_dir` | Path string | Default cache directory | Root of the state database and non-finalized-state backup. Does not relocate peer caches or RPC cookies. |
 | `ephemeral` | Boolean | `false` | Store the database in a temporary directory instead of `cache_dir`, and disable non-finalized-state backups. The temporary database is removed on successful cleanup; a crash can leave it behind. |
+| `prune_blocks_older_than` | Integer, optional | Unset (archive) | Number of recent finalized block bodies to retain; older bodies are deleted. At least 10,000 on Mainnet and Testnet, or 1,001 on Regtest. Irreversible, and stops advertising `NODE_NETWORK`. See [pruned mining nodes](pruning.md). |
 | `should_backup_non_finalized_state` | Boolean | `true` | Back up recent blocks outside the finalized database so they can be restored after a restart. Disabled by `ephemeral`; otherwise updates occur no more frequently than every five seconds. |
 | `delete_old_database` | Boolean | `true` | Check for and delete obsolete state database versions. Setting `false` disables old-version cleanup, not migration of a compatible previous database. |
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
