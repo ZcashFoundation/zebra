@@ -12,6 +12,24 @@ members = [
         "zebra-utils",
         "tower-batch-control",
         "tower-fallback",
+        "zebra-fuzz/fuzz",
+]
+
+# Keep fuzz-only features out of ordinary node builds. CI selects the full
+# workspace explicitly, while cargo-fuzz selects its own manifest.
+default-members = [
+        "zebrad",
+        "zebra-chain",
+        "zebra-network",
+        "zebra-state",
+        "zebra-script",
+        "zebra-consensus",
+        "zebra-rpc",
+        "zebra-node-services",
+        "zebra-test",
+        "zebra-utils",
+        "tower-batch-control",
+        "tower-fallback",
 ]
 
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
@@ -76,7 +94,7 @@ futures-core = "0.3.31"
 futures-util = "0.3.31"
 groth16 = "0.2"
 group = "0.14"
-halo2 = "0.4"
+halo2 = { package = "halo2_proofs", version = "0.4" }
 hex = "0.4.3"
 hex-literal = "0.4"
 howudoin = "0.1"

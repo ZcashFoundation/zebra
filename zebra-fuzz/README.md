@@ -16,9 +16,8 @@ target; see [Running locally](#running-locally).
 
 ```
 zebra-fuzz/
-└── fuzz/                    # the cargo-fuzz crate (its own cargo workspace)
+└── fuzz/                    # cargo-fuzz crate, a member of Zebra's workspace
     ├── Cargo.toml
-    ├── Cargo.lock
     ├── fuzz_targets/        # 15 targets, one file each
     ├── dicts/               # libFuzzer dictionaries, named <target>.dict
     ├── seed_gen.rs          # helper binary, not a fuzz target
@@ -31,10 +30,13 @@ Two properties of this layout are deliberate:
   harness crate at `<crate>/fuzz`, and the targets reach the node crates through
   relative paths (`../../zebra-chain`, …). Flattening the directory breaks those
   paths.
-- **`fuzz/Cargo.toml` declares its own `[workspace]`.** The fuzz crate is
-  therefore _not_ a member of the Zebra workspace, and is not built by
-  `cargo build`, `cargo test`, or `cargo clippy` at the repository root. It is
-  also absent from the per-crate CI matrix, which is derived from `cargo tree`.
+- **`fuzz/Cargo.toml` belongs to the root workspace.** Existing workspace
+  compilation, Clippy, formatting, dependency checks, and the per-crate CI
+  matrix include it. These are ordinary stable-Rust builds, not fuzzing runs.
+  Fuzzer binaries set `test = false` so ordinary test discovery does not run
+  them as libtest binaries. The root `default-members` list excludes this
+  package, keeping it out of ordinary root `cargo build` and `cargo test`;
+  use `--workspace` or `-p zebra-fuzz-targets` to select it explicitly.
 
 ## The `fuzzing` feature
 
@@ -47,9 +49,12 @@ each declare a `fuzzing` feature that changes only the visibility of one module:
 | `zebra-network` | `protocol` | `p2p_message_parse`, `p2p_deep_fuzz`, `addr_message_fuzz` |
 | `zebra-consensus` | `block` | `equihash_fuzz`, `block_deserialize`, `block_deep_fuzz` |
 
-The feature is **off by default**, activates no dependencies, and is never
-enabled by a default or release build. The remaining nine targets use public
-APIs only.
+The feature is **off by default** on the node crates and activates no
+dependencies. Building the fuzz package enables it, including in a whole
+workspace build. Default root builds exclude the fuzz package. Build the
+production node with `cargo build -p zebrad` (and `--release` for release mode)
+to explicitly select only the node and its dependencies.
+The remaining nine targets use public APIs only.
 
 `fuzzing` is a test-only feature in the same category as `proptest-impl`: it is
 not part of the crates' stability surface, and the items it exposes carry no
@@ -153,38 +158,28 @@ large `target/` directory; and `cargo fuzz run` then fuzzes indefinitely. Append
 `-- -runs=1000` to exercise the seeds once and exit, which is enough to check
 that a target builds and runs.
 
-Note that the OSS-Fuzz build script lives in the
-[oss-fuzz repository](https://github.com/google/oss-fuzz), not here. Once the
-integration in google/oss-fuzz#15900 is pointed at this repository, it will clone
-it and run `cargo fuzz build` against this directory.
+The OSS-Fuzz build script lives in the
+[oss-fuzz repository](https://github.com/google/oss-fuzz), not here. It clones
+Zebra and runs `cargo fuzz build` against this directory. Unless overridden
+with `CARGO_TARGET_DIR`, build artifacts now use the root workspace's `target/`
+directory, not `zebra-fuzz/fuzz/target/`.
 
 ## Dependencies and `Cargo.lock`
 
-Because `fuzz/` is a separate cargo workspace, it resolves its dependencies
-independently of the Zebra workspace and has its own `Cargo.lock`. Two
-consequences are worth knowing about.
+The fuzz package uses the repository-root `Cargo.lock` and inherits shared
+external dependencies through `workspace = true`. There is no separate fuzz
+lockfile to update. Fuzz-only dependencies such as `libfuzzer-sys` remain local
+to the fuzz manifest.
 
-### A stale lockfile fails in a confusing place
+When triaging a crash, preserve the source revision, root lockfile, toolchain,
+and fuzz build flags used by the failing build. A shared lockfile does not make
+an instrumented nightly fuzz build identical to a production build.
 
-Cargo updates only the packages it _must_ update; it does not upgrade a
-dependency that already satisfies its version requirement. A transitive
-dependency can therefore stay pinned at an old patch release while the Zebra
-workspace moves on, and the resulting build failure surfaces inside a crate that
-this directory never names.
+For a compile-only check without running fuzzers:
 
-- **Symptom.** The build fails with an error in a crate that does not appear in
-  `fuzz/Cargo.toml` — for example, `zcash_primitives` calling an `orchard`
-  method that "does not exist".
-- **Cause.** `fuzz/Cargo.lock` holds a transitive dependency at an older version
-  than the workspace now requires.
-- **Fix.** `cargo update --manifest-path zebra-fuzz/fuzz/Cargo.toml`
-
-### Resolved versions may differ from the workspace
-
-For the same reason, the versions used here can differ from those in the
-repository-root `Cargo.lock`. When triaging a crash, rebuild against the
-`Cargo.lock` in this directory rather than the workspace one; otherwise a crash
-found by the fuzzer may not reproduce.
+```sh
+cargo check --locked -p zebra-fuzz-targets --all-targets
+```
 
 ## Adding a target
 
