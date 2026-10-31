@@ -11,6 +11,7 @@
   - [Running Zebra](user/run.md)
     - [Startup and sync](user/startup.md)
     - [Syncing from a state snapshot](user/snapshots.md)
+    - [Pruned mining nodes](user/pruning.md)
     - [Version 2 peer-to-peer protocol (beta)](user/p2p-v2.md)
     - [Spentness hints (experimental)](user/spentness-hints.md)
   - [Upgrading Zebra](user/upgrading.md)

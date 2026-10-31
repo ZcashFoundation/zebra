@@ -110,6 +110,114 @@ fn find_fork_point_locates_the_fork() {
     assert_eq!(find_fork_point(best_chain, db, vec![]), None);
 }
 
+#[test]
+fn find_hashes_stop_at_pruned_history_without_skipping_the_gap() {
+    use std::sync::Arc;
+
+    use zebra_chain::{
+        block::Block, parameters::Network::Mainnet, serialization::ZcashDeserializeInto,
+    };
+
+    use crate::{
+        service::{
+            finalized_state::{DiskWriteBatch, FinalizedState, TransactionLocation, WriteDisk},
+            non_finalized_state::Chain,
+            read::{find_chain_hashes, find_chain_headers},
+        },
+        CheckpointVerifiedBlock, Config, StateInitError,
+    };
+
+    let _init_guard = zebra_test::init();
+    let mut state = FinalizedState::new_with_debug(
+        &Config::ephemeral(),
+        &Mainnet,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    )
+    .unwrap();
+    let chain = None::<&Arc<Chain>>;
+    assert!(find_chain_hashes(chain, &state.db, vec![], None, 10)
+        .unwrap()
+        .is_empty());
+    assert!(find_chain_headers(chain, &state.db, vec![], None, 10).is_empty());
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(4)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    for block in &blocks {
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block.clone()).into(),
+                None,
+                "pruned block locator test",
+            )
+            .unwrap();
+    }
+    let db = &state.db;
+    let hashes: Vec<_> = blocks.iter().map(|block| block.hash()).collect();
+    let headers: Vec<_> = blocks.iter().map(|block| block.header.clone()).collect();
+    assert_eq!(
+        find_chain_hashes(chain, db, vec![hashes[0]], None, 10).unwrap(),
+        hashes[1..],
+    );
+
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(Height(2)),
+    );
+    db.write_batch(batch).unwrap();
+
+    // A locator before the gap must not jump to the retained suffix.
+    assert!(find_chain_hashes(chain, db, vec![hashes[0]], None, 10)
+        .unwrap()
+        .is_empty());
+    // Without an intersection, preserve the genesis prefix and stop at the gap.
+    assert_eq!(
+        find_chain_hashes(chain, db, vec![], None, 10).unwrap(),
+        hashes[..1],
+    );
+    // The successor at the retained floor is available, with normal stop and count limits.
+    for (stop, max_len, expected) in [
+        (None, 10, &hashes[2..]),
+        (Some(hashes[2]), 10, &hashes[2..3]),
+        (None, 1, &hashes[2..3]),
+    ] {
+        assert_eq!(
+            find_chain_hashes(chain, db, vec![hashes[1]], stop, max_len).unwrap(),
+            expected,
+        );
+    }
+    assert_eq!(
+        find_chain_headers(chain, db, vec![hashes[0]], None, 10),
+        headers[1..],
+    );
+    assert!(find_chain_headers(chain, db, vec![hashes[3]], None, 10).is_empty());
+
+    // A damaged availability boundary is an error, not an empty inventory.
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(2)),
+        TransactionLocation::min_for_height(Height(4)),
+    );
+    db.write_batch(batch).unwrap();
+    let error = find_chain_hashes(chain, db, vec![hashes[0]], None, 10).unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<StateInitError>(),
+        Some(StateInitError::HistoryRead { .. })
+    ));
+    assert_eq!(
+        find_chain_headers(chain, db, vec![hashes[0]], None, 10),
+        headers[1..],
+    );
+}
+
 /// Check that the block locator heights are sensible.
 #[test]
 fn test_block_locator_heights() {

@@ -23,6 +23,7 @@ use crate::{
     address_book::AddressMetrics,
     address_book_peers::AddressBookPeers,
     meta_addr::{MetaAddr, MetaAddrChange},
+    types::PeerServices,
     AddressBook, BanList, BoxError, Config,
 };
 
@@ -292,7 +293,8 @@ pub type AddressBookService =
 
 impl AddressBookUpdater {
     /// Spawn a new [`AddressBookUpdater`] task, updating a new [`AddressBook`]
-    /// configured with Zebra's actual `local_listener` address.
+    /// configured with Zebra's actual `local_listener` address and base `local_services`.
+    /// Experimental services are applied from `config`.
     ///
     /// Returns handles for:
     /// - the address book, which should only be used for hot reads,
@@ -307,6 +309,7 @@ impl AddressBookUpdater {
     pub fn spawn(
         config: &Config,
         local_listener: SocketAddr,
+        local_services: PeerServices,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
         watch::Receiver<BanList>,
@@ -317,6 +320,7 @@ impl AddressBookUpdater {
     ) {
         let address_book = AddressBook::new(
             local_listener,
+            config.advertised_services(local_services),
             &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),

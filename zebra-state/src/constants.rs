@@ -18,6 +18,10 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 /// `zebra-checkpoints`) can use it without depending on `zebra-state`.
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
 
+/// Minimum retained finalized block bodies on Mainnet and Testnet when pruning is enabled.
+/// Regtest permits `MAX_BLOCK_REORG_HEIGHT + 1` bodies instead.
+pub const MIN_PRUNING_RETENTION: u32 = 10_000;
+
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
 
@@ -34,7 +38,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 29;
+const DATABASE_FORMAT_VERSION: u64 = 30;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -45,6 +49,10 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
+///   Compatible v29 archive state is moved to `state/v30` without rewriting records. Older
+///   binaries must not open this directory: their minor-version downgrade path assumes archive
+///   bodies remain complete. Keep a separate archive backup for rollback; the move is not a copy.
 /// - 29.2.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
 ///   families, which hold the omitted outputs and the construction record of a hinted sync
 ///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the
@@ -68,7 +76,7 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 2;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

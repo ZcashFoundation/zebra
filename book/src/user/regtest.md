@@ -41,6 +41,10 @@ For a persistent chain, remove `ephemeral = true` and set `[state] cache_dir`
 to a dedicated directory. If consensus changes affect existing blocks, start
 again from a compatible earlier state, not the existing tip.
 
+To test [pruning](pruning.md), set `[state] prune_blocks_older_than` in the
+persistent configuration. Regtest accepts a window as small as 1,001 blocks;
+Mainnet and Testnet require at least 10,000.
+
 The RPC examples read `./regtest-rpc/.cookie`; keep it private. See
 [RPC authentication](rpc.md#authentication).
 

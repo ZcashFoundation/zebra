@@ -70,6 +70,12 @@ backup and use an empty destination. Follow the
 [upgrade and rollback procedure](../user/upgrading.md); do not rename or
 symlink version directories to simulate an upgrade.
 
+Start from an archive snapshot, not a [pruned](../user/pruning.md) database, and
+keep pruning disabled while preparing it: `copy-state` cannot copy a range whose
+block bodies are missing. Keep the untouched backup an archive too, because
+deleted history cannot be restored from a pruned database
+([format 30 and recovery](../user/pruning.md#format-30-recovery-and-copies)).
+
 Copy only blocks valid under the private parameters. Do not copy a public
 peer cache or reuse a database from a previous incompatible test. A format
 upgrade preserves storage compatibility, not consensus compatibility.
