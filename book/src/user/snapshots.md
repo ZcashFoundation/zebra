@@ -40,7 +40,8 @@ directory manually to claim compatibility.
 Builds with [block-body pruning](pruning.md) use database format **30.0.0**,
 with finalized state under `<cache_dir>/state/v30/<network>/`. When no v30
 database exists, startup moves a v29 archive there. This happens even with
-pruning disabled and leaves no v29 backup for an older binary. Read
+pruning disabled and leaves no v29 backup for an older binary. A never-pruned
+archive can be moved back for Zebra 7.0.0; read
 [format 30 and recovery](pruning.md#format-30-recovery-and-copies) before
 upgrading.
 

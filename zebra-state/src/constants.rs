@@ -51,8 +51,9 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 /// Version history:
 /// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
 ///   Compatible v29 archive state is moved to `state/v30` without rewriting records. Older
-///   binaries must not open this directory: their minor-version downgrade path assumes archive
-///   bodies remain complete. Keep a separate archive backup for rollback; the move is not a copy.
+///   binaries must not open a pruned v30 directory: their minor-version downgrade path assumes
+///   archive bodies remain complete. A never-pruned v30 directory can be renamed back to v29 for
+///   rollback, because no records are rewritten; a pruned one needs a separate archive backup.
 /// - 29.2.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
 ///   families, which hold the omitted outputs and the construction record of a hinted sync
 ///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the

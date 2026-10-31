@@ -123,8 +123,22 @@ This release uses database format 30 for both archive and pruned nodes. When no 
 startup can move an existing v29 database inside the cache directory from
 `state/v29/<network>/` to `state/v30/<network>/`. This is a move, not a backup, and happens
 even with pruning disabled. An older binary looking in v29 will not find the moved state and may
-start syncing again. Do not rename or symlink v30 state into an older format's path: the
-directory boundary keeps older binaries from treating incomplete history as an archive.
+start syncing again.
+
+The upgrade to format 30 rewrites no records, so an archive that has **never** been pruned can be
+rolled back to Zebra 7.0.0 by moving the directory back:
+
+1. With this release still running, confirm `getblockchaininfo` reports `pruned: false`, and that
+   the config does not set `prune_blocks_older_than`.
+2. Stop Zebra and every process that opens its database directly.
+3. Move `state/v30/<network>/` back to `state/v29/<network>/`. The `state/v29/<network>/` path must
+   not already exist.
+4. Start Zebra 7.0.0, built with the same `indexer` feature setting. It logs that it is opening a
+   newer database format and continues from the existing tip.
+
+Never do this with a database that has been pruned, even partially: Zebra 7.0.0 cannot detect
+missing block bodies, and would serve incomplete blocks to peers and RPC clients. A pruned node can
+only return to 7.0.0 from a separate archive backup.
 
 Before upgrading or pruning, stop Zebra and keep any required archive backup outside the managed
 cache directory. After deletion, simply removing the option makes writable startup fail. To regain
