@@ -46,9 +46,6 @@ static CLIENT_GUARD: Mutex<Option<ClientInitGuard>> = Mutex::new(None);
 /// The network this node runs on, used to find the network upgrade at the tip.
 static NETWORK: OnceLock<Network> = OnceLock::new();
 
-/// When [`init`] ran, early in startup, which metrics measure the process uptime from.
-static STARTED_AT: OnceLock<Instant> = OnceLock::new();
-
 /// Whether the syncer was close to the chain tip when the progress task last checked.
 static CLOSE_TO_TIP: AtomicBool = AtomicBool::new(false);
 
@@ -147,6 +144,7 @@ impl Metadata {
     fn client_options_with_release(&self, release: String) -> ClientOptions {
         let log_attributes = self.log_attributes();
         let network = self.tags.get("chain.network").cloned();
+        let started_at = Instant::now();
         let options = ClientOptions::new()
             .release(release)
             .before_send(|mut event| {
@@ -166,7 +164,7 @@ impl Metadata {
                     &mut metric.attributes,
                     network.as_deref(),
                     chain_position().map(|(_, network_upgrade)| network_upgrade),
-                    STARTED_AT.get().map(Instant::elapsed),
+                    started_at.elapsed(),
                 );
                 Some(metric)
             });
@@ -211,7 +209,6 @@ impl Metadata {
 
 /// Starts the Sentry client and its release health sessions, which are replaced daily.
 pub(crate) fn init(network: &Network) {
-    let _ = STARTED_AT.set(Instant::now());
     let _ = NETWORK.set(network.clone());
 
     let mut metadata = Metadata::from_env();
@@ -399,7 +396,7 @@ fn add_metric_attributes(
     attributes: &mut Map<Cow<'static, str>, LogAttribute>,
     network: Option<&str>,
     network_upgrade: Option<NetworkUpgrade>,
-    uptime: Option<Duration>,
+    uptime: Duration,
 ) {
     if let Some(network) = network {
         attributes
@@ -411,11 +408,9 @@ fn add_metric_attributes(
             .entry("chain.network_upgrade".into())
             .or_insert_with(|| network_upgrade.to_string().into());
     }
-    if let Some(uptime) = uptime {
-        attributes
-            .entry("process.uptime_seconds".into())
-            .or_insert_with(|| uptime.as_secs().into());
-    }
+    attributes
+        .entry("process.uptime_seconds".into())
+        .or_insert_with(|| uptime.as_secs().into());
 }
 
 /// Returns the Sentry tracing layer, or `None` if [`init`] has not bound an enabled client.
@@ -611,8 +606,8 @@ mod tests {
 
     use sentry::{
         protocol::{
-            Context, Envelope, EnvelopeItem, Event, Frame, ItemContainer, Log, LogAttribute,
-            LogLevel, Map, Metric, MetricType, SessionStatus, Stacktrace, Unit,
+            Context, EnvelopeItem, Event, Frame, ItemContainer, Log, LogAttribute, LogLevel, Map,
+            Metric, MetricType, SessionStatus, Stacktrace, Unit, Value,
         },
         test::with_captured_envelopes_options,
         Client, ClientOptions, Hub, Scope,
@@ -632,16 +627,26 @@ mod tests {
         start_run_sessions, tracing_layer, without_panic_handling_frames, Metadata, SentryRecorder,
     };
 
-    fn sent_metrics(envelopes: &[Envelope]) -> Vec<&Metric> {
-        envelopes
-            .iter()
-            .flat_map(|envelope| envelope.items())
-            .filter_map(|item| match item {
-                EnvelopeItem::ItemContainer(ItemContainer::Metrics(metrics)) => Some(metrics),
-                _ => None,
-            })
-            .flatten()
-            .collect()
+    /// Returns the metrics sent while `record` runs with [`SentryRecorder`] and a client built from
+    /// `metadata`.
+    fn sent_metrics(metadata: &Metadata, record: impl FnOnce()) -> Vec<Metric> {
+        with_captured_envelopes_options(
+            || metrics::with_local_recorder(&SentryRecorder, record),
+            metadata.client_options_with_release("zebrad@test".to_string()),
+        )
+        .iter()
+        .flat_map(|envelope| envelope.items())
+        .filter_map(|item| match item {
+            EnvelopeItem::ItemContainer(ItemContainer::Metrics(metrics)) => Some(metrics),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
+    fn metric_attribute<'a>(metric: &'a Metric, key: &str) -> Option<&'a Value> {
+        metric.attributes.get(key).map(|attribute| &attribute.0)
     }
 
     fn tracing_layer_installed_with(client: Option<Client>) -> bool {
@@ -964,34 +969,22 @@ mod tests {
         let mut metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
         metadata.tags.insert("chain.network", "Mainnet".to_owned());
 
-        let envelopes = with_captured_envelopes_options(
-            || {
-                metrics::with_local_recorder(&SentryRecorder, || {
-                    // Far from the tip, an initial sync would send a value for every block.
-                    metrics::histogram!(
-                        "state.block_writer.phase.duration_seconds",
-                        "phase" => "queue"
-                    )
-                    .record(9.0);
+        let metrics = sent_metrics(&metadata, || {
+            // Far from the tip, an initial sync would send a value for every block.
+            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue")
+                .record(9.0);
 
-                    super::record_close_to_tip(true);
-                    metrics::histogram!(
-                        "state.block_writer.phase.duration_seconds",
-                        "phase" => "queue"
-                    )
-                    .record(0.25);
-                    metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
-                    metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
-                });
-            },
-            metadata.client_options_with_release("zebrad@test".to_string()),
-        );
+            super::record_close_to_tip(true);
+            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue")
+                .record(0.25);
+            metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
+            metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
+        });
 
-        let metrics = sent_metrics(&envelopes);
         let [metric] = metrics.as_slice() else {
             panic!("expected only the listed histogram near the tip, got {metrics:?}");
         };
-        let attribute = |key: &str| metric.attributes.get(key).and_then(|attr| attr.0.as_str());
+        let attribute = |key: &str| metric_attribute(metric, key).and_then(Value::as_str);
 
         assert_eq!(metric.name, "state.block_writer.phase.duration_seconds");
         assert_eq!(metric.r#type, MetricType::Distribution);
@@ -1009,19 +1002,14 @@ mod tests {
         // hasn't reached yet.
         let height = Height(3_543_405);
 
-        let envelopes = with_captured_envelopes_options(
-            || {
-                // The progress task records the histogram for Prometheus and sends the value to
-                // Sentry, so the recorder must not send it again.
-                metrics::with_local_recorder(&SentryRecorder, || {
-                    metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(2.0);
-                });
-                tip_block_delay(Some(&Network::Mainnet), height, 2.0).capture();
-            },
-            metadata.client_options_with_release("zebrad@test".to_string()),
-        );
+        let metrics = sent_metrics(&metadata, || {
+            // The progress task records the histogram for Prometheus and sends the value to
+            // Sentry, so the recorder must not send it again.
+            super::record_close_to_tip(true);
+            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(2.0);
+            tip_block_delay(Some(&Network::Mainnet), height, 2.0).capture();
+        });
 
-        let metrics = sent_metrics(&envelopes);
         let [metric] = metrics.as_slice() else {
             panic!("expected one tip block delay, got {metrics:?}");
         };
@@ -1031,17 +1019,11 @@ mod tests {
         assert_eq!(metric.value, 2.0);
         assert_eq!(metric.unit, Some(Unit::Second));
         assert_eq!(
-            metric
-                .attributes
-                .get("chain.height")
-                .and_then(|attr| attr.0.as_u64()),
+            metric_attribute(metric, "chain.height").and_then(Value::as_u64),
             Some(3_543_405),
         );
         assert_eq!(
-            metric
-                .attributes
-                .get("chain.network_upgrade")
-                .and_then(|attr| attr.0.as_str()),
+            metric_attribute(metric, "chain.network_upgrade").and_then(Value::as_str),
             Some("Nu7"),
         );
     }
@@ -1049,19 +1031,19 @@ mod tests {
     #[test]
     fn metric_attributes_are_added_once_known_and_keep_existing_ones() {
         let mut attributes = Map::new();
-        attributes.insert("chain.network_upgrade".into(), "metric-upgrade".into());
-
-        add_metric_attributes(&mut attributes, Some("Mainnet"), None, None);
+        add_metric_attributes(&mut attributes, None, None, Duration::ZERO);
         assert_eq!(
             attributes.keys().collect::<Vec<_>>(),
-            ["chain.network", "chain.network_upgrade"],
+            ["process.uptime_seconds"],
         );
 
+        let mut attributes = Map::new();
+        attributes.insert("chain.network_upgrade".into(), "metric-upgrade".into());
         add_metric_attributes(
             &mut attributes,
             Some("Mainnet"),
             Some(NetworkUpgrade::Nu7),
-            Some(Duration::from_millis(90_500)),
+            Duration::from_millis(90_500),
         );
         let attribute = |key: &str| attributes.get(key).map(|attr| &attr.0);
 
