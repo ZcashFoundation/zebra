@@ -20,12 +20,22 @@ pub(super) const FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 ///
 /// Sentry stores every value it receives, and these can be incremented many times a second, so
 /// each label set is sent as one total per [`FLUSH_INTERVAL`].
-const COUNTERS: &[&str] = &["sync.restart.count", "sync.block.error.count"];
+const COUNTERS: &[&str] = &[
+    "sync.restart.count",
+    "sync.block.error.count",
+    "sync.verified.block.count",
+    "gossip.verified.block.count",
+];
 
 /// The gauges sent to Sentry, as their latest value at each [`flush`], with their units.
 const GAUGES: &[(&str, Option<Unit>)] = &[
     ("sync.downloads.in_flight", None),
     ("sync.downloads.oldest_age_seconds", Some(Unit::Second)),
+    ("zcash.mempool.size.transactions", None),
+    (
+        "zebra.state.rocksdb.total_disk_size_bytes",
+        Some(Unit::Byte),
+    ),
 ];
 
 /// The listed counters and gauges recorded so far, by name and labels.
