@@ -1,6 +1,7 @@
 //! Sends selected counters and gauges to Sentry once a minute.
 
 use std::{
+    cell::Cell,
     collections::HashMap,
     sync::{atomic::Ordering, Arc, LazyLock, Mutex, PoisonError},
     time::Duration,
@@ -81,11 +82,32 @@ fn recorded(key: &Key, kind: Kind) -> Arc<AtomicU64> {
     value
 }
 
+/// Held for a whole [`flush`], so that the flush at shutdown waits for a periodic flush that has
+/// taken counter totals but not sent them yet.
+static FLUSHING: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    /// Whether this thread is in a [`flush`], so that the panic hook's flush returns instead of
+    /// waiting for a flush that panicked on the same thread.
+    static IN_FLUSH: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Sends each listed counter's total since the previous call, and each listed gauge's latest
 /// value.
 ///
-/// Sends after releasing the lock, so it can also run from the panic hook.
+/// Sends after releasing the lock on the recorded metrics, so it can also run from the panic hook.
 pub(super) fn flush() {
+    if IN_FLUSH.get() {
+        return;
+    }
+
+    let _flushing = FLUSHING.lock().unwrap_or_else(PoisonError::into_inner);
+    IN_FLUSH.set(true);
+    send_recorded();
+    IN_FLUSH.set(false);
+}
+
+fn send_recorded() {
     let recorded: Vec<_> = RECORDED
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -129,5 +151,48 @@ pub(super) fn flush() {
                 gauge.capture();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    use super::*;
+
+    #[test]
+    fn flush_waits_for_a_flush_in_progress() {
+        let (locked_tx, locked_rx) = mpsc::channel();
+
+        // Stands in for a periodic flush that has taken the totals but not sent them yet.
+        let in_progress = thread::spawn(move || {
+            let _flushing = FLUSHING.lock().unwrap_or_else(PoisonError::into_inner);
+            locked_tx.send(()).expect("the test thread is waiting");
+            thread::sleep(Duration::from_millis(200));
+        });
+        locked_rx
+            .recv()
+            .expect("the other thread holds the flush lock");
+
+        let started = Instant::now();
+        flush();
+        assert!(started.elapsed() >= Duration::from_millis(150));
+
+        in_progress.join().expect("the other thread doesn't panic");
+    }
+
+    #[test]
+    fn flush_returns_when_reentered_from_a_flush_on_the_same_thread() {
+        // A panic during a flush runs the panic hook's flush on the same thread.
+        let _flushing = FLUSHING.lock().unwrap_or_else(PoisonError::into_inner);
+        IN_FLUSH.set(true);
+
+        flush();
+
+        IN_FLUSH.set(false);
     }
 }
