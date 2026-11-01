@@ -197,9 +197,11 @@ pub async fn show_block_chain_progress(
             metrics::gauge!("sync.estimated_network_tip_height").set(estimated_height.0 as f64);
             metrics::gauge!("sync.estimated_distance_to_tip").set(remaining_sync_blocks as f64);
 
+            let diagnostics = sync_status.diagnostics();
+
             // Measured here, so the age keeps growing while the syncer waits on that block.
-            let oldest_in_flight_age = sync_status
-                .oldest_in_flight_since()
+            let oldest_in_flight_age = diagnostics
+                .oldest_in_flight_since
                 .map(|since| instant_now.saturating_duration_since(since));
             metrics::gauge!("sync.downloads.oldest_age_seconds")
                 .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
@@ -231,8 +233,6 @@ pub async fn show_block_chain_progress(
             } else {
                 last_log_time = instant_now;
             }
-
-            let diagnostics = sync_status.diagnostics();
 
             // Use the spacing at the estimated network tip, which changes at NU7 (ZIP 218).
             let target_block_spacing =

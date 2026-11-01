@@ -73,11 +73,6 @@ impl SyncStatus {
         self.diagnostics.borrow().clone()
     }
 
-    /// Returns when the oldest block that is still being downloaded or verified was queued.
-    pub(crate) fn oldest_in_flight_since(&self) -> Option<std::time::Instant> {
-        self.diagnostics.borrow().oldest_in_flight_since
-    }
-
     /// Wait until the synchronization is likely close to the tip.
     ///
     /// Returns an error if communication with the synchronizer is lost.

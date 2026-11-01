@@ -651,7 +651,6 @@ where
                 warn!(
                     reason = reason.as_str(),
                     kind,
-                    made_progress,
                     error,
                     timeout = ?restart_delay,
                     ?state_tip,
@@ -1176,9 +1175,6 @@ where
                 .map_err(Into::into);
 
             // 3 layers of results is not ideal, but we need the timeout on the outside.
-            if let Ok(Ok(Err(error))) = &response {
-                self.count_block_error(error);
-            }
             match response {
                 Ok(Ok(Ok(response))) => self
                     .handle_block_response(Ok(response))
@@ -1214,13 +1210,19 @@ where
     async fn request_genesis_once(
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
-        let response = self.downloads.download_and_verify(self.genesis_hash).await;
-        if let Err(error) = &response {
-            self.count_block_error(error);
-        }
+        let response = self
+            .downloads
+            .download_and_verify(self.genesis_hash)
+            .await
+            .inspect_err(|error| self.count_block_error(error));
         Self::handle_response(response).map_err(|e| eyre!(e))?;
 
-        let response = self.downloads.next().await.expect("downloads is nonempty");
+        let response = self
+            .downloads
+            .next()
+            .await
+            .expect("downloads is nonempty")
+            .inspect_err(|error| self.count_block_error(error));
 
         Ok(response)
     }

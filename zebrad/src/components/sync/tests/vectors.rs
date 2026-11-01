@@ -2394,14 +2394,6 @@ async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
 /// while other tip failures keep their stage.
 #[test]
 fn tip_block_submission_failures_restart_as_block_errors() {
-    type TestChainSync = ChainSync<
-        MockService<zn::Request, zn::Response, PanicAssertion>,
-        MockService<zs::Request, zs::Response, PanicAssertion>,
-        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
-        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
-        MockChainTip,
-    >;
-
     let block = TestChainSync::tips_restart_error(
         RestartReason::ExtendTipsError,
         BlockDownloadVerifyError::Timeout.into(),
