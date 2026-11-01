@@ -434,51 +434,41 @@ fn check_configured_funding_stream_constraints() {
         }
     }
 
-    std::panic::set_hook(Box::new(|_| {}));
-
-    // should panic when sum of numerators is greater than funding stream denominator.
-    let expected_panic_numerator = std::panic::catch_unwind(|| {
-        testnet::Parameters::build()
-            .with_funding_streams(vec![ConfiguredFundingStreams {
-                recipients: Some(vec![ConfiguredFundingStreamRecipient {
-                    receiver: FundingStreamReceiver::Ecc,
-                    numerator: 101,
-                    addresses: Some(
-                        subsidy::constants::testnet::FUNDING_STREAM_ECC_ADDRESSES
-                            .map(Into::into)
-                            .to_vec(),
-                    ),
-                }]),
-                ..Default::default()
-            }])
-            .to_network()
-    });
-
-    // should panic when recipient addresses are for Mainnet.
-    let expected_panic_wrong_addr_network = std::panic::catch_unwind(|| {
-        testnet::Parameters::build()
-            .with_funding_streams(vec![ConfiguredFundingStreams {
-                recipients: Some(vec![ConfiguredFundingStreamRecipient {
-                    receiver: FundingStreamReceiver::Ecc,
-                    numerator: 10,
-                    addresses: Some(vec![
-                        subsidy::constants::mainnet::FUNDING_STREAM_ECC_ADDRESSES[0].into();
-                        subsidy::constants::testnet::FUNDING_STREAM_ECC_ADDRESSES.len()
-                    ]),
-                }]),
-                ..Default::default()
-            }])
-            .to_network()
-    });
-
-    // drop panic hook before expecting errors.
-    let _ = std::panic::take_hook();
-
-    expected_panic_numerator.expect_err(
-        "should panic when sum of numerators is greater than funding stream denominator",
+    let excessive_numerator = testnet::Parameters::build()
+        .try_with_funding_streams(vec![ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                numerator: 101,
+                ..ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::Ecc)
+            }]),
+            ..Default::default()
+        }])
+        .unwrap_err();
+    assert_eq!(
+        excessive_numerator,
+        ParametersBuilderError::InvalidFundingStreamNumerators,
     );
-    expected_panic_wrong_addr_network
-        .expect_err("should panic when recipient addresses are for Mainnet");
+
+    let wrong_address = subsidy::constants::mainnet::FUNDING_STREAM_ECC_ADDRESSES[0];
+    let wrong_network = testnet::Parameters::build()
+        .try_with_funding_streams(vec![ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                addresses: Some(vec![
+                    wrong_address.into();
+                    subsidy::constants::testnet::FUNDING_STREAM_ECC_ADDRESSES.len()
+                ]),
+                ..ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::Ecc)
+            }]),
+            ..Default::default()
+        }])
+        .unwrap()
+        .to_network()
+        .unwrap_err();
+    assert_eq!(
+        wrong_network,
+        ParametersBuilderError::WrongFundingStreamAddressNetwork {
+            address: wrong_address.parse().unwrap(),
+        },
+    );
 }
 
 /// Check that `new_regtest()` constructs a network with the provided funding streams.

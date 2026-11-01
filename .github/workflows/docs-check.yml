@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs_check: ${{ steps.filter.outputs.docs_check || 'true' }}
+      book_links: ${{ steps.filter.outputs.book_links || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
@@ -83,6 +84,43 @@ jobs:
             --ignore .git \
             --config .trunk/configs/.markdownlint.yaml
 
+  # The Book workflow only runs on `main`, so this job catches a broken book before merge:
+  # missing SUMMARY entries or includes, and links or anchors that do not resolve.
+  book-links:
+    name: book-links
+    needs: changes
+    if: needs.changes.outputs.book_links == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup mdBook
+        uses: jontze/action-mdbook@6c0be56d14c4bf16861b00af61f50ff7400ce502 #v4.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mdbook-version: ~0.5
+          use-mermaid: true
+
+      - name: Build the book
+        run: mdbook build book --dest-dir "$RUNNER_TEMP/book"
+
+      # Offline: external links are checked weekly by the Advisory Checks workflow.
+      - name: Check internal links and anchors
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 #v2.8.0
+        with:
+          args: >-
+            --offline
+            --include-fragments
+            --no-progress
+            --root-dir ${{ runner.temp }}/book
+            "${{ runner.temp }}/book/**/*.html"
+          fail: true
+
   docs-check:
     runs-on: ubuntu-26.04
     if: always()
@@ -90,10 +128,11 @@ jobs:
       - changes
       - spell-check
       - markdown-lint
+      - book-links
     timeout-minutes: 5
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: spell-check, markdown-lint
+          allowed-skips: spell-check, markdown-lint, book-links

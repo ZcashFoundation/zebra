@@ -78,19 +78,19 @@ pub struct Config {
     /// Can be `address:port` or just `address`. If there is no configured
     /// port, Zebra will use the default port for the configured `network`.
     ///
-    /// `address` can be an IP address or a DNS name. DNS names are
-    /// only resolved once, when Zebra starts up.
+    /// `address` must be an IP literal, not a DNS name.
     ///
     /// By default, Zebra listens on `[::]` (all IPv6 and IPv4 addresses).
     /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
     ///
     /// If a specific listener address is configured, Zebra will advertise
-    /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("\[::\]:port"), which is not advertised to other nodes.
+    /// it to other nodes unless [`Self::external_addr`] overrides it.
+    /// The default unspecified address ("\[::\]:port") is not advertised.
     ///
-    /// Zebra does not currently support:
-    /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
-    /// - [Auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
+    /// Set [`Self::external_addr`] to advertise a different address. Zebra does not support
+    /// [auto-discovering its external address][external-ip].
+    ///
+    /// [external-ip]: https://github.com/ZcashFoundation/zebra/issues/1893
     ///
     /// However, other Zebra instances compensate for unspecified or incorrect
     /// listener addresses by adding the external IP addresses of peers to
@@ -820,11 +820,9 @@ impl<'de> Deserialize<'de> for Config {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
             }
-            (DNetwork::ConfiguredRegtest { params, .. }, _) => testnet::Parameters::new_regtest(
-                build_regtest_params(*params).map_err(de::Error::custom)?,
-            )
-            .map(Network::new_configured_testnet)
-            .map_err(de::Error::custom)?,
+            (DNetwork::ConfiguredRegtest { params, .. }, _) => build_regtest_params(*params)
+                .map(Network::new_configured_testnet)
+                .map_err(de::Error::custom)?,
             (DNetwork::DefaultForKind(NetworkKind::Mainnet), _) => Network::Mainnet,
             (DNetwork::DefaultForKind(NetworkKind::Testnet), Some(params)) => {
                 build_configured_testnet::<D>(params, &initial_testnet_peers)?
@@ -833,11 +831,9 @@ impl<'de> Deserialize<'de> for Config {
                 Network::new_default_testnet()
             }
             (DNetwork::DefaultForKind(NetworkKind::Regtest), Some(params)) => {
-                testnet::Parameters::new_regtest(
-                    build_regtest_params(params).map_err(de::Error::custom)?,
-                )
-                .map(Network::new_configured_testnet)
-                .map_err(de::Error::custom)?
+                build_regtest_params(params)
+                    .map(Network::new_configured_testnet)
+                    .map_err(de::Error::custom)?
             }
             (DNetwork::DefaultForKind(NetworkKind::Regtest), None) => {
                 Network::new_regtest(Default::default())
@@ -849,7 +845,7 @@ impl<'de> Deserialize<'de> for Config {
             Err(_) => match listen_addr.parse::<IpAddr>() {
                 Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
                 Err(err) => Err(de::Error::custom(format!(
-                    "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                    "{err}; Hint: use an IPv4 or IPv6 address; the port is optional (bracket IPv6 with a port)"
                 ))),
             },
         }?;
@@ -860,7 +856,7 @@ impl<'de> Deserialize<'de> for Config {
                 Err(_) => match address.parse::<IpAddr>() {
                     Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),
                     Err(err) => Err(de::Error::custom(format!(
-                        "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
+                        "{err}; Hint: use an IPv4 or IPv6 address; the port is optional (bracket IPv6 with a port)"
                     ))),
                 },
             }?
@@ -1019,7 +1015,9 @@ where
     )
     .map_err(de::Error::custom)?
     {
-        params_builder = params_builder.with_funding_streams(funding_streams);
+        params_builder = params_builder
+            .try_with_funding_streams(funding_streams)
+            .map_err(de::Error::custom)?;
     }
 
     if let Some(lockbox_disbursements) = lockbox_disbursements {
@@ -1079,8 +1077,15 @@ where
     params_builder.to_network().map_err(de::Error::custom)
 }
 
-fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters, &'static str> {
+fn build_regtest_params(params: DTestnetParameters) -> Result<testnet::Parameters, BoxError> {
     let DTestnetParameters {
+        // Older saved configurations include custom names that never changed Regtest's identity.
+        network_name: _,
+        network_magic,
+        slow_start_interval,
+        target_difficulty_limit,
+        disable_pow,
+        genesis_hash,
         activation_heights,
         nsm_reissuance_height,
         pre_nu6_funding_streams,
@@ -1091,10 +1096,11 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
         initial_nsm_value_balance,
-        ..
+        pre_blossom_halving_interval,
+        temporary_orchard_disabling_soft_fork_height,
     } = params;
 
-    Ok(RegtestParameters {
+    let regtest = testnet::Parameters::new_regtest(RegtestParameters {
         activation_heights: activation_heights.unwrap_or_default(),
         nsm_reissuance_height,
         funding_streams: merge_funding_streams(
@@ -1107,7 +1113,43 @@ fn build_regtest_params(params: DTestnetParameters) -> Result<RegtestParameters,
         extend_funding_stream_addresses_as_required,
         should_allow_unshielded_coinbase_spends,
         initial_nsm_value_balance,
-    })
+    })?;
+
+    // Serialization includes fixed values, so reject conflicts rather than field presence.
+    if network_magic.is_some_and(|value| Magic(value) != regtest.network_magic()) {
+        return Err("network_magic cannot override the fixed Regtest value".into());
+    }
+    if slow_start_interval.is_some_and(|value| value != regtest.slow_start_interval().0) {
+        return Err("slow_start_interval cannot override the fixed Regtest value".into());
+    }
+    if target_difficulty_limit.is_some_and(|value| {
+        value.parse::<U256>().ok() != Some(regtest.target_difficulty_limit().into())
+    }) {
+        return Err("target_difficulty_limit must match the fixed Regtest value".into());
+    }
+    if disable_pow.is_some_and(|value| value != regtest.disable_pow()) {
+        return Err("disable_pow cannot override the fixed Regtest value".into());
+    }
+    if genesis_hash.is_some_and(|value| value.parse().ok() != Some(regtest.genesis_hash())) {
+        return Err("genesis_hash must match the fixed Regtest value".into());
+    }
+    if pre_blossom_halving_interval
+        .is_some_and(|value| i64::from(value) != regtest.pre_blossom_halving_interval())
+    {
+        return Err("pre_blossom_halving_interval cannot override the fixed Regtest value".into());
+    }
+    if temporary_orchard_disabling_soft_fork_height.is_some_and(|value| {
+        Some(value)
+            != regtest
+                .temporary_orchard_disabling_soft_fork_height()
+                .map(|height| height.0)
+    }) {
+        return Err(
+            "temporary_orchard_disabling_soft_fork_height is not supported on Regtest".into(),
+        );
+    }
+
+    Ok(regtest)
 }
 
 /// Merge legacy streams before the current list, preserving omission and explicit disable.

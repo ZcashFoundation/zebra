@@ -234,6 +234,12 @@ where
         ),
     >,
 
+    /// Exact IDs and source IPs reserved until pending tasks are collected, including cancellations.
+    pending_ids: HashMap<UnminedTxId, Option<IpAddr>>,
+
+    /// Same-effects reservations scoped to the advertising host, not other peers or local requests.
+    pending_peer_mined_ids: HashSet<(transaction::Hash, IpAddr)>,
+
     /// The number of currently in-flight download tasks per advertising host,
     /// keyed on the peer's [`IpAddr`].
     ///
@@ -322,6 +328,10 @@ where
             };
 
             if let Some(hash) = completed_txid {
+                if let Some(Some(source)) = this.pending_ids.remove(&hash) {
+                    this.pending_peer_mined_ids
+                        .remove(&(hash.mined_id(), source));
+                }
                 if let Some((_, _gossip, Some(source))) = this.cancel_handles.remove(&hash) {
                     Self::release_peer_slot(this.pending_per_peer, source);
                 }
@@ -374,6 +384,8 @@ where
             results_sender,
             in_flight: 0,
             cancel_handles: HashMap::new(),
+            pending_ids: HashMap::new(),
+            pending_peer_mined_ids: HashSet::new(),
             pending_per_peer: HashMap::new(),
             transaction_verified,
         }
@@ -396,7 +408,13 @@ where
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
 
-        if self.cancel_handles.contains_key(&txid) {
+        // An unverified effects ID must not reserve other hosts' or local candidates.
+        if self.pending_ids.contains_key(&txid)
+            || source.is_some_and(|source| {
+                self.pending_peer_mined_ids
+                    .contains(&(txid.mined_id(), source.ip()))
+            })
+        {
             debug!(
                 ?txid,
                 queue_len = self.in_flight,
@@ -602,6 +620,19 @@ where
         self.pending.push(task);
         self.in_flight += 1;
         assert!(
+            self.pending_ids
+                .insert(txid, source.map(|source| source.ip()))
+                .is_none(),
+            "exact transaction IDs are only queued once"
+        );
+        if let Some(source) = source {
+            assert!(
+                self.pending_peer_mined_ids
+                    .insert((txid.mined_id(), source.ip())),
+                "same-effects transactions from one host are only queued once"
+            );
+        }
+        assert!(
             self.cancel_handles
                 .insert(txid, (cancel_tx, gossiped_tx_req, source))
                 .is_none(),
@@ -658,6 +689,8 @@ where
         for (_hash, (cancel_tx, _gossip, _source)) in self.cancel_handles.drain() {
             let _ = cancel_tx.send(CancelDownloadAndVerify);
         }
+        self.pending_ids.clear();
+        self.pending_peer_mined_ids.clear();
         self.pending_per_peer.clear();
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());

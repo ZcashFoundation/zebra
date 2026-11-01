@@ -108,9 +108,9 @@ jobs:
               project with the same body.
             - File names only have to be unique and end in `.yaml`; use
               `<project>-<kind>-<n>.yaml`.
-            - For crate fragments only: a change that is both breaking and additive (for example, a new variant on an
-              enum that is not `#[non_exhaustive]`) gets a `breaking` fragment for its impact and
-              an `Added` fragment for the new capability.
+            - A breaking addition gets one `breaking` fragment that names the new capability
+              and explains its impact (for example, a new variant on an enum that is not
+              `#[non_exhaustive]`). Do not duplicate it in an `Added` fragment.
             - The `zebrad` project is for node operators: config, CLI, RPC, and behavior, framed
               by what an operator observes. Omit it when the PR has no operator-visible effect
               (pure library API, internal refactor, CI, tests, non-security dependency bumps).

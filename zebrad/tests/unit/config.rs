@@ -958,6 +958,20 @@ fn config_env_override_defaults() {
 }
 
 #[test]
+fn config_source_and_target_env_are_isolated() {
+    let env = EnvGuard::new();
+    env.set_var("ZEBRA_STATE__CACHE_DIR", "/source/cache");
+    env.set_var("ZEBRA_TARGET_STATE__CACHE_DIR", "/target/cache");
+
+    let source = ZebradConfig::load(None).expect("source namespace should load");
+    let target =
+        ZebradConfig::load_with_env(None, "ZEBRA_TARGET").expect("target namespace should load");
+
+    assert_eq!(source.state.cache_dir, PathBuf::from("/source/cache"));
+    assert_eq!(target.state.cache_dir, PathBuf::from("/target/cache"));
+}
+
+#[test]
 fn config_env_override_file() {
     let env = EnvGuard::new();
 

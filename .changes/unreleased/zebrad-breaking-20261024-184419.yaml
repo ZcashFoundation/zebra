@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Validate Elasticsearch TLS certificates by default when built with the `elasticsearch` feature. Configure a server certificate trusted by the client, or set `[state] elasticsearch_skip_cert_validation = true` only for trusted local self-signed setups; opting out exposes credentials and indexed data to interception.
+time: 2026-10-24T18:44:19.533492485+02:00

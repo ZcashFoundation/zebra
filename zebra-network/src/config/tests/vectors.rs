@@ -167,6 +167,146 @@ extend_funding_stream_addresses_as_required = true
     assert!(toml::from_str::<Config>(config).is_err());
 }
 
+/// Invalid operator input must be rejected during loading, not panic then or in subsidy consumers.
+#[test]
+fn invalid_funding_and_lockbox_configuration_returns_errors() {
+    let _init_guard = zebra_test::init();
+    let cases = [
+        (
+            "reversed range",
+            r#"funding_streams = [{ height_range = { start = 2, end = 1 }, recipients = [] }]"#,
+            "end height",
+        ),
+        (
+            "excessive numerator",
+            r#"funding_streams = [{ height_range = { start = 1, end = 2 }, recipients = [{ receiver = "Deferred", numerator = 101 }] }]"#,
+            "numerators",
+        ),
+        (
+            "overflowing numerators",
+            r#"funding_streams = [{ height_range = { start = 1, end = 2 }, recipients = [{ receiver = "ECC", numerator = 9223372036854775807 }, { receiver = "ZcashFoundation", numerator = 9223372036854775807 }, { receiver = "MajorGrants", numerator = 9223372036854775807 }] }]"#,
+            "numerators",
+        ),
+        (
+            "malformed funding address",
+            r#"funding_streams = [{ height_range = { start = 1, end = 2 }, recipients = [{ receiver = "ECC", numerator = 7, addresses = ["invalid"] }] }]"#,
+            "funding stream address",
+        ),
+        (
+            "missing default height range",
+            r#"funding_streams = [{ height_range = { start = 0, end = 0 }, recipients = [] }, { height_range = { start = 0, end = 0 }, recipients = [] }, { height_range = { start = 0, end = 0 }, recipients = [] }, {}]"#,
+            "height_range",
+        ),
+        (
+            "missing default recipients",
+            r#"funding_streams = [{ height_range = { start = 0, end = 0 }, recipients = [] }, { height_range = { start = 0, end = 0 }, recipients = [] }, { height_range = { start = 0, end = 0 }, recipients = [] }, { height_range = { start = 1, end = 2 } }]"#,
+            "recipients",
+        ),
+        (
+            "empty address extension",
+            r#"extend_funding_stream_addresses_as_required = true
+funding_streams = [{ height_range = { start = 1, end = 10 }, recipients = [{ receiver = "ECC", numerator = 7, addresses = [] }] }]"#,
+            "addresses",
+        ),
+        (
+            "empty addresses",
+            r#"funding_streams = [{ height_range = { start = 1, end = 10 }, recipients = [{ receiver = "ECC", numerator = 7, addresses = [] }] }]"#,
+            "addresses",
+        ),
+        (
+            "insufficient addresses",
+            r#"funding_streams = [{ height_range = { start = 1, end = 40000 }, recipients = [{ receiver = "ECC", numerator = 7, addresses = ["t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz"] }] }]"#,
+            "addresses",
+        ),
+        (
+            "wrong network address",
+            r#"funding_streams = [{ height_range = { start = 0, end = 1 }, recipients = [{ receiver = "ECC", numerator = 7, addresses = ["t3LmX1cxWPPPqL4TZHx42HU3U5ghbFjRiif"] }] }]"#,
+            "Testnet",
+        ),
+        (
+            "malformed lockbox address",
+            r#"lockbox_disbursements = [{ address = "invalid", amount = 1 }]"#,
+            "lockbox disbursement address",
+        ),
+        (
+            "excessive lockbox total",
+            r#"lockbox_disbursements = [{ address = "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz", amount = 2100000000000000 }, { address = "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz", amount = 1 }]"#,
+            "lockbox disbursement total",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for network in ["Testnet", "Regtest"] {
+        for (name, parameters, diagnostic) in cases {
+            let isolation = if network == "Testnet" {
+                "network_magic = [0, 0, 0, 0]\ncheckpoints = true\n"
+            } else {
+                ""
+            };
+            let config = format!(
+                "network = '{network}'\ninitial_testnet_peers = []\n\
+                 [testnet_parameters]\n{isolation}{parameters}"
+            );
+            match std::panic::catch_unwind(|| toml::from_str::<Config>(&config)) {
+                Ok(Err(error)) if error.to_string().contains(diagnostic) => {}
+                Ok(Err(error)) => failures.push(format!("{network}: {name}: {error}")),
+                Ok(Ok(_)) => failures.push(format!("{network}: {name}: accepted invalid input")),
+                Err(_) => failures.push(format!("{network}: {name}: panicked")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Validation preserves address extension, valid lockbox totals, and canonical serialization.
+#[test]
+fn valid_funding_and_lockbox_configuration_roundtrip() {
+    let _init_guard = zebra_test::init();
+    for network in ["Testnet", "Regtest"] {
+        let isolation = if network == "Testnet" {
+            "network_magic = [0, 0, 0, 0]\ncheckpoints = true\n"
+        } else {
+            ""
+        };
+        let config: Config = toml::from_str(&format!(
+            "network = '{network}'\ninitial_testnet_peers = []\n\
+             [testnet_parameters]\n{isolation}\
+             extend_funding_stream_addresses_as_required = true\n\
+             funding_streams = [\
+               {{ height_range = {{ start = 0, end = 0 }}, recipients = [\
+                 {{ receiver = 'ECC', numerator = 7 }}\
+               ] }},\
+               {{ height_range = {{ start = 1, end = 40000 }}, recipients = [\
+                 {{ receiver = 'ECC', numerator = 7, addresses = ['t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz'] }},\
+                 {{ receiver = 'Deferred', numerator = 93 }}\
+               ] }}\
+             ]\n\
+             lockbox_disbursements = [\
+               {{ address = 't26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz', amount = 2100000000000000 }}\
+             ]"
+        ))
+        .unwrap();
+        let restored: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(config, restored);
+        let parameters = restored.network.parameters().unwrap();
+        assert_eq!(
+            parameters.lockbox_disbursements()[0].1,
+            parameters.lockbox_disbursement_total_amount(),
+        );
+        for height in [1, 39_999] {
+            assert_eq!(
+                zebra_chain::parameters::subsidy::funding_stream_address(
+                    Height(height),
+                    &restored.network,
+                    FundingStreamReceiver::Ecc,
+                )
+                .unwrap()
+                .to_string(),
+                "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+            );
+        }
+    }
+}
+
 /// Checks that a configured Testnet's temporary Orchard-disabling soft fork height
 /// survives a serialization round-trip.
 #[test]
@@ -199,6 +339,42 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
         params.temporary_orchard_disabling_soft_fork_height(),
         Some(soft_fork_height),
     );
+}
+
+#[test]
+fn regtest_rejects_fixed_parameter_overrides() {
+    let _init_guard = zebra_test::init();
+    let canonical: Config = toml::from_str("network = 'Regtest'").unwrap();
+    let restored: Config = toml::from_str(&toml::to_string(&canonical).unwrap()).unwrap();
+    assert_eq!(canonical, restored);
+
+    for (field, value) in [
+        ("disable_pow", "false"),
+        ("network_magic", "[0, 1, 2, 3]"),
+        ("genesis_hash", "'invalid'"),
+        (
+            "genesis_hash",
+            "'0000000000000000000000000000000000000000000000000000000000000000'",
+        ),
+        ("slow_start_interval", "1"),
+        ("target_difficulty_limit", "'invalid'"),
+        ("target_difficulty_limit", "'1'"),
+        ("pre_blossom_halving_interval", "145"),
+        ("temporary_orchard_disabling_soft_fork_height", "1"),
+    ] {
+        for prefix in [
+            "network = 'Regtest'\n[testnet_parameters]",
+            "[network.params]",
+        ] {
+            let config = format!("{prefix}\n{field} = {value}\n");
+            let error = toml::from_str::<Config>(&config)
+                .expect_err("Regtest must reject overrides of fixed parameters");
+            assert!(
+                error.to_string().contains(field),
+                "unexpected error: {error}"
+            );
+        }
+    }
 }
 
 /// Coalesced upgrades must not acquire earlier Regtest defaults after serialization.
@@ -487,13 +663,13 @@ fn legacy_public_testnet_overrides_require_migration() {
 
 #[test]
 fn empty_funding_ranges_allow_address_auto_extension() {
-    for network in ["Testnet", "Regtest"] {
+    for (network, network_magic) in [("Testnet", [0; 4]), ("Regtest", magics::REGTEST.0)] {
         let config: Config = toml::from_str(&format!(
             "network = '{network}'\n\
              initial_testnet_peers = []\n\
              [testnet_parameters]\n\
              checkpoints = {}\n\
-             network_magic = [0, 0, 0, 0]\n\
+             network_magic = {network_magic:?}\n\
              extend_funding_stream_addresses_as_required = true\n\
              funding_streams = [\
                {{ height_range = {{ start = 0, end = 0 }}, recipients = [{{ receiver = 'ECC', numerator = 7, addresses = [] }}] }},\
@@ -524,7 +700,7 @@ fn empty_funding_ranges_allow_address_auto_extension() {
 fn empty_funding_streams_reject_legacy_declarations() {
     let _init_guard = zebra_test::init();
 
-    for network in ["Testnet", "Regtest"] {
+    for (network, network_magic) in [("Testnet", [0; 4]), ("Regtest", magics::REGTEST.0)] {
         let checkpoints = network == "Testnet";
         for legacy_field in ["pre_nu6_funding_streams", "post_nu6_funding_streams"] {
             let config = format!(
@@ -532,7 +708,7 @@ fn empty_funding_streams_reject_legacy_declarations() {
                  initial_testnet_peers = []\n\
                  [testnet_parameters]\n\
                  checkpoints = {checkpoints}\n\
-                 network_magic = [0, 0, 0, 0]\n\
+                 network_magic = {network_magic:?}\n\
                  funding_streams = []\n\
                  {legacy_field} = {{ height_range = {{ start = 1, end = 2 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n"
             );
@@ -558,14 +734,14 @@ fn empty_funding_streams_reject_legacy_declarations() {
 fn legacy_funding_streams_combine_with_disjoint_nonempty_lists() {
     let _init_guard = zebra_test::init();
 
-    for network in ["Testnet", "Regtest"] {
+    for (network, network_magic) in [("Testnet", [0; 4]), ("Regtest", magics::REGTEST.0)] {
         let checkpoints = network == "Testnet";
         let config: Config = toml::from_str(&format!(
             "network = '{network}'\n\
              initial_testnet_peers = []\n\
              [testnet_parameters]\n\
              checkpoints = {checkpoints}\n\
-             network_magic = [0, 0, 0, 0]\n\
+             network_magic = {network_magic:?}\n\
              pre_nu6_funding_streams = {{ height_range = {{ start = 1, end = 4 }}, recipients = [{{ receiver = 'Deferred', numerator = 1 }}] }}\n\
              post_nu6_funding_streams = {{ height_range = {{ start = 4, end = 5 }}, recipients = [{{ receiver = 'Deferred', numerator = 2 }}] }}\n\
              funding_streams = [{{ height_range = {{ start = 5, end = 6 }}, recipients = [{{ receiver = 'Deferred', numerator = 3 }}] }}]\n"

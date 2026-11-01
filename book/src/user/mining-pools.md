@@ -71,7 +71,7 @@ tips can be skipped during rapid changes, and notifications are not a replayable
 
 Keep periodic polling enabled as a backstop for missed notifications or a restarted pool. Block
 notifications only signal tip changes, so retain the pool's periodic job refresh for transaction-only
-updates too. See the [s-nomp testnet guide](mining-testnet-s-nomp.md#important) for its compatibility and
+updates too. See the [s-nomp testnet guide](mining-testnet-s-nomp.md#compatibility-and-limitations) for its compatibility and
 payment limitations; this command does not make an unsupported pool version production-ready.
 
 ### ZMQ subscribers

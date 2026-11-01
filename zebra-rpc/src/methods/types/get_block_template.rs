@@ -82,12 +82,9 @@ type InBlockTxDependenciesDepth = usize;
 pub struct BlockTemplateResponse {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
-    /// At the moment, Zebra does not support any of the extra capabilities from the specification:
-    /// - `proposal`: <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-    /// - `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
-    /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
-    ///
-    /// By the above, Zebra will always return an empty vector here.
+    /// Returns `["proposal"]` for <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>.
+    /// Long polling is also supported through `longpollid`, but is not listed here.
+    /// Server lists are not supported.
     pub(crate) capabilities: Vec<String>,
 
     /// The version of the block format.

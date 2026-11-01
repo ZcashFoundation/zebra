@@ -106,8 +106,9 @@ pub use self::traits::{ReadState, State};
 /// This service modifies and provides access to:
 /// - the non-finalized state: the most recent blocks, up to
 ///   [`MAX_BLOCK_REORG_HEIGHT`](crate::MAX_BLOCK_REORG_HEIGHT) of them.
-///   Zebra allows chain forks in the non-finalized state,
-///   stores it in memory, and re-downloads it when restarted.
+///   Zebra allows chain forks in the non-finalized state and stores it in memory.
+///   By default, it backs up recent blocks to disk and restores them on restart;
+///   blocks missing from the backup must be re-downloaded.
 /// - the finalized state: older blocks that have many confirmations.
 ///   Zebra stores the single best chain in the finalized state,
 ///   and re-loads it from disk when restarted.
