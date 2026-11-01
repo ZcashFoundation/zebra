@@ -2,13 +2,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, LazyLock, Mutex, PoisonError,
-    },
+    sync::{atomic::Ordering, Arc, LazyLock, Mutex, PoisonError},
 };
 
-use metrics::{Counter, CounterFn, Gauge, GaugeFn, Key};
+use metrics::{atomics::AtomicU64, Counter, Gauge, Key};
 use sentry::protocol::Unit;
 
 /// The counters sent to Sentry, as the total recorded since the previous [`flush`].
@@ -24,7 +21,21 @@ const GAUGES: &[(&str, Option<Unit>)] = &[
 ];
 
 /// The listed counters and gauges recorded so far, by name and labels.
-static RECORDED: LazyLock<Mutex<HashMap<Key, Arc<Periodic>>>> = LazyLock::new(Default::default);
+static RECORDED: LazyLock<Mutex<HashMap<Key, Periodic>>> = LazyLock::new(Default::default);
+
+/// A listed counter's total since the last [`flush`], or a listed gauge's latest value as `f64`
+/// bits.
+#[derive(Clone)]
+struct Periodic {
+    kind: Kind,
+    value: Arc<AtomicU64>,
+}
+
+#[derive(Clone)]
+enum Kind {
+    Counter,
+    Gauge(Option<Unit>),
+}
 
 /// Returns a counter that [`flush`] sends to Sentry, if `key` is one of the [`COUNTERS`].
 pub(super) fn counter(key: &Key) -> Option<Counter> {
@@ -40,16 +51,27 @@ pub(super) fn gauge(key: &Key) -> Option<Gauge> {
     Some(Gauge::from_arc(recorded(key, Kind::Gauge(unit.clone()))))
 }
 
-fn recorded(key: &Key, kind: Kind) -> Arc<Periodic> {
+fn recorded(key: &Key, kind: Kind) -> Arc<AtomicU64> {
     let mut recorded = RECORDED.lock().unwrap_or_else(PoisonError::into_inner);
 
     if let Some(periodic) = recorded.get(key) {
-        return periodic.clone();
+        return periodic.value.clone();
     }
 
-    let periodic = Arc::new(Periodic::new(kind));
-    recorded.insert(key.clone(), periodic.clone());
-    periodic
+    // A gauge is NaN until it is first set, so `flush` skips it.
+    let initial = match kind {
+        Kind::Counter => 0,
+        Kind::Gauge(_) => f64::NAN.to_bits(),
+    };
+    let value = Arc::new(AtomicU64::new(initial));
+    recorded.insert(
+        key.clone(),
+        Periodic {
+            kind,
+            value: value.clone(),
+        },
+    );
+    value
 }
 
 /// Sends each listed counter's total since the previous call, and each listed gauge's latest
@@ -70,7 +92,7 @@ pub(crate) fn flush() {
             .labels()
             .map(|label| (label.key().to_owned(), label.value().to_owned()));
 
-        match &periodic.kind {
+        match periodic.kind {
             Kind::Counter => {
                 let count = periodic.value.swap(0, Ordering::Relaxed);
                 if count == 0 {
@@ -92,7 +114,7 @@ pub(crate) fn flush() {
 
                 let mut gauge = sentry::metrics::gauge(name, value);
                 if let Some(unit) = unit {
-                    gauge = gauge.unit(unit.clone());
+                    gauge = gauge.unit(unit);
                 }
                 for (key, value) in labels {
                     gauge = gauge.attribute(key, value);
@@ -100,68 +122,5 @@ pub(crate) fn flush() {
                 gauge.capture();
             }
         }
-    }
-}
-
-enum Kind {
-    Counter,
-    Gauge(Option<Unit>),
-}
-
-/// A counter's total since the last [`flush`], or a gauge's latest value as `f64` bits.
-struct Periodic {
-    kind: Kind,
-    value: AtomicU64,
-}
-
-impl Periodic {
-    fn new(kind: Kind) -> Self {
-        // A gauge is NaN until it is first set, so `flush` skips it.
-        let value = match kind {
-            Kind::Counter => 0,
-            Kind::Gauge(_) => f64::NAN.to_bits(),
-        };
-
-        Self {
-            kind,
-            value: AtomicU64::new(value),
-        }
-    }
-
-    fn update_gauge(&self, update: impl Fn(f64) -> f64) {
-        let _ = self
-            .value
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
-                Some(update(f64::from_bits(bits)).to_bits())
-            });
-    }
-}
-
-impl CounterFn for Periodic {
-    fn increment(&self, value: u64) {
-        self.value.fetch_add(value, Ordering::Relaxed);
-    }
-
-    // Zebra only increments the listed counters.
-    fn absolute(&self, _value: u64) {}
-}
-
-impl GaugeFn for Periodic {
-    fn increment(&self, value: f64) {
-        self.update_gauge(|gauge| if gauge.is_nan() { value } else { gauge + value });
-    }
-
-    fn decrement(&self, value: f64) {
-        self.update_gauge(|gauge| {
-            if gauge.is_nan() {
-                -value
-            } else {
-                gauge - value
-            }
-        });
-    }
-
-    fn set(&self, value: f64) {
-        self.value.store(value.to_bits(), Ordering::Relaxed);
     }
 }
