@@ -1216,6 +1216,7 @@ where
             .await
             .inspect_err(|error| self.count_block_error(error));
         Self::handle_response(response).map_err(|e| eyre!(e))?;
+        self.update_metrics();
 
         let response = self
             .downloads
@@ -1223,6 +1224,7 @@ where
             .await
             .expect("downloads is nonempty")
             .inspect_err(|error| self.count_block_error(error));
+        self.update_metrics();
 
         Ok(response)
     }

@@ -144,6 +144,15 @@ pub async fn show_block_chain_progress(
 
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
+        // Measured before the tip is known too, so a stalled genesis block download shows up, and
+        // measured here, so the age keeps growing while the syncer waits on that block.
+        let diagnostics = sync_status.diagnostics();
+        let oldest_in_flight_age = diagnostics
+            .oldest_in_flight_since
+            .map(|since| instant_now.saturating_duration_since(since));
+        metrics::gauge!("sync.downloads.oldest_age_seconds")
+            .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
+
         if let Some(estimated_height) =
             latest_chain_tip.estimate_network_chain_tip_height(&network, now)
         {
@@ -196,15 +205,6 @@ pub async fn show_block_chain_progress(
             // Export sync distance metrics for observability
             metrics::gauge!("sync.estimated_network_tip_height").set(estimated_height.0 as f64);
             metrics::gauge!("sync.estimated_distance_to_tip").set(remaining_sync_blocks as f64);
-
-            let diagnostics = sync_status.diagnostics();
-
-            // Measured here, so the age keeps growing while the syncer waits on that block.
-            let oldest_in_flight_age = diagnostics
-                .oldest_in_flight_since
-                .map(|since| instant_now.saturating_duration_since(since));
-            metrics::gauge!("sync.downloads.oldest_age_seconds")
-                .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
 
             // Work out how long it has been since the state height has increased.
             //

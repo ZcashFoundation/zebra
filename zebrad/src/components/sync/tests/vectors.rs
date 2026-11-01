@@ -2492,6 +2492,43 @@ async fn diagnostics_include_blocks_queued_before_a_readiness_wait() {
     assert!(diagnostics.oldest_in_flight_since.is_some());
 }
 
+/// A genesis block download that never finishes is published as in flight, so the progress task
+/// reports its age before the node has a chain tip.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_include_a_genesis_block_that_never_downloads() {
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // The genesis download gets the only permit, and the mock peer set never answers it.
+    let one_permit_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 1);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        one_permit_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let waiting = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_genesis_once());
+    assert!(waiting.await.is_err(), "the genesis block never downloads");
+
+    let diagnostics = diagnostics.borrow();
+    assert_eq!(diagnostics.in_flight, 1);
+    assert!(diagnostics.oldest_in_flight_since.is_some());
+}
+
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
 /// height limit must NOT score the peer that served it, while consensus-invalid
 /// blocks still must.
