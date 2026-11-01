@@ -2450,6 +2450,53 @@ async fn genesis_submission_failures_are_counted() {
     );
 }
 
+/// A genesis retry that finds the block still queued from a timed-out attempt doesn't count a
+/// block error, because the syncer ignores it and keeps waiting for that download.
+#[tokio::test(start_paused = true)]
+async fn genesis_retries_while_the_block_is_queued_are_not_counted() {
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // The genesis download gets the only permit, and the mock peer set never answers it.
+    let one_permit_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 1);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        one_permit_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    for attempt in ["first", "retry"] {
+        let genesis =
+            tokio::time::timeout(Duration::from_secs(1), chain_sync.request_genesis_once());
+        assert!(
+            genesis.await.is_err(),
+            "the {attempt} attempt never downloads"
+        );
+    }
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count("sync.block.error.count", &[("kind", "duplicate_queued")]),
+        0,
+    );
+}
+
 /// A wait for network capacity that the obtain tips or genesis timeout cancels, because both are
 /// shorter than the readiness deadline, is counted once as a network readiness timeout.
 #[tokio::test(start_paused = true)]

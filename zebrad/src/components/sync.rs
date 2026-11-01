@@ -1575,7 +1575,17 @@ where
     }
 
     /// Counts a block that failed to queue, download, or verify.
+    ///
+    /// A block that is already queued isn't counted, because the syncer ignores that error: it
+    /// happens when a timed-out genesis attempt or an earlier round left the block queued.
     fn count_block_error(&self, error: &BlockDownloadVerifyError) {
+        if matches!(
+            error,
+            BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
+        ) {
+            return;
+        }
+
         metrics::counter!("sync.block.error.count", "kind" => Self::block_error_kind(error))
             .increment(1);
     }
