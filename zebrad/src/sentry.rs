@@ -6,7 +6,7 @@ use std::{
     env,
     panic::PanicHookInfo,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Mutex, MutexGuard, OnceLock, PoisonError,
     },
     thread,
@@ -48,6 +48,9 @@ static NETWORK: OnceLock<Network> = OnceLock::new();
 
 /// When [`init`] ran, early in startup, which metrics measure the process uptime from.
 static STARTED_AT: OnceLock<Instant> = OnceLock::new();
+
+/// Whether the syncer was close to the chain tip when the progress task last checked.
+static CLOSE_TO_TIP: AtomicBool = AtomicBool::new(false);
 
 /// The best chain tip height, or [`UNKNOWN_TIP_HEIGHT`] until the progress task records one.
 ///
@@ -333,6 +336,15 @@ pub(crate) fn end(status: SessionStatus) -> bool {
 /// Records the best chain tip height for the events, logs, and metrics sent after this call.
 pub(crate) fn record_tip_height(height: Height) {
     TIP_HEIGHT.store(height.0, Ordering::Relaxed);
+}
+
+/// Records whether the syncer is close to the chain tip, which per-block metrics wait for.
+pub(crate) fn record_close_to_tip(close_to_tip: bool) {
+    CLOSE_TO_TIP.store(close_to_tip, Ordering::Relaxed);
+}
+
+fn is_close_to_tip() -> bool {
+    CLOSE_TO_TIP.load(Ordering::Relaxed)
 }
 
 /// Returns the best chain tip height and its network upgrade, once both are known.
@@ -955,6 +967,14 @@ mod tests {
         let envelopes = with_captured_envelopes_options(
             || {
                 metrics::with_local_recorder(&SentryRecorder, || {
+                    // Far from the tip, an initial sync would send a value for every block.
+                    metrics::histogram!(
+                        "state.block_writer.phase.duration_seconds",
+                        "phase" => "queue"
+                    )
+                    .record(9.0);
+
+                    super::record_close_to_tip(true);
                     metrics::histogram!(
                         "state.block_writer.phase.duration_seconds",
                         "phase" => "queue"
@@ -969,7 +989,7 @@ mod tests {
 
         let metrics = sent_metrics(&envelopes);
         let [metric] = metrics.as_slice() else {
-            panic!("expected only the listed histogram, got {metrics:?}");
+            panic!("expected only the listed histogram near the tip, got {metrics:?}");
         };
         let attribute = |key: &str| metric.attributes.get(key).and_then(|attr| attr.0.as_str());
 

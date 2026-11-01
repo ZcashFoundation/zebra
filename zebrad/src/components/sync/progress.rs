@@ -144,7 +144,10 @@ pub async fn show_block_chain_progress(
             let network_upgrade = NetworkUpgrade::current(&network, current_height);
 
             #[cfg(feature = "sentry")]
-            crate::sentry::record_tip_height(current_height);
+            {
+                crate::sentry::record_tip_height(current_height);
+                crate::sentry::record_close_to_tip(is_syncer_stopped);
+            }
 
             if let Some(previous_network_upgrade) = last_network_upgrade
                 .replace(network_upgrade)

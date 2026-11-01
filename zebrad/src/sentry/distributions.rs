@@ -14,8 +14,10 @@ use zebra_chain::{
 /// The histograms sent to Sentry, all measured in seconds.
 ///
 /// Sentry stores every recorded value, so only histograms recorded a few times per block belong
-/// here, not ones recorded per transaction, peer message, or request. The block phase histograms
-/// are only recorded by builds of the `next` branch.
+/// here, not ones recorded per transaction, peer message, or request. They are only sent while the
+/// node is close to the chain tip, because an initial sync records them for every block, faster
+/// than Sentry's transport can send them. The block phase histograms are only recorded by builds
+/// of the `next` branch.
 ///
 /// [`send_tip_block_delay`] sends the tip block delay instead, with its block height.
 const DISTRIBUTIONS: &[&str] = &[
@@ -76,7 +78,7 @@ impl Recorder for SentryRecorder {
     }
 
     fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
-        if DISTRIBUTIONS.contains(&key.name()) {
+        if DISTRIBUTIONS.contains(&key.name()) && super::is_close_to_tip() {
             Histogram::from_arc(Arc::new(Distribution(key.clone())))
         } else {
             Histogram::noop()
