@@ -232,9 +232,6 @@ pub async fn show_block_chain_progress(
                 last_log_time = instant_now;
             }
 
-            #[cfg(feature = "sentry")]
-            crate::sentry::flush_metrics();
-
             let diagnostics = sync_status.diagnostics();
 
             // Use the spacing at the estimated network tip, which changes at NU7 (ZIP 218).

@@ -37,7 +37,6 @@ mod distributions;
 mod periodic;
 
 pub(crate) use distributions::{send_tip_block_delay, SentryRecorder};
-pub(crate) use periodic::flush as flush_metrics;
 
 /// Keeps the Sentry client open until [`end`] drops it.
 ///
@@ -233,6 +232,16 @@ pub(crate) fn init(network: &Network) {
         });
     if let Err(error) = rotation {
         warn!(?error, "unable to start Sentry session rotation");
+    }
+
+    let metrics_flush = thread::Builder::new()
+        .name("sentry metrics flush".to_owned())
+        .spawn(|| loop {
+            thread::sleep(periodic::FLUSH_INTERVAL);
+            periodic::flush();
+        });
+    if let Err(error) = metrics_flush {
+        warn!(?error, "unable to start Sentry metrics flush");
     }
 }
 
@@ -1081,9 +1090,9 @@ mod tests {
             metrics::gauge!("sync.downloads.oldest_age_seconds").set(30.0);
             metrics::gauge!("sync.downloads.oldest_age_seconds").set(90.0);
 
-            super::flush_metrics();
+            super::periodic::flush();
             // No new errors, so only the gauge's latest value is sent again.
-            super::flush_metrics();
+            super::periodic::flush();
         });
 
         let mut metrics: Vec<_> = metrics

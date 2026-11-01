@@ -3,15 +3,22 @@
 use std::{
     collections::HashMap,
     sync::{atomic::Ordering, Arc, LazyLock, Mutex, PoisonError},
+    time::Duration,
 };
 
 use metrics::{atomics::AtomicU64, Counter, Gauge, Key};
 use sentry::protocol::Unit;
 
+/// How often the listed counters and gauges are sent to Sentry.
+///
+/// Each label set sends one value per interval, so the volume Sentry stores is inversely
+/// proportional to this.
+pub(super) const FLUSH_INTERVAL: Duration = Duration::from_secs(60);
+
 /// The counters sent to Sentry, as the total recorded since the previous [`flush`].
 ///
 /// Sentry stores every value it receives, and these can be incremented many times a second, so
-/// each label set is sent as one total a minute.
+/// each label set is sent as one total per [`FLUSH_INTERVAL`].
 const COUNTERS: &[&str] = &["sync.restart.count", "sync.block.error.count"];
 
 /// The gauges sent to Sentry, as their latest value at each [`flush`], with their units.
@@ -78,7 +85,7 @@ fn recorded(key: &Key, kind: Kind) -> Arc<AtomicU64> {
 /// value.
 ///
 /// Sends after releasing the lock, so it can also run from the panic hook.
-pub(crate) fn flush() {
+pub(super) fn flush() {
     let recorded: Vec<_> = RECORDED
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
