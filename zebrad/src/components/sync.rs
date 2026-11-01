@@ -444,6 +444,12 @@ where
 
     /// Publishes the syncer state that the progress task logs when sync stalls.
     diagnostics: watch::Sender<SyncDiagnostics>,
+
+    /// Whether a block is waiting for network capacity before it can be queued.
+    ///
+    /// It stays set when an enclosing timeout cancels that wait, so the timeout can be counted as
+    /// the block's error.
+    awaiting_network_capacity: bool,
 }
 
 /// A sync round that ended early, and why.
@@ -609,6 +615,7 @@ where
             block_reobtain_retries: HashMap::new(),
             utxo_race_drops: 0,
             diagnostics,
+            awaiting_network_capacity: false,
         };
 
         (new_syncer, sync_status)
@@ -709,15 +716,24 @@ where
         self.reobtain_hashes.clear();
         self.block_reobtain_retries.clear();
         self.utxo_race_drops = 0;
+        self.awaiting_network_capacity = false;
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
-            .await
-            .map_err(|e| RestartError::new(RestartReason::ObtainTipsTimeout, e))?
-            .map_err(|e| Self::tips_restart_error(RestartReason::ObtainTipsError, e))?;
+        // Queueing the blocks it finds can wait for network capacity for longer than this timeout.
+        let mut extra_hashes = match timeout(SYNC_RESTART_DELAY, self.obtain_tips()).await {
+            Ok(tips) => {
+                tips.map_err(|e| Self::tips_restart_error(RestartReason::ObtainTipsError, e))?
+            }
+            Err(_) if self.count_cancelled_network_wait() => {
+                return Err(Self::block_restart_error(BlockDownloadVerifyError::Timeout));
+            }
+            Err(elapsed) => {
+                return Err(RestartError::new(RestartReason::ObtainTipsTimeout, elapsed))
+            }
+        };
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
@@ -841,7 +857,7 @@ where
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
-            if let Err(error) = self.downloads.download_and_verify(hash).await {
+            if let Err(error) = self.queue_block(hash).await {
                 trace!(?hash, ?error, "re-download of missing block not queued");
                 // Any other error means the network failed or wasn't ready before the download
                 // deadline. Keep this block and the rest for the next sync round, rather than
@@ -1172,7 +1188,10 @@ where
 
             let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once())
                 .await
-                .map_err(Into::into);
+                .map_err(|elapsed| {
+                    self.count_cancelled_network_wait();
+                    elapsed.into()
+                });
 
             // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
@@ -1211,8 +1230,7 @@ where
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
         let response = self
-            .downloads
-            .download_and_verify(self.genesis_hash)
+            .queue_block(self.genesis_hash)
             .await
             .inspect_err(|error| self.count_block_error(error));
         Self::handle_response(response).map_err(|e| eyre!(e))?;
@@ -1258,7 +1276,7 @@ where
             // Queueing can wait for network capacity, so publish the downloads queued so far.
             self.update_metrics();
 
-            match self.downloads.download_and_verify(hash).await {
+            match self.queue_block(hash).await {
                 Ok(()) => {}
                 Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
                     debug!("block request was already queued, continuing");
@@ -1534,6 +1552,26 @@ where
             VerifierServiceError { .. } => "verifier_service",
             Timeout => "network_ready_timeout",
         }
+    }
+
+    /// Queues `hash` for download and verification, which can wait for network capacity.
+    async fn queue_block(&mut self, hash: block::Hash) -> Result<(), BlockDownloadVerifyError> {
+        self.awaiting_network_capacity = true;
+        let result = self.downloads.download_and_verify(hash).await;
+        self.awaiting_network_capacity = false;
+
+        result
+    }
+
+    /// Counts a block whose wait for network capacity an enclosing timeout cancelled, as the
+    /// network readiness timeout it would have reached, and returns whether there was one.
+    fn count_cancelled_network_wait(&mut self) -> bool {
+        let cancelled = std::mem::take(&mut self.awaiting_network_capacity);
+        if cancelled {
+            self.count_block_error(&BlockDownloadVerifyError::Timeout);
+        }
+
+        cancelled
     }
 
     /// Counts a block that failed to queue, download, or verify.

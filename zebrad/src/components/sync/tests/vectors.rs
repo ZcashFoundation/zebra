@@ -2450,6 +2450,62 @@ async fn genesis_submission_failures_are_counted() {
     );
 }
 
+/// A wait for network capacity that the obtain tips or genesis timeout cancels, because both are
+/// shorter than the readiness deadline, is counted once as a network readiness timeout.
+#[tokio::test(start_paused = true)]
+async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
+    use indexmap::IndexSet;
+    use tower::limit::ConcurrencyLimit;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        never_ready_network,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    let batch = IndexSet::from([block::Hash::from([0xE1; 32])]);
+    let tips = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_blocks(batch));
+    assert!(tips.await.is_err(), "the block waits for network capacity");
+    assert!(chain_sync.count_cancelled_network_wait());
+
+    let genesis = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_genesis_once());
+    assert!(
+        genesis.await.is_err(),
+        "the genesis block waits for network capacity"
+    );
+    assert!(chain_sync.count_cancelled_network_wait());
+
+    assert!(!chain_sync.count_cancelled_network_wait());
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        2,
+    );
+}
+
 /// While a batch waits for network capacity, the published download state includes the blocks
 /// queued earlier in that batch.
 #[tokio::test(start_paused = true)]
