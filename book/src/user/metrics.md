@@ -101,7 +101,7 @@ when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
 
 | Metric | Unit | Description |
 |---|---|---|
-| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined after their parent was already this node's tip, so the blocks a node catches up on after a restart or a stall aren't counted. Negative when the miner's clock is ahead of this node's. |
+| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined after their parent was already this node's tip, so the blocks a node catches up on after a restart or a stall aren't counted. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
 
 The header time is set by the block's miner, so a single value is only approximate.
 Nodes that follow the same chain see the same header times, so comparing these

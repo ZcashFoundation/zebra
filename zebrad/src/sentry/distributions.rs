@@ -78,7 +78,7 @@ impl Recorder for SentryRecorder {
     }
 
     fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
-        if DISTRIBUTIONS.contains(&key.name()) && super::is_close_to_tip() {
+        if DISTRIBUTIONS.contains(&key.name()) {
             Histogram::from_arc(Arc::new(Distribution(key.clone())))
         } else {
             Histogram::noop()
@@ -86,11 +86,17 @@ impl Recorder for SentryRecorder {
     }
 }
 
-/// A histogram that Sentry receives as a distribution.
+/// A histogram that Sentry receives as a distribution while the node is close to the chain tip.
 struct Distribution(Key);
 
 impl HistogramFn for Distribution {
     fn record(&self, value: f64) {
+        // Checked here rather than at registration, because callers can keep a histogram handle
+        // while the node moves toward or away from the tip.
+        if !super::is_close_to_tip() {
+            return;
+        }
+
         let mut distribution = sentry::metrics::distribution(self.0.name().to_owned(), value)
             .unit(sentry::protocol::Unit::Second);
 

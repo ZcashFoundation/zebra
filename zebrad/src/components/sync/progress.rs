@@ -412,7 +412,9 @@ pub async fn show_block_chain_progress(
 /// Records how long after its header time each new best chain tip block was committed.
 ///
 /// A block is only recorded if it was mined after its parent was already this node's tip, so a
-/// node catching up after a restart or a stall doesn't record its backlog.
+/// node catching up after a restart or a stall doesn't record its backlog. The block before a
+/// network upgrade activation isn't recorded either, because [`ChainTipChange`] reports it as a
+/// reset so that the mempool is cleared, and a reset doesn't include the block's time.
 #[cfg_attr(not(feature = "sentry"), allow(unused_variables))]
 pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange) {
     let mut tip_block_delay = TipBlockDelay::new(Utc::now());

@@ -970,13 +970,16 @@ mod tests {
         metadata.tags.insert("chain.network", "Mainnet".to_owned());
 
         let metrics = sent_metrics(&metadata, || {
+            let queue = metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue");
+
             // Far from the tip, an initial sync would send a value for every block.
-            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue")
-                .record(9.0);
+            queue.record(9.0);
+            super::record_close_to_tip(true);
+            queue.record(0.25);
+            super::record_close_to_tip(false);
+            queue.record(8.0);
 
             super::record_close_to_tip(true);
-            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue")
-                .record(0.25);
             metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
             metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
         });
