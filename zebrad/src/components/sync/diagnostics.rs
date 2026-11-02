@@ -1,8 +1,14 @@
 //! Syncer state published for stall diagnosis.
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
 
 use tokio::task::AbortHandle;
+
+use zebra_chain::block;
 
 /// Why a sync round ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,38 +53,62 @@ pub struct SyncDiagnostics {
     /// The number of blocks being downloaded or verified.
     pub in_flight: usize,
 
-    /// The oldest block that is still being downloaded or verified.
-    pub oldest_in_flight: Option<InFlightBlock>,
+    /// The blocks that might still be downloading or verifying, shared with the downloader.
+    pub in_flight_blocks: InFlightBlocks,
 }
 
 impl SyncDiagnostics {
     /// Returns how long the oldest block that is still being downloaded or verified has been
     /// queued, as of `now`.
     pub fn oldest_in_flight_age(&self, now: Instant) -> Option<Duration> {
-        self.oldest_in_flight
-            .as_ref()
-            .filter(|block| block.is_running())
-            .map(|block| now.saturating_duration_since(block.queued_at))
+        self.in_flight_blocks
+            .oldest_running_since()
+            .map(|queued_at| now.saturating_duration_since(queued_at))
     }
 }
 
-/// A queued block download and verify task.
-#[derive(Clone, Debug)]
-pub struct InFlightBlock {
-    /// When the task was queued.
-    pub queued_at: Instant,
+/// The block download and verify tasks that might still be running, ordered by when they were
+/// queued.
+///
+/// The downloader and the progress task share it, because a finished task stays in the downloader
+/// until the syncer reads its result, which can be several sync rounds later for a node at the
+/// tip, and the syncer only republishes its state during a round.
+#[derive(Clone, Debug, Default)]
+pub struct InFlightBlocks(Arc<Mutex<BTreeMap<(Instant, [u8; 32]), AbortHandle>>>);
 
-    /// The task, checked when the age is read.
-    ///
-    /// A finished task stays in the downloader until the syncer reads its result, which can be
-    /// several sync rounds later for a node at the tip, and the syncer only republishes its state
-    /// during a round.
-    pub task: AbortHandle,
-}
+impl InFlightBlocks {
+    /// Adds the task for `hash`, queued at `queued_at`.
+    pub fn insert(&self, queued_at: Instant, hash: block::Hash, task: AbortHandle) {
+        self.tasks().insert((queued_at, hash.0), task);
+    }
 
-impl InFlightBlock {
-    /// Returns true if the task hasn't finished.
-    pub fn is_running(&self) -> bool {
-        !self.task.is_finished()
+    /// Removes the task for `hash`, queued at `queued_at`.
+    pub fn remove(&self, queued_at: Instant, hash: block::Hash) {
+        self.tasks().remove(&(queued_at, hash.0));
+    }
+
+    /// Removes every task.
+    pub fn clear(&self) {
+        self.tasks().clear();
+    }
+
+    /// Returns when the oldest task that is still running was queued, and forgets the older ones
+    /// that have finished.
+    pub fn oldest_running_since(&self) -> Option<Instant> {
+        let mut tasks = self.tasks();
+        while let Some(oldest) = tasks.first_entry() {
+            if !oldest.get().is_finished() {
+                return Some(oldest.key().0);
+            }
+            oldest.remove();
+        }
+
+        None
+    }
+
+    fn tasks(&self) -> MutexGuard<'_, BTreeMap<(Instant, [u8; 32]), AbortHandle>> {
+        self.0
+            .lock()
+            .expect("no code panics while holding the in-flight blocks lock")
     }
 }

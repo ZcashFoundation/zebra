@@ -578,9 +578,6 @@ where
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
         let (sync_status, recent_syncs) = SyncStatus::new_for_network(&config.network.network);
-        let (diagnostics, diagnostics_receiver) = watch::channel(SyncDiagnostics::default());
-        let sync_status = sync_status.with_diagnostics(diagnostics_receiver);
-
         let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
         let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);
 
@@ -596,6 +593,12 @@ where
             ),
             max_checkpoint_height,
         ));
+
+        let (diagnostics, diagnostics_receiver) = watch::channel(SyncDiagnostics {
+            in_flight_blocks: downloads.in_flight_blocks(),
+            ..SyncDiagnostics::default()
+        });
+        let sync_status = sync_status.with_diagnostics(diagnostics_receiver);
 
         let new_syncer = Self {
             genesis_hash: config.network.network.genesis_hash(),
@@ -1670,14 +1673,12 @@ where
 
     fn update_metrics(&mut self) {
         let in_flight = self.downloads.in_flight();
-        let oldest_in_flight = self.downloads.oldest_in_flight();
 
         metrics::gauge!("sync.prospective_tips.len",).set(self.prospective_tips.len() as f64);
         metrics::gauge!("sync.downloads.in_flight",).set(in_flight as f64);
 
         self.diagnostics.send_modify(|diagnostics| {
             diagnostics.in_flight = in_flight;
-            diagnostics.oldest_in_flight = oldest_in_flight;
         });
     }
 

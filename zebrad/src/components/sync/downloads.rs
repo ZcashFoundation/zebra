@@ -1,7 +1,7 @@
 //! A download stream for Zebra's block syncer.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     convert,
     pin::Pin,
     sync::Arc,
@@ -18,7 +18,7 @@ use pin_project::pin_project;
 use thiserror::Error;
 use tokio::{
     sync::{oneshot, watch},
-    task::{AbortHandle, JoinHandle},
+    task::JoinHandle,
     time::{timeout, timeout_at, Instant},
 };
 use tower::{Service, ServiceExt};
@@ -32,7 +32,7 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    diagnostics::InFlightBlock, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
     FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
@@ -252,9 +252,8 @@ where
     /// verify tasks, with the time each task was queued.
     cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, std::time::Instant)>,
 
-    /// The pending tasks in `cancel_handles` that might still be running, ordered by the time they
-    /// were queued.
-    by_queue_time: BTreeMap<(std::time::Instant, [u8; 32]), AbortHandle>,
+    /// The pending tasks in `cancel_handles` that might still be running.
+    in_flight_blocks: InFlightBlocks,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -289,7 +288,7 @@ where
                 Ok((_, hash)) | Err((_, hash)) => *hash,
             };
             if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
-                this.by_queue_time.remove(&(queued_at, hash.0));
+                this.in_flight_blocks.remove(queued_at, hash);
             }
 
             Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
@@ -350,7 +349,7 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
-            by_queue_time: BTreeMap::new(),
+            in_flight_blocks: InFlightBlocks::default(),
         }
     }
 
@@ -669,7 +668,7 @@ where
                 .is_none(),
             "blocks are only queued once"
         );
-        self.by_queue_time.insert((queued_at, hash.0), task_handle);
+        self.in_flight_blocks.insert(queued_at, hash, task_handle);
 
         Ok(())
     }
@@ -686,7 +685,7 @@ where
             let _ = cancel.send(());
         }
 
-        self.by_queue_time.clear();
+        self.in_flight_blocks.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -707,21 +706,9 @@ where
         self.pending.len()
     }
 
-    /// Returns the oldest in-flight download and verify task that is still running, and forgets
-    /// the older ones that have finished.
-    pub fn oldest_in_flight(&mut self) -> Option<InFlightBlock> {
-        while let Some(oldest) = self.by_queue_time.first_entry() {
-            let block = InFlightBlock {
-                queued_at: oldest.key().0,
-                task: oldest.get().clone(),
-            };
-            if block.is_running() {
-                return Some(block);
-            }
-            oldest.remove();
-        }
-
-        None
+    /// Returns the tasks that might still be running, which the sync diagnostics share.
+    pub fn in_flight_blocks(&self) -> InFlightBlocks {
+        self.in_flight_blocks.clone()
     }
 
     /// Returns true if there are no in-flight download and verify tasks.

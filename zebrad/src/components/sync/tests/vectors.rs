@@ -2609,7 +2609,7 @@ async fn diagnostics_include_a_genesis_block_that_never_downloads() {
         .is_some());
 }
 
-/// A download that finished isn't published as in flight while the syncer hasn't read its result,
+/// A download that finished isn't reported as in flight while the syncer hasn't read its result,
 /// which a node at the tip can leave unread for several sync rounds after queueing the one block
 /// it was missing.
 #[tokio::test(start_paused = true)]
@@ -2633,7 +2633,6 @@ async fn diagnostics_leave_out_finished_downloads_the_syncer_has_not_read() {
         .request_blocks(IndexSet::from([block1_hash]))
         .await
         .expect("the peer set has capacity");
-    chain_sync.update_metrics();
     assert!(diagnostics
         .borrow()
         .oldest_in_flight_age(std::time::Instant::now())
@@ -2655,14 +2654,68 @@ async fn diagnostics_leave_out_finished_downloads_the_syncer_has_not_read() {
         .respond(block1_hash);
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // The syncer hasn't republished since the download finished.
     assert!(diagnostics
         .borrow()
         .oldest_in_flight_age(std::time::Instant::now())
         .is_none());
+}
 
-    chain_sync.update_metrics();
-    assert!(diagnostics.borrow().oldest_in_flight.is_none());
+/// When the oldest download finishes before the syncer reads its result, the age is that of the
+/// next download that is still running, even though the syncer hasn't republished since.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_report_the_next_running_download_when_the_oldest_finishes() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    let mut peer_set = MockService::build().for_unit_tests();
+    let mut block_verifier_router = MockService::build().for_unit_tests();
+    let (mut chain_sync, _misbehavior_rx) =
+        new_chain_sync_with(peer_set.clone(), block_verifier_router.clone());
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector is a valid block");
+    let block1_hash = block1.hash();
+    // The mock peer set never answers this download.
+    let stuck_hash = block::Hash::from([0xD4; 32]);
+
+    chain_sync
+        .request_blocks(IndexSet::from([block1_hash]))
+        .await
+        .expect("the peer set has capacity");
+    let stuck_queued_after = std::time::Instant::now();
+    chain_sync
+        .request_blocks(IndexSet::from([stuck_hash]))
+        .await
+        .expect("the peer set has capacity");
+
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(block1_hash);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let now = std::time::Instant::now();
+    let age = diagnostics
+        .borrow()
+        .oldest_in_flight_age(now)
+        .expect("the stuck download is still running");
+    assert!(
+        age <= now.saturating_duration_since(stuck_queued_after),
+        "the age is measured from the stuck download, not the finished one"
+    );
 }
 
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead
