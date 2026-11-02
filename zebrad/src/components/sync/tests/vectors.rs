@@ -2506,6 +2506,58 @@ async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
     );
 }
 
+/// A download that failed before a restart is counted when the restart drops the downloads the
+/// syncer hasn't read yet.
+#[tokio::test(start_paused = true)]
+async fn finished_block_errors_are_counted_before_a_restart_drops_them() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    let mut peer_set = MockService::build().for_unit_tests();
+    let mut block_verifier_router = MockService::build().for_unit_tests();
+    let (mut chain_sync, _misbehavior_rx) =
+        new_chain_sync_with(peer_set.clone(), block_verifier_router.clone());
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector is a valid block");
+    let block1_hash = block1.hash();
+
+    chain_sync
+        .request_blocks(IndexSet::from([block1_hash]))
+        .await
+        .expect("the peer set has capacity");
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(Err(zebra_consensus::BoxError::from(
+            "synthetic test verifier error",
+        )));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+    chain_sync.count_finished_block_errors();
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count("sync.block.error.count", &[("kind", "validation_request")]),
+        1,
+    );
+    assert_eq!(chain_sync.downloads.in_flight(), 0);
+}
+
 /// An obtain tips or sync step timeout that cancels a block's wait for network capacity restarts
 /// the sync as that block's network readiness timeout, and counts it. Otherwise the timeout keeps
 /// its own restart reason.

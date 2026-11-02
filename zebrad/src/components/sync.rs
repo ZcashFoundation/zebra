@@ -11,7 +11,10 @@ use std::{
 };
 
 use color_eyre::eyre::{eyre, Report};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    stream::{FuturesUnordered, StreamExt},
+    FutureExt,
+};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -635,6 +638,7 @@ where
             let start_tip = self.latest_chain_tip.best_tip_height();
             let result = self.try_to_sync().await;
             if result.is_err() {
+                self.count_finished_block_errors();
                 self.downloads.cancel_all();
             }
 
@@ -1597,6 +1601,16 @@ where
             BlockDownloadVerifyError::Timeout
         } else {
             BlockDownloadVerifyError::GenesisTimeout
+        }
+    }
+
+    /// Counts the errors of downloads that finished without the syncer reading their results,
+    /// before a restart drops them.
+    fn count_finished_block_errors(&mut self) {
+        while let Some(Some(response)) = self.downloads.next().now_or_never() {
+            if let Err(error) = response {
+                self.count_block_error(&error);
+            }
         }
     }
 
