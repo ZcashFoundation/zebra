@@ -156,33 +156,44 @@ fn send_recorded() {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::mpsc,
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{sync::mpsc, thread, time::Duration};
 
     use super::*;
 
     #[test]
     fn flush_waits_for_a_flush_in_progress() {
         let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
 
         // Stands in for a periodic flush that has taken the totals but not sent them yet.
         let in_progress = thread::spawn(move || {
             let _flushing = FLUSHING.lock().unwrap_or_else(PoisonError::into_inner);
             locked_tx.send(()).expect("the test thread is waiting");
-            thread::sleep(Duration::from_millis(200));
+            release_rx
+                .recv()
+                .expect("the test thread releases the flush");
         });
         locked_rx
             .recv()
             .expect("the other thread holds the flush lock");
 
-        let started = Instant::now();
-        flush();
-        assert!(started.elapsed() >= Duration::from_millis(150));
+        let (flushed_tx, flushed_rx) = mpsc::channel();
+        let flushing = thread::spawn(move || {
+            flush();
+            flushed_tx.send(()).expect("the test thread is waiting");
+        });
+
+        assert!(
+            flushed_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "a flush finished while another one was in progress"
+        );
+        release_tx.send(()).expect("the other thread is waiting");
+        flushed_rx
+            .recv()
+            .expect("the flush finishes once the other one does");
 
         in_progress.join().expect("the other thread doesn't panic");
+        flushing.join().expect("the flushing thread doesn't panic");
     }
 
     #[test]
