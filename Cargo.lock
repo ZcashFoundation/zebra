@@ -7721,6 +7721,7 @@ dependencies = [
  "log",
  "metrics",
  "metrics-exporter-prometheus",
+ "metrics-util",
  "nix",
  "num-integer",
  "once_cell",

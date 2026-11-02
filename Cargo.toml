@@ -102,6 +102,7 @@ libzcash_script = "0.2"
 log = "0.4.27"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
+metrics-util = { version = "0.19", default-features = false }
 mset = "0.1"
 nix = "0.31"
 num-integer = "0.1.46"

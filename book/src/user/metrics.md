@@ -93,6 +93,22 @@ front end that you can visualize:
 
 [metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html
 
+## Block timing
+
+These histograms show how quickly a node accepts new blocks. Official release builds
+also send them to [Sentry](tracing.md#sentry-production-monitoring) as distributions
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
+
+| Metric | Unit | Description |
+|---|---|---|
+| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+
+The header time is set by the block's miner, so a single value is only approximate.
+Nodes that follow the same chain see the same header times, so comparing these
+values across nodes over the same period shows which nodes accept blocks sooner.
+In Sentry, each `zcash.chain.tip.block_delay_seconds` value also carries the block's
+`chain.height`, so nodes can be compared block by block.
+
 ## Network metric aggregation
 
 Connection state, request, response, message, and byte metrics are aggregated across

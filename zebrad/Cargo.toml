@@ -100,7 +100,7 @@ progress-bar = [
     "zebra-network/progress-bar",
 ]
 
-prometheus = ["metrics-exporter-prometheus"]
+prometheus = ["metrics-exporter-prometheus", "metrics-util"]
 
 # Production features that modify dependency behaviour
 
@@ -228,7 +228,7 @@ rand = { workspace = true }
 thread-priority = { workspace = true, optional = true }
 
 # prod feature sentry
-sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "rustls", "tracing", "ureq"], optional = true }
+sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "metrics", "rustls", "tracing", "ureq"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { workspace = true, optional = true }
@@ -248,6 +248,7 @@ bytes = { workspace = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { workspace = true, features = ["http-listener"], optional = true }
+metrics-util = { workspace = true, optional = true }
 
 # prod feature release_max_level_info
 #
