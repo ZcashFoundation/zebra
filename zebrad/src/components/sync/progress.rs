@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use num_integer::div_ceil;
 
 use tokio::sync::watch;
@@ -63,6 +63,14 @@ const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
 //
 // TODO: change to HeightDiff?
 const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: u32 = 10;
+
+/// How long before its parent became this node's tip a block can have been mined, and still have
+/// its tip delay recorded.
+///
+/// A block often arrives while its parent is still being verified, and a slower node sees that
+/// more often, so requiring the parent first would drop a slower node's largest delays. This is
+/// longer than a healthy node's block delay, and most of a restart's or a stall's backlog is older.
+const TIP_BLOCK_DELAY_BACKLOG_MARGIN: TimeDelta = TimeDelta::minutes(2);
 
 /// Logs Zebra's estimated progress towards the chain tip every minute or so, and
 /// updates a terminal progress bar every few seconds.
@@ -411,10 +419,11 @@ pub async fn show_block_chain_progress(
 
 /// Records how long after its header time each new best chain tip block was committed.
 ///
-/// A block is only recorded if it was mined after its parent was already this node's tip, so a
-/// node catching up after a restart or a stall doesn't record its backlog. The block before a
-/// network upgrade activation isn't recorded either, because [`ChainTipChange`] reports it as a
-/// reset so that the mempool is cleared, and a reset doesn't include the block's time.
+/// A block is only recorded if it was mined at most [`TIP_BLOCK_DELAY_BACKLOG_MARGIN`] before its
+/// parent became this node's tip, so a node catching up after a restart or a stall doesn't record
+/// most of its backlog. The block before a network upgrade activation isn't recorded either,
+/// because [`ChainTipChange`] reports it as a reset so that the mempool is cleared, and a reset
+/// doesn't include the block's time.
 #[cfg_attr(not(feature = "sentry"), allow(unused_variables))]
 pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange) {
     let mut tip_block_delay = TipBlockDelay::new(Utc::now());
@@ -442,12 +451,15 @@ impl TipBlockDelay {
     }
 
     /// Returns the height of the block that `tip_action` added and the seconds from its header
-    /// time to `now`, if it grew the tip by a block mined after its parent became this node's tip.
+    /// time to `now`, if it grew the tip by a block mined at most
+    /// [`TIP_BLOCK_DELAY_BACKLOG_MARGIN`] before its parent became this node's tip.
     ///
     /// The delay is negative when the block's miner set its clock ahead of this node's.
     fn observe(&mut self, tip_action: &TipAction, now: DateTime<Utc>) -> Option<(Height, f64)> {
         let delay = match tip_action {
-            TipAction::Grow { block } if block.time >= self.tip_since => {
+            TipAction::Grow { block }
+                if block.time >= self.tip_since - TIP_BLOCK_DELAY_BACKLOG_MARGIN =>
+            {
                 Some((block.height, (now - block.time).as_seconds_f64()))
             }
             _ => None,
@@ -460,7 +472,6 @@ impl TipBlockDelay {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
     use zebra_chain::{block, parameters::Network};
     use zebra_state::{ChainTipBlock, ChainTipSender};
 
@@ -505,8 +516,19 @@ mod tests {
                 at(125),
                 Some((block::Height(15), -5.0)),
             ),
+            (
+                Some(tip_block(16, 15, at(140))),
+                at(170),
+                Some((block::Height(16), 30.0)),
+            ),
+            // Mined while its parent was still being verified.
+            (
+                Some(tip_block(17, 16, at(160))),
+                at(175),
+                Some((block::Height(17), 15.0)),
+            ),
             // A different chain.
-            (Some(tip_block(17, 16, at(200))), at(201), None),
+            (Some(tip_block(19, 18, at(200))), at(201), None),
         ];
 
         for (new_tip, now, expected) in steps {
