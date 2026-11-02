@@ -1206,6 +1206,171 @@ fn pruned_subtree_checks_still_reject_missing_or_incorrect_roots() {
         .contains("orchard: Err"));
 }
 
+/// Once pruning may run, it can delete the completing block's body between the availability check
+/// and the body read, so the subtree checks must use the stored subtree even when bodies are retained.
+#[test]
+fn subtree_checks_use_stored_subtrees_once_pruning_may_run() {
+    use super::super::disk_format::upgrade::add_subtrees::subtree_format_calculation_pre_checks;
+    use hex_literal::hex;
+    use zebra_chain::subtree::NoteCommitmentSubtree;
+
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    assert!(state
+        .db
+        .history_capabilities()
+        .unwrap()
+        .has_block_body(Height(1_707_429)));
+
+    let mut sapling = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(558_822),
+        root: sapling_crypto::Node::from_bytes([0; 32]).unwrap(),
+    };
+    let mut orchard = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(1_707_429),
+        root: [0; 32].as_slice().try_into().unwrap(),
+    };
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+
+    // Before startup checks finish, pruning cannot run, so the early-chain calculation is used.
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    state.db.mark_ready_for_pruning();
+    let error = subtree_format_calculation_pre_checks(&state.db).unwrap_err();
+    assert!(error.contains("sapling: Err"));
+    assert!(error.contains("orchard: Err"));
+
+    sapling.root = sapling_crypto::Node::from_bytes(hex!(
+        "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+    ))
+    .unwrap();
+    orchard.root = hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+        .as_slice()
+        .try_into()
+        .unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    // Before the first subtrees complete, nothing is stored and the check still passes.
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    state.db.mark_ready_for_pruning();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+}
+
+/// Finalization can complete the first subtree between its initial lookup and the tip-tree read.
+#[test]
+fn subtree_checks_allow_completion_after_missing_subtree_lookup() {
+    use super::super::disk_format::upgrade::add_subtrees::{
+        subtree_format_calculation_pre_checks, AFTER_MISSING_ORCHARD_SUBTREE,
+        AFTER_MISSING_SAPLING_SUBTREE,
+    };
+    use hex_literal::hex;
+    use zebra_chain::{
+        orchard, sapling,
+        sapling::tree::legacy::{
+            LegacyFrontier, LegacyLeaf, LegacyNonEmptyFrontier, LegacyPosition,
+        },
+        subtree::{NoteCommitmentSubtree, TRACKED_SUBTREE_HEIGHT},
+    };
+
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        prune_blocks_older_than: Some(MIN_PRUNING_RETENTION),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    state.db.mark_ready_for_pruning();
+    assert!(state.db.sapling_subtree_by_index(0).is_none());
+    assert!(state.db.orchard_subtree_by_index(0).is_none());
+    assert!(state.db.sapling_tree_for_tip().subtree_index().is_none());
+    assert!(state.db.orchard_tree_for_tip().subtree_index().is_none());
+
+    let sapling = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(558_822),
+        root: sapling_crypto::Node::from_bytes(hex!(
+            "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+        ))
+        .unwrap(),
+    };
+    let orchard: NoteCommitmentSubtree<orchard::tree::Node> = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(1_707_429),
+        root: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+            .as_slice()
+            .try_into()
+            .unwrap(),
+    };
+    // Both tree types use this legacy encoding. One completed subtree followed by a note
+    // needs only the known subtree root as its ommer, not all of the preceding commitments.
+    let tree_bytes = |root| {
+        let frontier = LegacyFrontier::<[u8; 32], 32> {
+            frontier: Some(LegacyNonEmptyFrontier {
+                position: LegacyPosition(1 << TRACKED_SUBTREE_HEIGHT),
+                leaf: LegacyLeaf::Left([0; 32]),
+                ommers: vec![root],
+            }),
+        };
+        bincode::serialize(&(frontier, None::<[u8; 32]>)).unwrap()
+    };
+    let sapling_tree: sapling::tree::NoteCommitmentTree =
+        bincode::deserialize(&tree_bytes(sapling.root.to_bytes())).unwrap();
+    let orchard_tree: orchard::tree::NoteCommitmentTree =
+        bincode::deserialize(&tree_bytes(orchard.root.to_repr())).unwrap();
+    assert_eq!(sapling_tree.subtree_index(), Some(1.into()));
+    assert_eq!(orchard_tree.subtree_index(), Some(1.into()));
+
+    let writer = state.db.clone();
+    AFTER_MISSING_SAPLING_SUBTREE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let mut batch = DiskWriteBatch::new();
+            batch.create_sapling_tree(&writer, &sapling.end_height, &sapling_tree);
+            batch.insert_sapling_subtree(&writer, &sapling);
+            batch.zs_insert(
+                &writer.cf_handle("hash_by_height").unwrap(),
+                sapling.end_height,
+                writer.hash(Height(3)).unwrap(),
+            );
+            writer.write_batch(batch).unwrap();
+        }));
+    });
+    let writer = state.db.clone();
+    AFTER_MISSING_ORCHARD_SUBTREE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let mut batch = DiskWriteBatch::new();
+            batch.create_orchard_tree(&writer, &orchard.end_height, &orchard_tree);
+            batch.insert_orchard_subtree(&writer, &orchard);
+            batch.zs_insert(
+                &writer.cf_handle("hash_by_height").unwrap(),
+                orchard.end_height,
+                writer.hash(Height(3)).unwrap(),
+            );
+            writer.write_batch(batch).unwrap();
+        }));
+    });
+
+    let result = subtree_format_calculation_pre_checks(&state.db);
+    assert!(AFTER_MISSING_SAPLING_SUBTREE.with(|hook| hook.borrow_mut().take().is_none()));
+    assert!(AFTER_MISSING_ORCHARD_SUBTREE.with(|hook| hook.borrow_mut().take().is_none()));
+    assert_eq!(result, Ok(()));
+}
+
 #[test]
 fn recent_address_checks_reject_an_unavailable_required_window() {
     use super::super::disk_format::upgrade::{
