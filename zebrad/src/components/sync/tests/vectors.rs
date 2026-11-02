@@ -2558,6 +2558,25 @@ async fn finished_block_errors_are_counted_before_a_restart_drops_them() {
     assert_eq!(chain_sync.downloads.in_flight(), 0);
 }
 
+/// A timeout that cancels a queued block after it got network capacity isn't counted as a wait for
+/// network capacity, even when it fires before the queue call returns.
+#[tokio::test(start_paused = true)]
+async fn timeouts_after_network_capacity_arrives_are_not_counted_as_network_waits() {
+    let _init_guard = zebra_test::init();
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+    );
+
+    // The peer set is ready at once, so this poll sends the download and then yields.
+    let mut queueing = Box::pin(chain_sync.queue_block(block::Hash::from([0xE3; 32])));
+    assert!(futures::poll!(&mut queueing).is_pending());
+    drop(queueing);
+
+    assert!(!chain_sync.count_cancelled_network_wait());
+}
+
 /// An obtain tips or sync step timeout that cancels a block's wait for network capacity restarts
 /// the sync as that block's network readiness timeout, and counts it. Otherwise the timeout keeps
 /// its own restart reason.

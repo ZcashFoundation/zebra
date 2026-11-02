@@ -447,12 +447,6 @@ where
 
     /// Publishes the syncer state that the progress task logs when sync stalls.
     diagnostics: watch::Sender<SyncDiagnostics>,
-
-    /// Whether a block is waiting for network capacity before it can be queued.
-    ///
-    /// It stays set when an enclosing timeout cancels that wait, so the timeout can be counted as
-    /// the block's error.
-    awaiting_network_capacity: bool,
 }
 
 /// A sync round that ended early, and why.
@@ -621,7 +615,6 @@ where
             block_reobtain_retries: HashMap::new(),
             utxo_race_drops: 0,
             diagnostics,
-            awaiting_network_capacity: false,
         };
 
         (new_syncer, sync_status)
@@ -723,7 +716,7 @@ where
         self.reobtain_hashes.clear();
         self.block_reobtain_retries.clear();
         self.utxo_race_drops = 0;
-        self.awaiting_network_capacity = false;
+        self.downloads.take_cancelled_network_wait();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -1557,9 +1550,7 @@ where
     async fn queue_block(&mut self, hash: block::Hash) -> Result<(), BlockDownloadVerifyError> {
         self.update_metrics();
 
-        self.awaiting_network_capacity = true;
         let result = self.downloads.download_and_verify(hash).await;
-        self.awaiting_network_capacity = false;
 
         match &result {
             Ok(()) | Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {}
@@ -1572,7 +1563,7 @@ where
     /// Counts a block whose wait for network capacity an enclosing timeout cancelled, as the
     /// network readiness timeout it would have reached, and returns whether there was one.
     fn count_cancelled_network_wait(&mut self) -> bool {
-        let cancelled = std::mem::take(&mut self.awaiting_network_capacity);
+        let cancelled = self.downloads.take_cancelled_network_wait();
         if cancelled {
             self.count_block_error(&BlockDownloadVerifyError::Timeout);
         }

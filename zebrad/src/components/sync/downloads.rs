@@ -254,6 +254,12 @@ where
 
     /// The pending tasks in `cancel_handles` that might still be running.
     in_flight_blocks: InFlightBlocks,
+
+    /// Whether [`Self::download_and_verify`] is waiting for network capacity.
+    ///
+    /// It stays set when an enclosing timeout cancels that wait, so the syncer can count the
+    /// timeout as the block's error.
+    awaiting_network_capacity: bool,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -350,6 +356,7 @@ where
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             in_flight_blocks: InFlightBlocks::default(),
+            awaiting_network_capacity: false,
         }
     }
 
@@ -375,8 +382,10 @@ where
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
         let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
-        let block_req = timeout_at(deadline, self.network.ready())
-            .await?
+        self.awaiting_network_capacity = true;
+        let ready = timeout_at(deadline, self.network.ready()).await;
+        self.awaiting_network_capacity = false;
+        let block_req = ready?
             .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
             .call(zn::Request::BlockDownload {
                 hash,
@@ -699,6 +708,12 @@ where
             .lock()
             .expect("thread panicked while holding the past_lookahead_limit_sender mutex guard")
             .send(false);
+    }
+
+    /// Returns whether an enclosing timeout cancelled a wait for network capacity, and forgets
+    /// that wait.
+    pub fn take_cancelled_network_wait(&mut self) -> bool {
+        std::mem::take(&mut self.awaiting_network_capacity)
     }
 
     /// Get the number of currently in-flight download and verify tasks.
