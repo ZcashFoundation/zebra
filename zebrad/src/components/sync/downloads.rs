@@ -1,7 +1,7 @@
 //! A download stream for Zebra's block syncer.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     convert,
     pin::Pin,
     sync::Arc,
@@ -18,7 +18,7 @@ use pin_project::pin_project;
 use thiserror::Error;
 use tokio::{
     sync::{oneshot, watch},
-    task::JoinHandle,
+    task::{AbortHandle, JoinHandle},
     time::{timeout, timeout_at, Instant},
 };
 use tower::{Service, ServiceExt};
@@ -32,8 +32,8 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    BLOCK_DOWNLOAD_ROUND_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
-    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+    diagnostics::InFlightBlock, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
 #[cfg(test)]
@@ -247,10 +247,11 @@ where
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks, with the time each task was queued.
-    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, Instant)>,
+    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, std::time::Instant)>,
 
-    /// The pending tasks in `cancel_handles`, ordered by the time they were queued.
-    queued_at: BTreeSet<(Instant, [u8; 32])>,
+    /// The pending tasks in `cancel_handles` that might still be running, ordered by the time they
+    /// were queued.
+    by_queue_time: BTreeMap<(std::time::Instant, [u8; 32]), AbortHandle>,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -285,7 +286,7 @@ where
                 Ok((_, hash)) | Err((_, hash)) => *hash,
             };
             if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
-                this.queued_at.remove(&(queued_at, hash.0));
+                this.by_queue_time.remove(&(queued_at, hash.0));
             }
 
             Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
@@ -346,7 +347,7 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
-            queued_at: BTreeSet::new(),
+            by_queue_time: BTreeMap::new(),
         }
     }
 
@@ -656,7 +657,8 @@ where
         // Try to start the spawned task before queueing the next block request
         tokio::task::yield_now().await;
 
-        let queued_at = Instant::now();
+        let queued_at = std::time::Instant::now();
+        let task_handle = task.abort_handle();
         self.pending.push(task);
         assert!(
             self.cancel_handles
@@ -664,7 +666,7 @@ where
                 .is_none(),
             "blocks are only queued once"
         );
-        self.queued_at.insert((queued_at, hash.0));
+        self.by_queue_time.insert((queued_at, hash.0), task_handle);
 
         Ok(())
     }
@@ -681,7 +683,7 @@ where
             let _ = cancel.send(());
         }
 
-        self.queued_at.clear();
+        self.by_queue_time.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -702,11 +704,21 @@ where
         self.pending.len()
     }
 
-    /// Returns when the oldest in-flight download and verify task was queued.
-    pub fn oldest_in_flight_since(&self) -> Option<std::time::Instant> {
-        self.queued_at
-            .first()
-            .map(|(queued_at, _hash)| queued_at.into_std())
+    /// Returns the oldest in-flight download and verify task that is still running, and forgets
+    /// the older ones that have finished.
+    pub fn oldest_in_flight(&mut self) -> Option<InFlightBlock> {
+        while let Some(oldest) = self.by_queue_time.first_entry() {
+            let block = InFlightBlock {
+                queued_at: oldest.key().0,
+                task: oldest.get().clone(),
+            };
+            if block.is_running() {
+                return Some(block);
+            }
+            oldest.remove();
+        }
+
+        None
     }
 
     /// Returns true if there are no in-flight download and verify tasks.

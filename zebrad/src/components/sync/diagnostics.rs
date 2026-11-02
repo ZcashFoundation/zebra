@@ -1,6 +1,8 @@
 //! Syncer state published for stall diagnosis.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use tokio::task::AbortHandle;
 
 /// Why a sync round ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +47,38 @@ pub struct SyncDiagnostics {
     /// The number of blocks being downloaded or verified.
     pub in_flight: usize,
 
-    /// When the oldest block that is still being downloaded or verified was queued.
-    pub oldest_in_flight_since: Option<Instant>,
+    /// The oldest block that is still being downloaded or verified.
+    pub oldest_in_flight: Option<InFlightBlock>,
+}
+
+impl SyncDiagnostics {
+    /// Returns how long the oldest block that is still being downloaded or verified has been
+    /// queued, as of `now`.
+    pub fn oldest_in_flight_age(&self, now: Instant) -> Option<Duration> {
+        self.oldest_in_flight
+            .as_ref()
+            .filter(|block| block.is_running())
+            .map(|block| now.saturating_duration_since(block.queued_at))
+    }
+}
+
+/// A queued block download and verify task.
+#[derive(Clone, Debug)]
+pub struct InFlightBlock {
+    /// When the task was queued.
+    pub queued_at: Instant,
+
+    /// The task, checked when the age is read.
+    ///
+    /// A finished task stays in the downloader until the syncer reads its result, which can be
+    /// several sync rounds later for a node at the tip, and the syncer only republishes its state
+    /// during a round.
+    pub task: AbortHandle,
+}
+
+impl InFlightBlock {
+    /// Returns true if the task hasn't finished.
+    pub fn is_running(&self) -> bool {
+        !self.task.is_finished()
+    }
 }

@@ -2592,7 +2592,9 @@ async fn diagnostics_include_blocks_queued_before_a_readiness_wait() {
 
     let diagnostics = diagnostics.borrow();
     assert_eq!(diagnostics.in_flight, 1);
-    assert!(diagnostics.oldest_in_flight_since.is_some());
+    assert!(diagnostics
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_some());
 }
 
 /// A genesis block download that never finishes is published as in flight, so the progress task
@@ -2629,7 +2631,80 @@ async fn diagnostics_include_a_genesis_block_that_never_downloads() {
 
     let diagnostics = diagnostics.borrow();
     assert_eq!(diagnostics.in_flight, 1);
-    assert!(diagnostics.oldest_in_flight_since.is_some());
+    assert!(diagnostics
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_some());
+}
+
+/// A download that finished isn't published as in flight while the syncer hasn't read its result,
+/// which a node at the tip can leave unread for several sync rounds after queueing the one block
+/// it was missing.
+#[tokio::test(start_paused = true)]
+async fn diagnostics_leave_out_finished_downloads_the_syncer_has_not_read() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    let mut peer_set = MockService::build().for_unit_tests();
+    let mut block_verifier_router = MockService::build().for_unit_tests();
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        peer_set.clone(),
+        block_verifier_router.clone(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+    let diagnostics = chain_sync.diagnostics.subscribe();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector is a valid block");
+    let block1_hash = block1.hash();
+
+    chain_sync
+        .request_blocks(IndexSet::from([block1_hash]))
+        .await
+        .expect("the peer set has capacity");
+    chain_sync.update_metrics();
+    assert!(diagnostics
+        .borrow()
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_some());
+
+    peer_set
+        .expect_request(zn::Request::BlockDownload {
+            hash: block1_hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(block1_hash);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // The syncer hasn't republished since the download finished.
+    assert!(diagnostics
+        .borrow()
+        .oldest_in_flight_age(std::time::Instant::now())
+        .is_none());
+
+    chain_sync.update_metrics();
+    assert!(diagnostics.borrow().oldest_in_flight.is_none());
 }
 
 /// Verifies fix for GHSA-qhr3-cvch-5fh2: a block that lands above the lookahead

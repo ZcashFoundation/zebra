@@ -1672,14 +1672,14 @@ where
 
     fn update_metrics(&mut self) {
         let in_flight = self.downloads.in_flight();
-        let oldest_in_flight_since = self.downloads.oldest_in_flight_since();
+        let oldest_in_flight = self.downloads.oldest_in_flight();
 
         metrics::gauge!("sync.prospective_tips.len",).set(self.prospective_tips.len() as f64);
         metrics::gauge!("sync.downloads.in_flight",).set(in_flight as f64);
 
         self.diagnostics.send_modify(|diagnostics| {
             diagnostics.in_flight = in_flight;
-            diagnostics.oldest_in_flight_since = oldest_in_flight_since;
+            diagnostics.oldest_in_flight = oldest_in_flight;
         });
     }
 

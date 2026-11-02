@@ -147,9 +147,7 @@ pub async fn show_block_chain_progress(
         // Measured before the tip is known too, so a stalled genesis block download shows up, and
         // measured here, so the age keeps growing while the syncer waits on that block.
         let diagnostics = sync_status.diagnostics();
-        let oldest_in_flight_age = diagnostics
-            .oldest_in_flight_since
-            .map(|since| instant_now.saturating_duration_since(since));
+        let oldest_in_flight_age = diagnostics.oldest_in_flight_age(instant_now);
         metrics::gauge!("sync.downloads.oldest_age_seconds")
             .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
 
