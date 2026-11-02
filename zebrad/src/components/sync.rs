@@ -727,11 +727,12 @@ where
             Ok(tips) => {
                 tips.map_err(|e| Self::tips_restart_error(RestartReason::ObtainTipsError, e))?
             }
-            Err(_) if self.count_cancelled_network_wait() => {
-                return Err(Self::block_restart_error(BlockDownloadVerifyError::Timeout));
-            }
             Err(elapsed) => {
-                return Err(RestartError::new(RestartReason::ObtainTipsTimeout, elapsed))
+                return Err(if self.count_cancelled_network_wait() {
+                    Self::block_restart_error(BlockDownloadVerifyError::Timeout)
+                } else {
+                    RestartError::new(RestartReason::ObtainTipsTimeout, elapsed)
+                });
             }
         };
         self.update_metrics();
@@ -851,9 +852,6 @@ where
 
         let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
         for hash in hashes.by_ref() {
-            // Queueing can wait for network capacity, so publish the downloads queued so far.
-            self.update_metrics();
-
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
@@ -866,7 +864,6 @@ where
                     error,
                     BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
                 ) {
-                    self.count_block_error(&error);
                     self.reobtain_hashes.insert(hash);
                     break;
                 }
@@ -1186,12 +1183,11 @@ where
         while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
 
-            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once())
-                .await
-                .map_err(|elapsed| {
-                    self.count_cancelled_network_wait();
-                    elapsed.into()
-                });
+            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once()).await;
+            if response.is_err() {
+                self.count_cancelled_network_wait();
+            }
+            let response = response.map_err(BlockDownloadVerifyError::from);
 
             // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
@@ -1229,10 +1225,7 @@ where
     async fn request_genesis_once(
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
-        let response = self
-            .queue_block(self.genesis_hash)
-            .await
-            .inspect_err(|error| self.count_block_error(error));
+        let response = self.queue_block(self.genesis_hash).await;
         Self::handle_response(response).map_err(|e| eyre!(e))?;
         self.update_metrics();
 
@@ -1273,18 +1266,12 @@ where
         // propagating — this prevents dropping unprocessed hashes from the
         // batch, which would create frontier gaps and stalls (#5709).
         for hash in hashes.into_iter() {
-            // Queueing can wait for network capacity, so publish the downloads queued so far.
-            self.update_metrics();
-
             match self.queue_block(hash).await {
                 Ok(()) => {}
                 Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
                     debug!("block request was already queued, continuing");
                 }
-                Err(error) => {
-                    self.count_block_error(&error);
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         }
 
@@ -1555,10 +1542,21 @@ where
     }
 
     /// Queues `hash` for download and verification, which can wait for network capacity.
+    ///
+    /// Publishes the downloads before that wait. A block that is already queued isn't counted as
+    /// an error, because the syncer ignores that error: it happens when a timed-out genesis
+    /// attempt or an earlier round left the block queued.
     async fn queue_block(&mut self, hash: block::Hash) -> Result<(), BlockDownloadVerifyError> {
+        self.update_metrics();
+
         self.awaiting_network_capacity = true;
         let result = self.downloads.download_and_verify(hash).await;
         self.awaiting_network_capacity = false;
+
+        match &result {
+            Ok(()) | Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {}
+            Err(error) => self.count_block_error(error),
+        }
 
         result
     }
@@ -1575,17 +1573,7 @@ where
     }
 
     /// Counts a block that failed to queue, download, or verify.
-    ///
-    /// A block that is already queued isn't counted, because the syncer ignores that error: it
-    /// happens when a timed-out genesis attempt or an earlier round left the block queued.
     fn count_block_error(&self, error: &BlockDownloadVerifyError) {
-        if matches!(
-            error,
-            BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
-        ) {
-            return;
-        }
-
         metrics::counter!("sync.block.error.count", "kind" => Self::block_error_kind(error))
             .increment(1);
     }
