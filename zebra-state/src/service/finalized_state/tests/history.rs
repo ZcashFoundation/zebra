@@ -1206,6 +1206,73 @@ fn pruned_subtree_checks_still_reject_missing_or_incorrect_roots() {
         .contains("orchard: Err"));
 }
 
+/// Once pruning may run, it can delete the completing block's body between the availability check
+/// and the body read, so the subtree checks must use the stored subtree even when bodies are retained.
+#[test]
+fn subtree_checks_use_stored_subtrees_once_pruning_may_run() {
+    use super::super::disk_format::upgrade::add_subtrees::subtree_format_calculation_pre_checks;
+    use hex_literal::hex;
+    use zebra_chain::subtree::NoteCommitmentSubtree;
+
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    assert!(state
+        .db
+        .history_capabilities()
+        .unwrap()
+        .has_block_body(Height(1_707_429)));
+
+    let mut sapling = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(558_822),
+        root: sapling_crypto::Node::from_bytes([0; 32]).unwrap(),
+    };
+    let mut orchard = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(1_707_429),
+        root: [0; 32].as_slice().try_into().unwrap(),
+    };
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+
+    // Before startup checks finish, pruning cannot run, so the early-chain calculation is used.
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    state.db.mark_ready_for_pruning();
+    let error = subtree_format_calculation_pre_checks(&state.db).unwrap_err();
+    assert!(error.contains("sapling: Err"));
+    assert!(error.contains("orchard: Err"));
+
+    sapling.root = sapling_crypto::Node::from_bytes(hex!(
+        "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+    ))
+    .unwrap();
+    orchard.root = hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+        .as_slice()
+        .try_into()
+        .unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    // Before the first subtrees complete, nothing is stored and the check still passes.
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    state.db.mark_ready_for_pruning();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+}
+
 #[test]
 fn recent_address_checks_reject_an_unavailable_required_window() {
     use super::super::disk_format::upgrade::{
