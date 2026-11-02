@@ -178,6 +178,9 @@ pub enum BlockDownloadVerifyError {
 
     #[error("timeout waiting for the network service to be ready")]
     Timeout,
+
+    #[error("the genesis block wasn't downloaded and verified before the genesis timeout")]
+    GenesisTimeout,
 }
 
 impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {

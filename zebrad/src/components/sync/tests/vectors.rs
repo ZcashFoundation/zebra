@@ -2506,6 +2506,57 @@ async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
     );
 }
 
+/// A genesis attempt that times out while its queued block downloads is a genesis timeout, which
+/// isn't counted, and one that times out waiting for network capacity is a network readiness
+/// timeout.
+#[tokio::test(start_paused = true)]
+async fn genesis_timeouts_are_told_apart_from_network_readiness_timeouts() {
+    let _init_guard = zebra_test::init();
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    // The genesis download gets the only permit, and the mock peer set never answers it.
+    let (mut downloading, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
+        MockService::build().for_unit_tests(),
+    );
+    let genesis = tokio::time::timeout(Duration::from_secs(1), downloading.request_genesis_once());
+    assert!(genesis.await.is_err(), "the genesis block never downloads");
+    assert!(matches!(
+        downloading.genesis_timeout(),
+        BlockDownloadVerifyError::GenesisTimeout
+    ));
+
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let (mut waiting, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
+        MockService::build().for_unit_tests(),
+    );
+    let genesis = tokio::time::timeout(Duration::from_secs(1), waiting.request_genesis_once());
+    assert!(
+        genesis.await.is_err(),
+        "the genesis block waits for network capacity"
+    );
+    assert!(matches!(
+        waiting.genesis_timeout(),
+        BlockDownloadVerifyError::Timeout
+    ));
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count("sync.block.error.count", &[("kind", "genesis_timeout")]),
+        0,
+    );
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+    );
+}
+
 /// While a batch waits for network capacity, the published download state includes the blocks
 /// queued earlier in that batch.
 #[tokio::test(start_paused = true)]

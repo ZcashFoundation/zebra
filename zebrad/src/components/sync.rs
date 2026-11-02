@@ -1183,11 +1183,10 @@ where
         while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
 
-            let response = timeout(SYNC_RESTART_DELAY, self.request_genesis_once()).await;
-            if response.is_err() {
-                self.count_cancelled_network_wait();
-            }
-            let response = response.map_err(BlockDownloadVerifyError::from);
+            let response = match timeout(SYNC_RESTART_DELAY, self.request_genesis_once()).await {
+                Ok(response) => Ok(response),
+                Err(_) => Err(self.genesis_timeout()),
+            };
 
             // 3 layers of results is not ideal, but we need the timeout on the outside.
             match response {
@@ -1538,6 +1537,7 @@ where
             NetworkServiceError { .. } => "network_service",
             VerifierServiceError { .. } => "verifier_service",
             Timeout => "network_ready_timeout",
+            GenesisTimeout => "genesis_timeout",
         }
     }
 
@@ -1570,6 +1570,16 @@ where
         }
 
         cancelled
+    }
+
+    /// Returns the error for a genesis attempt that the genesis timeout cancelled, and counts it
+    /// if the block was still waiting for network capacity.
+    fn genesis_timeout(&mut self) -> BlockDownloadVerifyError {
+        if self.count_cancelled_network_wait() {
+            BlockDownloadVerifyError::Timeout
+        } else {
+            BlockDownloadVerifyError::GenesisTimeout
+        }
     }
 
     /// Counts a block that failed to queue, download, or verify.
