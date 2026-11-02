@@ -2412,28 +2412,12 @@ fn tip_block_submission_failures_restart_as_block_errors() {
 /// A genesis block that can't get network capacity is counted as a block error.
 #[tokio::test(start_paused = true)]
 async fn genesis_submission_failures_are_counted() {
-    use tower::limit::ConcurrencyLimit;
-
     let _init_guard = zebra_test::init();
 
-    let config = ZebradConfig {
-        consensus: ConsensusConfig::default(),
-        state: StateConfig::ephemeral(),
-        ..Default::default()
-    };
-    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
     // A peer set with no ready peers: a zero-permit limit never becomes ready.
-    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
-    let (mut chain_sync, _sync_status) = ChainSync::new(
-        &config,
-        Height(0),
-        never_ready_network,
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
         MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        mock_chain_tip,
-        misbehavior_tx,
     );
 
     let recorder = CounterRecorder::default();
@@ -2454,28 +2438,12 @@ async fn genesis_submission_failures_are_counted() {
 /// block error, because the syncer ignores it and keeps waiting for that download.
 #[tokio::test(start_paused = true)]
 async fn genesis_retries_while_the_block_is_queued_are_not_counted() {
-    use tower::limit::ConcurrencyLimit;
-
     let _init_guard = zebra_test::init();
 
-    let config = ZebradConfig {
-        consensus: ConsensusConfig::default(),
-        state: StateConfig::ephemeral(),
-        ..Default::default()
-    };
-    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
     // The genesis download gets the only permit, and the mock peer set never answers it.
-    let one_permit_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 1);
-    let (mut chain_sync, _sync_status) = ChainSync::new(
-        &config,
-        Height(0),
-        one_permit_network,
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
         MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        mock_chain_tip,
-        misbehavior_tx,
     );
 
     let recorder = CounterRecorder::default();
@@ -2502,28 +2470,13 @@ async fn genesis_retries_while_the_block_is_queued_are_not_counted() {
 #[tokio::test(start_paused = true)]
 async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
     use indexmap::IndexSet;
-    use tower::limit::ConcurrencyLimit;
 
     let _init_guard = zebra_test::init();
 
-    let config = ZebradConfig {
-        consensus: ConsensusConfig::default(),
-        state: StateConfig::ephemeral(),
-        ..Default::default()
-    };
-    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
     // A peer set with no ready peers: a zero-permit limit never becomes ready.
-    let never_ready_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
-    let (mut chain_sync, _sync_status) = ChainSync::new(
-        &config,
-        Height(0),
-        never_ready_network,
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
         MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        mock_chain_tip,
-        misbehavior_tx,
     );
 
     let recorder = CounterRecorder::default();
@@ -2558,28 +2511,13 @@ async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
 #[tokio::test(start_paused = true)]
 async fn diagnostics_include_blocks_queued_before_a_readiness_wait() {
     use indexmap::IndexSet;
-    use tower::limit::ConcurrencyLimit;
 
     let _init_guard = zebra_test::init();
 
-    let config = ZebradConfig {
-        consensus: ConsensusConfig::default(),
-        state: StateConfig::ephemeral(),
-        ..Default::default()
-    };
-    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
     // The first download holds the only permit, so the second waits for network capacity.
-    let one_permit_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 1);
-    let (mut chain_sync, _sync_status) = ChainSync::new(
-        &config,
-        Height(0),
-        one_permit_network,
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
         MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        mock_chain_tip,
-        misbehavior_tx,
     );
     let diagnostics = chain_sync.diagnostics.subscribe();
 
@@ -2601,28 +2539,12 @@ async fn diagnostics_include_blocks_queued_before_a_readiness_wait() {
 /// reports its age before the node has a chain tip.
 #[tokio::test(start_paused = true)]
 async fn diagnostics_include_a_genesis_block_that_never_downloads() {
-    use tower::limit::ConcurrencyLimit;
-
     let _init_guard = zebra_test::init();
 
-    let config = ZebradConfig {
-        consensus: ConsensusConfig::default(),
-        state: StateConfig::ephemeral(),
-        ..Default::default()
-    };
-    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
     // The genesis download gets the only permit, and the mock peer set never answers it.
-    let one_permit_network = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 1);
-    let (mut chain_sync, _sync_status) = ChainSync::new(
-        &config,
-        Height(0),
-        one_permit_network,
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(1),
         MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        mock_chain_tip,
-        misbehavior_tx,
     );
     let diagnostics = chain_sync.diagnostics.subscribe();
 
@@ -2645,25 +2567,10 @@ async fn diagnostics_leave_out_finished_downloads_the_syncer_has_not_read() {
 
     let _init_guard = zebra_test::init();
 
-    let config = ZebradConfig {
-        consensus: ConsensusConfig::default(),
-        state: StateConfig::ephemeral(),
-        ..Default::default()
-    };
-    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
     let mut peer_set = MockService::build().for_unit_tests();
     let mut block_verifier_router = MockService::build().for_unit_tests();
-    let (mut chain_sync, _sync_status) = ChainSync::new(
-        &config,
-        Height(0),
-        peer_set.clone(),
-        block_verifier_router.clone(),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
-        mock_chain_tip,
-        misbehavior_tx,
-    );
+    let (mut chain_sync, _misbehavior_rx) =
+        new_chain_sync_with(peer_set.clone(), block_verifier_router.clone());
     let diagnostics = chain_sync.diagnostics.subscribe();
 
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -2787,6 +2694,36 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
 ) {
     let _init_guard = zebra_test::init();
 
+    new_chain_sync_with(
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+    )
+}
+
+/// Builds a [`ChainSync`] like [`new_chain_sync_with_misbehavior`], downloading from `peer_set`
+/// and verifying with `block_verifier_router`.
+#[allow(clippy::type_complexity)]
+fn new_chain_sync_with<ZN>(
+    peer_set: ZN,
+    block_verifier_router: MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+) -> (
+    ChainSync<
+        ZN,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >,
+    tokio::sync::mpsc::Receiver<zn::MisbehaviorReport>,
+)
+where
+    ZN: tower::Service<zn::Request, Response = zn::Response, Error = crate::BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZN::Future: Send + 'static,
+{
     let config = ZebradConfig {
         consensus: ConsensusConfig::default(),
         state: StateConfig::ephemeral(),
@@ -2799,8 +2736,8 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
     let (chain_sync, _sync_status) = ChainSync::new(
         &config,
         Height(0),
-        MockService::build().for_unit_tests(),
-        MockService::build().for_unit_tests(),
+        peer_set,
+        block_verifier_router,
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
@@ -2808,6 +2745,15 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
     );
 
     (chain_sync, misbehavior_rx)
+}
+
+/// A mock peer set that never answers, and serves at most `permits` requests at a time.
+///
+/// With no permits, it never becomes ready.
+fn peer_set_with_permits(
+    permits: usize,
+) -> tower::limit::ConcurrencyLimit<MockService<zn::Request, zn::Response, PanicAssertion>> {
+    tower::limit::ConcurrencyLimit::new(MockService::build().for_unit_tests(), permits)
 }
 
 fn setup() -> (
