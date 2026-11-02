@@ -2506,6 +2506,49 @@ async fn network_capacity_waits_cancelled_by_a_timeout_are_counted_once() {
     );
 }
 
+/// An obtain tips or sync step timeout that cancels a block's wait for network capacity restarts
+/// the sync as that block's network readiness timeout, and counts it. Otherwise the timeout keeps
+/// its own restart reason.
+#[tokio::test(start_paused = true)]
+async fn stage_timeouts_that_cancel_a_network_wait_restart_as_block_errors() {
+    use indexmap::IndexSet;
+
+    let _init_guard = zebra_test::init();
+
+    // A peer set with no ready peers: a zero-permit limit never becomes ready.
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with(
+        peer_set_with_permits(0),
+        MockService::build().for_unit_tests(),
+    );
+
+    let recorder = CounterRecorder::default();
+    let metrics_guard = metrics::set_default_local_recorder(&recorder);
+
+    let batch = IndexSet::from([block::Hash::from([0xE2; 32])]);
+    let elapsed = tokio::time::timeout(Duration::from_secs(1), chain_sync.request_blocks(batch))
+        .await
+        .expect_err("the block waits for network capacity");
+    let waiting = chain_sync.stage_timeout_error(RestartReason::SyncStepTimeout, elapsed);
+    assert_eq!(waiting.reason, RestartReason::BlockError);
+    assert_eq!(waiting.kind, Some("network_ready_timeout"));
+
+    let elapsed = tokio::time::timeout(Duration::from_secs(1), std::future::pending::<()>())
+        .await
+        .expect_err("the future never finishes");
+    let idle = chain_sync.stage_timeout_error(RestartReason::SyncStepTimeout, elapsed);
+    assert_eq!(idle.reason, RestartReason::SyncStepTimeout);
+    assert_eq!(idle.kind, None);
+    drop(metrics_guard);
+
+    assert_eq!(
+        recorder.count(
+            "sync.block.error.count",
+            &[("kind", "network_ready_timeout")]
+        ),
+        1,
+    );
+}
+
 /// A genesis attempt that times out while its queued block downloads is a genesis timeout, which
 /// isn't counted, and one that times out waiting for network capacity is a network readiness
 /// timeout.

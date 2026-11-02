@@ -130,7 +130,7 @@ with `sync.downloads.in_flight`.
 - `exhausted_tips`: the syncer downloaded every block its peers advertised. This is the normal end of a round.
 - `obtain_tips_timeout` or `obtain_tips_error`: asking peers for new block hashes timed out or failed. If a block they returned was still waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
 - `extend_tips_error`: asking peers to extend the known hashes failed.
-- `sync_step_timeout`: one sync step took longer than the block verify timeout, which usually indicates a hang.
+- `sync_step_timeout`: one sync step took longer than the block verify timeout, which usually indicates a hang. If a block was waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
 - `block_error`: a block download or verify error restarted the sync. The error's `kind` is in the `waiting to restart sync` log.
 
 `kind` names the error, for example `not_found`, `download_timed_out`, `invalid`, `verify_timeout`,

@@ -731,20 +731,21 @@ where
                 tips.map_err(|e| Self::tips_restart_error(RestartReason::ObtainTipsError, e))?
             }
             Err(elapsed) => {
-                return Err(if self.count_cancelled_network_wait() {
-                    Self::block_restart_error(BlockDownloadVerifyError::Timeout)
-                } else {
-                    RestartError::new(RestartReason::ObtainTipsTimeout, elapsed)
-                });
+                return Err(self.stage_timeout_error(RestartReason::ObtainTipsTimeout, elapsed));
             }
         };
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
             // Avoid hangs due to service readiness or other internal operations
-            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
+            extra_hashes = match timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
                 .await
-                .map_err(|e| RestartError::new(RestartReason::SyncStepTimeout, e))??;
+            {
+                Ok(extra_hashes) => extra_hashes?,
+                Err(elapsed) => {
+                    return Err(self.stage_timeout_error(RestartReason::SyncStepTimeout, elapsed));
+                }
+            };
         }
 
         info!("exhausted prospective tip set");
@@ -1573,6 +1574,20 @@ where
         }
 
         cancelled
+    }
+
+    /// Returns the error for a sync stage that its timeout cancelled, as `reason`, or as a block
+    /// error if the stage was waiting for network capacity, which also counts that block.
+    fn stage_timeout_error(
+        &mut self,
+        reason: RestartReason,
+        elapsed: tokio::time::error::Elapsed,
+    ) -> RestartError {
+        if self.count_cancelled_network_wait() {
+            Self::block_restart_error(BlockDownloadVerifyError::Timeout)
+        } else {
+            RestartError::new(reason, elapsed)
+        }
     }
 
     /// Returns the error for a genesis attempt that the genesis timeout cancelled, and counts it
