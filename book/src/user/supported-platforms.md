@@ -1,62 +1,65 @@
-# Platform Support
+# Platform support
 
-Support for different platforms are organized into three tiers, each with a
-different set of guarantees. For more information on the policies for platforms
-at each tier, see the [Platform Tier Policy](target-tier-policies.md).
+The [platform tier policy](target-tier-policies.md) defines maintenance
+commitments; the tables below list Zebra 7.0.0 release targets and CI coverage.
+A Rust target triple does not specify a Linux distribution or library versions.
 
-Platforms are identified by their Rust "target triple" which is a string composed by
-`<machine>-<vendor>-<operating system>`.
+## Minimum supported Rust version (MSRV)
 
-## Minimum Supported Rust Version (MSRV)
-
-Zebra's minimum supported Rust version is **1.89** for the workspace and
-library crates, and **1.91** for the `zebrad` binary. We recommend using the
-latest stable Rust release for best performance and security.
+The workspace and library crates require Rust **1.89**. For the daemon's
+minimum and pinned toolchain, see
+[building from source](install.md#building-from-source).
+CI toolchains are listed below.
 
 ## Tier 1
 
-Tier 1 platforms can be thought of as "guaranteed to work". The Zebra project
-builds official binary releases for each tier 1 platform, and automated testing
-ensures that each tier 1 platform builds and passes tests after each change.
+The production release targets are 64-bit GNU/Linux on x86 and ARM:
 
-For the full requirements, see [Tier 1 platform policy](target-tier-policies.md#tier-1-platform-policy) in the Platform Tier Policy.
+| Target | Release archive build host | Artifacts |
+| --- | --- | --- |
+| `x86_64-unknown-linux-gnu` | Ubuntu 22.04 | Binary archive and `linux/amd64` image |
+| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 ARM | Binary archive and `linux/arm64` image |
 
-| platform                    | os                                                   | notes        | rust                                                                | artifacts |
-| --------------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------- | --------- |
-| `x86_64-unknown-linux-gnu`  | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit       | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker, binary |
-| `aarch64-unknown-linux-gnu` | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit ARM64 | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker, binary |
+See [pre-built binary requirements](install.md#pre-built-binaries) and
+[Docker images](docker.md#images-and-tags). The GNU/Linux archives do not run
+natively on Alpine Linux.
 
-> **Note:** Official Docker images are multi-architecture and support both AMD64 and ARM64.
-> The same image tag can be used on either platform.
+The [release-binary workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-release-binaries.yml)
+builds both targets natively. The
+[Docker workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-build-docker-image.yml)
+builds test images only for AMD64; the main unit-test workflow has no per-change
+ARM64 job. See the [Tier 1 policy](target-tier-policies.md#tier-1-platform-policy).
 
 ## Tier 2
 
-Tier 2 platforms can be thought of as "guaranteed to build". The Zebra project
-builds in CI for each tier 2 platform, and automated builds ensure that each
-tier 2 platform builds after each change. Not all automated tests are run so it's
-not guaranteed to produce a working build, and official builds are not available,
-but tier 2 platforms often work to quite a good degree and patches are always
-welcome!
+The additional CI environment, x86-64 Ubuntu 26.04, runs workspace and crate
+builds, minimum-version checks, Clippy, and unit tests. It produces no separate
+Ubuntu-specific release archive.
 
-For the full requirements, see [Tier 2 platform policy](target-tier-policies.md#tier-2-platform-policy) in the Platform Tier Policy.
+| Target | Environment | Toolchain coverage |
+| --- | --- | --- |
+| `x86_64-unknown-linux-gnu` | GitHub Actions `ubuntu-26.04` | Rust 1.97.0 builds and tests; Rust 1.91.0 daemon build; Rust 1.89 library-crate builds |
 
-| platform                   | os                                                                                              | notes       | rust                                                                           | artifacts |
-| -------------------------- | ----------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------ | --------- |
-| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-26.04](https://github.com/actions/virtual-environments#available-environments)  | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
-| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-26.04](https://github.com/actions/virtual-environments#available-environments)  | 64-bit beta | [latest beta release](https://github.com/rust-lang/rust/blob/beta/src/version) | N/A       |
+The target triple is the same as the x86-64 Tier 1 release target; the tier
+here describes an additional OS/toolchain environment. See the
+[Tier 2 policy](target-tier-policies.md#tier-2-platform-policy).
 
-> **Note:** Linux is tested on both stable and beta Rust to catch potential regressions early.
+Scheduled or manually triggered
+[advisory jobs](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/advisory.yml)
+run Clippy and unit tests with beta Rust on Ubuntu 26.04. They do not guarantee
+that each change builds with beta.
 
 ## Tier 3
 
-Tier 3 platforms are those which the Zebra codebase has support for, but which
-the Zebra project does not build or test automatically, so they may or may not
-work. Official builds are not available.
+The following platforms have no official `zebrad` release archives and no
+full-node build-and-test guarantee:
 
-For the full requirements, see [Tier 3 platform policy](target-tier-policies.md#tier-3-platform-policy) in the Platform Tier Policy.
+| Target | Platform | CI limitation |
+| --- | --- | --- |
+| `x86_64-apple-darwin` | macOS on Intel | No macOS build or test job |
+| `aarch64-apple-darwin` | macOS on Apple silicon | No macOS build or test job |
+| `x86_64-pc-windows-msvc` | Windows with the MSVC toolchain | CI tests only the `zebra-test` helper crate, not `zebrad` |
 
-| platform                 | os             | notes                  | rust                                                                | artifacts |
-| ------------------------ | -------------- | ---------------------- | ------------------------------------------------------------------- | --------- |
-| `x86_64-apple-darwin`    | latest macOS   | 64-bit                 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |
-| `aarch64-apple-darwin`   | latest macOS   | 64-bit, Apple M1 or M2 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |
-| `x86_64-pc-windows-msvc` | latest Windows | 64-bit                 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |
+Build from source on macOS; use a supported Linux environment for production.
+The zcashd-compat preflight supports Linux only, independently of these
+native-node tiers. See the [Tier 3 policy](target-tier-policies.md#tier-3-platform-policy).

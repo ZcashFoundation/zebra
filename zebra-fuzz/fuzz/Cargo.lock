@@ -944,9 +944,9 @@ checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "equihash"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "306286e8dcc39ab3dfceb74c792ce8baffdab90591321d3ffaae64829734c37f"
+checksum = "49eac9289a160ac92d99537b3434a1a3696df0177fe2c66818bdb9a33b6d5770"
 dependencies = [
  "blake2b_simd",
  "corez",
@@ -5041,6 +5041,7 @@ dependencies = [
  "metrics",
  "once_cell",
  "orchard",
+ "parking_lot",
  "rand 0.10.2",
  "rayon",
  "sapling-crypto",

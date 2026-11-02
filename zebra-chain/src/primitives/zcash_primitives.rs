@@ -9,7 +9,7 @@ use zcash_script::script;
 
 use crate::{
     amount::{Amount, NonNegative},
-    serialization::ZcashSerialize,
+    serialization::CompactSizeMessage,
     transaction::{HashType, SigHash},
     transparent::{self, Script},
     Error,
@@ -156,11 +156,14 @@ impl TryFrom<&transparent::Output> for zcash_transparent::bundle::TxOut {
 
     #[allow(clippy::unwrap_in_result)]
     fn try_from(output: &transparent::Output) -> Result<Self, Self::Error> {
-        let serialized_output_bytes = output
-            .zcash_serialize_to_vec()
+        // Preserve the serialization limit for manually constructed scripts.
+        CompactSizeMessage::try_from(output.lock_script.as_raw_bytes().len())
+            .map_err(io::Error::from)
             .expect("zcash_primitives and Zebra transparent output formats must be compatible");
+        let value = Zatoshis::try_from(output.value)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
 
-        zcash_transparent::bundle::TxOut::read(&mut serialized_output_bytes.as_slice())
+        Ok(Self::new(value, (&output.lock_script).into()))
     }
 }
 
@@ -247,23 +250,21 @@ impl PrecomputedTxData {
 
     /// Computes precomputed sighash data with an explicit consensus branch ID.
     ///
-    /// Clones the transaction to get an owned `TransactionData` for `map_authorization`,
+    /// Clones each bundle once to get owned `TransactionData` for `map_authorization`,
     /// reconstructing with the correct `branch_id` for V1-V4 sighash computation.
     fn from_transaction_with_branch_id(
         tx: &crate::transaction::Transaction,
         branch_id: zcash_protocol::consensus::BranchId,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
     ) -> Result<PrecomputedTxData, Error> {
-        let inner = tx.inner();
+        let data = tx.inner();
 
-        // Clone the transaction to get an owned TransactionData we can transform.
-        // Reconstruct with the correct branch_id (the stored value may differ for
-        // V1-V4 transactions that were parsed without network context).
+        // Reconstruct from borrowed fields with the correct branch_id (the stored value may
+        // differ for V1-V4 transactions that were parsed without network context).
         //
         // The rebuild must preserve every bundle: losing the Ironwood one would leave
         // `PrecomputedTxData::ironwood_bundle` empty, and the verifier queues an Ironwood proof
         // check only when that returns `Some`.
-        let data = inner.clone().into_data();
         let data_with_branch_id = crate::transaction::compat::transaction_data_from_parts(
             data.version(),
             branch_id,

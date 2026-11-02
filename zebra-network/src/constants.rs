@@ -419,7 +419,7 @@ pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
 /// Misbehaviour updates are batched so peers can't keep the address book mutex locked by
 /// repeatedly sending invalid blocks or transactions.
 #[cfg(not(test))]
-pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The interval between flushes of batched peer misbehaviour updates into the address book.
 ///

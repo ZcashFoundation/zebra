@@ -310,6 +310,11 @@ impl FromHex for AuthDataRoot {
 /// <https://zips.z.cash/zip-0244#authorizing-data-commitment>
 pub const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
 
+/// Returns the transaction's auth digest, or the consensus placeholder for pre-v5 transactions.
+pub(crate) fn auth_digest_or_placeholder(tx: &Transaction) -> transaction::AuthDigest {
+    tx.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER)
+}
+
 impl<T> std::iter::FromIterator<T> for AuthDataRoot
 where
     T: std::convert::AsRef<Transaction>,
@@ -320,7 +325,7 @@ where
     {
         transactions
             .into_iter()
-            .map(|tx| tx.as_ref().auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
+            .map(|tx| auth_digest_or_placeholder(tx.as_ref()))
             .collect()
     }
 }

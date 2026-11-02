@@ -46,6 +46,10 @@ use super::{
     VERIFYING_KEY_PRE_NU6_2,
 };
 
+/// Records actual static-key construction threads, not preload calls or proof-cache hits.
+pub(crate) static KEY_BUILDS: std::sync::Mutex<Vec<std::thread::ThreadId>> =
+    std::sync::Mutex::new(Vec::new());
+
 /// The `verifier` label the test caches report their metrics under.
 ///
 /// Test caches use their own label so their counts never land in the series the production
@@ -96,6 +100,31 @@ fn pre_nu6_2_transaction_bundle_and_sighash(
     panic!("mainnet test blocks must contain a transparent-input-free Orchard transaction");
 }
 
+#[test]
+fn one_action_bundles_keep_the_existing_fallback_fanout_bound() {
+    use tower_batch_control::RequestWeight;
+
+    let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+    let mut actions = bundle.actions().clone();
+    actions.tail.clear();
+    let bundle = Bundle::try_from_parts(
+        actions,
+        *bundle.flags(),
+        *bundle.value_balance(),
+        *bundle.anchor(),
+        bundle.authorization().clone(),
+        bundle.bundle_version(),
+    )
+    .unwrap();
+    let item = Item::new(bundle, sighash);
+    assert_eq!(item.bundle.actions().len(), 1);
+    assert_eq!(
+        item.request_weight() * super::super::MAX_BATCH_SIZE,
+        super::HALO2_MAX_BATCH_SIZE,
+        "a failed batch must not retry more bundles than the previous threshold allowed"
+    );
+}
+
 /// A real pre-NU6.2 Orchard proof verifies under the pre-NU6.2 key and is rejected by the
 /// post-NU6.2 key.
 ///
@@ -103,22 +132,26 @@ fn pre_nu6_2_transaction_bundle_and_sighash(
 /// that selecting the wrong era's key causes a hard verification failure. If the verifier ever
 /// "fails open" (e.g. validates everything against a single key, like the rejected zcashd WIP
 /// shortcut), the wrong-key assertion below would fail.
-#[test]
-fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
-    let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+#[tokio::test]
+async fn pre_nu6_2_proof_only_verifies_under_pre_nu6_2_key() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let preload = super::spawn_key_preload();
+        let verification = tokio::task::spawn_blocking(|| {
+            let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
 
-    // Correct era key: the historical proof must verify, so pre-NU6.2 history still re-syncs.
-    assert!(
-        Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2),
-        "a real pre-NU6.2 Orchard proof must verify under the pre-NU6.2 (insecure) key"
-    );
+            // A request racing preload must share the historical key's lazy initializer.
+            assert!(Item::new(bundle.clone(), sighash).verify_single(&VERIFYING_KEY_PRE_NU6_2));
+            assert!(!Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_NU6_2));
+        });
 
-    // Wrong era key: the same proof must be rejected. This is the not-fail-open guarantee.
-    assert!(
-        !Item::new(bundle, sighash).verify_single(&VERIFYING_KEY_NU6_2),
-        "a pre-NU6.2 Orchard proof must be REJECTED by the post-NU6.2 (fixed) key; \
-         verifying it would mean the era selection is fail-open"
-    );
+        preload.await.expect("key preload must succeed");
+        verification
+            .await
+            .expect("historical verification must succeed");
+        assert_eq!(KEY_BUILDS.lock().unwrap().len(), 3);
+    })
+    .await
+    .expect("preload and racing verification must finish");
 }
 
 /// The Orchard verifier routing selects the correct key by block era (network upgrade).
@@ -790,4 +823,224 @@ async fn cache_miss_propagates_an_inner_readiness_failure() {
         1,
         "the item must still be verified, so the readiness failure was not recorded as an Ok"
     );
+}
+
+/// Preparation overlaps admission; flushing preserves per-item errors, fallback, and caching.
+#[tokio::test(flavor = "multi_thread")]
+async fn overlapped_preparation_preserves_batch_results() {
+    use futures::{future::join_all, FutureExt};
+    use tower_batch_control::{Batch, BatchControl};
+    use tower_fallback::Fallback;
+
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+        let valid = cacheable_item(&bundle, sighash, test_wtx_id(1));
+        let restricted = cacheable_item(
+            &rebuilt_as(
+                &bundle,
+                Flags::CROSS_ADDRESS_DISABLED,
+                BundleVersion::orchard_v3(),
+            ),
+            sighash,
+            test_wtx_id(2),
+        );
+        let ironwood = cacheable_item(
+            &rebuilt_as(
+                &bundle,
+                Flags::CROSS_ADDRESS_DISABLED,
+                BundleVersion::ironwood_v3(),
+            ),
+            sighash,
+            test_wtx_id(2),
+        );
+
+        for vk in [
+            &*VERIFYING_KEY_PRE_NU6_2,
+            &*VERIFYING_KEY_NU6_2,
+            &*super::VERIFYING_KEY_NU6_3_ONWARD,
+        ] {
+            for drop_service in [false, true] {
+                let mut verifier = super::Verifier::new(vk);
+                let mut responses = [valid.clone(), restricted.clone(), ironwood.clone()]
+                    .map(|item| verifier.call(BatchControl::Item(item)));
+                for response in &mut responses {
+                    assert!(response.as_mut().now_or_never().is_none());
+                }
+
+                let cancelled = Item::new(bundle.clone(), sighash);
+                let retained = Arc::downgrade(&cancelled.bundle);
+                drop(verifier.call(BatchControl::Item(cancelled)));
+                while retained.upgrade().is_some() {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                for response in &mut responses {
+                    assert!(
+                        response.as_mut().now_or_never().is_none(),
+                        "preparation before flush must not publish an unverified result"
+                    );
+                }
+
+                if drop_service {
+                    drop(verifier);
+                } else {
+                    verifier.call(BatchControl::Flush).await.unwrap();
+                }
+
+                let [valid_result, restricted_result, ironwood_result] =
+                    futures::future::join_all(responses)
+                        .await
+                        .try_into()
+                        .unwrap();
+                assert_eq!(
+                    valid_result.is_ok(),
+                    std::ptr::eq(vk, &*VERIFYING_KEY_PRE_NU6_2)
+                );
+                for result in [restricted_result, ironwood_result] {
+                    let error = result.unwrap_err();
+                    if std::ptr::eq(vk, &*super::VERIFYING_KEY_NU6_3_ONWARD) {
+                        assert!(matches!(
+                            error.downcast_ref::<TransactionError>(),
+                            Some(TransactionError::Halo2VerificationFailed)
+                        ));
+                    } else {
+                        assert_eq!(
+                            error.to_string(),
+                            format!(
+                                "could not validate halo2 proof: {}",
+                                orchard::bundle::BatchError::RestrictionUnsupportedByKey
+                            )
+                        );
+                    }
+                }
+                assert!(retained.upgrade().is_none());
+            }
+        }
+
+        let mut invalid = valid.clone();
+        invalid.sighash.0[0] ^= 1;
+        invalid.cache_key = Some(cache_key(&bundle, invalid.sighash, test_wtx_id(1)));
+        let cancelled = cacheable_item(&bundle, sighash, test_wtx_id(3));
+        for invalid_proof in [false, true] {
+            // Long timers make the explicit partial-batch flush the only completion path.
+            let batch = Batch::new(
+                super::Verifier::new(&VERIFYING_KEY_PRE_NU6_2),
+                super::HALO2_MAX_BATCH_SIZE,
+                1,
+                Duration::from_secs(3600),
+                Duration::from_secs(3600),
+            );
+            let fallbacks = Arc::new(AtomicUsize::new(0));
+            let count = fallbacks.clone();
+            let fallback = tower::service_fn(move |item| {
+                count.fetch_add(1, Ordering::SeqCst);
+                super::Verifier::verify_single_spawning(item, &VERIFYING_KEY_PRE_NU6_2)
+            });
+            let mut cache = Cached::new(
+                Fallback::new(batch.clone(), fallback),
+                8,
+                TEST_CACHE_VERIFIER_LABEL,
+            );
+            let rejected = if invalid_proof { &invalid } else { &restricted };
+            let mut responses = [valid.clone(), rejected.clone(), cancelled.clone()]
+                .map(|item| Box::pin(cache.call(item)));
+            for response in &mut responses {
+                assert!(response.as_mut().now_or_never().is_none());
+            }
+            let [valid_response, rejected_response, cancelled_response] = responses;
+            drop(cancelled_response);
+            assert!(batch.clone().try_flush().unwrap());
+            let results = join_all([valid_response, rejected_response]).await;
+            assert!(results[0].is_ok());
+            assert!(results[1].is_err());
+            assert_eq!(
+                fallbacks.load(Ordering::SeqCst),
+                if invalid_proof { 2 } else { 1 }
+            );
+
+            verify_through(&mut cache, valid.clone()).await;
+            assert_eq!(
+                cache.inner_calls_for(&valid),
+                1,
+                "the successful sibling is cached"
+            );
+            let mut retries =
+                [rejected.clone(), cancelled.clone()].map(|item| Box::pin(cache.call(item)));
+            for response in &mut retries {
+                assert!(response.as_mut().now_or_never().is_none());
+            }
+            assert!(batch.clone().try_flush().unwrap());
+            let results = join_all(retries).await;
+            assert!(results[0].is_err());
+            assert!(results[1].is_ok());
+            assert_eq!(
+                cache.inner_calls_for(rejected),
+                2,
+                "failures are not cached"
+            );
+            assert_eq!(
+                cache.inner_calls_for(&cancelled),
+                2,
+                "cancelled calls are not cached"
+            );
+        }
+    })
+    .await
+    .expect("preparation must precede flushing, which must preserve each item's result");
+}
+
+/// Admission never prepares on async workers, and cancellation releases the sole blocking worker.
+#[test]
+fn preparation_overlaps_admission_and_ends_on_cancellation() {
+    use tower_batch_control::BatchControl;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(120), async {
+            let (bundle, sighash) = pre_nu6_2_bundle_and_sighash();
+            for drop_service in [false, true] {
+                // Occupy the only blocking worker: admission must not prepare the bundle itself.
+                let (release, blocked) = std::sync::mpsc::channel();
+                let (started, ready) = tokio::sync::oneshot::channel();
+                let blocker = tokio::task::spawn_blocking(move || {
+                    started.send(()).unwrap();
+                    blocked.recv_timeout(Duration::from_secs(120)).unwrap();
+                });
+                ready.await.unwrap();
+                let mut verifier = super::Verifier::new(&VERIFYING_KEY_PRE_NU6_2);
+                let item = Item::new(bundle.clone(), sighash);
+                let retained = Arc::downgrade(&item.bundle);
+                let response = verifier.call(BatchControl::Item(item));
+                assert!(
+                    retained.upgrade().is_some(),
+                    "preparation must wait for a blocking worker, not run on the async caller"
+                );
+                release.send(()).unwrap();
+                blocker.await.unwrap();
+
+                // No flush yet: the preparer must consume the item while admission stays open.
+                while retained.upgrade().is_some() {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                drop(response);
+                if drop_service {
+                    drop(verifier);
+                } else {
+                    // Even an unpolled, cancelled flush must close the preparation channel.
+                    drop(verifier.call(BatchControl::Flush));
+                    drop(verifier);
+                }
+
+                // This cannot start until the preparer releases the sole blocking worker.
+                tokio::task::spawn_blocking(|| ()).await.unwrap();
+            }
+        })
+        .await
+    });
+    runtime.shutdown_timeout(Duration::from_secs(5));
+    result.expect("cancelled callers and flushes must not leave a blocked preparer");
 }

@@ -1,82 +1,120 @@
 # Mining with Zebra in Docker
 
-Zebra's [Docker images](https://hub.docker.com/r/zfnd/zebra/tags) can be used
-for your mining operations. If you don't have Docker, see the [manual
-configuration instructions](https://zebra.zfnd.org/user/mining.html).
+Configure a reward address in the [Zebra image](docker.md), synchronize the
+node, then connect a pool and external solver as described in [Mining](mining.md).
 
-Using docker, you can start mining by running:
+## Mainnet node
 
-```bash
-docker run -d --name zebra_local \
-  -e ZEBRA_MINING__MINER_ADDRESS="t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1" \
+Set `MINER_ADDRESS` in the shell to a supported
+[Mainnet reward address](mining.md#miner-address) controlled by the recipient.
+
+```sh
+docker run -d --name zebra-mainnet \
+  -e ZEBRA_NETWORK__NETWORK=Mainnet \
+  -e "ZEBRA_MINING__MINER_ADDRESS=${MINER_ADDRESS:?Set MINER_ADDRESS}" \
   -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232 \
   -p 8233:8233 \
-  -p 8232:8232 \
-  -v zebrad-cache:/home/zebra/.cache/zebra \
-  zfnd/zebra:latest
+  -p 127.0.0.1:8232:8232 \
+  -v zebra-mainnet-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:7.0.0
 ```
 
-This command starts a container on Mainnet and binds the P2P port (8233) and
-the RPC port (8232) on your Docker host. The P2P port lets other Zcash nodes
-connect to your node. If you want to start generating blocks, you need to let
-Zebra sync first.
+Keep RPC published only on host loopback unless a protected network or proxy
+controls access. Never share writable state between running nodes; see
+[Docker paths and permissions](docker.md#paths-and-permissions).
 
-Note that you must pass the address for your mining rewards via the
-`ZEBRA_MINING__MINER_ADDRESS` environment variable when you are starting the
-container, as we did with the ZF funding stream address above. The address we
-used starts with the prefix `t3`, meaning it is a Mainnet P2SH address. Please
-remember to set your own address for the rewards.
+Inspect node output with:
 
-If you'd rather run a complete mining setup with a single command, the
-repository also ships a ready-made compose stack in
-[`docker/mining/`](https://github.com/ZcashFoundation/zebra/tree/main/docker/mining)
-that starts Zebra together with a mining pool and miner.
+```sh
+docker logs --follow zebra-mainnet
+```
 
-Instead of listing the environment variables on the command line, you can use
-Docker's `--env-file` flag to specify a file containing the variables. You can
-find more info here
-<https://docs.docker.com/engine/reference/commandline/run/#env>.
+Wait for a [mining template](mining.md#running-zebra) before starting a pool.
 
-If you don't want to set any environment variables, you can edit the
-`docker/default-zebra-config.toml` file, and pass it to Zebra before starting
-the container. There's an example in `docker/docker-compose.yml` of how to do
-that.
+## RPC authentication
 
-If you want to mine on Testnet, you need to set the `ZEBRA_NETWORK__NETWORK` environment
-variable to `Testnet` and use a Testnet address for the rewards. For example,
-running
+Request a template from the host using the container's
+[RPC cookie](rpc.md#authentication):
 
-```bash
-docker run -d --name zebra_local \
-  -e ZEBRA_NETWORK__NETWORK="Testnet" \
-  -e ZEBRA_MINING__MINER_ADDRESS="t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v" \
+```sh
+cookie=$(docker exec zebra-mainnet cat /home/zebra/.cache/zebra/.cookie)
+curl --fail-with-body --silent --show-error \
+  --user "$cookie" \
+  --header 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"getblocktemplate","params":[]}' \
+  http://127.0.0.1:8232/ | jq
+unset cookie
+```
+
+Configure the pool to reload these credentials when Zebra restarts. Treat
+them as a password. For container-to-container RPC and isolated deployments
+without authentication, follow [Docker RPC](docker.md#rpc).
+
+## Testnet node
+
+Set `MINER_ADDRESS` to a Testnet address, then use separate container and
+volume names:
+
+```sh
+docker run -d --name zebra-testnet \
+  -e ZEBRA_NETWORK__NETWORK=Testnet \
+  -e "ZEBRA_MINING__MINER_ADDRESS=${MINER_ADDRESS:?Set a Testnet MINER_ADDRESS}" \
   -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232 \
   -p 18233:18233 \
-  -p 18232:18232 \
-  -v zebrad-cache:/home/zebra/.cache/zebra \
-  zfnd/zebra:latest
+  -p 127.0.0.1:18232:18232 \
+  -v zebra-testnet-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:7.0.0
 ```
 
-will start a container on Testnet and bind the P2P port (18233) and the RPC port
-(18232) on your Docker host. Notice that we also used a different rewards
-address. It starts with the prefix `t2`, indicating that it is a Testnet
-address. A Mainnet address would prevent Zebra from starting on Testnet, and
-conversely, a Testnet address would prevent Zebra from starting on Mainnet.
+Use `zebra-testnet` and port 18232 in the authentication commands. Public
+Testnet requires real proof of work; use [Regtest](regtest.md) for local
+block-generation tests.
 
-To connect to the RPC port, you will need the contents of the [cookie
-file](https://zebra.zfnd.org/user/mining.html?highlight=cookie#testing-the-setup)
-Zebra uses for authentication. By default, it is stored at
-`/home/zebra/.cache/zebra/.cookie`. You can print its contents by running
+## Configuration overrides
 
-```bash
-docker exec -it zebra_local cat /home/zebra/.cache/zebra/.cookie
+Use [environment overrides](config.md#environment-variables) for the
+[mining fields](config.md#mining). Docker's `--env-file` option replaces
+individual `-e` options when maintaining these values in a file.
+
+To use a TOML file, mount it read-only and set `CONFIG_FILE_PATH` to its path
+inside the container:
+
+```sh
+docker run -d --name zebra-configured \
+  --mount "type=bind,source=$PWD/zebrad.toml,target=/etc/zebra/zebrad.toml,readonly" \
+  -e CONFIG_FILE_PATH=/etc/zebra/zebrad.toml \
+  -v zebra-configured-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:7.0.0
 ```
 
-If you want to avoid authentication, you can turn it off by setting
+Configure the file's network, mining address, and listeners, and publish only
+the ports required for that deployment. See
+[mounted configuration](docker.md#mounted-configuration) for file loading.
 
-```toml
-[rpc]
-enable_cookie_auth = false
-```
+## Repository mining Compose stack
 
-in Zebra's config file before you start the container.
+The repository's
+[`docker/mining/docker-compose.yml`](https://github.com/ZcashFoundation/zebra/blob/main/docker/mining/docker-compose.yml)
+builds Zebra and the s-nomp pool, starts Redis 7, and defines an optional
+nheqminer container under the `miner` profile. Its defaults are Testnet,
+internal RPC port 18232, P2P port 18233, Stratum port 3333, and pool web port
+8080. Stratum is the protocol between the pool and its mining workers.
+The stack does not publish Zebra's RPC or Redis ports to the host.
+
+Copy `docker/mining/.env.example` to `docker/mining/.env` and set
+`MINER_ADDRESS` to a reward address for the selected network. Optional
+`EXTRA_COINBASE_DATA` supplies literal UTF-8 data, at most 86 bytes, through
+`ZEBRA_MINING__EXTRA_COINBASE_DATA`.
+
+The Zebra service enables its health listener at `127.0.0.1:8080` without
+publishing it. S-NOMP waits for `/healthy` to succeed before starting.
+A successful health check does not replace the mining sync check.
+
+The stack disables RPC authentication inside its Docker network. Do not
+publish that unauthenticated RPC port. The pool and miner build contexts use
+moving upstream branches rather than pinned commits. Its
+[s-nomp payment limitations](mining-testnet-s-nomp.md) also apply.
+
+Use the [s-nomp Testnet procedure](mining-testnet-s-nomp.md) for an isolated
+deployment with compatibility workarounds, independent of this Compose file.
+Do not use this experimental stack as a production pool.

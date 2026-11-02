@@ -49,19 +49,21 @@ pub use error::{
 };
 pub use request::{
     AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
-    HashOrHeight, MappedRequest, ReadRequest, Request, SemanticallyVerifiedBlock,
+    HashOrHeight, MappedRequest, MinedBlockNotifications, ReadRequest, Request,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
 pub use request::Spend;
 
 pub use response::{
-    AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, NonFinalizedBlocksListener,
-    ReadResponse, Response,
+    AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, MiningCandidateChanges,
+    MiningCandidateGuard, NonFinalizedBlocksListener, ReadResponse, Response,
 };
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
+    early_relay::{EarlyRelayCache, EarlyRelayGuard},
     finalized_state::FinalizedState,
     init, init_read_only,
     non_finalized_state::NonFinalizedState,

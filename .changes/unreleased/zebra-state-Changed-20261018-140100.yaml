@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Move per-input, per-transaction, and tip getter spans to TRACE and state request spans to DEBUG; reuse known block hashes in commit spans. Log events are unchanged.'
+time: 2026-10-18T14:01:00.000000000+00:00

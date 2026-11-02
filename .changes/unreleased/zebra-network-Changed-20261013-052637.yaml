@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: 'Route singleton block inventories received during block discovery to inbound gossip without scheduling duplicate sync downloads ([#11709](https://github.com/ZcashFoundation/zebra/issues/11709)).'
+time: 2026-10-13T05:26:37Z

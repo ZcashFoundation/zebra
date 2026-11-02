@@ -5,7 +5,7 @@
 //! * [LatestChainTip] for efficient access to the current best tip, and
 //! * [ChainTipChange] to `await` specific changes to the chain tip.
 
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Instant};
 
 use chrono::{DateTime, Utc};
 use futures::TryFutureExt;
@@ -37,7 +37,7 @@ mod tests;
 
 /// The internal watch channel data type for [`ChainTipSender`], [`LatestChainTip`],
 /// and [`ChainTipChange`].
-type ChainTipData = Option<ChainTipBlock>;
+type ChainTipData = Option<(ChainTipBlock, Instant)>;
 
 /// A chain tip block, with precalculated block data.
 ///
@@ -130,8 +130,8 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
 }
 
 impl From<CheckpointVerifiedBlock> for ChainTipBlock {
-    fn from(CheckpointVerifiedBlock(prepared): CheckpointVerifiedBlock) -> Self {
-        prepared.into()
+    fn from(prepared: CheckpointVerifiedBlock) -> Self {
+        SemanticallyVerifiedBlock::from(prepared).into()
     }
 }
 
@@ -246,7 +246,7 @@ impl ChainTipSender {
             .sender
             .borrow()
             .as_ref()
-            .map(|active_value| active_value.hash);
+            .map(|(active_value, _)| active_value.hash);
 
         let needs_update = match (new_tip.as_ref(), active_hash) {
             // since the blocks have been contextually validated,
@@ -257,7 +257,9 @@ impl ChainTipSender {
         };
 
         if needs_update {
-            let _ = self.sender.send(new_tip);
+            let _ = self
+                .sender
+                .send(new_tip.map(|block| (block, Instant::now())));
         }
     }
 
@@ -265,7 +267,7 @@ impl ChainTipSender {
     ///
     /// Callers should create a new span with empty `new_height` and `new_hash` fields.
     fn record_new_tip(new_tip: &Option<ChainTipBlock>) {
-        Self::record_tip(&tracing::Span::current(), "new", new_tip);
+        Self::record_tip(&tracing::Span::current(), "new", new_tip.as_ref());
     }
 
     /// Record `new_tip` and the fields from `self` in the current span.
@@ -284,8 +286,8 @@ impl ChainTipSender {
 
         let old_tip = &*self.sender.borrow();
 
-        Self::record_tip(&span, "new", new_tip);
-        Self::record_tip(&span, "old", old_tip);
+        Self::record_tip(&span, "new", new_tip.as_ref());
+        Self::record_tip(&span, "old", old_tip.as_ref().map(|(block, _)| block));
 
         span.record(
             "old_has_non_finalized_tip",
@@ -296,9 +298,9 @@ impl ChainTipSender {
     /// Record `tip` into `span` using the `prefix` to name the fields.
     ///
     /// Callers should create a new span with empty `{prefix}_height` and `{prefix}_hash` fields.
-    fn record_tip(span: &tracing::Span, prefix: &str, tip: &Option<ChainTipBlock>) {
-        let height = tip.as_ref().map(|block| block.height);
-        let hash = tip.as_ref().map(|block| block.hash);
+    fn record_tip(span: &tracing::Span, prefix: &str, tip: Option<&ChainTipBlock>) {
+        let height = tip.map(|block| block.height);
+        let hash = tip.map(|block| block.hash);
 
         span.record(format!("{prefix}_height").as_str(), field::debug(height));
         span.record(format!("{prefix}_hash").as_str(), field::debug(hash));
@@ -339,8 +341,7 @@ impl LatestChainTip {
     /// while holding the receiver lock as briefly as possible.
     ///
     /// This helper method is a shorter way to borrow the value from the [`watch::Receiver`] and
-    /// extract some information from it, while also adding the current chain tip block's fields as
-    /// records to the current span.
+    /// extract some information from it.
     ///
     /// A single read lock is acquired to clone `T`, and then released after the clone.
     /// See the performance note on [`WatchReceiver::with_watch_data`].
@@ -354,68 +355,46 @@ impl LatestChainTip {
     where
         F: FnOnce(&ChainTipBlock) -> U,
     {
-        let span = tracing::Span::current();
-
-        let register_span_fields = |chain_tip_block: Option<&ChainTipBlock>| {
-            span.record(
-                "height",
-                tracing::field::debug(chain_tip_block.map(|block| block.height)),
-            );
-            span.record(
-                "hash",
-                tracing::field::debug(chain_tip_block.map(|block| block.hash)),
-            );
-            span.record(
-                "time",
-                tracing::field::debug(chain_tip_block.map(|block| block.time)),
-            );
-            span.record(
-                "previous_hash",
-                tracing::field::debug(chain_tip_block.map(|block| block.previous_block_hash)),
-            );
-            span.record(
-                "transaction_count",
-                tracing::field::debug(chain_tip_block.map(|block| block.transaction_hashes.len())),
-            );
-        };
-
-        self.receiver.with_watch_data(|chain_tip_block| {
-            // TODO: replace with Option::inspect when it stabilises
-            //       https://github.com/rust-lang/rust/issues/91345
-            register_span_fields(chain_tip_block.as_ref());
-
-            chain_tip_block.as_ref().map(f)
-        })
+        self.receiver
+            .with_watch_data(|data| data.as_ref().map(|(block, _)| f(block)))
     }
 }
 
 impl ChainTip for LatestChainTip {
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn best_tip_height(&self) -> Option<block::Height> {
         self.with_chain_tip_block(|block| block.height)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn best_tip_hash(&self) -> Option<block::Hash> {
         self.with_chain_tip_block(|block| block.hash)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
         self.with_chain_tip_block(|block| (block.height, block.hash))
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
         self.with_chain_tip_block(|block| block.time)
     }
 
-    #[instrument(skip(self))]
+    fn best_tip_changed_at(&self, expected_hash: block::Hash) -> Option<Instant> {
+        self.receiver.borrow_mapped(|data| {
+            data.as_ref()
+                .filter(|(block, _)| block.hash == expected_hash)
+                .map(|(_, changed_at)| *changed_at)
+        })
+    }
+
+    #[instrument(level = "trace", skip(self))]
     fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
         self.with_chain_tip_block(|block| (block.height, block.time))
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.with_chain_tip_block(|block| block.transaction_hashes.clone())
             .unwrap_or_else(|| Arc::new([]))

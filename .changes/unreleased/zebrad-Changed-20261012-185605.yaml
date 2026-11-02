@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Blocks with many transactions compute their authorizing data root in parallel, which shortens block commits.
+time: 2026-10-12T18:56:05.961809985+02:00

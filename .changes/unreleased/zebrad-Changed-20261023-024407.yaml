@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Added `network.experimental_early_block_relay`, off by default; mining nodes should enable it. Between peers that both enable it, blocks extending the best tip are relayed before transaction verification finishes, and as compact blocks rebuilt from the mempool, with full-block fallback. Other peers keep ordinary relay. The feature uses an experimental service bit; see "Early block relay and compact blocks" in the mining guide.'
+time: 2026-10-23T02:44:07.561109259+02:00

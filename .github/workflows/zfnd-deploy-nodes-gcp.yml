@@ -116,9 +116,10 @@ on:
       - .github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
       - .github/workflows/zfnd-build-docker-image.yml
 
+  # Stable publication and prerelease promotion trigger released; prerelease publication does not.
   release:
     types:
-      - published
+      - released
 
 permissions:
   contents: read

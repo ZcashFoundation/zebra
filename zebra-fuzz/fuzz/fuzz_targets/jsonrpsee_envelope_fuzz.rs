@@ -115,6 +115,7 @@ const METHOD_NAMES: &[&str] = &[
     "z_getsubtreesbyindex",
     // Tier-B: fork manipulation
     "invalidateblock",
+    "preciousblock",
     "reconsiderblock",
     // Tier-B: node ops
     "addnode",
@@ -283,6 +284,7 @@ impl Service<zebra_state::Request> for MockState {
             R::Depth(_) => Ok(Resp::Depth(None)),
             R::BlockLocator => Ok(Resp::BlockLocator(Vec::new())),
             R::InvalidateBlock(h) => Ok(Resp::Invalidated(h)),
+            R::PreciousBlock(h) => Ok(Resp::Precious(h)),
             R::ReconsiderBlock(_) => Ok(Resp::Reconsidered(Vec::new())),
             _ => Err::<Resp, BoxError>("fuzz mock: variant not constructed".into()),
         };
@@ -536,6 +538,7 @@ fn build_envelope(data: &[u8]) -> Option<String> {
 ///   z_gettreestate(hash_or_height: String)
 ///   z_getsubtreesbyindex(pool: String, start_index: u16, limit: Option<u16>)
 ///   invalidateblock(block_hash: String)
+///   preciousblock(block_hash: String)
 ///   reconsiderblock(block_hash: String)
 ///   addnode(addr: PeerSocketAddr, command: AddNodeCommand)  // ["host:port", "add"]
 ///   getblockhash(index: i32)
@@ -675,7 +678,7 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
             let limit = take_u32_le(5) as u16;
             format!(r#"["{}",{},{}]"#, pool, start, limit)
         }
-        "invalidateblock" | "reconsiderblock" => {
+        "invalidateblock" | "preciousblock" | "reconsiderblock" => {
             // [block_hash_hex]
             let s = hex_class(0, &payload[1.min(payload.len())..]);
             format!(r#"["{}"]"#, s)

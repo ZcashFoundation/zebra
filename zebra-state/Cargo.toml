@@ -46,6 +46,7 @@ bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
 dirs = { workspace = true }
 futures = { workspace = true }
+hashbrown = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
 humantime-serde = { workspace = true }

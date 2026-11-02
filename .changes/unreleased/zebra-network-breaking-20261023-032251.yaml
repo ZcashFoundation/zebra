@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Added negotiated compact-block wire messages, bounded witnessed-identity reconstruction, and compact screening requests and responses; update exhaustive matches on Message, Request, and Response.
+time: 2026-10-23T03:22:51.907202654+02:00

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Bounded state retention of out-of-order blocks while preserving progress for ready parents and accepted commits after callers disconnect.
+time: 2026-10-14T20:28:02.88447411+02:00

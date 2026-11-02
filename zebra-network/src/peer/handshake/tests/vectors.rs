@@ -21,6 +21,9 @@ fn serialization_error_metric_labels_ignore_details() {
     }
 }
 
+/// The height advertised by the scripted remote peer.
+const REMOTE_START_HEIGHT: block::Height = block::Height(2_500_000);
+
 /// Spawns a scripted remote peer on `remote_stream` that answers a handshake with a version
 /// message advertising `remote_services`, then a verack.
 fn spawn_remote_peer(
@@ -52,7 +55,7 @@ fn spawn_remote_peer(
             address_from: AddrInVersion::new(listen_addr, remote_services),
             nonce: Nonce::default(),
             user_agent: "/test-remote/".to_string(),
-            start_height: block::Height(0),
+            start_height: REMOTE_START_HEIGHT,
             relay: false,
         };
 
@@ -226,6 +229,138 @@ async fn outbound_direct_accepts_serving_peer() {
 
     let connection_info = result.expect("outbound handshake with a serving peer succeeds");
     assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
+}
+
+/// Both actual version messages must opt in; configuration and user agents cannot substitute.
+#[tokio::test]
+async fn early_block_relay_requires_bilateral_handshake() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for local_setting in [
+            "",
+            "experimental_early_block_relay = false",
+            "experimental_early_block_relay = true",
+        ] {
+            for remote_enabled in [false, true] {
+                for isolated in [false, true] {
+                    let config: Config = toml::from_str(local_setting).unwrap();
+                    let local_enabled = config.experimental_early_block_relay;
+                    // Exercise the serialized operator configuration, not just a Rust field.
+                    let config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+                    let remote_config = Config {
+                        experimental_early_block_relay: remote_enabled,
+                        ..Config::default()
+                    };
+                    let (local, remote) = tokio::io::duplex(65536);
+                    let network = Network::Mainnet;
+                    let codec = || Codec::builder().for_network(&network).finish();
+                    let mut local = Framed::new(local, codec());
+                    let mut remote = Framed::new(remote, codec());
+                    let address = "127.0.0.1:8233".parse().unwrap();
+                    let local_addr = if isolated {
+                        ConnectedAddr::Isolated
+                    } else {
+                        ConnectedAddr::new_outbound_direct(address)
+                    };
+                    let remote_addr = ConnectedAddr::new_inbound_direct(address);
+                    let (local_info, remote_info) = tokio::try_join!(
+                        negotiate_version(
+                            &mut local,
+                            &local_addr,
+                            config,
+                            Arc::default(),
+                            "/same-user-agent/".to_string(),
+                            PeerServices::NODE_NETWORK,
+                            false,
+                            MinimumPeerVersion::new(NoChainTip, &network),
+                        ),
+                        negotiate_version(
+                            &mut remote,
+                            &remote_addr,
+                            remote_config,
+                            Arc::default(),
+                            "/same-user-agent/".to_string(),
+                            PeerServices::NODE_NETWORK,
+                            false,
+                            MinimumPeerVersion::new(NoChainTip, &network),
+                        ),
+                    )
+                    .expect("both peers support this network version");
+                    let bit = PeerServices::NODE_EARLY_BLOCK_RELAY;
+                    assert_eq!(local_info.remote.services.contains(bit), remote_enabled);
+                    assert_eq!(
+                        remote_info.remote.services.contains(bit),
+                        local_enabled && !isolated
+                    );
+                    let negotiated = local_enabled && remote_enabled && !isolated;
+                    assert_eq!(local_info.early_block_relay, negotiated);
+                    assert_eq!(remote_info.early_block_relay, negotiated);
+                }
+            }
+        }
+    })
+    .await
+    .expect("bilateral handshakes must complete within the test deadline");
+}
+
+/// Successful handshakes publish the remote start height for inbound and outbound peers.
+#[tokio::test]
+async fn handshake_records_start_height() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let book_addr: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    for connected_addr in [
+        ConnectedAddr::new_inbound_direct(book_addr),
+        ConnectedAddr::new_outbound_direct(book_addr),
+    ] {
+        let (address_book_tx, mut address_book_rx) = address_book_updater::change_channel(10);
+        let handshake = Handshake::builder()
+            .with_config(Config {
+                network: network.clone(),
+                ..Config::default()
+            })
+            .with_inbound_service(service_fn(|_req| async move {
+                Ok::<Response, BoxError>(Response::Nil)
+            }))
+            .with_latest_chain_tip(NoChainTip)
+            .with_address_book_updater(address_book_tx)
+            .finish()
+            .expect("provided mandatory builder parameters");
+        let (local_stream, remote_stream) = tokio::io::duplex(65536);
+        let remote_peer = spawn_remote_peer(remote_stream, &network, PeerServices::NODE_NETWORK);
+        let client = timeout(
+            TEST_TIMEOUT,
+            handshake.oneshot(HandshakeRequest {
+                data_stream: local_stream,
+                connected_addr,
+                connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+            }),
+        )
+        .await
+        .expect("handshake must not time out")
+        .expect("serving peer handshake succeeds");
+
+        let update = timeout(TEST_TIMEOUT, address_book_rx.recv())
+            .await
+            .expect("address book update must not time out")
+            .expect("successful handshake publishes an address book update")
+            .into_change()
+            .expect("handshake publishes a peer change");
+        let now = Utc::now();
+        let instant = std::time::Instant::now();
+        let initial = MetaAddr::new_initial_peer(book_addr)
+            .into_new_meta_addr(instant, now.try_into().unwrap());
+        for previous in [None, Some(initial)] {
+            let peer = update
+                .apply_to_meta_addr(previous, instant, now)
+                .expect("successful handshake updates new and existing peers");
+            assert_eq!(peer.start_height(), Some(REMOTE_START_HEIGHT));
+        }
+
+        drop(client);
+        remote_peer.abort();
+    }
 }
 
 /// A rejected non-serving outbound peer must NOT have its advertised services recorded by the

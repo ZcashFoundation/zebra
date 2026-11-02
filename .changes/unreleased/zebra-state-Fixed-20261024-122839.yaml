@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Batch note commitment appends when computing speculative block-template context ([#12010](https://github.com/ZcashFoundation/zebra/issues/12010)).
+time: 2026-10-24T12:28:39.112537257+02:00

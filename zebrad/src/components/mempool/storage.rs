@@ -555,15 +555,15 @@ impl Storage {
             .collect();
         let sprout_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|tx| tx.sprout_nullifiers().collect::<Vec<_>>())
+            .flat_map(|tx| tx.sprout_nullifiers())
             .collect();
         let sapling_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|tx| tx.sapling_nullifiers().collect::<Vec<_>>())
+            .flat_map(|tx| tx.sapling_nullifiers())
             .collect();
         let orchard_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|tx| tx.orchard_nullifiers().collect::<Vec<_>>())
+            .flat_map(|tx| tx.orchard_nullifiers())
             .collect();
         let ironwood_nullifiers: HashSet<_> = transactions
             .iter()
@@ -718,6 +718,7 @@ impl Storage {
         tx_ids.into_iter().filter_map(|tx_id| {
             self.transactions()
                 .get(&tx_id.mined_id())
+                .filter(|tx| tx.transaction.id == tx_id)
                 .map(|tx| &tx.transaction)
         })
     }

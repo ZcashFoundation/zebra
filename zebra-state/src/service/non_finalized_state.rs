@@ -23,18 +23,20 @@ use crate::{
         MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
         MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
     },
-    error::ReconsiderError,
+    error::{PreciousError, ReconsiderError},
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{
         check,
         finalized_state::{calculate_deferred_pool_balance_change, ZebraDb},
         InvalidateError,
     },
-    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    MinedBlockNotifications, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod address_transfers;
 mod backup;
 mod chain;
+mod created_utxos;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -42,7 +44,9 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 #[cfg(test)]
 mod tests;
 
+use address_transfers::AddressTransfers;
 pub(crate) use chain::{Chain, SpendingTransactionId};
+pub(crate) use created_utxos::CreatedUtxos;
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -60,6 +64,9 @@ pub struct NonFinalizedState {
     /// Using `chain_set.last()` or `chain_set.iter().next_back()` is deprecated,
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
+
+    /// Monotonically increasing tip preference, never written to the database or backup.
+    precious_rank: u64,
 
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
@@ -109,6 +116,7 @@ impl Clone for NonFinalizedState {
     fn clone(&self) -> Self {
         Self {
             chain_set: self.chain_set.clone(),
+            precious_rank: self.precious_rank,
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
             should_count_metrics: self.should_count_metrics,
@@ -126,6 +134,7 @@ impl NonFinalizedState {
     pub fn new(network: &Network) -> NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
+            precious_rank: 0,
             network: network.clone(),
             invalidated_blocks: Default::default(),
             should_count_metrics: true,
@@ -261,6 +270,7 @@ impl NonFinalizedState {
                 .zip(other.chain_set.iter())
                 .all(|(self_chain, other_chain)| self_chain.eq_internal_state(other_chain))
             && self.network == other.network
+            && self.precious_rank == other.precious_rank
     }
 
     /// Returns an iterator over the non-finalized chains, with the best chain first.
@@ -323,8 +333,8 @@ impl NonFinalizedState {
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
-        // Chain::cmp uses the partial cumulative work, the tip's receipt time, and the
-        // hash of the tip block. None of these fields has interior mutability.
+        // Chain::cmp uses work, precious rank, receipt time, and tip hash.
+        // None of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
         #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
@@ -380,7 +390,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizableBlock::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(Arc::unwrap_or_clone(best_chain_root), root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -414,6 +424,97 @@ impl NonFinalizedState {
         Ok(())
     }
 
+    /// Apply an exact proposal verdict to its solved block and original parent.
+    ///
+    /// Normal chain application rebuilds indexes and the history leaf using the solved hash.
+    /// Mined bodies are published only after checking current invalidation and resolving the parent.
+    /// A changed wall clock can suppress early relay without changing the normal commit policy.
+    pub(super) fn commit_prevalidated_contextual(
+        &mut self,
+        contextual: ContextuallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+        notifications: Option<&MinedBlockNotifications>,
+    ) -> Result<(), ValidateContextError> {
+        // Local invalidation refers to solved hashes, which proposals do not bind.
+        if self.is_block_invalidated(contextual.hash) {
+            return Err(ValidateContextError::BlockPreviouslyInvalidated {
+                block_hash: contextual.hash,
+            });
+        }
+        let parent_hash = contextual.block.header.previous_block_hash;
+        let (height, hash) = (contextual.height, contextual.hash);
+        let parent_chain = if parent_hash == finalized_state.finalized_tip_hash() {
+            Arc::new(Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .expect("a successful proposal has a finalized parent"),
+                finalized_state.note_commitment_trees_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            ))
+        } else {
+            self.parent_chain(parent_hash)?
+        };
+        if let Some(notifications) = notifications {
+            if contextual
+                .block
+                .header
+                .time_is_valid_at(chrono::Utc::now(), &height, &hash)
+                .is_ok()
+            {
+                let _ = notifications.validated.send(Some(contextual.block.clone()));
+            }
+        }
+        let chain = Arc::unwrap_or_clone(parent_chain).push(contextual)?;
+        self.insert_with(Arc::new(chain), |chains| {
+            chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+        });
+        self.update_metrics_for_committed_block(height, hash);
+        Ok(())
+    }
+
+    /// Prefer this tip over other equal-work tips until it is extended or forked.
+    ///
+    /// Known non-tip blocks, tips with less work than the best chain, and repeats of the latest
+    /// call are accepted unchanged. Later calls take precedence; neither the preference nor its
+    /// counter is persisted.
+    pub fn precious_block(
+        &mut self,
+        block_hash: Hash,
+        finalized_state: &ZebraDb,
+    ) -> Result<block::Hash, PreciousError> {
+        let Some(mut chain) = self.find_chain(|chain| chain.non_finalized_tip_hash() == block_hash)
+        else {
+            if self.any_chain_contains(&block_hash) || finalized_state.contains_hash(block_hash) {
+                return Ok(block_hash);
+            }
+            return Err(PreciousError::MissingBlock(block_hash));
+        };
+
+        // A repeat of the latest call already holds the newest rank.
+        if chain.precious_rank == Some(self.precious_rank)
+            || chain.partial_cumulative_work
+                < self
+                    .best_chain()
+                    .expect("the requested tip belongs to a non-empty chain set")
+                    .partial_cumulative_work
+        {
+            return Ok(block_hash);
+        }
+
+        self.precious_rank = self
+            .precious_rank
+            .checked_add(1)
+            .expect("u64 cannot be exhausted by preciousblock calls in a node's lifetime");
+        self.chain_set.remove(&chain);
+        Arc::make_mut(&mut chain).precious_rank = Some(self.precious_rank);
+        self.chain_set.insert(chain);
+        self.update_metrics_for_chains();
+        self.update_metrics_bars();
+        Ok(block_hash)
+    }
+
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     ///
@@ -430,7 +531,11 @@ impl NonFinalizedState {
             }
 
             self.chain_set.remove(&chain);
-            chain.blocks.values().cloned().collect()
+            chain
+                .blocks
+                .values()
+                .map(|block| block.as_ref().clone())
+                .collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
                 .invalidate_block(block_hash)
@@ -438,7 +543,7 @@ impl NonFinalizedState {
 
             // Add the new chain fork or updated chain to the set of recent chains, and
             // remove the chain containing the hash of the block from chain set
-            self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
+            self.insert_with(Arc::new(new_chain), |chain_set| {
                 chain_set.retain(|c| !c.contains_block_hash(block_hash))
             });
 
@@ -594,18 +699,18 @@ impl NonFinalizedState {
     ///
     /// `new_chain` should start as a clone of the parent chain fork,
     /// or the finalized tip.
-    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
+    #[tracing::instrument(
+        level = "debug",
+        skip(self, finalized_state, new_chain, prepared),
+        fields(height = ?prepared.height, hash = %prepared.hash)
+    )]
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        if self
-            .invalidated_blocks
-            .values()
-            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
-        {
+        if self.is_block_invalidated(prepared.hash) {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
             });
@@ -616,7 +721,7 @@ impl NonFinalizedState {
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &new_chain.unspent_utxos(),
+            &new_chain.created_utxos,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
@@ -681,7 +786,10 @@ impl NonFinalizedState {
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
     #[allow(clippy::unwrap_in_result)]
-    #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
+    #[tracing::instrument(
+        skip(new_chain, contextual, sprout_final_treestates),
+        fields(height = ?contextual.height, hash = %contextual.hash)
+    )]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
@@ -706,6 +814,7 @@ impl NonFinalizedState {
                     block,
                     &network,
                     &history_tree,
+                    None,
                 ));
             });
 
@@ -768,7 +877,7 @@ impl NonFinalizedState {
     /// Returns the first chain satisfying the given predicate.
     ///
     /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
-    /// (Using the first-received, then tip block hash tie-breakers.)
+    /// (Using the precious preference, first-received, then tip block hash tie-breakers.)
     pub fn find_chain<P>(&self, mut predicate: P) -> Option<Arc<Chain>>
     where
         P: FnMut(&Chain) -> bool,
@@ -918,6 +1027,13 @@ impl NonFinalizedState {
     /// Returns true if this [`NonFinalizedState`] contains no chains.
     pub fn is_chain_set_empty(&self) -> bool {
         self.chain_count() == 0
+    }
+
+    /// Returns whether local invalidation excludes this block or one of its retained descendants.
+    pub(super) fn is_block_invalidated(&self, hash: block::Hash) -> bool {
+        self.invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == hash))
     }
 
     /// Return the invalidated blocks.

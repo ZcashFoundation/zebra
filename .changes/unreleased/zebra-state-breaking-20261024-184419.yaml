@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Validate Elasticsearch TLS certificates by default. With the `elasticsearch` feature, `Config` struct literals must include the new `elasticsearch_skip_cert_validation` field (default `false`) or use `..Default::default()`; set it to `true` only for trusted local clusters with self-signed certificates.
+time: 2026-10-24T18:44:19.520254993+02:00

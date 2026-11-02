@@ -115,9 +115,18 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         .as_slice()
         .zcash_deserialize_into()
         .expect("DUMMY_HEADER deserializes");
+    let coinbase = Arc::new(Transaction::test_v1(
+        vec![Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![],
+        LockTime::unlocked(),
+    ));
     let block = Arc::new(Block {
         header: Arc::new(header),
-        transactions: vec![t0.clone(), t1.clone()],
+        transactions: vec![coinbase, t0.clone(), t1.clone()],
     });
     let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
     let new_outputs = new_ordered_outputs_with_height(&block, height, &transaction_hashes);
@@ -131,15 +140,15 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         received_time: None,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(semantically_verified),
+        CheckpointVerifiedBlock::from(semantically_verified),
         Treestate::default(),
         DeferredPoolBalanceChange::zero(),
     );
 
     // Inputs to `prepare_transparent_transaction_batch`, prepared the way `write_block` does.
     let existing_output_location = OutputLocation::from_usize(Height(0), 0, 0);
-    let t0_output_location = OutputLocation::from_usize(height, 0, 0);
-    let t1_output_location = OutputLocation::from_usize(height, 1, 0);
+    let t0_output_location = OutputLocation::from_usize(height, 1, 0);
+    let t1_output_location = OutputLocation::from_usize(height, 2, 0);
 
     let make_utxo =
         |h: Height| transparent::Utxo::new(Output::new(value, address.script()), h, false);
@@ -182,7 +191,10 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         &spent_utxos_by_outpoint,
         &spent_utxos_by_out_loc,
         #[cfg(feature = "indexer")]
-        &HashMap::new(),
+        &HashMap::from([
+            (existing_outpoint, existing_output_location),
+            (t0_output_outpoint, t0_output_location),
+        ]),
         address_balances,
     );
 
@@ -200,5 +212,119 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         received,
         u64::from(value).saturating_mul(3),
         "received counts the existing V plus two intra-block credits of V",
+    );
+}
+
+/// Fee redistribution preserves balances and the first output location of a new address.
+#[test]
+fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = Height(1);
+    let existing_address = Address::from_script_hash(NetworkKind::Mainnet, [0x43; 20]);
+    let new_address = Address::from_script_hash(NetworkKind::Mainnet, [0x44; 20]);
+    let value = Amount::<NonNegative>::try_from(MAX_MONEY / 2 + 3).unwrap();
+    let returned = Amount::<NonNegative>::try_from(MAX_MONEY / 2 + 1).unwrap();
+    let one = Amount::<NonNegative>::try_from(1).unwrap();
+    let existing_outpoint = OutPoint {
+        hash: transaction::Hash([0x45; 32]),
+        index: 0,
+    };
+    let existing_output_location = OutputLocation::from_usize(Height(0), 1, 0);
+    let existing_utxo =
+        transparent::OrderedUtxo::new(Output::new(value, existing_address.script()), Height(0), 1);
+    let coinbase = Arc::new(Transaction::test_v1(
+        vec![Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![
+            Output::new(returned, existing_address.script()),
+            Output::new(one, new_address.script()),
+        ],
+        LockTime::unlocked(),
+    ));
+    let spending = Arc::new(Transaction::test_v1(
+        vec![Input::PrevOut {
+            outpoint: existing_outpoint,
+            unlock_script: Script::new(&[]),
+            sequence: u32::MAX,
+        }],
+        vec![Output::new(one, new_address.script())],
+        LockTime::unlocked(),
+    ));
+    let block = Arc::new(Block {
+        header: Arc::new(
+            zebra_test::vectors::DUMMY_HEADER
+                .zcash_deserialize_into()
+                .unwrap(),
+        ),
+        transactions: vec![coinbase, spending],
+    });
+    assert_eq!(
+        block
+            .transaction_fees(&HashMap::from([(existing_outpoint, existing_utxo.clone())]))
+            .unwrap(),
+        (returned + one).unwrap(),
+    );
+    let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    let new_outputs = new_ordered_outputs_with_height(&block, height, &transaction_hashes);
+    let new_outputs_by_out_loc = block
+        .transactions
+        .iter()
+        .enumerate()
+        .flat_map(|(tx_index, tx)| {
+            tx.outputs()
+                .into_iter()
+                .enumerate()
+                .map(move |(output_index, output)| {
+                    (
+                        OutputLocation::from_usize(height, tx_index, output_index),
+                        transparent::Utxo::new(output, height, tx_index == 0),
+                    )
+                })
+        })
+        .collect();
+    let finalized = FinalizedBlock::from_checkpoint_verified(
+        CheckpointVerifiedBlock::from(SemanticallyVerifiedBlock {
+            hash: block.hash(),
+            block,
+            height,
+            new_outputs,
+            transaction_hashes,
+            received_time: None,
+        }),
+        Treestate::default(),
+        DeferredPoolBalanceChange::zero(),
+    );
+    let mut balance = AddressBalanceLocation::new(existing_output_location);
+    *balance.balance_mut() = value;
+    *balance.received_mut() = u64::from(value);
+    let zebra_db = new_ephemeral_zebra_db(&network);
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_transparent_transaction_batch(
+        &zebra_db,
+        &network,
+        &finalized,
+        &new_outputs_by_out_loc,
+        &HashMap::from([(existing_outpoint, existing_utxo.utxo.clone())]),
+        &BTreeMap::from([(existing_output_location, existing_utxo.utxo)]),
+        #[cfg(feature = "indexer")]
+        &HashMap::from([(existing_outpoint, existing_output_location)]),
+        AddressBalanceLocationUpdates::Insert(HashMap::from([(existing_address, balance)])),
+    );
+    zebra_db.write_batch(batch).unwrap();
+    assert_eq!(
+        zebra_db.address_balance(&existing_address),
+        Some((returned, u64::from(value) + u64::from(returned))),
+    );
+    assert_eq!(
+        zebra_db.address_balance(&new_address),
+        Some(((one + one).unwrap(), 2)),
+    );
+    assert_eq!(
+        zebra_db.address_location(&new_address),
+        Some(OutputLocation::from_usize(height, 0, 1)),
     );
 }

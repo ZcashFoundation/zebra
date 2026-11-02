@@ -117,6 +117,20 @@ pub enum CommitBlockError {
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
     WriteTaskExited,
+
+    /// The bounded mined-block notification channel has no free slot before committing.
+    #[error("mined block notification channel is full; block was not committed")]
+    MinedBlockNotificationFull,
+
+    /// The mined-block notification consumer closed its channel before committing.
+    #[error("mined block notification channel is closed; block was not committed")]
+    MinedBlockNotificationClosed,
+
+    /// The bounded orphan queue evicted this block before its parent became ready.
+    ///
+    /// This is local resource pressure, not a consensus failure; the request can be retried.
+    #[error("orphan block queue is full; block was not committed")]
+    OrphanQueueFull,
 }
 
 impl CommitBlockError {
@@ -136,7 +150,11 @@ impl CommitBlockError {
     pub fn is_auth_commitment_mismatch(&self) -> bool {
         match self {
             CommitBlockError::ValidateContextError(err) => err.is_auth_commitment_mismatch(),
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
@@ -149,18 +167,27 @@ impl CommitBlockError {
             CommitBlockError::ValidateContextError(err) => {
                 err.is_descendant_of_auth_commitment_mismatch()
             }
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => false,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     ///
     /// Consensus-invalid subsidies and authorizing-data commitments score 100.
-    /// Duplicate requests, shutdowns, and rejected-ancestor descendants score 0.
+    /// Duplicate requests, shutdowns, orphan/notification admission failures, and rejected
+    /// descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
-            CommitBlockError::Duplicate { .. } | CommitBlockError::WriteTaskExited => 0,
+            CommitBlockError::Duplicate { .. }
+            | CommitBlockError::WriteTaskExited
+            | CommitBlockError::OrphanQueueFull
+            | CommitBlockError::MinedBlockNotificationFull
+            | CommitBlockError::MinedBlockNotificationClosed => 0,
         }
     }
 }
@@ -275,6 +302,27 @@ pub enum ReconsiderError {
     /// validation.
     #[error("replaying a previously invalidated block failed contextual validation: {0}")]
     ReplayFailed(#[source] ValidateContextError),
+}
+
+/// An error describing why a `PreciousBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PreciousError {
+    /// The block hash was not found in the finalized or non-finalized state.
+    #[error("Block not found")]
+    MissingBlock(block::Hash),
+
+    /// The state is checkpointing blocks and cannot change non-finalized chain preferences.
+    #[error("cannot prefer blocks while still committing checkpointed blocks")]
+    ProcessingCheckpointedBlocks,
+
+    /// Sending the precious block request to the block write task failed.
+    #[error("failed to send precious block request to block write task")]
+    SendPreciousRequestFailed,
+
+    /// The precious block request was dropped before processing.
+    #[error("precious block request was unexpectedly dropped")]
+    PreciousRequestDropped,
 }
 
 /// An error describing why an `AwaitUtxo` request failed.

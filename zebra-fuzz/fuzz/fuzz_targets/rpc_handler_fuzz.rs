@@ -44,6 +44,7 @@
 //!   that consult the tip before mutating.
 //! * `Request::InvalidateBlock(_)` → `Ok(Response::Invalidated([0u8; 32]))` to
 //!   walk past the state-write await in `invalidateblock`.
+//! * `Request::PreciousBlock(h)` → `Ok(Response::Precious(h))` to echo the requested hash.
 //! * `Request::ReconsiderBlock(_)` → `Ok(Response::Reconsidered(vec![]))`.
 //!
 //! Other variants fall through to `Err(BoxError)`, so any
@@ -202,6 +203,8 @@ enum RpcCall {
     /// then state write request. Same parser as `getblock` hash variant
     /// but exercised through a different dispatch.
     InvalidateBlock(String),
+    /// `preciousblock(block_hash)` — parses the hash, then requests a tip preference.
+    PreciousBlock(String),
     /// `reconsiderblock(block_hash)` — methods.rs. Mirror of
     /// `invalidateblock`, complementary state mutation.
     ReconsiderBlock(String),
@@ -479,6 +482,7 @@ impl Service<zebra_state::Request> for MockState {
             // attempt with a non-zero input hash. This is a mock-contract requirement (mirrors
             // how the real state actually behaves), not a defensive workaround for a real bug.
             R::InvalidateBlock(h) => Ok(Resp::Invalidated(h)),
+            R::PreciousBlock(h) => Ok(Resp::Precious(h)),
             R::ReconsiderBlock(_) => Ok(Resp::Reconsidered(Vec::new())),
             _ => Err::<Resp, BoxError>("fuzz mock: variant not constructed".into()),
         };
@@ -793,6 +797,11 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
         // ── Tier-B fork manipulation ───────────────────────────────
         RpcCall::InvalidateBlock(block_hash) => {
             let _ = AssertUnwindSafe(rpc.invalidate_block(block_hash))
+                .catch_unwind()
+                .await;
+        }
+        RpcCall::PreciousBlock(block_hash) => {
+            let _ = AssertUnwindSafe(rpc.precious_block(block_hash))
                 .catch_unwind()
                 .await;
         }

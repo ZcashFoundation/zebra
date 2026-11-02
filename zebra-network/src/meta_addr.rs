@@ -7,7 +7,7 @@ use std::{
 
 use chrono::Utc;
 
-use zebra_chain::{parameters::Network, serialization::DateTime32};
+use zebra_chain::{block::Height, parameters::Network, serialization::DateTime32};
 
 use crate::{
     constants,
@@ -239,6 +239,9 @@ pub struct MetaAddr {
 
     /// The protocol version negotiated with the peer during handshake, if available.
     negotiated_version: Option<Version>,
+
+    /// The start height advertised in the peer's most recent version message, if available.
+    start_height: Option<Height>,
 }
 
 /// A change to an existing `MetaAddr`.
@@ -298,6 +301,7 @@ pub enum MetaAddrChange {
         is_inbound: bool,
         user_agent: String,
         negotiated_version: Version,
+        start_height: Height,
     },
 
     /// Updates an existing `MetaAddr` when we send a ping to a peer.
@@ -370,6 +374,7 @@ impl MetaAddr {
             is_inbound: false,
             user_agent: None,
             negotiated_version: None,
+            start_height: None,
         }
     }
 
@@ -408,6 +413,7 @@ impl MetaAddr {
         is_inbound: bool,
         user_agent: String,
         negotiated_version: Version,
+        start_height: Height,
     ) -> MetaAddrChange {
         UpdateConnected {
             addr: canonical_peer_addr(*addr),
@@ -415,6 +421,7 @@ impl MetaAddr {
             is_inbound,
             user_agent,
             negotiated_version,
+            start_height,
         }
     }
 
@@ -758,6 +765,11 @@ impl MetaAddr {
         self.negotiated_version
     }
 
+    /// Returns the start height advertised in this peer's most recent version message, if available.
+    pub fn start_height(&self) -> Option<Height> {
+        self.start_height
+    }
+
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
@@ -800,6 +812,7 @@ impl MetaAddr {
             is_inbound: false,
             user_agent: None,
             negotiated_version: None,
+            start_height: None,
         })
     }
 }
@@ -1014,6 +1027,7 @@ impl MetaAddrChange {
             is_inbound: self.is_inbound(),
             user_agent,
             negotiated_version,
+            start_height: self.start_height(),
         }
     }
 
@@ -1067,6 +1081,15 @@ impl MetaAddrChange {
         }
     }
 
+    /// Returns the advertised start height from this change, if available.
+    pub fn start_height(&self) -> Option<Height> {
+        if let MetaAddrChange::UpdateConnected { start_height, .. } = self {
+            Some(*start_height)
+        } else {
+            None
+        }
+    }
+
     /// Returns the corresponding [`MetaAddr`] for a local listener change.
     ///
     /// This method exists so we don't have to provide an unused [`Instant`] to get a local
@@ -1091,6 +1114,7 @@ impl MetaAddrChange {
             is_inbound: self.is_inbound(),
             user_agent: None,
             negotiated_version: None,
+            start_height: None,
         }
     }
 
@@ -1248,6 +1272,7 @@ impl MetaAddrChange {
                 is_inbound: previous.is_inbound || self.is_inbound(),
                 user_agent: None,
                 negotiated_version: None,
+                start_height: None,
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
@@ -1275,6 +1300,7 @@ impl MetaAddrChange {
                 is_inbound: previous.is_inbound || self.is_inbound(),
                 user_agent: self.user_agent().or(previous.user_agent),
                 negotiated_version: self.negotiated_version().or(previous.negotiated_version),
+                start_height: self.start_height().or(previous.start_height),
             })
         }
     }

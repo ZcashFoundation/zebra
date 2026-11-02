@@ -48,12 +48,14 @@ rayon = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 futures = { workspace = true }
 futures-util = { workspace = true }
 metrics = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync", "tracing", "rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true, features = ["timeout", "util", "buffer"] }
 tracing = { workspace = true }
 tracing-futures = { workspace = true }
@@ -96,6 +98,7 @@ proptest-derive = { workspace = true }
 spandoc = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+tower = { workspace = true, features = ["limit"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 

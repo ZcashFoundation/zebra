@@ -25,7 +25,9 @@ find_cached_disk_image() {
     local git_pattern="${1}"
     local git_source="${2}"
     local disk_name
-    local disk_search_pattern="${DISK_PREFIX}-${git_pattern}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
+    # `name~` is an unanchored regex match, so anchor the prefix: otherwise a branch whose slug
+    # ends with this branch's slug would match too.
+    local disk_search_pattern="^${DISK_PREFIX}-${git_pattern}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
 
     # `set -e` does not apply inside the command substitutions that call this function,
     # so a failed query must be returned explicitly, or it would look like "no image".
@@ -53,7 +55,7 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     CACHED_DISK_NAME=""
 
     # Try to find one from the current branch (or PR).
-    CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")
+    CACHED_DISK_NAME=$(find_cached_disk_image "${GITHUB_REF}-[0-9a-f]+" "branch")
     # If no image was found, try to find an image based on the `main` branch.
     CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image "main-[0-9a-f]+" "main branch")}
     # If we still have no image, try to find one from any branch.

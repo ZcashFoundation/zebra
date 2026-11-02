@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Routine state-service spans now use DEBUG, and per-input, per-transaction and chain-tip getter spans use TRACE. INFO events and their fields are unchanged.
+time: 2026-10-19T13:12:24.421246398+02:00

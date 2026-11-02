@@ -1,0 +1,436 @@
+//! Opt-in compact transport; consensus and source scoring remain in the ordinary downloader.
+
+use std::{
+    collections::HashSet,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
+
+use futures::Sink;
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::{sleep, timeout, timeout_at, Instant},
+};
+use tower::{Service, ServiceExt};
+use zebra_chain::{
+    block::{self, Block, MAX_BLOCK_BYTES},
+    chain_tip::ChainTip,
+    serialization::{CompactSizeMessage, SerializationError, ZcashSerialize},
+};
+
+use super::{Connection, Handler, InventoryResponse, State};
+use crate::{
+    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock, Reconstruction},
+    constants,
+    protocol::external::Message,
+    BlockAuthorization, BoxError, PeerError, Request, Response,
+};
+
+// A decoded body can retain substantially more memory than its two-megabyte wire encoding.
+// Six global slots cover three advertised and three received bodies, including detached hash work.
+// Received bodies must pass proof-of-work and current-best-tip screening before taking a slot.
+static SLOTS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(6)));
+const RETENTION: Duration = Duration::from_secs(15);
+const RECOVERY_TIMEOUT: Duration = Duration::from_secs(2);
+
+struct ServingBlock {
+    block: Arc<Block>,
+    /// Keep the sent short-ID keys reproducible without retaining the compact transaction vectors.
+    nonce: u64,
+    authorization: Option<BlockAuthorization>,
+}
+
+impl ServingBlock {
+    fn is_authorized(&self) -> bool {
+        self.authorization
+            .as_ref()
+            .is_none_or(|authorization| authorization.is_authorized(&self.block))
+    }
+}
+
+#[derive(Default)]
+pub(super) struct CompactRelay {
+    pub(super) send: bool,
+    received: Option<(Arc<CompactBlock>, Instant, OwnedSemaphorePermit)>,
+    sent: Option<(ServingBlock, Option<Instant>, OwnedSemaphorePermit)>,
+    /// Bound aggregate recovery payloads, including repeated or empty requests.
+    recovery_bytes_left: usize,
+    /// Gossip and sync can request the same body before either verifier commits it.
+    reconstructed: Option<(Arc<Block>, Instant, OwnedSemaphorePermit)>,
+    last_received: Option<Instant>,
+}
+
+impl CompactRelay {
+    pub(super) fn clear_sent(&mut self) {
+        self.sent = None;
+    }
+
+    pub(super) fn advert_is_authorized(&self) -> bool {
+        self.sent
+            .as_ref()
+            .is_some_and(|(serving, until, _)| until.is_none() && serving.is_authorized())
+    }
+
+    pub(super) fn mark_sent(&mut self) {
+        let (serving, until, _) = self
+            .sent
+            .as_mut()
+            .expect("a delivered compact announcement retains its serving snapshot");
+        serving.authorization = None;
+        *until = Some(Instant::now() + RETENTION);
+        self.recovery_bytes_left =
+            usize::try_from(MAX_BLOCK_BYTES).expect("the block byte limit fits in memory");
+    }
+
+    pub(super) fn expire(&mut self) {
+        let now = Instant::now();
+        if self
+            .received
+            .as_ref()
+            .is_some_and(|(_, until, _)| *until <= now)
+        {
+            self.received = None;
+        }
+        if self
+            .sent
+            .as_ref()
+            .is_some_and(|(_, until, _)| until.is_some_and(|until| until <= now))
+        {
+            self.sent = None;
+        }
+        if self
+            .reconstructed
+            .as_ref()
+            .is_some_and(|(_, until, _)| *until <= now)
+        {
+            self.reconstructed = None;
+        }
+    }
+
+    pub(super) fn has_cached(&self) -> bool {
+        self.received.is_some() || self.sent.is_some() || self.reconstructed.is_some()
+    }
+
+    pub(super) fn expiry(&self) -> Instant {
+        self.received
+            .as_ref()
+            .map(|(_, until, _)| *until)
+            .into_iter()
+            .chain(self.sent.as_ref().and_then(|(_, until, _)| *until))
+            .chain(self.reconstructed.as_ref().map(|(_, until, _)| *until))
+            .min()
+            .unwrap_or_else(|| Instant::now() + RETENTION)
+    }
+}
+
+impl<S, Tx, C> Connection<S, Tx, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError>,
+    C: ChainTip,
+    Tx: Sink<Message, Error = SerializationError> + Unpin,
+{
+    /// Query the existing bounded inbound service without turning collision recovery into scoring.
+    async fn compact_query(&mut self, request: Request) -> Option<Response> {
+        timeout(constants::REQUEST_TIMEOUT, async {
+            self.svc.ready().await.ok()?.call(request).await.ok()
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Resolve live permission before constructing an announcement.
+    async fn compact_serving_block(&mut self, hash: block::Hash) -> Option<ServingBlock> {
+        let (blocks, authorization) = match self
+            .compact_query(Request::EarlyBlocksByHash(HashSet::from([hash])))
+            .await?
+        {
+            Response::Blocks(blocks) => (blocks, None),
+            Response::AuthorizedBlocks {
+                blocks,
+                authorization,
+            } => (blocks, Some(authorization)),
+            _ => return None,
+        };
+        let block = blocks.into_iter().find_map(|item| match item {
+            InventoryResponse::Available((block, _)) if block.hash() == hash => Some(block),
+            _ => None,
+        })?;
+        Some(ServingBlock {
+            block,
+            nonce: rand::random(),
+            authorization,
+        })
+    }
+
+    pub(super) async fn compact_advert(&mut self, hash: block::Hash) -> Option<Message> {
+        if !self.connection_info.early_block_relay || !self.compact.send {
+            return None;
+        }
+        self.compact.expire();
+        // Do not replace a body while the peer can still be recovering its transactions.
+        if self.compact.sent.is_some() {
+            return None;
+        }
+        let permit = SLOTS.clone().try_acquire_owned().ok()?;
+        let serving = self.compact_serving_block(hash).await?;
+        let (serving, compact, permit) = tokio::task::spawn_blocking(move || {
+            let compact = CompactBlock::from_block(&serving.block, serving.nonce);
+            let compact = compact.ok().filter(|compact| {
+                compact.zcash_serialized_size() < serving.block.zcash_serialized_size()
+            });
+            (serving, compact, permit)
+        })
+        .await
+        .ok()?;
+        let compact = compact?;
+        self.compact.sent = Some((serving, None, permit));
+        Some(Message::CompactBlock(Arc::new(compact)))
+    }
+
+    pub(super) async fn receive_compact(&mut self, block: Arc<CompactBlock>) {
+        if !self.connection_info.early_block_relay {
+            return;
+        }
+        self.compact.expire();
+        let hash = block.header.hash();
+        let advertiser = self.connection_info.connected_addr.get_transient_addr();
+        if self.compact.received.is_none()
+            && self
+                .compact
+                .last_received
+                .is_none_or(|last| last.elapsed() >= RETENTION)
+            && matches!(
+                self.compact_query(Request::CheckCompactHeader(block.clone()))
+                    .await,
+                Some(Response::Nil)
+            )
+        {
+            if let Ok(permit) = SLOTS.clone().try_acquire_owned() {
+                if matches!(
+                    self.compact_query(Request::AdvertiseCompactBlock(hash, advertiser))
+                        .await,
+                    Some(Response::Nil)
+                ) {
+                    self.compact.last_received = Some(Instant::now());
+                    self.compact.received = Some((block, Instant::now() + RETENTION, permit));
+                }
+                return;
+            }
+        }
+        // Reconstruction starts only after the downloader applies its global/per-IP admission.
+        self.drive_peer_request(Request::AdvertiseBlock(hash, advertiser))
+            .await;
+    }
+
+    pub(super) async fn download_block(&mut self, hash: block::Hash) -> Result<Handler, PeerError> {
+        self.compact.expire();
+        if let Some((block, _, _)) = &self.compact.reconstructed {
+            if block.hash() == hash {
+                return Ok(self.compact_response(block.clone()));
+            }
+        }
+        if self
+            .compact
+            .received
+            .as_ref()
+            .is_some_and(|(block, _, _)| block.header.hash() == hash)
+        {
+            let (compact, _, permit) = self
+                .compact
+                .received
+                .take()
+                .expect("the matching cached compact block exists");
+            if let Some(Response::CompactBlockTransactions(candidates)) = self
+                .compact_query(Request::CompactBlockTransactions(compact.clone()))
+                .await
+            {
+                let result =
+                    tokio::task::spawn_blocking(move || (compact.reconstruct(candidates), permit))
+                        .await;
+                if let Ok((Ok(reconstruction), permit)) = result {
+                    let indexes = reconstruction.missing_indexes();
+                    if indexes.is_empty() {
+                        if let Some(block) = self
+                            .finish_compact(
+                                reconstruction,
+                                BlockTransactions {
+                                    block_hash: hash,
+                                    transactions: Vec::new(),
+                                },
+                                permit,
+                            )
+                            .await
+                        {
+                            return Ok(self.compact_response(block));
+                        }
+                    } else {
+                        self.peer_tx
+                            .send(Message::GetBlockTransactions(BlockTransactionsRequest {
+                                block_hash: hash,
+                                indexes,
+                            }))
+                            .await?;
+                        return Ok(Handler::CompactBlock {
+                            reconstruction,
+                            permit,
+                        });
+                    }
+                }
+            }
+        }
+        self.peer_tx
+            .send(Message::GetData(vec![hash.into()]))
+            .await?;
+        Ok(Handler::BlocksByHash {
+            pending_hashes: HashSet::from([hash]),
+            blocks: Vec::with_capacity(1),
+        })
+    }
+
+    fn compact_response(&self, block: Arc<Block>) -> Handler {
+        Handler::Finished(Ok(Response::Blocks(vec![InventoryResponse::Available((
+            block,
+            self.connection_info.connected_addr.get_transient_addr(),
+        ))])))
+    }
+
+    async fn finish_compact(
+        &mut self,
+        reconstruction: Reconstruction,
+        response: BlockTransactions,
+        permit: OwnedSemaphorePermit,
+    ) -> Option<Arc<Block>> {
+        let (block, permit) =
+            tokio::task::spawn_blocking(move || (reconstruction.finish(response), permit))
+                .await
+                .ok()?;
+        let block = block.ok()?;
+        // A txid Merkle root does not bind v5/v6 proofs or signatures. Authenticate the ordered
+        // authorization root before giving these probabilistically reconstructed bytes to consensus.
+        if !matches!(
+            self.compact_query(Request::CheckCompactBlock(block.clone()))
+                .await,
+            Some(Response::Nil)
+        ) {
+            return None;
+        }
+        self.compact.reconstructed = Some((block.clone(), Instant::now() + RETENTION, permit));
+        Some(block)
+    }
+
+    pub(super) async fn receive_compact_transactions(&mut self, response: BlockTransactions) {
+        let hash = response.block_hash;
+        let State::AwaitingResponse { handler, .. } = &mut self.state else {
+            return;
+        };
+        if !matches!(handler, Handler::CompactBlock { reconstruction, .. } if reconstruction.block_hash() == hash)
+        {
+            return;
+        }
+        if let Some(recovery) = &self.compact_recovery {
+            recovery.send_replace(None);
+        }
+        let Handler::CompactBlock {
+            reconstruction,
+            permit,
+        } = std::mem::replace(handler, Handler::Finished(Ok(Response::Nil)))
+        else {
+            unreachable!("the matching reconstruction was checked")
+        };
+        if let Some(block) = self.finish_compact(reconstruction, response, permit).await {
+            let response = self.compact_response(block);
+            if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                *handler = response;
+            }
+        } else {
+            self.fallback_compact(hash).await;
+        }
+    }
+
+    pub(super) async fn fallback_compact(&mut self, hash: block::Hash) {
+        self.clear_compact_recovery();
+        if let Err(error) = self.peer_tx.send(Message::GetData(vec![hash.into()])).await {
+            self.fail_with(error).await;
+            return;
+        }
+        if let State::AwaitingResponse { handler, .. } = &mut self.state {
+            *handler = Handler::BlocksByHash {
+                pending_hashes: HashSet::from([hash]),
+                blocks: Vec::with_capacity(1),
+            };
+            self.request_timer = Some(Box::pin(sleep(constants::REQUEST_TIMEOUT)));
+        }
+    }
+
+    pub(super) async fn serve_compact_transactions(&mut self, request: BlockTransactionsRequest) {
+        if !self.connection_info.early_block_relay {
+            return;
+        }
+        self.compact.expire();
+        let Some((serving, Some(until), _)) = &self.compact.sent else {
+            return;
+        };
+        if serving.block.hash() != request.block_hash {
+            return;
+        }
+        if request
+            .indexes
+            .last()
+            .is_some_and(|index| *index >= serving.block.transactions.len())
+            || request.indexes.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return;
+        }
+        let until = *until;
+        let overhead = request.block_hash.zcash_serialized_size()
+            + CompactSizeMessage::try_from(request.indexes.len())
+                .expect("recovery indexes are bounded by the advertised block")
+                .zcash_serialized_size();
+        let Some(remaining) = self
+            .compact
+            .recovery_bytes_left
+            .checked_sub(overhead)
+            .and_then(|remaining| {
+                request
+                    .indexes
+                    .iter()
+                    .try_fold(remaining, |remaining, index| {
+                        remaining
+                            .checked_sub(serving.block.transactions[*index].zcash_serialized_size())
+                    })
+            })
+        else {
+            return;
+        };
+        self.compact.recovery_bytes_left = remaining;
+        let transactions = request
+            .indexes
+            .into_iter()
+            .map(|index| serving.block.transactions[index].clone())
+            .collect();
+        let response = BlockTransactions {
+            block_hash: request.block_hash,
+            transactions,
+        };
+        // Repeated recovery shares a byte budget and the snapshot's original deadline.
+        let result = timeout_at(
+            until,
+            self.peer_tx.send(Message::BlockTransactions(response)),
+        )
+        .await
+        .unwrap_or(Err(PeerError::ConnectionSendTimeout));
+        if let Err(error) = result {
+            self.compact.clear_sent();
+            self.fail_with(error).await;
+        }
+    }
+}
+
+pub(super) fn response_timeout(handler: &Handler) -> Duration {
+    if matches!(handler, Handler::CompactBlock { .. }) {
+        RECOVERY_TIMEOUT
+    } else {
+        constants::REQUEST_TIMEOUT
+    }
+}

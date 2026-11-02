@@ -47,7 +47,7 @@ sapling-crypto = "0.9"
 # rpc_handler_fuzz / jsonrpsee_envelope_fuzz timestamp handling
 chrono = { version = "0.4.40", default-features = false }
 # equihash_fuzz multi-param oracle
-equihash = "0.3"
+equihash = { version = "0.3.1", features = ["unsafe-verifier"] }
 # script_flag_matrix_fuzz: below-zebra-script FFI flag matrix
 libzcash_script = "0.2"
 zcash_script = { version = "0.6", features = ["signature-validation"] }

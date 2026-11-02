@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `MinedBlockNotifications::allow_ordinary_commit` to retain a superseded mined observer without requiring notification capacity for an ordinary same-hash commit.
+time: 2026-10-14T22:35:04.078938665+02:00
