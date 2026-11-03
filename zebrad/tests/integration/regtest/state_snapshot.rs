@@ -21,6 +21,7 @@
 //! ```
 
 use std::{
+    collections::HashMap,
     fs,
     net::{SocketAddr, TcpListener, UdpSocket},
     path::Path,
@@ -320,6 +321,102 @@ fn dir_size(dir: &Path) -> Result<u64> {
     Ok(total)
 }
 
+/// The size of the distinct piece objects: identical manifest entries are downloaded and stored once.
+fn unique_piece_bytes(manifest: &Manifest) -> u64 {
+    manifest
+        .pieces()
+        .map(|(_, _, piece)| (piece.hash, u64::from(piece.size)))
+        .collect::<HashMap<_, _>>()
+        .values()
+        .sum()
+}
+
+/// Scrapes a node's Prometheus endpoint.
+async fn scrape_metrics(addr: SocketAddr) -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    Ok(client
+        .get(format!("http://{addr}"))
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?)
+}
+
+/// Returns a counter's value from a Prometheus scrape, or `None` if it has not been recorded.
+/// `command` selects the single command label used by the version 2 connection counters.
+fn metric(body: &str, name: &str, command: Option<&str>) -> Result<Option<u64>> {
+    let name = name.replace('.', "_");
+    let total_name = format!("{name}_total");
+    for line in body.lines().filter(|line| !line.starts_with('#')) {
+        let Some((sample, value)) = line.split_once(' ') else {
+            continue;
+        };
+        let (sample_name, labels) = sample
+            .split_once('{')
+            .map_or((sample, ""), |(name, labels)| {
+                (name, labels.trim_end_matches('}'))
+            });
+        if sample_name != name && sample_name != total_name {
+            continue;
+        }
+        let expected_labels =
+            command.map_or("".to_owned(), |command| format!("command=\"{command}\""));
+        if labels != expected_labels {
+            continue;
+        }
+        return Ok(Some(value.parse()?));
+    }
+    Ok(None)
+}
+
+/// Checks actual object response traffic against the unique manifest and piece bytes.
+fn assert_snapshot_traffic(metrics_a: &str, metrics_b: &str, expected_bytes: u64) -> Result<()> {
+    let required = |body, name, command| {
+        metric(body, name, command)?
+            .ok_or_else(|| eyre!("missing required Prometheus counter {name}"))
+    };
+    let transport_bytes = required(metrics_a, "zebra.net.in.objects.bytes", None)?;
+    let requests_a = required(metrics_a, "zebra.net.in.requests", Some("get-object"))?;
+    let responses_a = required(metrics_a, "zebra.net.out.responses", Some("get-object"))?;
+    let requests_b = required(metrics_b, "zebra.net.out.requests", Some("Object"))?;
+    let responses_b = required(metrics_b, "zebra.net.in.responses", Some("Object"))?;
+    let busy = metric(metrics_a, "zebra.net.in.objects.busy", None)?.unwrap_or(0);
+    let unreadable = metric(metrics_a, "zebra.net.in.objects.unreadable", None)?.unwrap_or(0);
+    let cancelled =
+        metric(metrics_b, "zebra.net.out.requests.canceled", Some("Object"))?.unwrap_or(0);
+    let failed_or_refused = requests_a
+        .checked_sub(responses_a)
+        .ok_or_else(|| eyre!("A sent more object responses than it received requests"))?;
+
+    assert_eq!(
+        transport_bytes, expected_bytes,
+        "actual response payload bytes"
+    );
+    assert_eq!(requests_a, requests_b, "A and B count the same requests");
+    assert_eq!(responses_a, responses_b, "A and B count the same responses");
+    assert_eq!(
+        failed_or_refused, 0,
+        "no failed or refused streams to retry"
+    );
+    assert_eq!(busy, 0, "no server busy refusals on the happy path");
+    assert_eq!(unreadable, 0, "no unreadable objects on the happy path");
+    assert_eq!(
+        cancelled, 0,
+        "no duplicate or abandoned downloads on the happy path"
+    );
+    tracing::info!(
+        transport_bytes,
+        expected_bytes,
+        requests_a,
+        responses_a,
+        "snapshot transport traffic"
+    );
+    Ok(())
+}
+
 fn start_node(dir: TempDir) -> Result<TestChild<TempDir>> {
     dir.spawn_child(args!["start"])?.with_timeout(TEST_TIMEOUT)
 }
@@ -352,9 +449,11 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // The QUIC port differs from the TCP port: peers are keyed by address and port across both
         // protocols, so one number for both would make B drop its version 2 connection to A.
         let quic_a = loopback(reserve_udp_port()?);
+        let metrics_a = loopback(reserve_tcp_port()?);
         let rpc_b = reserve_tcp_port()?;
         let p2p_b = loopback(reserve_tcp_port()?);
         let quic_b = loopback(reserve_udp_port()?);
+        let metrics_b = loopback(reserve_tcp_port()?);
         let rpc_c = reserve_tcp_port()?;
         let p2p_c = loopback(reserve_tcp_port()?);
 
@@ -426,6 +525,7 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // semantically.
         config_a.state.debug_stop_at_height = None;
         config_a.sync.serve_state_snapshots = true;
+        config_a.metrics.endpoint_addr = Some(metrics_a);
         config_a.network.v2_listen_addr = Some(quic_a);
         // B is more than the near-tip window behind A, so its outbound sync dialers require
         // NODE_NETWORK, which pruned A does not advertise. A dials B instead; inbound connections
@@ -475,8 +575,12 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // Node B: empty and pruned, with the exported commitment, downloading from A.
         let key_b = TransparentSigningKey::random();
         let mut config_b = node_config(&network_b, rpc_b, p2p_b, RETENTION_B, &key_b)?;
+        // Keep post-checkpoint validation from starving on loaded hosts with many CPU workers.
+        config_b.sync.full_verify_concurrency_limit = 1;
+        config_b.sync.parallel_cpu_threads = 1;
         config_b.network.initial_testnet_peers = [p2p_a.to_string()].into();
         config_b.network.v2_listen_addr = Some(quic_b);
+        config_b.metrics.endpoint_addr = Some(metrics_b);
         config_b.network.initial_v2_peers = [quic_a.to_string()].into();
         config_b.sync.state_snapshot_sync = true;
         config_b.sync.state_snapshot = Some(commitment);
@@ -494,6 +598,19 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         for stage in EXPECTED_STAGES {
             node_b.expect_stdout_line_matches(regex::escape(&stage.to_string()))?;
             if stage == Stage::StateInitialized {
+                // Capture transport counters before A's restart resets them. Bootstrap has finished,
+                // so these counts are stable and exclude ordinary block sync.
+                let (metrics_a, metrics_b) =
+                    tokio::try_join!(scrape_metrics(metrics_a), scrape_metrics(metrics_b),)?;
+                let objects_b = ArtifactStore::new(&config_b.state, &network_b).objects_dir();
+                let manifest_bytes = fs::read(objects_b.join(commitment.manifest.to_string()))?;
+                let manifest = Manifest::decode(&manifest_bytes, &network_b)?;
+                assert_snapshot_traffic(
+                    &metrics_a,
+                    &metrics_b,
+                    u64::try_from(manifest_bytes.len())? + unique_piece_bytes(&manifest),
+                )?;
+
                 // A has served the snapshot and B has imported and opened it while A was pruned.
                 // Regtest's fixed old block times make every node count as syncing, so a pruned
                 // peer cannot satisfy the required NODE_NETWORK service in either direction.
@@ -543,9 +660,9 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             );
         }
 
-        // The bytes downloaded are the objects B keeps: the manifest and its pieces, and nothing
-        // else. The size ratio against A's state is only logged: it is meaningful on Mainnet, not
-        // for a Regtest chain whose window is most of the chain (design, §10 "Mainnet benchmark").
+        // Retained file sizes are independent of the transport counters checked above. Identical
+        // manifest entries share one object file. The size ratio against A's state is only logged:
+        // it is meaningful on Mainnet, not for a Regtest chain whose window is most of the chain.
         let objects_b = ArtifactStore::new(&config_b.state, &network_b).objects_dir();
         let manifest_path = objects_b.join(commitment.manifest.to_string());
         assert!(
@@ -557,16 +674,16 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         assert_eq!(manifest.height, Height(H));
         assert_eq!(manifest.block_hash, commitment.block_hash);
         assert_eq!(manifest.window_start, Height(L));
-        let downloaded = dir_size(&objects_b)?;
+        let retained_bytes = dir_size(&objects_b)?;
         tracing::info!(
-            downloaded,
+            retained_bytes,
             state_size_a,
-            "bytes downloaded for the snapshot against A's state directory"
+            "retained snapshot bytes against A's state directory"
         );
         assert_eq!(
-            downloaded,
-            u64::try_from(manifest_bytes.len())? + manifest.total_piece_bytes(),
-            "B's store holds exactly the manifest and its pieces",
+            retained_bytes,
+            u64::try_from(manifest_bytes.len())? + unique_piece_bytes(&manifest),
+            "B's store holds exactly the manifest and its distinct pieces",
         );
 
         // Spending a UTXO created below the window: the output is trusted on the manifest, its
@@ -668,6 +785,8 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // rule, because `H + 1` is above the last checkpoint, and syncs from genesis instead,
         // verifying every block semantically.
         let mut config_c = node_config(&network, rpc_c, p2p_c, RETENTION_B, &key_b)?;
+        config_c.sync.full_verify_concurrency_limit = 1;
+        config_c.sync.parallel_cpu_threads = 1;
         config_c.sync.state_snapshot_sync = true;
         config_c.sync.state_snapshot = Some(commitment);
         config_c.sync.state_snapshot_peers = vec![quic_a.to_string()];
@@ -716,4 +835,34 @@ fn expected_stages_follow_the_contract() {
     assert_eq!(EXPECTED_STAGES[..], Stage::ALL[..EXPECTED_STAGES.len()]);
     assert_eq!(Stage::ALL.last(), Some(&Stage::TargetReached));
     assert_eq!(L, 1.max(H - 2303));
+}
+
+#[test]
+fn parses_prometheus_object_counters() {
+    let _init_guard = zebra_test::init();
+    let scrape = r#"
+# TYPE zebra_net_in_objects_bytes counter
+zebra_net_in_objects_bytes_total 123
+# TYPE zebra_net_in_requests counter
+zebra_net_in_requests_total{command="get-object"} 17
+zebra_net_in_requests_total{command="get-blocks"} 99
+zebra_net_in_objects_bytes_extra 999
+"#;
+
+    assert_eq!(
+        metric(scrape, "zebra.net.in.objects.bytes", None).unwrap(),
+        Some(123)
+    );
+    assert_eq!(
+        metric(scrape, "zebra.net.in.requests", Some("get-object")).unwrap(),
+        Some(17)
+    );
+    assert_eq!(
+        metric(scrape, "zebra.net.in.requests", Some("get-headers")).unwrap(),
+        None
+    );
+    assert_eq!(
+        metric(scrape, "zebra.net.in.objects.busy", None).unwrap(),
+        None
+    );
 }
