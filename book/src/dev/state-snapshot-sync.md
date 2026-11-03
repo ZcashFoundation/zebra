@@ -182,7 +182,7 @@ object index). The flow runs in `StartCmd` before `zebra_state::init`.
 
 **Decision rule** (`should_bootstrap`), every condition logged once at `info` when it fails:
 `[sync] state_snapshot_sync`; pruning configured; the state not ephemeral; no current-major database
-directory and no restorable previous-major one (`restorable_db_versions` + `DB::list_cf`); a
+directory and no restorable previous-major one (`restorable_db_versions` + on-disk format probes); a
 commitment available and allowed; the preconditions above; `[sync] state_snapshot_peers` or, when
 empty, `network.initial_v2_peers` not empty; zcashd-compat off; the manifest not marked rejected.
 
