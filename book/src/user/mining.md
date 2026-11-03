@@ -135,6 +135,9 @@ peers receive a compact block when it is smaller than the full block. The receiv
 rebuilds it from its mempool, requests missing transactions once, and falls back to
 the full block if reconstruction fails or times out. It still validates the block
 fully. Other peers retain ordinary full-block relay.
+No more than three peers are selected to send high-bandwidth compact announcements.
+A demoted source retains its slot until the disabling write finishes; a failed
+connection releases its slot without waiting for transport shutdown.
 
 End-to-end Mainnet propagation benefits have not been measured. Negotiation uses
 service bit 16 (`NODE_COMPACT_BLOCKS`), assigned by the
