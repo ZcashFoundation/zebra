@@ -31,7 +31,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 use zebra_db::{
-    chain::BLOCK_INFO,
+    chain::{BLOCK_INFO, SNAPSHOT_BASE},
     spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
     sync_meta::SYNC_META_BY_HEIGHT,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
@@ -138,6 +138,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Spentness hints
     SPENTNESS_JOURNAL,
     SPENTNESS_ARTIFACT,
+    // Snapshot sync. Always registered, and empty unless the database was imported from a
+    // state snapshot.
+    SNAPSHOT_BASE,
 ];
 
 /// The finalized part of the chain state, stored in the db.

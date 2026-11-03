@@ -163,3 +163,35 @@ fn sync_metadata_round_trips_with_cumulative_output_count() {
     extended.extend_from_slice(&[0xFF; 8]);
     assert_eq!(SyncMetadata::from_bytes(&extended), metadata);
 }
+
+/// The snapshot base marker round-trips through its fixed-width disk encoding.
+#[test]
+fn snapshot_base_round_trips_through_disk_format() {
+    let _init_guard = zebra_test::init();
+
+    let base = SnapshotBase {
+        window_start: Height(3_519_757),
+        height: Height(3_522_060),
+        block_hash: block::Hash([0x11; 32]),
+        manifest: ObjectHash([0x22; 32]),
+        deferred_checks: SnapshotBase::DEFERRED_BLOCK_HASH
+            | SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS,
+    };
+
+    let bytes = base.as_bytes();
+    assert_eq!(bytes.len(), SNAPSHOT_BASE_DISK_BYTES);
+    // Heights are 3-byte big-endian, as everywhere else in the database.
+    assert_eq!(&bytes[..3], Height(3_519_757).as_bytes());
+    assert_eq!(&bytes[3..6], Height(3_522_060).as_bytes());
+    assert_eq!(&bytes[6..38], [0x11; 32]);
+    assert_eq!(&bytes[38..70], [0x22; 32]);
+    assert_eq!(bytes[70], 0b11);
+
+    assert_eq!(SnapshotBase::from_bytes(bytes), base);
+    assert!(base.has_deferred(SnapshotBase::DEFERRED_BLOCK_HASH));
+    assert!(!SnapshotBase {
+        deferred_checks: 0,
+        ..base
+    }
+    .has_deferred(SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS));
+}

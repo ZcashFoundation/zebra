@@ -125,3 +125,54 @@ fn empty_upgrade_records_the_running_spending_index_layout() {
         Some(running_version)
     );
 }
+
+/// A non-empty database in the previous minor format is marked with the snapshot base format
+/// once it is opened, because the format change registers the 30.1.0 upgrade.
+#[test]
+fn existing_database_is_marked_with_the_snapshot_base_format() {
+    use std::sync::Arc;
+
+    use crate::CheckpointVerifiedBlock;
+    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+
+    let _guard = zebra_test::init();
+    let (_cache, mut state) = state();
+    let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    state
+        .commit_finalized_direct(
+            CheckpointVerifiedBlock::from(genesis).into(),
+            None,
+            "snapshot base format test",
+        )
+        .unwrap();
+
+    let running_version = state.db.format_version_in_code();
+    assert_eq!(
+        (
+            running_version.major,
+            running_version.minor,
+            running_version.patch
+        ),
+        (30, 1, 0)
+    );
+    let mut disk_version = Version::new(30, 0, 0);
+    disk_version.build = running_version.build.clone();
+    state
+        .db
+        .update_format_version_on_disk(&disk_version)
+        .unwrap();
+
+    let change = DbFormatChange::open_database(&running_version, Some(disk_version));
+    assert!(change.is_upgrade());
+    let (_sender, receiver) = bounded(1);
+    change
+        .run_format_change_or_check(&state.db, Some(Height(0)), &receiver)
+        .unwrap();
+
+    assert_eq!(
+        state.db.format_version_on_disk().unwrap(),
+        Some(running_version)
+    );
+}

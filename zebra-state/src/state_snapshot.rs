@@ -3,7 +3,8 @@
 //!
 //! - [`format`] defines the manifest and the piece records;
 //! - [`store`] keeps the verified objects on disk, by hash;
-//! - [`export`] writes a snapshot from a finalized database.
+//! - [`export`] writes a snapshot from a finalized database;
+//! - [`import`] builds a finalized database from verified pieces.
 
 use std::{io, path::PathBuf};
 
@@ -16,6 +17,7 @@ use crate::{BoxError, StateInitError};
 
 pub mod export;
 pub mod format;
+pub mod import;
 pub mod store;
 
 /// Where a snapshot-imported database's history starts, and what it was
