@@ -9,6 +9,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height},
     parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
     state_snapshot::ObjectHash,
@@ -30,6 +31,9 @@ pub(crate) const RETENTION: u32 = MAX_BLOCK_REORG_HEIGHT + 1;
 
 /// The manifest hash every test marker carries.
 pub(crate) const MANIFEST: ObjectHash = ObjectHash([0x5a; 32]);
+
+/// The value of every test coinbase output, in zatoshis.
+pub(crate) const COINBASE_VALUE: i64 = 1_000;
 
 /// The coinbase transaction kind of a test block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,22 +83,54 @@ pub(crate) fn open(config: &Config) -> Result<FinalizedState, crate::StateInitEr
     Ok(state)
 }
 
-/// Returns a coinbase transaction of `kind` for `height`.
+/// Returns a coinbase transaction of `kind` for `height`, paying [`COINBASE_VALUE`] to a
+/// pay-to-public-key-hash address so later blocks can spend it.
 fn coinbase(height: Height, kind: Coinbase) -> Arc<Transaction> {
     let input = transparent::Input::Coinbase {
         height,
         data: vec![0],
         sequence: u32::MAX,
     };
+    let output = transparent::Output {
+        value: Amount::try_from(COINBASE_VALUE).expect("a small positive amount"),
+        lock_script: transparent::Script::new(&[
+            0x76, 0xa9, 0x14, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+            0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x88, 0xac,
+        ]),
+    };
     match kind {
         Coinbase::Branched => Arc::new(Transaction::test_v5(
             NetworkUpgrade::current(&network(), height),
             vec![input],
-            vec![],
+            vec![output],
             LockTime::unlocked(),
             height,
         )),
     }
+}
+
+/// Returns a transaction spending the coinbase output of the block at `height`, with no outputs.
+pub(crate) fn spend_coinbase_of(db: &ZebraDb, height: Height, expiry: Height) -> Arc<Transaction> {
+    let coinbase = db
+        .block(height.into())
+        .expect("the spent block has a body")
+        .expect("the spent block is in the chain")
+        .transactions[0]
+        .clone();
+    Arc::new(Transaction::test_v5(
+        NetworkUpgrade::current(&network(), expiry),
+        vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: coinbase.hash(),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[]),
+            sequence: 0,
+        }],
+        vec![],
+        LockTime::unlocked(),
+        expiry,
+    ))
 }
 
 /// Returns a child of `parent` whose commitment covers the history tree root `root`, with a

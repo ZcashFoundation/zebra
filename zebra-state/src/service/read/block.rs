@@ -275,6 +275,15 @@ where
             if known_transaction(chain, db, parent_hash) {
                 return Ok(None);
             }
+            // A database imported from a state snapshot indexes only the transactions below
+            // its window that still have unspent outputs, so a fully spent parent is history
+            // the snapshot never carried, not a reorg (DESIGN §7).
+            if let Some(height) = block
+                .coinbase_height()
+                .filter(|_| db.snapshot_base().is_some())
+            {
+                return Err(BlockReadError::BlockBodyUnavailable { height });
+            }
             continue;
         };
         let from_coinbase = parent_tx.is_coinbase();

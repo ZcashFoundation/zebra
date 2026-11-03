@@ -1,11 +1,20 @@
 //! A finalized database imported from a state snapshot: history starts at the snapshot window.
 
-use zebra_chain::block::{self, Height};
+use std::{collections::HashMap, sync::Arc};
+
+use zebra_chain::{
+    block::{self, Height},
+    transaction,
+};
 
 use super::super::{DiskWriteBatch, FinalizedState, TransactionLocation, WriteDisk};
 use crate::{
-    tests::snapshot_db::{config, open, snapshot_state, write_marker, Coinbase, RETENTION},
-    HistoryCapabilities, SnapshotBase, StateInitError,
+    service::{non_finalized_state::Chain, read},
+    tests::snapshot_db::{
+        append, carve, commit_child, config, open, snapshot_state, spend_coinbase_of, write_marker,
+        Coinbase, RETENTION,
+    },
+    BlockReadError, HistoryCapabilities, SnapshotBase, StateInitError,
 };
 
 /// The snapshot height `H` of the test chains.
@@ -93,6 +102,79 @@ fn snapshot_marker_must_be_consistent_with_the_stored_chain() {
             "{damaged:?} must be rejected"
         );
     }
+}
+
+#[test]
+fn reads_below_the_snapshot_window_are_unavailable() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut state = open(&config(cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    append(&mut state, TIP - 1, Coinbase::Branched);
+    let spent_height = Height(WINDOW_START - 2);
+    let spent = state.db.block(spent_height.into()).unwrap().unwrap();
+    let spend = spend_coinbase_of(&state.db, spent_height, Height(TIP));
+    let spending = commit_child(&mut state, Coinbase::Branched, vec![spend]);
+    carve(&state, Height(WINDOW_START), 0);
+
+    // Blocks below the window are unknown, and their indexed transactions are unavailable.
+    assert_eq!(state.db.block(spent_height.into()).unwrap(), None);
+    assert_eq!(state.db.block(spent.hash().into()).unwrap(), None);
+    assert_eq!(
+        state
+            .db
+            .transaction(spent.transactions[0].hash())
+            .unwrap_err(),
+        BlockReadError::BlockBodyUnavailable {
+            height: spent_height
+        }
+    );
+    assert_eq!(
+        state.db.transaction(transaction::Hash([0xff; 32])).unwrap(),
+        None
+    );
+    assert_eq!(
+        state
+            .db
+            .transaction(spending.transactions[0].hash())
+            .unwrap()
+            .unwrap()
+            .1,
+        Height(TIP)
+    );
+
+    // A window block spending below the window has no readable spent outputs, whether the
+    // parent is still indexed because another of its outputs is unspent ...
+    let no_chain = None::<Arc<Chain>>;
+    assert_eq!(
+        read::spent_outputs_for_block(no_chain.clone(), &state.db, spending.hash().into())
+            .unwrap_err(),
+        BlockReadError::BlockBodyUnavailable {
+            height: spent_height
+        }
+    );
+    // ... or dropped from the index because none of them is.
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(
+        &state.db.cf_handle("tx_loc_by_hash").unwrap(),
+        spent.transactions[0].hash(),
+    );
+    state.db.write_batch(batch).unwrap();
+    assert_eq!(
+        read::spent_outputs_for_block(no_chain.clone(), &state.db, spending.hash().into())
+            .unwrap_err(),
+        BlockReadError::BlockBodyUnavailable {
+            height: Height(TIP)
+        }
+    );
+
+    // Without a marker, an unknown parent is a reorg or a lagging view, and is skipped.
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(&state.db.cf_handle("snapshot_base").unwrap(), ());
+    state.db.write_batch(batch).unwrap();
+    assert_eq!(
+        read::spent_outputs_for_block(no_chain, &state.db, spending.hash().into()).unwrap(),
+        Some(HashMap::new())
+    );
 }
 
 #[test]
