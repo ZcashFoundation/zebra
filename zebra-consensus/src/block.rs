@@ -839,8 +839,10 @@ where
             });
 
             // Cache hits already bind the Merkle root through exact bytes or the proposal key.
-            // On misses, bind the body before announcing early work and reuse these hashes below.
-            let transaction_hashes = if cached.is_none() {
+            // On misses, bind the body before announcing early work and reuse these hashes below,
+            // and compute the block's memory charge once, off the async runtime and the state's
+            // block writer, so the state reuses it.
+            let transaction_hashes_and_charge = if cached.is_none() {
                 let block = block.clone();
                 let network = network.clone();
                 Some(run_blocking(blocking_checks, move || {
@@ -855,7 +857,8 @@ where
                     }
                     let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
                     check::merkle_root_validity(&network, &block, &hashes)?;
-                    Ok::<_, VerifyBlockError>(hashes)
+                    let charge = zs::block_retained_charge(&block, &hashes);
+                    Ok::<_, VerifyBlockError>((hashes, charge))
                 }).await?)
             } else {
                 None
@@ -978,8 +981,8 @@ where
                 };
             }
 
-            let transaction_hashes =
-                transaction_hashes.expect("cache hits return after committing the block");
+            let (transaction_hashes, retained_charge) = transaction_hashes_and_charge
+                .expect("cache hits return after committing the block");
 
 
             // Now do the slower checks
@@ -1179,7 +1182,7 @@ where
                 new_outputs,
                 transaction_hashes,
                 received_time: Some(received_time),
-                retained_charge: None,
+                retained_charge: Some(retained_charge),
             };
 
             // Return early for proposal requests.
