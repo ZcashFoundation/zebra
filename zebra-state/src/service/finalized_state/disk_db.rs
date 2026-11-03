@@ -72,6 +72,13 @@ pub type DB = rocksdb::DBWithThreadMode<DBThreadMode>;
 /// One mebibyte, the unit of RocksDB's memory settings.
 const MIB: u64 = 1024 * 1024;
 
+/// Converts a memory size from the limits into the `usize` RocksDB's setters take.
+///
+/// A size this process cannot address is no bound at all, so it saturates.
+fn memory_size(bytes: u64) -> usize {
+    usize::try_from(bytes).unwrap_or(usize::MAX)
+}
+
 /// Memory bounds for the finalized state's RocksDB database.
 ///
 /// zebrad derives these bounds from its memory plan and passes them when the state is opened.
@@ -1571,8 +1578,142 @@ impl DiskDb {
     }
 
     /// Returns the memory limits this database was opened with.
+    ///
+    /// [`DiskDb::apply_memory_limits`] resizes the database's memory objects in place without
+    /// changing this value.
     pub fn limits(&self) -> &RocksDbMemoryLimits {
         &self.database_options.limits
+    }
+
+    /// Applies `limits` to the open database, where RocksDB allows a live change.
+    ///
+    /// zebrad calls this when its memory profile changes, for example when the initial sync
+    /// reaches full verification and the sync pipeline's share moves to the database. Every
+    /// change goes through RocksDB's own synchronisation; Zebra holds no lock.
+    ///
+    /// What changes live:
+    /// - the memtable size, memtable count and level 0 compaction trigger of every column
+    ///   family (the shape `write_buffer_total` derives), on a read-write database opened with
+    ///   a write buffer total;
+    /// - the write buffer manager's total (`write_buffer_total`), when the database was opened
+    ///   with a manager;
+    /// - the block cache capacity (`block_cache_bytes`), when the database was opened with a
+    ///   cache of its own.
+    ///
+    /// What cannot change after the database is opened, and is logged and skipped:
+    /// - adding or removing the write buffer manager or the shared block cache;
+    /// - the bounded memtable shape, on a database opened without a write buffer total:
+    ///   `min_write_buffer_number_to_merge` is an immutable RocksDB option, and with today's 2 a
+    ///   flush of the smaller memtables would wait for two immutable memtables while writes are
+    ///   delayed at three;
+    /// - `charge_index_and_filter_cfs`: table factories are fixed when a column family opens;
+    /// - `max_background_jobs`: RocksDB can change it live, but its C API (and so the Rust
+    ///   binding) exposes no `SetDBOptions`;
+    /// - column family options on a read-only secondary, which RocksDB rejects;
+    /// - `max_open_files`, which the limits never change.
+    ///
+    /// Every skipped change applies when the database is reopened under the new limits.
+    /// [`DiskDb::limits`] keeps returning the limits the database was opened with.
+    ///
+    /// This is blocking disk I/O: RocksDB rewrites its OPTIONS file after each column family's
+    /// change. Async callers use
+    /// [`ZebraDb::spawn_apply_memory_limits`](super::ZebraDb::spawn_apply_memory_limits).
+    ///
+    /// # Errors
+    ///
+    /// If RocksDB rejects a column family option change. The column families change first, one
+    /// at a time, so after an error the write buffer manager and the block cache keep their
+    /// sizes, the column families before the failing one have the new memtable shape, and the
+    /// others keep the old one. Applying the same limits again completes the change.
+    pub fn apply_memory_limits(&self, limits: &RocksDbMemoryLimits) -> Result<(), rocksdb::Error> {
+        let opened = &self.database_options;
+
+        // Column family changes are the only step that can fail, so they go first.
+        if let Some(shape) = limits.memtable_shape() {
+            if self.mode.is_read_only() {
+                debug!("a read-only secondary cannot change its column family options");
+            } else if opened.limits.memtable_shape().is_some() {
+                let write_buffer_size = shape.write_buffer_size.to_string();
+                let max_write_buffer_number = shape.max_write_buffer_number.to_string();
+                let level0_file_num_compaction_trigger =
+                    shape.level0_file_num_compaction_trigger.to_string();
+
+                for cf_name in self.column_family_names() {
+                    let Some(cf) = self.db.cf_handle(cf_name) else {
+                        continue;
+                    };
+
+                    self.db.set_options_cf(
+                        &cf,
+                        &[
+                            ("write_buffer_size", &write_buffer_size),
+                            ("max_write_buffer_number", &max_write_buffer_number),
+                            (
+                                "level0_file_num_compaction_trigger",
+                                &level0_file_num_compaction_trigger,
+                            ),
+                        ],
+                    )?;
+                }
+            }
+            // Otherwise the database was opened without a write buffer total, which the write
+            // buffer manager warning below logs.
+        }
+
+        match (&opened.write_buffer_manager, limits.write_buffer_total) {
+            (Some(manager), Some(total)) => manager.set_buffer_size(memory_size(total)),
+            (None, Some(total)) => warn!(
+                ?total,
+                "the database was opened without a write buffer manager, so its memtables keep \
+                 today's shape and stay unbounded until it is reopened under the new limits"
+            ),
+            (Some(manager), None) => warn!(
+                total = manager.get_buffer_size(),
+                "a write buffer manager cannot be removed from an open database, \
+                 keeping its current total"
+            ),
+            (None, None) => {}
+        }
+
+        match (&opened.block_cache, limits.block_cache_bytes) {
+            (Some(cache), Some(capacity)) => {
+                // `set_capacity` takes the handle by `&mut`, but every handle points at the same
+                // RocksDB cache, so a clone of the shared handle resizes the shared cache.
+                let mut cache = cache.clone();
+                cache.set_capacity(memory_size(capacity));
+            }
+            (None, Some(capacity)) => warn!(
+                ?capacity,
+                "the database was opened with RocksDB's default block cache, \
+                 which cannot be resized"
+            ),
+            (Some(_), None) => warn!(
+                "a block cache cannot be removed from an open database, \
+                 keeping its current capacity"
+            ),
+            (None, None) => {}
+        }
+
+        if limits.charge_index_and_filter_cfs != opened.limits.charge_index_and_filter_cfs {
+            warn!(
+                opened = ?opened.limits.charge_index_and_filter_cfs,
+                requested = ?limits.charge_index_and_filter_cfs,
+                "index and filter block charging is fixed when the database opens, \
+                 keeping the column families it was opened with"
+            );
+        }
+
+        if limits.effective_max_background_jobs() != opened.limits.effective_max_background_jobs() {
+            debug!(
+                opened = ?opened.limits.effective_max_background_jobs(),
+                requested = ?limits.effective_max_background_jobs(),
+                "the background thread count is fixed when the database opens"
+            );
+        }
+
+        info!(?limits, "applied new memory limits to the state database");
+
+        Ok(())
     }
 
     /// Returns the `Path` where the files used by this database are located.
@@ -1928,10 +2069,7 @@ impl DiskDb {
             let capacity = limits
                 .block_cache_bytes
                 .unwrap_or(Self::DEFAULT_BLOCK_CACHE_BYTES);
-            Cache::new_lru_cache(
-                usize::try_from(capacity)
-                    .expect("a block cache capacity is a size of this process's memory"),
-            )
+            Cache::new_lru_cache(memory_size(capacity))
         });
         let block_based_opts = Self::block_based_options(block_cache.as_ref(), false);
 
@@ -1952,10 +2090,7 @@ impl DiskDb {
         // column families. The file and level sizes set above stay unchanged, so the layout of
         // level 1 and below is identical.
         if let Some(shape) = limits.memtable_shape() {
-            opts.set_write_buffer_size(
-                usize::try_from(shape.write_buffer_size)
-                    .expect("a memtable size is a size of this process's memory"),
-            );
+            opts.set_write_buffer_size(memory_size(shape.write_buffer_size));
             opts.set_min_write_buffer_number_to_merge(shape.min_write_buffer_number_to_merge);
             opts.set_max_write_buffer_number(shape.max_write_buffer_number);
             opts.set_level_zero_file_num_compaction_trigger(
@@ -1965,13 +2100,9 @@ impl DiskDb {
 
         // The manager flushes instead of stalling writers: a stall would block the single
         // write queue, which is the state writer thread.
-        let write_buffer_manager = limits.write_buffer_total.map(|total| {
-            WriteBufferManager::new_write_buffer_manager(
-                usize::try_from(total)
-                    .expect("a write buffer total is a size of this process's memory"),
-                false,
-            )
-        });
+        let write_buffer_manager = limits
+            .write_buffer_total
+            .map(|total| WriteBufferManager::new_write_buffer_manager(memory_size(total), false));
         if let Some(write_buffer_manager) = &write_buffer_manager {
             opts.set_write_buffer_manager(write_buffer_manager);
         }

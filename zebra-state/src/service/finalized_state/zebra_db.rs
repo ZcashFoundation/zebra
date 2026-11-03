@@ -594,6 +594,43 @@ impl ZebraDb {
     pub fn size(&self) -> u64 {
         self.db.size()
     }
+
+    /// Returns the memory limits this database was opened with.
+    pub fn memory_limits(&self) -> &RocksDbMemoryLimits {
+        self.db.limits()
+    }
+
+    /// Applies `limits` to the open database, where RocksDB allows a live change.
+    ///
+    /// See [`DiskDb::apply_memory_limits`] for what changes live and what is fixed at open.
+    /// This is blocking disk I/O, so async callers use
+    /// [`ZebraDb::spawn_apply_memory_limits`].
+    pub fn apply_memory_limits(&self, limits: &RocksDbMemoryLimits) -> Result<(), rocksdb::Error> {
+        self.db.apply_memory_limits(limits)
+    }
+
+    /// Spawns a blocking task to apply `limits` to the open database, where RocksDB allows a
+    /// live change.
+    ///
+    /// See [`DiskDb::apply_memory_limits`] for what changes live and what is fixed at open.
+    pub async fn spawn_apply_memory_limits(
+        &self,
+        limits: RocksDbMemoryLimits,
+    ) -> Result<(), rocksdb::Error> {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = db.apply_memory_limits(&limits);
+            if let Err(apply_error) = &result {
+                tracing::warn!(
+                    ?apply_error,
+                    "failed to apply new state database memory limits"
+                );
+            }
+            result
+        })
+        .wait_for_panics()
+        .await
+    }
 }
 
 impl Drop for ZebraDb {
