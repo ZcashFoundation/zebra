@@ -22,7 +22,7 @@ use crate::{
     state_snapshot::{
         format::{ComponentId, PieceManifest, PieceWriter},
         import::{
-            build_piece_sst, import_dir, import_state_snapshot, is_singleton,
+            build_piece_sst, decode_history_tree, import_dir, import_state_snapshot, is_singleton,
             records::{self, RawHistoryTree},
             sst_path, window_start, ImportCheck, SstMetadata,
         },
@@ -110,6 +110,19 @@ fn import_round_trip() {
     assert_eq!(
         state.db.address_balance(&fixture::address(3)),
         chain.state.db.address_balance(&fixture::address(3)),
+    );
+    assert!(
+        chain
+            .state
+            .db
+            .transaction_hashes_for_block(Height(3).into())
+            .is_some(),
+        "the source has the complete block"
+    );
+    assert_eq!(
+        state.db.transaction_hashes_for_block(Height(3).into()),
+        None,
+        "a UTXO-parent index row is not a complete below-window block"
     );
 
     let successor = fixture::successor(&chain);
@@ -978,9 +991,59 @@ fn history_tree_with_overflowing_work_is_refused() {
         entry.inner[work..work + 32].fill(0xff);
     }
     let tampered = bincode::DefaultOptions::new().serialize(&raw).unwrap();
+    assert_early_history_tree_refusal(&chain, &tampered, "total work");
 
     let result = import_tampered(&chain, |records| {
         *record(records, ComponentId::HistoryTree, &[]) = tampered;
     });
     assert_eq!(refused_by(&result), ImportCheck::HistoryTree);
+}
+
+/// The early history-tree decode used by bootstrap rejects unsafe peaks before rebuilding them:
+/// no peaks, and Sapling or Orchard transaction counts that overflow when peaks are combined.
+#[test]
+fn early_history_tree_decode_rejects_unsafe_peaks() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let honest = fixture::singleton(&chain.state, ComponentId::HistoryTree);
+
+    let mut empty: RawHistoryTree = bincode::DefaultOptions::new().deserialize(&honest).unwrap();
+    empty.peaks.clear();
+    let empty = bincode::DefaultOptions::new().serialize(&empty).unwrap();
+    assert_early_history_tree_refusal(&chain, &empty, "no peaks");
+
+    for orchard in [false, true] {
+        let mut raw: RawHistoryTree = bincode::DefaultOptions::new().deserialize(&honest).unwrap();
+        assert!(raw.peaks.len() >= 2, "the tree has peaks to combine");
+        for entry in raw.peaks.values_mut() {
+            let header = if entry.inner[0] == 1 { 1 } else { 1 + 2 * 4 };
+            let branch_id = zebra_chain::parameters::NetworkUpgrade::Nu5
+                .branch_id()
+                .unwrap()
+                .into();
+            let mut data =
+                zcash_history::NodeDataV2::read(branch_id, &mut &entry.inner[header..]).unwrap();
+            if orchard {
+                data.orchard_tx = u64::MAX;
+            } else {
+                data.v1.sapling_tx = u64::MAX;
+            }
+            let mut bytes = Vec::new();
+            data.write(&mut bytes).unwrap();
+            entry.inner[header..header + bytes.len()].copy_from_slice(&bytes);
+        }
+        let tampered = bincode::DefaultOptions::new().serialize(&raw).unwrap();
+        assert_early_history_tree_refusal(&chain, &tampered, "transaction counts");
+    }
+}
+
+/// Writes `tree` as the early bootstrap history-tree piece and checks its decode error.
+fn assert_early_history_tree_refusal(chain: &fixture::Chain, tree: &[u8], expected: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = piece_file(dir.path(), &[(Vec::new(), tree.to_vec())]);
+    let result = decode_history_tree(&path, &chain.network);
+    assert!(
+        matches!(result, Err(SnapshotError::InvalidHistoryTree(ref detail)) if detail.contains(expected)),
+        "expected an early decode refusal containing {expected:?}, got {result:?}"
+    );
 }

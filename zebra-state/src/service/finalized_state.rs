@@ -74,9 +74,11 @@ pub use zebra_db::{
 };
 
 // The state snapshot importer writes and checks a database below this module's API.
+#[cfg(test)]
+pub(crate) use disk_format::chain::RawHistoryTree;
 pub(crate) use disk_format::{
     block::{HEIGHT_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES},
-    chain::HistoryTreeParts,
+    chain::{check_history_tree_peaks, HistoryTreeParts},
     transparent::OUTPUT_LOCATION_DISK_BYTES,
     upgrade::{CancelFormatChange, DbFormatChange},
 };

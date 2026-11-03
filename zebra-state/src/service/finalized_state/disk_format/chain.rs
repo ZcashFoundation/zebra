@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 
+use ::zcash_history::{NodeData, NodeDataV2, NodeDataV3, MAX_ENTRY_SIZE};
 use bincode::Options;
+use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 use zebra_chain::{
@@ -115,13 +117,15 @@ impl HistoryTreeParts {
             ));
         }
 
-        if NetworkUpgrade::current(network, parts.current_height) < NetworkUpgrade::Heartwood {
+        let upgrade = NetworkUpgrade::current(network, parts.current_height);
+        if upgrade < NetworkUpgrade::Heartwood {
             return Err(format!(
                 "the history tree ends at height {}, before Heartwood",
                 parts.current_height.0
             ));
         }
 
+        check_history_tree_peaks(bytes, upgrade)?;
         parts
             .with_network(network)
             .map_err(|error| format!("the history tree does not rebuild from its peaks: {error}"))
@@ -177,6 +181,103 @@ impl IntoDisk for HistoryTreeParts {
             .serialize(self)
             .expect("serialization to vec doesn't fail")
     }
+}
+
+/// A stored history tree, with its peaks as bytes: the layout of
+/// [`HistoryTreeParts`], whose fields are private.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct RawHistoryTree {
+    network_kind: NetworkKind,
+    size: u32,
+    pub(crate) peaks: BTreeMap<u32, RawEntry>,
+    current_height: Height,
+}
+
+/// A stored history tree entry: its kind, then the node data of the tree's version.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct RawEntry {
+    #[serde(with = "BigArray")]
+    pub(crate) inner: [u8; MAX_ENTRY_SIZE],
+}
+
+/// Checks that the history tree `bytes` rebuilds without panicking: it has peaks, every peak is an
+/// entry of the tree version of `upgrade`, and the work and transaction counts added while combining
+/// them do not overflow.
+pub(crate) fn check_history_tree_peaks(
+    bytes: &[u8],
+    upgrade: NetworkUpgrade,
+) -> Result<(), String> {
+    let raw: RawHistoryTree = bincode::DefaultOptions::new()
+        .deserialize(bytes)
+        .map_err(|error| format!("invalid history tree: {error}"))?;
+    let branch_id = upgrade
+        .branch_id()
+        .ok_or_else(|| format!("{upgrade:?} has no history tree"))?;
+    let overflow = |what| format!("the history tree's {what} overflow when its peaks are combined");
+
+    let mut peaks = raw
+        .peaks
+        .values()
+        .map(|entry| read_peak(upgrade, branch_id.into(), &entry.inner));
+    let (first, [orchard, ironwood]) = peaks
+        .next()
+        .ok_or_else(|| "the history tree has no peaks".to_string())??;
+    let mut work = first.subtree_total_work;
+    let mut transactions = [first.sapling_tx, orchard, ironwood];
+    for peak in peaks {
+        let (data, [orchard, ironwood]) = peak?;
+        work = work
+            .checked_add(data.subtree_total_work)
+            .ok_or_else(|| overflow("total work"))?;
+        for (total, count) in transactions
+            .iter_mut()
+            .zip([data.sapling_tx, orchard, ironwood])
+        {
+            *total = total
+                .checked_add(count)
+                .ok_or_else(|| overflow("transaction counts"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Parses a stored history tree peak as an entry of the tree version of `upgrade`, and returns its
+/// node data before Orchard, with its Orchard and Ironwood transaction counts.
+fn read_peak(
+    upgrade: NetworkUpgrade,
+    branch_id: u32,
+    entry: &[u8],
+) -> Result<(NodeData, [u64; 2]), String> {
+    use NetworkUpgrade::*;
+
+    // An entry is its kind, then its node data: a leaf, or a node with the indexes of its two children.
+    let header = match entry.first().copied() {
+        Some(1) => 1,
+        Some(0) => 1 + 2 * 4,
+        _ => return Err("a history tree peak has an unknown entry kind".to_string()),
+    };
+    let mut reader = entry
+        .get(header..)
+        .ok_or_else(|| "a history tree peak is truncated".to_string())?;
+    let invalid = |error| format!("invalid history tree peak: {error}");
+    Ok(match upgrade {
+        Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom => {
+            return Err(format!("{upgrade:?} has no history tree"))
+        }
+        Heartwood | Canopy => (
+            NodeData::read(branch_id, &mut reader).map_err(invalid)?,
+            [0, 0],
+        ),
+        Nu5 | Nu6 | Nu6_1 | Nu6_2 => {
+            let data = NodeDataV2::read(branch_id, &mut reader).map_err(invalid)?;
+            (data.v1, [data.orchard_tx, 0])
+        }
+        // NU6.3 and every later upgrade use V3 trees, as `NonEmptyHistoryTree::from_cache` does.
+        _ => {
+            let data = NodeDataV3::read(branch_id, &mut reader).map_err(invalid)?;
+            (data.v2.v1, [data.v2.orchard_tx, data.ironwood_tx])
+        }
+    })
 }
 
 /// The width of a history-tree [`zcash_history::Entry`] as serialized by database formats written
