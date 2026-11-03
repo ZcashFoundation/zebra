@@ -102,6 +102,10 @@ pub enum SnapshotError {
     #[error("opening the state failed: {0}")]
     StateOpen(#[from] StateInitError),
 
+    /// The state's history capabilities could not be read.
+    #[error("reading the state's history capabilities failed: {0}")]
+    HistoryRead(#[source] StateInitError),
+
     /// A component's export stopped because another component failed, whose
     /// error is reported instead.
     #[error("the export was cancelled because another component failed")]
