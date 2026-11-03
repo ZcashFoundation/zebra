@@ -62,16 +62,6 @@ const IBD_SURPLUS_TO_ROCKSDB_PERCENT: u64 = 60;
 /// when the node mines or serves block templates (design §2.3 step 3).
 const MINING_SHARE_PERCENT: u64 = 5;
 
-/// The network share per peer in the initial target size.
-const NETWORK_SHARE_PER_PEER_BYTES: u64 = 8 * MIB;
-
-/// The smallest initial peer target size a plan derives.
-const MIN_PEERSET_INITIAL_TARGET_SIZE: u64 = 8;
-
-/// The network share at and above which the QUIC windows keep their default sizes; below it,
-/// the plan uses [`zebra_network::QuicWindows::compact`].
-const QUIC_DEFAULT_WINDOWS_MIN_SHARE_BYTES: u64 = 256 * MIB;
-
 /// The mempool transaction cost units per two and a half bytes of the mempool share: in-memory
 /// transactions take 1.5 to 2.5 times their serialized size (design §2.3, R1 §2.3).
 const MEMPOOL_COST_PER_SHARE_BYTE_NUMERATOR: u64 = 2;
@@ -224,8 +214,8 @@ impl Component {
         }
     }
 
-    /// The least memory the component needs in `profile`, in bytes (design §2.3).
-    pub fn floor(self, profile: Profile) -> u64 {
+    /// The least memory the component needs in `profile` with `inputs`, in bytes (design §2.3).
+    pub fn floor(self, profile: Profile, inputs: &PlanInputs) -> u64 {
         match (self, profile) {
             (Self::RocksDb, _) => {
                 ROCKSDB_PINNED_METADATA_BYTES
@@ -238,7 +228,16 @@ impl Component {
             }
             (Self::Pipeline, Profile::TipOnly) => TIP_ONLY_PIPELINE_FLOOR_BYTES,
             (Self::NonFinalized, _) => 64 * MIB,
-            (Self::Network, _) => 32 * MIB,
+            // One peer target with version 2 enabled, which is also conservative without it, and
+            // the checkpoint sync engine's outbound version 2 connections when it runs.
+            (Self::Network, _) => {
+                let v2 = if inputs.v2_checkpoint_sync {
+                    zebra_network::V2Endpoint::CheckpointSync
+                } else {
+                    zebra_network::V2Endpoint::Enabled
+                };
+                zebra_network::MemoryLimits::minimum_budget_bytes(v2).div_ceil(MIB) * MIB
+            }
             // The memory of a 10 million cost mempool.
             (Self::Mempool, _) => 25 * MIB,
             (Self::Rpc, _) => 0,
@@ -278,9 +277,9 @@ impl Component {
 pub struct ComponentShares([u64; 6]);
 
 impl ComponentShares {
-    /// Returns the shares where every component gets its floor in `profile`.
-    pub fn floors(profile: Profile) -> Self {
-        Self(Component::ALL.map(|component| component.floor(profile)))
+    /// Returns the shares where every component gets its floor in `profile` with `inputs`.
+    pub fn floors(profile: Profile, inputs: &PlanInputs) -> Self {
+        Self(Component::ALL.map(|component| component.floor(profile, inputs)))
     }
 
     /// Returns `component`'s share, in bytes.
@@ -326,9 +325,31 @@ pub struct PlanInputs {
     /// pipeline's share to the RPC proposal cache.
     pub mining: bool,
 
+    /// Whether the node opens a version 2 endpoint, which adds independent connection limits and
+    /// their request buffers.
+    pub v2_enabled: bool,
+
+    /// Whether the node runs the version 2 checkpoint sync engine, which needs at least
+    /// [`zebra_network::MIN_V2_SYNC_OUTBOUND_CONNECTIONS`] outbound version 2 connections, so the
+    /// network share pays for them even at the smallest peer target.
+    pub v2_checkpoint_sync: bool,
+
     /// The number of blocks the syncer verifies at once after the last checkpoint, which with
     /// `ewma_charge` sizes the `TipOnly` sync pipeline.
     pub full_verify_concurrency_limit: usize,
+}
+
+impl PlanInputs {
+    /// The version 2 connections the network's limits allow: none without an endpoint, and at
+    /// least the checkpoint sync engine's outbound connections when it runs, like the network's
+    /// [`zebra_network::Config::v2_endpoint`].
+    pub fn network_v2_endpoint(&self) -> zebra_network::V2Endpoint {
+        match (self.v2_enabled, self.v2_checkpoint_sync) {
+            (false, _) => zebra_network::V2Endpoint::Disabled,
+            (true, false) => zebra_network::V2Endpoint::Enabled,
+            (true, true) => zebra_network::V2Endpoint::CheckpointSync,
+        }
+    }
 }
 
 impl Default for PlanInputs {
@@ -340,6 +361,8 @@ impl Default for PlanInputs {
             index_clone_factor: INDEX_CLONE_FACTOR,
             ewma_charge: None,
             mining: false,
+            v2_enabled: false,
+            v2_checkpoint_sync: false,
             full_verify_concurrency_limit: crate::components::sync::Config::default()
                 .full_verify_concurrency_limit,
         }
@@ -551,7 +574,12 @@ impl MemoryPlan {
     /// below the floors that the operator runs with anyway (`--unsafe-low-specs`, design §2.3
     /// step 5).
     pub fn clamped_to_floors(budget: u64, profile: Profile, inputs: &PlanInputs) -> Self {
-        Self::from_shares(budget, profile, inputs, ComponentShares::floors(profile))
+        Self::from_shares(
+            budget,
+            profile,
+            inputs,
+            ComponentShares::floors(profile, inputs),
+        )
     }
 
     /// Returns the smallest budget whose plan covers every floor of `profile`, in bytes.
@@ -559,7 +587,7 @@ impl MemoryPlan {
     /// Derived from the floors, the fixed floor and the slack, so that it changes with them:
     /// `ceil((Σ floors + fixed) / (1 − slack))` (design §2.2).
     pub fn min_budget(profile: Profile, inputs: &PlanInputs) -> u64 {
-        let needed = ComponentShares::floors(profile).total();
+        let needed = ComponentShares::floors(profile, inputs).total();
 
         // The components' memory never decreases as the budget grows, so the smallest budget
         // that covers the floors is found by bisection over every budget.
@@ -654,7 +682,7 @@ impl MemoryPlan {
             Profile::TipOnly => {
                 // The tip pipeline holds a lookahead of full-verification blocks, 32 MiB until
                 // the syncer has measured their charge (design §2.3 step 4).
-                let floor = Component::Pipeline.floor(profile);
+                let floor = Component::Pipeline.floor(profile, inputs);
                 let estimate = inputs.ewma_charge.map_or(floor, |charge| {
                     charge.saturating_mul(
                         u64::try_from(inputs.full_verify_concurrency_limit).unwrap_or(u64::MAX),
@@ -693,7 +721,7 @@ impl MemoryPlan {
         inputs: &PlanInputs,
     ) -> Result<ComponentShares, Shortfall> {
         let components_memory = Self::components_memory(budget, inputs);
-        let floors = ComponentShares::floors(profile);
+        let floors = ComponentShares::floors(profile, inputs);
         let nominal = Self::nominal_shares(components_memory, profile, inputs);
 
         if components_memory < floors.total() {
@@ -784,12 +812,6 @@ impl MemoryPlan {
             u64::try_from(default_state.queued_blocks_bytes).unwrap_or(u64::MAX),
         );
 
-        let peers = (network / NETWORK_SHARE_PER_PEER_BYTES).clamp(
-            MIN_PEERSET_INITIAL_TARGET_SIZE,
-            u64::try_from(zebra_network::constants::DEFAULT_PEERSET_INITIAL_TARGET_SIZE)
-                .expect("the default peer target is a small number"),
-        );
-
         let tx_cost_limit = mul_div_floor(
             shares.get(Component::Mempool),
             MEMPOOL_COST_PER_SHARE_BYTE_NUMERATOR,
@@ -816,16 +838,13 @@ impl MemoryPlan {
                 queued_blocks_bytes: usize::try_from(queued_blocks_bytes)
                     .expect("the queued blocks bound is at most the default, which is a usize"),
             },
-            network: zebra_network::MemoryLimits {
-                peerset_initial_target_size: Some(
-                    usize::try_from(peers).expect("the peer target is at most 25"),
-                ),
-                quic: if network >= QUIC_DEFAULT_WINDOWS_MIN_SHARE_BYTES {
-                    zebra_network::QuicWindows::default()
-                } else {
-                    zebra_network::QuicWindows::compact()
-                },
-            },
+            // Every version 2 node serves synchronization artifacts: `zebrad` gives it an object
+            // source, so it advertises `NODE_SYNC_ARTIFACTS` and uses the serving windows.
+            network: zebra_network::MemoryLimits::for_budget(
+                network,
+                inputs.network_v2_endpoint(),
+                inputs.v2_enabled,
+            ),
             sync: SyncMemoryLimits {
                 pipeline_bytes: Some(pipeline),
             },
@@ -870,7 +889,7 @@ fn mul_div_ceil(value: u64, numerator: u64, denominator: u64) -> u64 {
     u64::try_from(result).unwrap_or(u64::MAX)
 }
 
-/// Formats `bytes` as whole mebibytes, rounded up, with thousands separators: `"1,084 MiB"`.
+/// Formats `bytes` as whole mebibytes, rounded up, with thousands separators: `"1,113 MiB"`.
 pub fn mib_ceil(bytes: u64) -> String {
     format!("{} MiB", with_thousands_separators(bytes.div_ceil(MIB)))
 }

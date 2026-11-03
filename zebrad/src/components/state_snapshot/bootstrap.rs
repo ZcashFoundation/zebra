@@ -54,10 +54,9 @@ use zebra_state::{
 use crate::{application::user_agent, config::ZebradConfig, BoxError};
 
 use super::{
+    memory::MemoryLimits,
     progress::Stage,
-    scheduler::{
-        PieceDescriptor, PieceStore, Scheduler, SchedulerConfig, SchedulerError, VerifiedPiece,
-    },
+    scheduler::{PieceDescriptor, PieceStore, Scheduler, SchedulerError, VerifiedPiece},
 };
 
 #[cfg(test)]
@@ -303,6 +302,7 @@ pub async fn bootstrap(
     config: &ZebradConfig,
     commitment: StateSnapshotCommitment,
     peers: Vec<String>,
+    memory: &MemoryLimits,
 ) -> Result<(), BootstrapError> {
     let network = config.network.network.clone();
     let store = ArtifactStore::new(&config.state, &network);
@@ -313,7 +313,7 @@ pub async fn bootstrap(
     // removed, and only workspaces that no attempt holds are swept.
 
     // 2. Dial the bootstrap peers.
-    let addrs = resolve_peers(&peers).await;
+    let addrs = resolve_peers(&peers, memory.scheduler.max_peers).await;
     if addrs.is_empty() {
         return Err(BootstrapError::Aborted(format!(
             "none of the {} configured bootstrap peers resolved to an address",
@@ -353,6 +353,7 @@ pub async fn bootstrap(
             commitment,
             peers,
             connected_at,
+            memory,
         )
         .await;
 
@@ -464,6 +465,7 @@ impl PieceStore for AttemptStore {
 }
 
 /// Steps 3 to 7 of the flow, from the manifest to the renamed database.
+#[allow(clippy::too_many_arguments)]
 async fn run<S>(
     config: &ZebradConfig,
     network: &Network,
@@ -472,6 +474,7 @@ async fn run<S>(
     commitment: StateSnapshotCommitment,
     mut peers: Peers<S>,
     connected_at: Instant,
+    memory: &MemoryLimits,
 ) -> Result<(), BootstrapError>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -539,8 +542,15 @@ where
         descriptor: tree_piece,
         path: tree_path,
     };
-    let piece_paths =
-        download_and_build(peers, &manifest, attempt_store, temp_root, tree_piece).await?;
+    let piece_paths = download_and_build(
+        peers,
+        &manifest,
+        attempt_store,
+        temp_root,
+        tree_piece,
+        memory,
+    )
+    .await?;
 
     // 6. Import and check the database under this attempt's workspace. The
     // final rename is separate so cancellation can never leave the importer's
@@ -997,10 +1007,9 @@ async fn finish_install(
     Ok(())
 }
 
-/// Resolves the configured `host:port` strings, one address per IP, up to
-/// [`MAX_BOOTSTRAP_PEERS`]. Hosts that fail to resolve are skipped with a
-/// warning.
-async fn resolve_peers(peers: &[String]) -> Vec<PeerSocketAddr> {
+/// Resolves at most `max_peers` configured `host:port` strings, one address per IP. Hosts that
+/// fail to resolve are skipped with a warning.
+async fn resolve_peers(peers: &[String], max_peers: usize) -> Vec<PeerSocketAddr> {
     let mut resolved = Vec::new();
 
     for host in peers {
@@ -1021,7 +1030,9 @@ async fn resolve_peers(peers: &[String]) -> Vec<PeerSocketAddr> {
         }
     }
 
-    interleave_resolved_peers(resolved)
+    let mut resolved = interleave_resolved_peers(resolved);
+    resolved.truncate(max_peers);
+    resolved
 }
 
 /// Selects resolved addresses round-robin by host, keeping only the first
@@ -1865,6 +1876,7 @@ async fn download_and_build<S>(
     store: AttemptStore,
     temp_root: &Path,
     tree_piece: VerifiedPiece,
+    memory: &MemoryLimits,
 ) -> Result<HashMap<ObjectHash, PathBuf>, BootstrapError>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -1876,6 +1888,7 @@ where
         store,
         temp_root,
         tree_piece,
+        memory,
         |path: PathBuf, component, piece, sst: PathBuf| {
             build_piece_sst(&path, component, piece, &sst)
         },
@@ -1889,6 +1902,7 @@ async fn download_and_build_with<S, B>(
     store: AttemptStore,
     temp_root: &Path,
     tree_piece: VerifiedPiece,
+    memory: &MemoryLimits,
     builder: B,
 ) -> Result<HashMap<ObjectHash, PathBuf>, BootstrapError>
 where
@@ -1912,7 +1926,7 @@ where
     let (verified_sender, mut verified) = mpsc::channel(VERIFIED_PIECE_CHANNEL_BOUND);
     let (blame_sender, mut blames) = mpsc::channel(BLAME_CHANNEL_BOUND);
     let scheduler = Scheduler::new(
-        SchedulerConfig::default(),
+        memory.scheduler.clone(),
         pieces,
         peers.into_clients(),
         store.shared.clone(),
@@ -1930,10 +1944,12 @@ where
         }
     });
 
-    // Half the cores build SST files, so the download and the node's other work keep the rest.
-    let parallelism = std::thread::available_parallelism()
-        .map_or(1, |cores| cores.get() / 2)
-        .max(1);
+    let parallelism = memory.sst_build_parallelism.unwrap_or_else(|| {
+        // Without a budget, half the cores build SST files, so other work keeps the rest.
+        std::thread::available_parallelism()
+            .map_or(1, |cores| cores.get() / 2)
+            .max(1)
+    });
     let permits = Arc::new(Semaphore::new(parallelism));
     let mut builds: JoinSet<Result<u64, BootstrapError>> = JoinSet::new();
     let temp_root = temp_root.to_path_buf();

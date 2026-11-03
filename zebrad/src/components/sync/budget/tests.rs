@@ -72,6 +72,40 @@ fn checkpoints() -> Arc<CheckpointList> {
     )
 }
 
+/// Budgeted initial sync accepts 400-block checkpoint gaps and rejects larger gaps the verifier
+/// would use, without rejecting checkpoints beyond its last checkpoint.
+#[test]
+fn checkpoint_gaps_fit_the_bounded_pipeline_liveness_rule() {
+    let _init_guard = zebra_test::init();
+
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        let list = network.checkpoint_list();
+        check_checkpoint_gaps(&list, list.max_height(), Height(0))
+            .expect("the built-in checkpoint lists fit the pipeline liveness rule");
+    }
+
+    let list = CheckpointList::from_list([
+        (Height(0), block::Hash([1; 32])),
+        (Height(400), block::Hash([2; 32])),
+        (Height(800), block::Hash([3; 32])),
+        (Height(1201), block::Hash([4; 32])),
+    ])
+    .expect("the custom checkpoint list has unique non-null hashes");
+
+    check_checkpoint_gaps(&list, Height(800), Height(0)).expect("400-block gaps fit");
+    assert_eq!(
+        check_checkpoint_gaps(&list, Height(1201), Height(800)),
+        Err(CheckpointGapTooLarge {
+            checkpoint: Height(1201),
+            gap: 401,
+        }),
+        "the first gap above 400 is refused only when the verifier uses it",
+    );
+    check_checkpoint_gaps(&list, Height(1201), Height(801)).expect(
+        "a state at height 801 has already bypassed the gap from 800 to 1201, and has no later gaps",
+    );
+}
+
 /// Returns a byte bound of `pipeline_bytes`.
 fn bounded(pipeline_bytes: u64) -> PipelineBudget {
     PipelineBudget::new(SyncMemoryLimits {

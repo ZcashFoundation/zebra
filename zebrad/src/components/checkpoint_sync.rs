@@ -243,6 +243,13 @@ where
         }
     }
 
+    /// Publishes every run's lookahead charge in `charged`, which the memory
+    /// watchdog counts toward the sync pipeline's usage.
+    pub fn with_charged(mut self, charged: Charged) -> Self {
+        self.supervisor.charged = charged;
+        self
+    }
+
     /// Runs until shutdown. Errors only on a fatal defect (a wrong
     /// checkpoint or pin), after handing ownership back to the legacy
     /// syncer.

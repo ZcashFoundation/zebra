@@ -43,13 +43,13 @@ fn memory_plan_without_a_budget_keeps_todays_limits() {
 }
 
 /// The smallest budgets are derived from the floors, and are the design's thresholds:
-/// 933 MiB at the tip and 1,084 MiB for initial sync (design §2.3).
+/// 963 MiB at the tip and 1,113 MiB for initial sync (design §2.3).
 #[test]
 fn min_budgets_are_the_smallest_budgets_that_cover_the_floors() {
     let _init_guard = zebra_test::init();
     let inputs = PlanInputs::default();
 
-    for (profile, expected) in [(Profile::TipOnly, "933 MiB"), (Profile::Ibd, "1,084 MiB")] {
+    for (profile, expected) in [(Profile::TipOnly, "963 MiB"), (Profile::Ibd, "1,113 MiB")] {
         let minimum = MemoryPlan::min_budget(profile, &inputs);
         assert_eq!(mib_ceil(minimum), expected, "{profile:?}");
 
@@ -67,27 +67,94 @@ fn min_budgets_are_the_smallest_budgets_that_cover_the_floors() {
     }
 
     assert_eq!(
-        Profile::for_budget(1084 * MIB, &inputs),
+        Profile::for_budget(1113 * MIB, &inputs),
         Profile::Ibd,
-        "1,084 MiB covers the initial sync floors"
+        "1,113 MiB covers the initial sync floors"
     );
-    assert_eq!(Profile::for_budget(1083 * MIB, &inputs), Profile::TipOnly);
+    assert_eq!(Profile::for_budget(1112 * MIB, &inputs), Profile::TipOnly);
 }
 
-/// The floors are the design's: RocksDB 256 MiB, the pipeline one checkpoint range (`Ibd`) or
-/// 32 MiB (`TipOnly`), the non-finalized state 64 MiB, the network 32 MiB, the mempool
-/// 25 MiB, and nothing for the RPC proposal cache.
+/// With the checkpoint sync engine, the network floor pays for its two outbound v2 connections, so
+/// the smallest budgets rise to 978 MiB at the tip and 1,129 MiB for initial sync, and every budget
+/// gives the engine at least two outbound v2 peers.
+#[test]
+fn checkpoint_sync_min_budgets_cover_two_outbound_v2_peers() {
+    let _init_guard = zebra_test::init();
+    let inputs = PlanInputs {
+        v2_enabled: true,
+        v2_checkpoint_sync: true,
+        ..PlanInputs::default()
+    };
+
+    for (profile, expected) in [(Profile::TipOnly, "978 MiB"), (Profile::Ibd, "1,129 MiB")] {
+        let minimum = MemoryPlan::min_budget(profile, &inputs);
+        assert_eq!(mib_ceil(minimum), expected, "{profile:?}");
+        assert!(minimum > MemoryPlan::min_budget(profile, &PlanInputs::default()));
+
+        MemoryPlan::derive(minimum, profile, &inputs)
+            .unwrap_or_else(|shortfall| panic!("the minimum covers the floors: {shortfall}"));
+        assert!(MemoryPlan::derive(minimum - 1, profile, &inputs).is_err());
+    }
+
+    for (budget, profile) in [
+        (
+            MemoryPlan::min_budget(Profile::TipOnly, &inputs),
+            Profile::TipOnly,
+        ),
+        (GIB, Profile::TipOnly),
+        (MemoryPlan::min_budget(Profile::Ibd, &inputs), Profile::Ibd),
+        (2 * GIB, Profile::Ibd),
+        (4 * GIB, Profile::Ibd),
+    ] {
+        let plan = MemoryPlan::derive(budget, profile, &inputs).expect("the budget is valid");
+        let peers = plan
+            .network
+            .peerset_initial_target_size
+            .expect("a budget derives a peer target");
+        assert!(
+            zebra_network::Config::buffered_request_bytes_for_target(
+                peers,
+                zebra_network::V2Endpoint::CheckpointSync,
+                plan.network.quic,
+            ) <= plan.shares.get(Component::Network),
+            "the engine's outbound v2 connections fit the network share at {budget}"
+        );
+        assert!(
+            zebra_network::V2Endpoint::CheckpointSync
+                .outbound_limit(peers * zebra_network::constants::OUTBOUND_PEER_LIMIT_MULTIPLIER)
+                >= zebra_network::MIN_V2_SYNC_OUTBOUND_CONNECTIONS
+        );
+    }
+
+    let plan = MemoryPlan::derive(2 * GIB, Profile::Ibd, &inputs).expect("2 GiB is enough");
+    assert_eq!(plan.network.peerset_initial_target_size, Some(1));
+}
+
+/// The floors cover the components' minimum limits: RocksDB 256 MiB, the pipeline one checkpoint
+/// range (`Ibd`) or 32 MiB (`TipOnly`), the non-finalized state 64 MiB, one v2 peer target's
+/// 57 MiB of request buffers (70 MiB with the checkpoint sync engine's second outbound v2
+/// connection), the mempool 25 MiB, and nothing for the RPC proposal cache.
 #[test]
 fn floors_and_ceilings_are_the_designs() {
     let _init_guard = zebra_test::init();
 
-    let floors = |profile| {
+    let floors = |profile, inputs: &PlanInputs| {
         Component::ALL
-            .map(|component| component.floor(profile) / MIB)
+            .map(|component| component.floor(profile, inputs) / MIB)
             .to_vec()
     };
-    assert_eq!(floors(Profile::Ibd), [256, 160, 64, 32, 25, 0]);
-    assert_eq!(floors(Profile::TipOnly), [256, 32, 64, 32, 25, 0]);
+    let inputs = PlanInputs::default();
+    assert_eq!(floors(Profile::Ibd, &inputs), [256, 160, 64, 57, 25, 0]);
+    assert_eq!(floors(Profile::TipOnly, &inputs), [256, 32, 64, 57, 25, 0]);
+
+    // The checkpoint sync engine's second outbound v2 connection raises the network floor.
+    let engine = PlanInputs {
+        v2_enabled: true,
+        v2_checkpoint_sync: true,
+        ..PlanInputs::default()
+    };
+    assert_eq!(floors(Profile::Ibd, &engine), [256, 160, 64, 70, 25, 0]);
+    assert_eq!(floors(Profile::TipOnly, &engine), [256, 32, 64, 70, 25, 0]);
     assert_eq!(
         Component::ALL
             .map(|component| component.ceiling() / MIB)
@@ -108,10 +175,10 @@ fn one_gib_tip_only_raises_rocksdb_to_its_floor() {
 
     assert_eq!(mib(Component::RocksDb), 256);
     assert_eq!(mib(Component::Pipeline), 32);
-    assert_eq!(mib(Component::NonFinalized), 81);
-    assert_eq!(mib(Component::Network), 50);
-    assert_eq!(mib(Component::Mempool), 47);
-    assert_eq!(mib(Component::Rpc), 19);
+    assert_eq!(mib(Component::NonFinalized), 78);
+    assert_eq!(mib(Component::Network), 58);
+    assert_eq!(mib(Component::Mempool), 44);
+    assert_eq!(mib(Component::Rpc), 16);
 
     let rocksdb = plan.state.rocksdb;
     assert_eq!(rocksdb.write_buffer_total, Some(64 * MIB));
@@ -121,8 +188,8 @@ fn one_gib_tip_only_raises_rocksdb_to_its_floor() {
         zebra_state::READ_PATH_COLUMN_FAMILIES
     );
     assert_eq!(rocksdb.effective_write_buffer_size(), Some(8 * MIB));
-    assert_eq!(plan.network.peerset_initial_target_size, Some(8));
-    assert_eq!(plan.network.quic, zebra_network::QuicWindows::compact());
+    assert_eq!(plan.network.peerset_initial_target_size, Some(3));
+    assert_eq!(plan.network.quic, zebra_network::QuicWindows::default());
     assert_eq!(plan.state.queued_blocks_bytes, 64 * 1024 * 1024);
     assert_eq!(plan.sync.pipeline_bytes, Some(32 * MIB));
     assert!(
@@ -169,13 +236,57 @@ fn two_gib_ibd_gives_every_component_its_nominal_share() {
             .map(|bytes| bytes / MIB),
         Some(23)
     );
-    assert_eq!(plan.network.peerset_initial_target_size, Some(16));
+    assert_eq!(plan.network.peerset_initial_target_size, Some(8));
+    assert_eq!(plan.network.quic, zebra_network::QuicWindows::default());
     assert_eq!(plan.state.queued_blocks_bytes, 320 * 1024 * 1024);
     assert_eq!(
         plan.state.non_finalized_resident_bytes,
         Some(plan.shares.get(Component::NonFinalized) / 2),
         "the resident target is the share over the index clone factor"
     );
+}
+
+/// With v2 enabled, the peer target and windows fit every legacy connection's message reservation,
+/// two largest v2 request bodies per v2 connection, and every v2 connection's transport windows.
+#[test]
+fn v2_network_limits_fit_their_share() {
+    let inputs = PlanInputs {
+        v2_enabled: true,
+        ..PlanInputs::default()
+    };
+
+    let compact = zebra_network::QuicWindows::compact();
+    // A version 2 node serves synchronization artifacts, so its larger windows are the serving ones.
+    let serving = zebra_network::QuicWindows::SERVING;
+    for (budget, profile, expected_peers, expected_windows) in [
+        (GIB, Profile::TipOnly, 1, compact),
+        (2 * GIB, Profile::Ibd, 1, serving),
+        (4 * GIB, Profile::Ibd, 4, compact),
+        (8 * GIB, Profile::Ibd, 7, compact),
+    ] {
+        let plan = MemoryPlan::derive(budget, profile, &inputs).expect("the budget is valid");
+        let share = plan.shares.get(Component::Network);
+        let peers = plan
+            .network
+            .peerset_initial_target_size
+            .expect("a budget derives a peer target");
+        assert_eq!(peers, expected_peers);
+        assert_eq!(plan.network.quic, expected_windows);
+        assert!(
+            zebra_network::Config::buffered_request_bytes_for_target(
+                peers,
+                zebra_network::V2Endpoint::Enabled,
+                plan.network.quic,
+            ) <= share
+        );
+        assert!(
+            zebra_network::Config::buffered_request_bytes_for_target(
+                peers + 1,
+                zebra_network::V2Endpoint::Enabled,
+                compact,
+            ) > share
+        );
+    }
 }
 
 /// Above a ceiling, the surplus goes to RocksDB and the pipeline 60/40 in `Ibd`, and to RocksDB
@@ -196,7 +307,7 @@ fn surplus_above_ceilings_goes_to_rocksdb_and_the_pipeline() {
     assert_eq!(mib(Component::Pipeline), 818);
     assert_eq!(plan.mempool.tx_cost_limit, Some(80_000_000));
     assert_eq!(plan.network.quic, zebra_network::QuicWindows::default());
-    assert_eq!(plan.network.peerset_initial_target_size, Some(25));
+    assert_eq!(plan.network.peerset_initial_target_size, Some(19));
 
     let tip = MemoryPlan::derive(4 * GIB, Profile::TipOnly, &inputs).expect("4 GiB is enough");
     assert_eq!(tip.shares.get(Component::Pipeline), 32 * MIB);
@@ -241,10 +352,10 @@ fn shortfall_lists_every_component_below_its_floor() {
     );
     assert_eq!(
         shortfall.to_string(),
-        "memory_budget 512 MiB is below the 933 MiB minimum for a node at the tip \
-         (1,084 MiB for initial sync): RocksDB needs 256 MiB but its share is 8 MiB, \
+        "memory_budget 512 MiB is below the 963 MiB minimum for a node at the tip \
+         (1,113 MiB for initial sync): RocksDB needs 256 MiB but its share is 8 MiB, \
          the non-finalized state needs 64 MiB but its share is 3 MiB, \
-         the network needs 32 MiB but its share is 2 MiB, \
+         the network needs 57 MiB but its share is 2 MiB, \
          the mempool needs 25 MiB but its share is 2 MiB; \
          raise the budget, remove it, sync from a snapshot, or pass --unsafe-low-specs"
     );
@@ -254,7 +365,7 @@ fn shortfall_lists_every_component_below_its_floor() {
     assert!(
         shortfall
             .to_string()
-            .starts_with("memory_budget 1 GiB is below the 1,084 MiB minimum for initial sync (933 MiB for a node at the tip): "),
+            .starts_with("memory_budget 1 GiB is below the 1,113 MiB minimum for initial sync (963 MiB for a node at the tip): "),
         "{shortfall}"
     );
 }
@@ -267,7 +378,10 @@ fn clamped_plan_gives_every_component_its_floor() {
     let plan = MemoryPlan::clamped_to_floors(256 * MIB, Profile::TipOnly, &PlanInputs::default());
 
     assert_eq!(plan.budget, Some(256 * MIB));
-    assert_eq!(plan.shares, ComponentShares::floors(Profile::TipOnly));
+    assert_eq!(
+        plan.shares,
+        ComponentShares::floors(Profile::TipOnly, &PlanInputs::default())
+    );
     assert_eq!(plan.state.rocksdb.write_buffer_total, Some(64 * MIB));
     assert_eq!(plan.state.rocksdb.block_cache_bytes, Some(32 * MIB));
     assert_eq!(plan.sync.pipeline_bytes, Some(32 * MIB));
@@ -360,7 +474,7 @@ fn arena_max_is_a_quarter_of_the_cores() {
 fn auto_budget_is_half_the_memory_within_the_clamp() {
     let _init_guard = zebra_test::init();
     let inputs = PlanInputs::default();
-    let minimum = 1084 * MIB;
+    let minimum = 1113 * MIB;
 
     let shortfall = MemoryPlan::auto_budget(GIB, &inputs)
         .expect_err("a 1 GiB host cannot sync, so auto refuses it");
@@ -419,24 +533,32 @@ fn oversized_budgets_leave_the_host_too_little() {
     assert!(MemoryPlan::is_oversized(GIB, 512 * MIB));
 }
 
-/// The derived plan of every budget in the design's table, in both profiles, so that a change
-/// to a share, floor or ceiling is a reviewed snapshot diff (design §6.1).
+/// The derived plan of every budget in the design's table, in both profiles, without and with
+/// mining, and with the version 2 checkpoint sync engine, so that a change to a share, floor or
+/// ceiling is a reviewed snapshot diff (design §6.1).
 #[test]
 fn derived_plans_golden_table() {
     let _init_guard = zebra_test::init();
 
     let mut table = String::new();
-    for mining in [false, true] {
+    for (mining, v2_checkpoint_sync) in [(false, false), (true, false), (false, true)] {
         let inputs = PlanInputs {
             cores: 32,
             mining,
+            v2_enabled: v2_checkpoint_sync,
+            v2_checkpoint_sync,
             ..PlanInputs::default()
+        };
+        let engine = if v2_checkpoint_sync {
+            " v2_checkpoint_sync=true"
+        } else {
+            ""
         };
         for profile in [Profile::TipOnly, Profile::Ibd] {
             for budget in [512 * MIB, GIB, 2 * GIB, 4 * GIB, 8 * GIB, 16 * GIB] {
                 write!(
                     table,
-                    "{profile} mining={mining} budget={}: ",
+                    "{profile} mining={mining}{engine} budget={}: ",
                     mib_floor(budget)
                 )
                 .expect("writing to a string succeeds");
@@ -527,6 +649,15 @@ fn any_inputs() -> impl Strategy<Value = PlanInputs> {
         )
 }
 
+/// [`any_inputs`] with a version 2 endpoint, with or without the checkpoint sync engine.
+fn any_v2_inputs() -> impl Strategy<Value = PlanInputs> {
+    (any_inputs(), any::<bool>()).prop_map(|(inputs, v2_checkpoint_sync)| PlanInputs {
+        v2_enabled: true,
+        v2_checkpoint_sync,
+        ..inputs
+    })
+}
+
 proptest! {
     /// A derived plan never gives the components more than the budget allows, keeps every
     /// component between its floor and its ceiling, and refuses exactly the budgets whose
@@ -535,11 +666,11 @@ proptest! {
     fn derived_plans_fit_the_budget(
         budget in any_budget(),
         profile in any_profile(),
-        inputs in any_inputs(),
+        inputs in prop_oneof![any_inputs(), any_v2_inputs()],
     ) {
         let _init_guard = zebra_test::init();
         let components_memory = MemoryPlan::components_memory(budget, &inputs);
-        let floors = ComponentShares::floors(profile);
+        let floors = ComponentShares::floors(profile, &inputs);
 
         match MemoryPlan::derive(budget, profile, &inputs) {
             Ok(plan) => {
@@ -550,7 +681,10 @@ proptest! {
                     "{plan:?} overspends {budget}"
                 );
                 for (component, share) in plan.shares.iter() {
-                    prop_assert!(share >= component.floor(profile), "{component:?} {plan:?}");
+                    prop_assert!(
+                        share >= component.floor(profile, &inputs),
+                        "{component:?} {plan:?}"
+                    );
                     prop_assert!(share <= component.ceiling(), "{component:?} {plan:?}");
                 }
                 prop_assert_eq!(MemoryPlan::derive(budget, profile, &inputs), Ok(plan));

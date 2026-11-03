@@ -7,6 +7,7 @@
 
 use std::{
     future::Future,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
@@ -127,6 +128,16 @@ impl ProcessMemory {
     }
 }
 
+/// The state memory read by one watchdog sample on its blocking worker.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StateMemorySample {
+    /// RocksDB's memory use and write-stall properties.
+    pub rocksdb: zebra_state::RocksDbMemorySample,
+
+    /// The retained charge of distinct blocks in the latest non-finalized state.
+    pub non_finalized_resident_bytes: u64,
+}
+
 /// Returns the memory a RocksDB sample says the database uses, in bytes: its memtables, block
 /// cache and table readers (design §4.1 "Soft bound").
 pub fn rocksdb_usage_bytes(sample: &zebra_state::RocksDbMemorySample) -> u64 {
@@ -169,6 +180,10 @@ pub struct Actions {
     /// when it went back below.
     pub rocksdb_over_plan: Option<bool>,
 
+    /// `Some(true)` when the sync pipeline's charge crossed above its share of the plan,
+    /// `Some(false)` when it went back below.
+    pub pipeline_over_plan: Option<bool>,
+
     /// The new plan, when the profile changed: its RocksDB limits are applied to the open
     /// database.
     pub new_plan: Option<MemoryPlan>,
@@ -186,6 +201,13 @@ pub struct Watchdog {
     /// The height of the last checkpoint, where initial sync ends.
     last_checkpoint: Height,
 
+    /// The pipeline whose ceiling changes with the plan.
+    pipeline_budget: crate::components::sync::PipelineBudget,
+
+    /// The checkpoint sync engine's lookahead charge, which replaces the legacy syncer's
+    /// downloads while the engine runs, so it counts toward the sync pipeline's usage.
+    engine_charged: crate::components::checkpoint_sync::engine::Charged,
+
     /// The pressure of the last sample.
     pressure: MemoryPressure,
 
@@ -194,6 +216,9 @@ pub struct Watchdog {
 
     /// Whether RocksDB's memory was above its share of the plan at the last sample.
     rocksdb_over_plan: bool,
+
+    /// Whether the sync pipeline's charge was above its share of the plan at the last sample.
+    pipeline_over_plan: bool,
 }
 
 impl Watchdog {
@@ -208,10 +233,40 @@ impl Watchdog {
             settings,
             plan_sender,
             last_checkpoint,
+            pipeline_budget: crate::components::sync::PipelineBudget::default(),
+            engine_charged: Default::default(),
             pressure: MemoryPressure::Normal,
             last_trim: None,
             rocksdb_over_plan: false,
+            pipeline_over_plan: false,
         }
+    }
+
+    /// Uses `pipeline_budget` for plan-driven pipeline ceiling updates.
+    pub fn with_pipeline_budget(
+        mut self,
+        pipeline_budget: crate::components::sync::PipelineBudget,
+    ) -> Self {
+        self.pipeline_budget = pipeline_budget;
+        self
+    }
+
+    /// Counts the checkpoint sync engine's lookahead charge, `engine_charged`, toward the sync
+    /// pipeline's usage.
+    pub fn with_engine_charged(
+        mut self,
+        engine_charged: crate::components::checkpoint_sync::engine::Charged,
+    ) -> Self {
+        self.engine_charged = engine_charged;
+        self
+    }
+
+    /// Returns the sync pipeline's usage, in bytes: the retained bytes of the legacy syncer's
+    /// downloaded blocks, and the checkpoint sync engine's lookahead charge.
+    pub fn pipeline_usage_bytes(&self) -> u64 {
+        self.pipeline_budget
+            .charged_bytes()
+            .saturating_add(self.engine_charged.load(Ordering::Relaxed))
     }
 
     /// Returns the plan the watchdog publishes.
@@ -257,6 +312,14 @@ impl Watchdog {
             if over_plan != self.rocksdb_over_plan {
                 actions.rocksdb_over_plan = Some(over_plan);
                 self.rocksdb_over_plan = over_plan;
+            }
+        }
+
+        if plan.budget.is_some() {
+            let over_plan = self.pipeline_usage_bytes() > plan.shares.get(Component::Pipeline);
+            if over_plan != self.pipeline_over_plan {
+                actions.pipeline_over_plan = Some(over_plan);
+                self.pipeline_over_plan = over_plan;
             }
         }
 
@@ -337,20 +400,20 @@ async fn trim_heap() {
 
 /// Runs the watchdog until its task is aborted, sampling every [`SAMPLE_INTERVAL`].
 ///
-/// `memory_sample` reads the RocksDB database's memory sample on a blocking thread, and
-/// `apply_rocksdb_limits` applies new RocksDB limits to the open database when the profile
+/// `memory_sample` reads the state's memory sample on a blocking thread, and
+/// `apply_state_limits` applies the new non-finalized target and RocksDB limits when the profile
 /// changes.
 pub async fn run<Tip, Sampler, Apply, Applied>(
     watchdog: Watchdog,
     pressure_sender: watch::Sender<MemoryPressure>,
     latest_chain_tip: Tip,
     memory_sample: Sampler,
-    apply_rocksdb_limits: Apply,
+    apply_state_limits: Apply,
 ) -> Result<(), Report>
 where
     Tip: ChainTip,
-    Sampler: Fn() -> zebra_state::RocksDbMemorySample + Clone + Send + 'static,
-    Apply: Fn(zebra_state::RocksDbMemoryLimits) -> Applied,
+    Sampler: Fn() -> StateMemorySample + Clone + Send + 'static,
+    Apply: Fn(zebra_state::MemoryLimits) -> Applied,
     Applied: Future<Output = ()>,
 {
     run_with_timing(
@@ -358,7 +421,7 @@ where
         pressure_sender,
         latest_chain_tip,
         memory_sample,
-        apply_rocksdb_limits,
+        apply_state_limits,
         SAMPLE_INTERVAL,
         BLOCKING_TIMEOUT,
     )
@@ -370,14 +433,14 @@ async fn run_with_timing<Tip, Sampler, Apply, Applied>(
     pressure_sender: watch::Sender<MemoryPressure>,
     latest_chain_tip: Tip,
     memory_sample: Sampler,
-    apply_rocksdb_limits: Apply,
+    apply_state_limits: Apply,
     sample_interval: Duration,
     blocking_timeout: Duration,
 ) -> Result<(), Report>
 where
     Tip: ChainTip,
-    Sampler: Fn() -> zebra_state::RocksDbMemorySample + Clone + Send + 'static,
-    Apply: Fn(zebra_state::RocksDbMemoryLimits) -> Applied,
+    Sampler: Fn() -> StateMemorySample + Clone + Send + 'static,
+    Apply: Fn(zebra_state::MemoryLimits) -> Applied,
     Applied: Future<Output = ()>,
 {
     let mut interval = tokio::time::interval(sample_interval);
@@ -391,8 +454,18 @@ where
             let has_budget = watchdog.settings.is_some();
             let memory_sample = memory_sample.clone();
             pending_sample = Some(tokio::task::spawn_blocking(move || {
-                let rocksdb_bytes = has_budget.then(|| rocksdb_usage_bytes(&memory_sample()));
-                (ProcessMemory::read(), rocksdb_bytes)
+                let sample = has_budget.then(memory_sample);
+                let rocksdb_bytes = sample
+                    .as_ref()
+                    .map(|sample| rocksdb_usage_bytes(&sample.rocksdb));
+                let non_finalized_resident_bytes = sample
+                    .as_ref()
+                    .map(|sample| sample.non_finalized_resident_bytes);
+                (
+                    ProcessMemory::read(),
+                    rocksdb_bytes,
+                    non_finalized_resident_bytes,
+                )
             }));
         }
 
@@ -403,7 +476,7 @@ where
                 .expect("a sample was spawned when none was outstanding"),
         )
         .await;
-        let (process, rocksdb_bytes) = match sample_result {
+        let (process, rocksdb_bytes, non_finalized_resident_bytes) = match sample_result {
             Ok(Ok(sample)) => {
                 pending_sample = None;
                 sample
@@ -411,11 +484,11 @@ where
             Ok(Err(error)) => {
                 pending_sample = None;
                 tracing::warn!(?error, "memory sample task failed");
-                (None, None)
+                (None, None, None)
             }
             Err(_) => {
                 tracing::warn!("memory sample took longer than {blocking_timeout:?}");
-                (None, None)
+                (None, None, None)
             }
         };
 
@@ -438,14 +511,30 @@ where
             metrics::gauge!("zebra.memory.usage_bytes", "component" => Component::RocksDb.label())
                 .set(rocksdb_bytes as f64);
         }
+        let pipeline_bytes = watchdog.pipeline_usage_bytes();
+        if plan.budget.is_some() {
+            // The cast is a metric value: f64 represents every memory size below 8 PiB exactly
+            // enough for a gauge.
+            metrics::gauge!("zebra.memory.usage_bytes", "component" => Component::Pipeline.label())
+                .set(pipeline_bytes as f64);
+        }
+        if let Some(non_finalized_resident_bytes) = non_finalized_resident_bytes {
+            // The cast is a metric value: f64 represents every memory size below 8 PiB exactly
+            // enough for a gauge.
+            metrics::gauge!(
+                "zebra.memory.usage_bytes",
+                "component" => Component::NonFinalized.label(),
+            )
+            .set(non_finalized_resident_bytes as f64);
+        }
 
         if let Some(new_plan) = actions.new_plan {
-            if tokio::time::timeout(
-                blocking_timeout,
-                apply_rocksdb_limits(new_plan.state.rocksdb),
-            )
-            .await
-            .is_err()
+            if let Some(pipeline_bytes) = new_plan.sync.pipeline_bytes {
+                watchdog.pipeline_budget.update_limit(pipeline_bytes);
+            }
+            if tokio::time::timeout(blocking_timeout, apply_state_limits(new_plan.state))
+                .await
+                .is_err()
             {
                 tracing::warn!("resizing the state database took longer than {blocking_timeout:?}");
             }
@@ -487,6 +576,21 @@ where
             Some(false) => tracing::info!(
                 rocksdb_bytes = ?rocksdb_bytes,
                 "the state database's memory is back within its share of the memory budget"
+            ),
+            None => {}
+        }
+
+        match actions.pipeline_over_plan {
+            Some(true) => tracing::warn!(
+                pipeline_bytes,
+                plan_bytes = plan.shares.get(Component::Pipeline),
+                "the sync pipeline's downloaded blocks, with the checkpoint sync engine's \
+                 lookahead, are above its share of the memory budget: the oldest checkpoint range \
+                 is always admitted, and the slack absorbs the overshoot"
+            ),
+            Some(false) => tracing::info!(
+                pipeline_bytes,
+                "the sync pipeline is back within its share of the memory budget"
             ),
             None => {}
         }

@@ -86,7 +86,7 @@ fn auto_budget_follows_the_detected_memory() {
     let (settings, warnings) = resolve(&config, false, Some(2 * GIB)).expect("2 GiB is enough");
     assert_eq!(
         settings.budget,
-        1084 * MIB,
+        1113 * MIB,
         "the initial sync minimum, in whole mebibytes"
     );
     assert!(
@@ -98,7 +98,7 @@ fn auto_budget_follows_the_detected_memory() {
     assert!(
         error
             .to_string()
-            .starts_with("memory_budget = \"auto\" needs at least 1,084 MiB of memory for initial sync, but only 1,024 MiB is available to Zebra"),
+            .starts_with("memory_budget = \"auto\" needs at least 1,113 MiB of memory for initial sync, but only 1,024 MiB is available to Zebra"),
         "{error}"
     );
 
@@ -135,10 +135,10 @@ fn explicit_limits_win_over_derived_limits() {
 
     // (tx_cost_limit, peerset_initial_target_size, expected plan values, expected warnings)
     for (tx_cost_limit, peers, expected_cost, expected_peers, expected_warnings) in [
-        (80_000_000, 25, Some(56_908_316), Some(16), 0),
+        (80_000_000, 25, Some(56_908_316), Some(8), 0),
         (10_000_000, 8, None, None, 0),
         (70_000_000, 20, None, None, 2),
-        (80_000_001, 25, None, Some(16), 1),
+        (80_000_001, 25, None, Some(8), 1),
     ] {
         let mut config = config_with_budget(MemoryBudget::Bytes(2 * GIB));
         config.mempool.tx_cost_limit = tx_cost_limit;
@@ -177,7 +177,7 @@ fn explicit_limits_win_over_derived_limits() {
         [
             "[mempool] tx_cost_limit 70,000,000 is above the 56,908,316 the memory budget \
              derives: using the explicit value, which can exceed the budget",
-            "[network] peerset_initial_target_size 20 is above the 16 the memory budget \
+            "[network] peerset_initial_target_size 20 is above the 8 the memory budget \
              derives: using the explicit value, which can exceed the budget",
         ]
     );
@@ -194,7 +194,7 @@ fn below_floor_budgets_are_refused_unless_unsafe() {
     assert!(
         error
             .to_string()
-            .starts_with("memory_budget 256 MiB is below the 933 MiB minimum for a node at the tip (1,084 MiB for initial sync): RocksDB needs 256 MiB"),
+            .starts_with("memory_budget 256 MiB is below the 963 MiB minimum for a node at the tip (1,113 MiB for initial sync): RocksDB needs 256 MiB"),
         "{error}"
     );
 
@@ -229,7 +229,7 @@ fn profile_after_open_follows_the_state_tip() {
     assert!(
         error
             .to_string()
-            .starts_with("IBD needs >= 1,084 MiB: sync from a snapshot or raise the budget"),
+            .starts_with("IBD needs >= 1,113 MiB: sync from a snapshot or raise the budget"),
         "{error}"
     );
     let _ = tip_only
@@ -258,7 +258,7 @@ fn profile_after_open_follows_the_state_tip() {
         .expect("--unsafe-low-specs syncs anyway");
     assert_eq!(profile, Profile::TipOnly);
     assert!(
-        warning.is_some_and(|warning| warning.contains("IBD needs >= 1,084 MiB")),
+        warning.is_some_and(|warning| warning.contains("IBD needs >= 1,113 MiB")),
         "the override is logged"
     );
 
@@ -277,11 +277,12 @@ fn profile_after_open_follows_the_state_tip() {
 
     assert_eq!(
         ibd_refusal(&MinimumBudgets::new(&PlanInputs::default())),
-        "IBD needs >= 1,084 MiB: sync from a snapshot or raise the budget"
+        "IBD needs >= 1,113 MiB: sync from a snapshot or raise the budget"
     );
 }
 
-/// The inputs follow the config: the configured CPU threads and whether the node mines.
+/// The inputs follow the config: the configured CPU threads, mining, the v2 endpoint and the
+/// checkpoint sync engine.
 #[test]
 fn plan_inputs_follow_the_config() {
     let _init_guard = zebra_test::init();
@@ -293,9 +294,15 @@ fn plan_inputs_follow_the_config() {
     assert_eq!(inputs.cores, 12);
     assert_eq!(inputs.full_verify_concurrency_limit, 30);
     assert!(!inputs.mining);
+    assert!(!inputs.v2_enabled);
+    assert!(!inputs.v2_checkpoint_sync);
 
     config.mining.internal_miner = true;
     assert!(plan_inputs(&config).mining);
+    config.network.v2_listen_addr = Some("127.0.0.1:8233".parse().unwrap());
+    assert!(plan_inputs(&config).v2_enabled);
+    config.sync.v2_checkpoint_sync = true;
+    assert!(plan_inputs(&config).v2_checkpoint_sync);
 }
 
 /// The startup line names the budget, the profile and every component's share and settings
@@ -316,8 +323,8 @@ fn startup_summary_lists_every_component() {
         "memory budget 2 GiB (explicit) profile=ibd fixed=384 MiB slack=307 MiB \
          rocksdb=474 MiB (pinned_metadata 160, write_buffers 188, per_cf 23, block_cache 125, \
          charged_cfs 4) pipeline=339 MiB (download_concurrency 50, queued_blocks 320 MiB) \
-         non_finalized=203 MiB (resident target 101 MiB, index_clone_factor 2, not enforced) \
-         network=135 MiB (peers 16, quic 2/4/3 MiB) mempool=56,908,316 cost \
+         non_finalized=203 MiB (resident target 101 MiB, index_clone_factor 2, early finalization, 100-block floor) \
+         network=135 MiB (peers 8, quic 4/8/6 MiB) mempool=56,908,316 cost \
          rpc=67 MiB proposal cache allocator arenas=8 (32 cores)"
     );
 
@@ -386,4 +393,54 @@ fn arena_cap_needs_a_budget_and_no_operator_cap() {
         .plan(Profile::Ibd)
         .expect("2 GiB covers the floors");
     assert_eq!(plan.allocator.arena_max, None, "the operator's cap wins");
+}
+
+/// Without a budget the checkpoint sync engine keeps its configured limits. With one, its
+/// lookahead fits the sync pipeline share, deselected peers keep the network share's priced
+/// window, and selected peers split the lookahead.
+#[test]
+fn budget_bounds_the_checkpoint_sync_engine() {
+    use crate::components::checkpoint_sync::{
+        engine::{DESELECTED_RECEIVE_WINDOW, SELECTED_RECEIVE_WINDOW},
+        EngineConfig,
+    };
+
+    let _init_guard = zebra_test::init();
+    let engine = EngineConfig::default();
+
+    assert_eq!(
+        super::checkpoint_sync_engine_config(engine.clone(), &MemoryPlan::default()),
+        engine
+    );
+
+    let inputs = PlanInputs {
+        v2_enabled: true,
+        ..PlanInputs::default()
+    };
+    for (budget, profile) in [(2 * GIB, Profile::Ibd), (8 * GIB, Profile::Ibd)] {
+        let plan = MemoryPlan::derive(budget, profile, &inputs).expect("the budget is valid");
+        let pipeline = plan
+            .sync
+            .pipeline_bytes
+            .expect("a budget bounds the pipeline");
+        let priced = plan.network.quic.connection_receive_window;
+        let bounded = super::checkpoint_sync_engine_config(engine.clone(), &plan);
+
+        assert_eq!(
+            bounded.lookahead_bytes,
+            engine.lookahead_bytes.min(pipeline)
+        );
+        assert!(bounded.deselected_receive_window <= priced);
+        assert!(bounded.deselected_receive_window <= DESELECTED_RECEIVE_WINDOW);
+        assert!(bounded.selected_receive_window <= SELECTED_RECEIVE_WINDOW);
+        assert!(bounded.selected_receive_window >= priced);
+        let selected = u64::from(bounded.selected_receive_window)
+            * u64::try_from(engine.target_peers).unwrap();
+        assert!(
+            selected <= bounded.lookahead_bytes.max(u64::from(priced) * 8),
+            "selected windows hold only requested ranges: {selected}"
+        );
+        assert_eq!(bounded.target_peers, engine.target_peers);
+        assert_eq!(bounded.min_peer_rate, engine.min_peer_rate);
+    }
 }
