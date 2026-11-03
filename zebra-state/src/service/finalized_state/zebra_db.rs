@@ -27,7 +27,10 @@ use crate::{
         database_format_version_at_path, database_format_version_on_disk,
         write_database_format_version_at_path,
     },
-    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
+    constants::{
+        state_database_format_version_in_code, DATABASE_FORMAT_VERSION_FILE_NAME,
+        STATE_DATABASE_KIND,
+    },
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -35,6 +38,7 @@ use crate::{
             transparent::AddressLocation,
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
+        STATE_COLUMN_FAMILIES_IN_CODE,
     },
     BoxError, Config, StateInitError,
 };
@@ -79,7 +83,7 @@ pub struct ZebraDb {
     config: Arc<Config>,
 
     /// Should format upgrades and format checks be skipped for this instance?
-    /// Only used in test code.
+    /// Only used in test code, and by the state snapshot importer, which runs the checks itself.
     //
     // TODO: move this to DiskDb
     debug_skip_format_upgrades: bool,
@@ -254,6 +258,35 @@ impl ZebraDb {
         db.spawn_format_change(format_change);
 
         Ok(db)
+    }
+
+    /// Opens the existing state database `config` names for `network`, without launching the
+    /// format change thread and without the format check at shutdown.
+    ///
+    /// The state snapshot importer opens the database it built this way, and runs the format
+    /// checks itself, so an invalid snapshot is refused instead of panicking the format thread.
+    pub(crate) fn open_without_format_change(
+        config: &Config,
+        network: &Network,
+    ) -> Result<ZebraDb, StateInitError> {
+        let db = DiskDb::new(
+            config,
+            STATE_DATABASE_KIND,
+            &state_database_format_version_in_code(),
+            network,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            false,
+        )?;
+
+        Ok(ZebraDb {
+            config: Arc::new(config.clone()),
+            debug_skip_format_upgrades: true,
+            format_change_handle: None,
+            ready_for_pruning: Arc::new(AtomicBool::new(false)),
+            db,
+        })
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.

@@ -1,7 +1,7 @@
 //! State snapshots: a pruned node's finalized state at a height `H`, exported
 //! as content-addressed pieces that another node downloads and verifies.
 //!
-//! - [`format`] defines the manifest and the piece records;
+//! - [`mod@format`] defines the manifest and the piece records;
 //! - [`store`] keeps the verified objects on disk, by hash;
 //! - [`export`] writes a snapshot from a finalized database;
 //! - [`import`] builds a finalized database from verified pieces.
@@ -212,4 +212,81 @@ pub enum SnapshotError {
         /// What is wrong.
         reason: String,
     },
+
+    /// The snapshot failed an import check. Unless the check is that a piece
+    /// file or the manifest matches the commitment, the snapshot's contents
+    /// are wrong for this node, so the caller marks its manifest rejected.
+    #[error("state snapshot refused by the {check} check: {detail}")]
+    Refused {
+        /// The check that failed.
+        check: import::ImportCheck,
+        /// What the check found.
+        detail: String,
+    },
+
+    /// A verified piece the import needs, or the SST file built from it, is
+    /// not available.
+    #[error("piece {index} of {component} ({hash}) is not available")]
+    MissingPiece {
+        /// The piece's component.
+        component: format::ComponentId,
+        /// The piece's index in its component.
+        index: u32,
+        /// The piece's hash.
+        hash: ObjectHash,
+    },
+
+    /// This node cannot import a state snapshot with its configuration, build
+    /// or existing state.
+    #[error("cannot import a state snapshot: {0}")]
+    Unsupported(String),
+
+    /// A database operation failed.
+    #[error("database error while {operation}: {source}")]
+    Database {
+        /// The operation that failed.
+        operation: &'static str,
+        /// The underlying error.
+        #[source]
+        source: rocksdb::Error,
+    },
+
+    /// The imported database could not be opened.
+    #[error("cannot open the imported state: {0}")]
+    Open(crate::StateInitError),
+}
+
+impl SnapshotError {
+    /// Returns whether the error is the snapshot's fault, rather than this
+    /// node's: the snapshot is malformed or failed an import check, so it is
+    /// never imported again.
+    pub fn rejects_snapshot(&self) -> bool {
+        match self {
+            SnapshotError::Refused { check, .. } => check.rejects_snapshot(),
+            SnapshotError::Format(format::FormatError::Io(_)) => false,
+            SnapshotError::Format(_) => true,
+            SnapshotError::Io { .. }
+            | SnapshotError::MissingPiece { .. }
+            | SnapshotError::Unsupported(_)
+            | SnapshotError::Database { .. }
+            | SnapshotError::Open(_) => false,
+            SnapshotError::ObjectTooLarge { .. }
+            | SnapshotError::HashMismatch { .. }
+            | SnapshotError::StateOpen(_)
+            | SnapshotError::HistoryRead(_)
+            | SnapshotError::Cancelled
+            | SnapshotError::StateRead(_)
+            | SnapshotError::FormatVersion { .. }
+            | SnapshotError::IndexerBuild
+            | SnapshotError::SpendingIndex { .. }
+            | SnapshotError::NewerFormat { .. }
+            | SnapshotError::NeedsMigration { .. }
+            | SnapshotError::GenesisHeight
+            | SnapshotError::EmptyState
+            | SnapshotError::TipMismatch { .. }
+            | SnapshotError::PrunedBelowWindow { .. }
+            | SnapshotError::MissingColumnFamily(_)
+            | SnapshotError::Inconsistent { .. } => false,
+        }
+    }
 }

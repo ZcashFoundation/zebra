@@ -1007,7 +1007,7 @@ impl DiskDb {
 
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
-    fn construct_column_families(
+    pub(crate) fn construct_column_families(
         db_options: Options,
         path: &Path,
         column_families_in_code: impl IntoIterator<Item = String>,
@@ -1530,7 +1530,7 @@ impl DiskDb {
     }
 
     /// Returns the database options for the finalized state database.
-    fn options() -> rocksdb::Options {
+    pub(crate) fn options() -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
