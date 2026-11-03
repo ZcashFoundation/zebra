@@ -83,11 +83,15 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     if let Some(bytes) = first_tx_of_version(&block, 4) {
         tx_samples.push(("V4 sapling", bytes));
     }
+    let block = Block::zcash_deserialize(Cursor::new(
+        zebra_test::vectors::BLOCK_MAINNET_419202_BYTES.as_slice(),
+    ))
+    .expect("valid block");
     let sapling_tx = block
         .transactions
         .iter()
         .find(|tx| tx.version() == 4 && tx.has_sapling_shielded_data())
-        .expect("block 419201 contains a V4 transaction with Sapling data");
+        .expect("block 419202 contains a V4 transaction with Sapling data");
     tx_samples.push((
         "V4 sapling shielded",
         sapling_tx
