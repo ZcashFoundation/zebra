@@ -218,7 +218,9 @@ transactions, validates that build as a block proposal in the background, and on
 Miners keep the coinbase-only template until the validated one is available. So a solved block that
 changes only the nonce and Equihash solution of a served template reuses the cached verdict in
 `submitblock`, which then checks proof of work and commits the block without repeating transaction
-and contextual validation. If you change the coinbase, transactions, timestamp or another header
+and contextual validation. The state applies such a block by rebinding the chain it prepared while
+validating the template, so the commit does not depend on the number of transactions in the block.
+If you change the coinbase, transactions, timestamp or another header
 field, submit the modified block with `getblocktemplate` parameters
 `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it. A successful proposal lets a
 later `submitblock` reuse verification when only the nonce and Equihash solution differ. Proof of
