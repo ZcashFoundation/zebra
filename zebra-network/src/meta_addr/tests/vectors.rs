@@ -34,7 +34,7 @@ fn sanitize_extremes() {
 
     let min_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
-        services: Default::default(),
+        services: Some(PeerServices::NODE_NETWORK),
         untrusted_last_seen: Some(u32::MIN.into()),
         last_response: Some(u32::MIN.into()),
         rtt: Some(Duration::ZERO),
@@ -49,7 +49,7 @@ fn sanitize_extremes() {
 
     let max_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
-        services: Default::default(),
+        services: Some(PeerServices::NODE_NETWORK),
         untrusted_last_seen: Some(u32::MAX.into()),
         last_response: Some(u32::MAX.into()),
         rtt: Some(Duration::ZERO),
@@ -68,6 +68,21 @@ fn sanitize_extremes() {
     if let Some(max_sanitized) = max_time_entry.sanitize(&Mainnet) {
         check::sanitize_avoids_leaks(&max_time_entry, &max_sanitized);
     }
+}
+
+/// Unknown services must not be replaced with `NODE_NETWORK` when gossiping an address.
+#[test]
+fn sanitize_omits_unknown_services() {
+    let _init_guard = zebra_test::init();
+
+    let now = DateTime32::now();
+    let mut peer = MetaAddr::new_initial_peer("127.0.0.1:8233".parse().unwrap())
+        .into_new_meta_addr(Instant::now(), now);
+
+    // Supply a timestamp so missing last-seen information cannot cause the rejection.
+    peer.set_untrusted_last_seen(now);
+
+    assert!(peer.sanitize(&Mainnet).is_none());
 }
 
 /// Test if a newly created local listening address is gossipable.
