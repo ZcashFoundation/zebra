@@ -1,6 +1,7 @@
 //! Types used in RPC methods.
 
 pub mod default_roots;
+pub mod get_block;
 pub mod get_block_template;
 pub mod get_blockchain_info;
 pub mod get_mempool_info;
