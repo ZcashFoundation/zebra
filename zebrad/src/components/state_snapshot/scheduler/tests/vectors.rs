@@ -7,7 +7,7 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -73,9 +73,10 @@ struct Behavior {
     /// An extra delay before answering a request at offset 0.
     first_range_latency: Duration,
 
-    /// The rate one answer's bytes arrive at, in bytes per second: an answer
-    /// of `n` bytes takes `n / rate` seconds more. `None` delivers them at
-    /// once.
+    /// The rate of the peer's link, in bytes per second, which its requests
+    /// in flight share as a real connection's streams do: an answer's bytes
+    /// are sent after those of the answers before it, `n` bytes in `n / rate`
+    /// seconds. `None` delivers them at once.
     rate: Option<u64>,
 
     /// The most bytes one answer carries, as a responder that finishes early.
@@ -155,12 +156,29 @@ struct Counters {
 
     /// How many times the service was checked for readiness.
     readiness_checks: AtomicUsize,
+
+    /// When the peer's link has sent every answer so far, in microseconds
+    /// since the test started.
+    link_free_at: AtomicU64,
 }
 
 impl Counters {
     /// The most requests that were in flight at once.
     fn max_in_flight(&self) -> usize {
         self.max_in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Queues an answer that takes `send` to send on the peer's link at `now`,
+    /// both since the test started, and returns when it will have been sent.
+    fn send_on_link(&self, now: Duration, send: Duration) -> Duration {
+        let now = u64::try_from(now.as_micros()).expect("tests run for less than u64::MAX µs");
+        let send = u64::try_from(send.as_micros()).expect("answers take less than u64::MAX µs");
+        let sent = |free: u64| free.max(now).saturating_add(send);
+        let free = self
+            .link_free_at
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |free| Some(sent(free)))
+            .expect("the update always returns a value");
+        Duration::from_micros(sent(free))
     }
 }
 
@@ -315,7 +333,9 @@ impl FakePeer {
         }
         if let Some(rate) = behavior.rate {
             let bytes = u64::try_from(data.len()).expect("a usize fits in a u64");
-            tokio::time::sleep(Duration::from_micros(bytes * 1_000_000 / rate.max(1))).await;
+            let send = Duration::from_micros(bytes * 1_000_000 / rate.max(1));
+            let sent = self.counters.send_on_link(self.epoch.elapsed(), send);
+            tokio::time::sleep_until(self.epoch + sent).await;
         }
 
         guard.answered(Some(data.len()));
@@ -710,7 +730,8 @@ async fn three_peers_download_every_piece() {
 
 /// After its first answers, a peer is asked for 8 seconds of its rate at a
 /// time, between 256 KiB and 4 MiB, and the last sub-range ends at the end
-/// of the piece.
+/// of the piece. The rate is the peer's, which its sub-ranges in flight
+/// share, not one sub-range's.
 #[tokio::test(start_paused = true)]
 async fn sub_ranges_follow_the_peer_rate() {
     let _init_guard = zebra_test::init();
@@ -753,6 +774,48 @@ async fn sub_ranges_follow_the_peer_rate() {
             .expect("the piece was requested");
         assert_eq!(last.offset + u64::from(last.length), u64::from(size));
     }
+}
+
+/// A sub-range in flight behind another one has time for both: a peer above
+/// the rate floor delivers it in full, though it takes longer than a lone
+/// sub-range's deadline.
+#[tokio::test(start_paused = true)]
+async fn a_pipelined_sub_range_has_time_for_the_one_ahead() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        rate: Some((100 * KIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[2 * MIB]), vec![peer]).run().await;
+
+    outcome.assert_complete();
+    // Two 1 MiB sub-ranges: the second is sent after the first, from 10.24 s to 20.48 s, past the
+    // 16 s a lone 1 MiB sub-range gets.
+    let calls = outcome.calls_of(0);
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls
+        .iter()
+        .all(|call| call.delivered == Some(usize::try_from(MIB).expect("fits"))));
+    assert_eq!(outcome.elapsed, ms(20_480));
+}
+
+/// A peer whose connection delivers above the 64 KiB/s floor is not stalled,
+/// though each of its two sub-ranges in flight gets half of it.
+#[tokio::test(start_paused = true)]
+async fn a_pipelining_peer_above_the_rate_floor_is_not_stalled() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        rate: Some((96 * KIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[8 * MIB]), vec![peer]).run().await;
+
+    outcome.assert_complete();
+    assert!(outcome.calls.iter().all(|call| !call.dropped));
+    // 8 MiB at 96 KiB/s takes 85.3 s, with the connection always busy.
+    assert!(outcome.elapsed < secs(86), "{:?}", outcome.elapsed);
 }
 
 /// A peer that finishes each answer early, with more than the short-answer
@@ -1560,9 +1623,9 @@ async fn the_end_game_leaves_a_peer_above_a_quarter_of_the_median() {
         .await;
 
     outcome.assert_complete();
-    // The fast peers are idle from 0.5 s, and the slower one finishes its piece at 1.25 s.
+    // The fast peers are idle from 0.8 s, and the slower one finishes its piece at 2 s.
     assert!(outcome.calls_of_for(0, 2).is_empty());
     assert!(outcome.calls_of_for(1, 2).is_empty());
     assert!(outcome.calls.iter().all(|call| !call.dropped));
-    assert_eq!(outcome.elapsed, ms(1250));
+    assert_eq!(outcome.elapsed, secs(2));
 }
