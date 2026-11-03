@@ -105,8 +105,8 @@ async fn state_propagates_incomplete_block_body_errors() {
             db,
             block.hash(),
         );
-        let error =
-            super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10).unwrap_err();
+        let error = super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10, None)
+            .unwrap_err();
         assert!(error.to_string().contains("cannot prove"));
         assert!(error
             .to_string()
@@ -292,9 +292,54 @@ fn legacy_chain_rejects_exhausted_history() {
         std::iter::once(Ok(block)),
         &Network::Mainnet,
         100_000,
+        None,
     )
     .unwrap_err();
     assert!(error.to_string().contains("cannot prove"));
+}
+
+/// The ancestors of a snapshot-imported database end at its window start, which the snapshot
+/// commitment pins; ending anywhere else still fails closed.
+#[test]
+fn legacy_chain_accepts_reaching_the_snapshot_base() {
+    use crate::SnapshotBase;
+
+    let blocks: Vec<Arc<Block>> = (1..=10)
+        .map(|height| {
+            zebra_test::vectors::MAINNET_BLOCKS[&height]
+                .zcash_deserialize_into()
+                .unwrap()
+        })
+        .collect();
+    assert!(blocks
+        .iter()
+        .all(|block| block.transactions[0].network_upgrade().is_none()));
+    let ancestors = || blocks.iter().rev().cloned().map(Ok);
+    let base = |window_start| SnapshotBase {
+        window_start: Height(window_start),
+        height: Height(10),
+        block_hash: blocks[9].hash(),
+        manifest: zebra_chain::state_snapshot::ObjectHash([0; 32]),
+        deferred_checks: 0,
+    };
+
+    assert_eq!(
+        super::check::legacy_chain(
+            Height(0),
+            ancestors(),
+            &Network::Mainnet,
+            100,
+            Some(base(1))
+        )
+        .unwrap(),
+        Some(Height(1))
+    );
+    for base in [None, Some(base(2)), Some(base(10))] {
+        let error =
+            super::check::legacy_chain(Height(0), ancestors(), &Network::Mainnet, 100, base)
+                .unwrap_err();
+        assert!(error.to_string().contains("ancestor history ended"));
+    }
 }
 
 async fn test_populated_state_responds_correctly(
@@ -848,7 +893,7 @@ proptest! {
         let nu_activation_height = NetworkUpgrade::Nu5
             .activation_height(&network)
             .expect("test networks activate NU5 after Canopy");
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT, None)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(None));
@@ -865,7 +910,7 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT, None)
             .map(|_| ())
             .map_err(|error| error.to_string());
 
@@ -907,6 +952,7 @@ proptest! {
             chain.clone().into_iter().rev().map(Ok),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
+            None,
         ).map(|_| ()).map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -923,7 +969,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT, None)
             .map(|_| ())
             .map_err(|error| error.to_string());
 

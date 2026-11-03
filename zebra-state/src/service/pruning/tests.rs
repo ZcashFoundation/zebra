@@ -152,6 +152,58 @@ fn retention_uses_the_durable_tip_and_excludes_genesis() {
 }
 
 #[test]
+fn snapshot_base_is_the_restart_witness_of_a_branchless_window() {
+    use crate::tests::snapshot_db::{snapshot_state, Coinbase};
+
+    const SNAPSHOT_TIP: u32 = 60;
+    const WINDOW_START: u32 = 21;
+    const SHORT_RETENTION: u32 = 10;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (mut state, base) = snapshot_state(
+        cache.path().to_path_buf(),
+        SNAPSHOT_TIP,
+        WINDOW_START,
+        Coinbase::Legacy,
+        0,
+    );
+    state.db.mark_ready_for_pruning();
+
+    // Without a marker, a window without branch IDs has no witness.
+    assert_eq!(
+        PruningWitness::default().update(&state.db, None).unwrap(),
+        None
+    );
+
+    // With the marker, reaching the window start is the witness: the restart check accepts it,
+    // and it keeps every window body until a branch ID block arrives.
+    let mut witness = PruningWitness::default();
+    assert_eq!(
+        witness.update(&state.db, Some(base)).unwrap(),
+        Some(base.window_start)
+    );
+    assert_eq!(
+        prune_batch(&state.db, SHORT_RETENTION, &mut witness).unwrap(),
+        None
+    );
+    assert_eq!(floor(&state.db), base.window_start);
+
+    let branched = crate::tests::snapshot_db::commit_child(&mut state, Coinbase::Branched, vec![]);
+    let branched_height = branched.coinbase_height().unwrap();
+    assert_eq!(
+        witness.update(&state.db, Some(base)).unwrap(),
+        Some(branched_height)
+    );
+    let target = retention_floor(branched_height, SHORT_RETENTION);
+    assert_eq!(
+        prune_batch(&state.db, SHORT_RETENTION, &mut witness).unwrap(),
+        Some(base.window_start..target)
+    );
+    assert_eq!(floor(&state.db), target);
+}
+
+#[test]
 fn archive_conversion_is_bounded_and_retention_never_restores_bodies() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
