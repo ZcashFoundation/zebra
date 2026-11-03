@@ -1010,8 +1010,8 @@ where
             || self.reserved.saturating_add(u64::from(size)) <= self.config.budget_bytes
     }
 
-    /// Gives each idle peer the next pending piece it can serve, while the
-    /// budget allows (design, §6.1: each piece goes to one peer).
+    /// Gives each idle peer the first pending piece it can serve that fits in
+    /// the budget (design, §6.1: each piece goes to one peer).
     fn assign(&mut self) {
         for peer in 0..self.peers.len() {
             if self.pending.is_empty() {
@@ -1020,16 +1020,11 @@ where
             if !self.is_idle(peer) {
                 continue;
             }
-            let Some(position) = self
-                .pending
-                .iter()
-                .position(|&piece| self.can_serve(peer, piece))
-            else {
+            let Some(position) = self.pending.iter().position(|&piece| {
+                self.can_serve(peer, piece) && self.budget_allows(self.pieces[piece].size)
+            }) else {
                 continue;
             };
-            if !self.budget_allows(self.pieces[self.pending[position]].size) {
-                break;
-            }
             if let Some(piece) = self.pending.remove(position) {
                 self.start_download(peer, piece);
             }

@@ -1054,6 +1054,44 @@ async fn the_budget_bounds_the_pieces_in_flight() {
     assert_eq!(outcome.all.max_in_flight(), 2);
 }
 
+/// When the next pending piece does not fit in the budget, an idle peer takes
+/// a smaller one that does, rather than waiting.
+#[tokio::test(start_paused = true)]
+async fn the_budget_is_filled_with_a_smaller_piece() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        latency: secs(1),
+        ..Behavior::default()
+    };
+    let outcome = Scenario {
+        config: SchedulerConfig {
+            budget_bytes: (3 * MIB).into(),
+            ..SchedulerConfig::default()
+        },
+        ..Scenario::new(objects(&[2 * MIB, 2 * MIB, MIB]), vec![peer; 2])
+    }
+    .run()
+    .await;
+
+    outcome.assert_complete();
+    // The first peer takes the first 2 MiB piece; the second 2 MiB piece does not fit beside it,
+    // so the second peer takes the 1 MiB piece at once, and the second 2 MiB piece follows at 1 s.
+    let first_request = |object: usize| {
+        outcome
+            .calls
+            .iter()
+            .filter(|call| call.hash == outcome.hash(object))
+            .map(|call| call.start)
+            .min()
+            .expect("every piece is requested")
+    };
+    assert_eq!(first_request(0), Duration::ZERO);
+    assert_eq!(first_request(2), Duration::ZERO);
+    assert_eq!(first_request(1), secs(1));
+    assert_eq!(outcome.elapsed, secs(2));
+}
+
 /// A piece larger than the whole budget is still downloaded, alone.
 #[tokio::test(start_paused = true)]
 async fn a_piece_larger_than_the_budget_is_downloaded() {
