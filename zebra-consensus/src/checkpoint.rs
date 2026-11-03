@@ -92,6 +92,21 @@ struct RequestBlock {
 #[derive(Debug)]
 struct RetainedBlockPermit(Arc<AtomicUsize>);
 
+impl RetainedBlockPermit {
+    // Admission is serialized through &mut self; commit owners can only decrease the count.
+    fn try_admit(
+        count: Arc<AtomicUsize>,
+        limit: usize,
+        evict: impl FnOnce() -> bool,
+    ) -> Option<Self> {
+        if count.load(Ordering::Relaxed) >= limit && !evict() {
+            return None;
+        }
+        count.fetch_add(1, Ordering::Relaxed);
+        Some(Self(count))
+    }
+}
+
 impl Drop for RetainedBlockPermit {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::Relaxed);
@@ -856,19 +871,19 @@ where
             }
             self.reject_queued(height, MAX_QUEUED_BLOCKS_PER_HEIGHT - 1);
         }
-        if self.retained_blocks.load(Ordering::Relaxed) >= self.retained_block_limit
-            && !self.evict_for(height, hash)
-        {
+        let Some(retained) = RetainedBlockPermit::try_admit(
+            self.retained_blocks.clone(),
+            self.retained_block_limit,
+            || self.evict_for(height, hash),
+        ) else {
             return Err(VerifyCheckpointError::QueuedLimit);
-        }
+        };
 
-        // Admission is serialized through &mut self; commit owners can only decrease the count.
-        self.retained_blocks.fetch_add(1, Ordering::Relaxed);
         let queued = QueuedBlock {
             block,
             tx,
             notifications,
-            retained: RetainedBlockPermit(self.retained_blocks.clone()),
+            retained,
         };
         let blocks = self
             .queued
