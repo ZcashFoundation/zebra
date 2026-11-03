@@ -141,6 +141,61 @@ fn import_tampered(
     fixture::import(chain, &records, &chain.network, 0).result
 }
 
+/// The importer's value pool check requires the UTXO set to hold exactly the
+/// transparent pool (design, §2, "Self-consistency checks"). That relation
+/// holds on databases populated with the Mainnet and Testnet block vectors,
+/// whose coinbases pay miners and founders, and not only on the fixture chain.
+#[test]
+fn utxo_set_value_is_the_transparent_pool_on_real_blocks() {
+    use std::sync::Arc;
+
+    use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+
+    let _init_guard = zebra_test::init();
+    for (network, blocks) in [
+        (
+            Network::Mainnet,
+            &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
+        ),
+        (
+            Network::new_default_testnet(),
+            &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+        ),
+    ] {
+        let mut state = FinalizedState::new_with_debug(
+            &Config::ephemeral(),
+            &network,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        )
+        .unwrap();
+        for bytes in blocks.values() {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+            state
+                .commit_finalized_direct(
+                    CheckpointVerifiedBlock::from(block).into(),
+                    None,
+                    "transparent pool test",
+                )
+                .unwrap();
+        }
+        assert!(
+            blocks.len() > 1,
+            "{network} has block vectors after genesis"
+        );
+
+        let utxos: u64 = fixture::rows(&state, ComponentId::Utxos)
+            .iter()
+            .map(|(_, value)| u64::from(transparent::Output::from_bytes(value).value))
+            .sum();
+        let pool = u64::from(state.db.finalized_value_pool().transparent_amount());
+        assert_ne!(pool, 0, "{network} coinbases pay transparent outputs");
+        assert_eq!(utxos, pool, "{network} UTXO set holds the transparent pool");
+    }
+}
+
 /// Returns the record of `component` at `key`.
 fn record<'a>(records: &'a mut Records, component: ComponentId, key: &[u8]) -> &'a mut Vec<u8> {
     records
