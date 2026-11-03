@@ -11,13 +11,13 @@ compile_error!("loom models need RUSTFLAGS=\"--cfg zebra_loom -C debug-assertion
 #[cfg(all(test, zebra_loom))]
 pub(crate) mod sync {
     pub(crate) mod atomic {
-        pub(crate) use ::loom::sync::atomic::{AtomicU64, Ordering};
+        pub(crate) use ::loom::sync::atomic::{fence, AtomicU64, Ordering};
     }
 }
 
 #[cfg(not(all(test, zebra_loom)))]
 pub(crate) mod sync {
     pub(crate) mod atomic {
-        pub(crate) use std::sync::atomic::{AtomicU64, Ordering};
+        pub(crate) use std::sync::atomic::{fence, AtomicU64, Ordering};
     }
 }
