@@ -65,7 +65,7 @@ mod recent_by_ip;
 /// The experimental version 2 protocol's listener and initial peer dialing.
 mod v2;
 
-pub use v2::close_v2_endpoint;
+pub use v2::{close_v2_endpoint, BootstrapPeers};
 
 /// A successful outbound peer connection attempt or inbound connection handshake.
 ///

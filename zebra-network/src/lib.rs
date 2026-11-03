@@ -205,7 +205,7 @@ pub use crate::{
         SharedPeerError,
     },
     peer_set::{
-        close_v2_endpoint, init, init_with_block_gossip_peer_ips, BlockAdvertiser,
+        close_v2_endpoint, init, init_with_block_gossip_peer_ips, BlockAdvertiser, BootstrapPeers,
         NetworkResponseFuture, NetworkService,
     },
     policies::RetryLimit,
