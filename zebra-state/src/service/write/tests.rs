@@ -669,3 +669,123 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         assert!(retained.any_chain_contains(&observation.root.hash()));
     }
 }
+
+/// Returns a root block with a child and a competing fork child, each carrying `charges`, and the
+/// finalized state they were committed on.
+fn forked_state_with_charges(
+    charges: [usize; 3],
+) -> (NonFinalizedState, FinalizedState, [Arc<Block>; 3]) {
+    let network = Network::Mainnet;
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let blocks = [
+        root.clone(),
+        root.make_fake_child().set_work(10),
+        root.make_fake_child().set_work(5),
+    ];
+    let mut state = NonFinalizedState::new(&network);
+    let finalized = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .unwrap();
+    finalized.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    for (index, (block, charge)) in blocks.iter().zip(charges).enumerate() {
+        let mut prepared = block.clone().prepare();
+        prepared.retained_charge = Some(charge);
+        if index == 0 {
+            state.commit_new_chain(prepared, &finalized).unwrap();
+        } else {
+            state.commit_block(prepared, &finalized).unwrap();
+        }
+    }
+    assert_eq!(state.chain_count(), 2, "the fork shares the root block");
+
+    (state, finalized, blocks)
+}
+
+/// The resident charge is the carried charge of each distinct non-finalized block: a root shared by
+/// two chains is charged once, and finalizing it releases its charge.
+#[test]
+fn resident_bytes_charge_each_distinct_block_once() {
+    let _init_guard = zebra_test::init();
+    let charges = [3_000_000, 5_000_000, 7_000_000];
+    let (mut state, _finalized, _blocks) = forked_state_with_charges(charges);
+
+    assert_eq!(
+        non_finalized_resident_bytes(&state),
+        15_000_000,
+        "the root is charged once, not once per chain",
+    );
+
+    state.finalize();
+    assert_eq!(non_finalized_resident_bytes(&state), 12_000_000);
+    assert_eq!(
+        non_finalized_resident_bytes(&NonFinalizedState::new(&Network::Mainnet)),
+        0
+    );
+}
+
+/// Every publish sets the `state.memory.resident_bytes` gauge to the published state's resident
+/// charge.
+#[test]
+fn publishing_the_chain_sets_the_resident_bytes_gauge() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use metrics::{
+        Counter, Gauge, GaugeFn, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+    };
+
+    struct LastValue(AtomicU64);
+
+    impl GaugeFn for LastValue {
+        fn increment(&self, _: f64) {}
+        fn decrement(&self, _: f64) {}
+        fn set(&self, value: f64) {
+            self.0.store(value.to_bits(), Ordering::SeqCst);
+        }
+    }
+
+    struct ResidentBytesRecorder(Arc<LastValue>);
+
+    impl Recorder for ResidentBytesRecorder {
+        fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+        fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+        fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+            Counter::noop()
+        }
+
+        fn register_gauge(&self, key: &Key, _: &Metadata<'_>) -> Gauge {
+            if key.name() == "state.memory.resident_bytes" {
+                Gauge::from_arc(self.0.clone())
+            } else {
+                Gauge::noop()
+            }
+        }
+
+        fn register_histogram(&self, _: &Key, _: &Metadata<'_>) -> Histogram {
+            Histogram::noop()
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    let (state, finalized, _blocks) = forked_state_with_charges([3_000_000, 5_000_000, 7_000_000]);
+    let gauge = Arc::new(LastValue(AtomicU64::new(f64::NAN.to_bits())));
+    let recorder = ResidentBytesRecorder(gauge.clone());
+    let (mut tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, _state_receiver) = watch::channel(state.clone());
+
+    metrics::with_local_recorder(&recorder, || {
+        update_latest_chain_channels(&state, &finalized.db, &mut tip_sender, &state_sender, None)
+    });
+    assert_eq!(f64::from_bits(gauge.0.load(Ordering::SeqCst)), 15_000_000.0);
+
+    let empty = NonFinalizedState::new(&Network::Mainnet);
+    metrics::with_local_recorder(&recorder, || {
+        update_latest_chain_channels(&empty, &finalized.db, &mut tip_sender, &state_sender, None)
+    });
+    assert_eq!(f64::from_bits(gauge.0.load(Ordering::SeqCst)), 0.0);
+}

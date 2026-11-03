@@ -1,6 +1,7 @@
 //! Writing blocks to the finalized and non-finalized states.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -77,6 +78,9 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// If `backup_dir_path` is `Some`, the non-finalized state is written to the backup
 /// directory before updating the channels.
 ///
+/// Also sets the `state.memory.resident_bytes` gauge to the published state's
+/// [`non_finalized_resident_bytes`].
+///
 /// Returns the latest chain tip height, or `None` if both states are empty.
 #[instrument(
     level = "debug",
@@ -110,6 +114,10 @@ fn update_latest_chain_channels(
         non_finalized_state.write_to_backup(backup_dir_path);
     }
 
+    // A gauge is a float: losing precision above 2^53 bytes doesn't matter for monitoring.
+    metrics::gauge!("state.memory.resident_bytes")
+        .set(non_finalized_resident_bytes(non_finalized_state) as f64);
+
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
@@ -133,6 +141,24 @@ pub enum WriteMessage {
     Finalized(QueuedCheckpointVerified),
     Handoff,
     NonFinalized(NonFinalizedWriteMessage),
+}
+
+/// The retained charge of the non-finalized blocks, in bytes: the sum of the charge each distinct
+/// block in the non-finalized chains carries.
+///
+/// A block below a fork point is one allocation shared by several chains, so it is charged once.
+/// Invalidated blocks, which `invalidateblock` keeps for `reconsiderblock`, are not charged.
+fn non_finalized_resident_bytes(non_finalized_state: &NonFinalizedState) -> u64 {
+    // Bounded by the fork limit (10 chains, or 100 on test networks) times the blocks in each
+    // chain above the finalized tip (the 1,000-block reorg window).
+    let mut charged = HashSet::new();
+    non_finalized_state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        .filter(|block| charged.insert(block.hash))
+        // `usize` is at most 64 bits on every supported platform.
+        .map(|block| block.retained_charge as u64)
+        .fold(0, u64::saturating_add)
 }
 
 /// A worker task that reads, validates, and writes blocks to the

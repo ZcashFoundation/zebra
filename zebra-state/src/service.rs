@@ -469,6 +469,13 @@ impl StateService {
                  blocks above its finalized tip"
             );
         }
+        if let Some(resident_target_bytes) = limits.non_finalized_resident_bytes {
+            tracing::debug!(
+                resident_target_bytes,
+                "the state.memory.resident_bytes gauge reports the non-finalized block charge \
+                 against its resident target, which is not enforced",
+            );
+        }
         let skip_backup_task = config.debug_skip_non_finalized_state_backup_task;
         let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
             NonFinalizedState::new(network)
