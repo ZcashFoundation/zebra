@@ -99,7 +99,7 @@ const LEGACY_MAX_ENTRY_SIZE: usize = 253;
 /// parse at the current width. The field order must match [`HistoryTreeParts`] so the two share a
 /// bincode layout (bincode ignores field names and identifies fields by position).
 #[derive(serde::Serialize, serde::Deserialize)]
-struct LegacyHistoryTreeParts {
+pub(crate) struct LegacyHistoryTreeParts {
     network_kind: NetworkKind,
     size: u32,
     peaks: BTreeMap<u32, LegacyEntry>,
@@ -108,7 +108,7 @@ struct LegacyHistoryTreeParts {
 
 /// A history-tree entry serialized at the pre-NU6.3 [`LEGACY_MAX_ENTRY_SIZE`] width.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct LegacyEntry {
+pub(crate) struct LegacyEntry {
     #[serde(with = "BigArray")]
     inner: [u8; LEGACY_MAX_ENTRY_SIZE],
 }

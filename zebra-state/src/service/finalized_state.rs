@@ -78,6 +78,12 @@ pub use disk_format::KV;
 
 pub use disk_format::upgrade::restorable_db_versions;
 
+// The state snapshot format decodes and re-encodes these values.
+pub(crate) use disk_format::{
+    chain::{HistoryTreeParts, LegacyHistoryTreeParts},
+    transparent::AddressBalanceLocation,
+};
+
 /// Minimum Sapling, Orchard and Ironwood note commitments in a checkpoint block for its note
 /// commitment tree update to run alongside its history commitment check.
 const OVERLAP_COMMITMENT_THRESHOLD: usize = 32;
