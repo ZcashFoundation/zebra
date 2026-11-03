@@ -711,6 +711,18 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
             &[],
             &legacy_history_tree_bytes(&history_tree),
         );
+
+        // Formats before 1.4.0 keyed the Sprout tip tree by the heights it changed at, and the
+        // state reads the last of those rows, so the earlier row is never read.
+        let sprout_cf = "sprout_note_commitment_tree";
+        let sprout_tip = trees
+            .iter()
+            .find(|(cf, _rows)| *cf == sprout_cf)
+            .map(|(_cf, rows)| without_cached_root(&rows[&Vec::new()]))
+            .expect("the Sprout tip tree is listed above");
+        delete(state, batch, sprout_cf, &[]);
+        insert(state, batch, sprout_cf, &Height(2).as_bytes(), &[0xFF; 3]);
+        insert(state, batch, sprout_cf, &Height(7).as_bytes(), &sprout_tip);
     });
 
     // The rewrites took effect.
@@ -721,6 +733,14 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
     assert!(cf_rows(&source, "block_info")
         .values()
         .all(|value| value.len() < 60));
+    assert!(cf_rows(&source, "sprout_note_commitment_tree")
+        .keys()
+        .all(|key| key.len() == 3));
+    assert_eq!(
+        source.db.sprout_tree_for_tip(),
+        open_state(&current).db.sprout_tree_for_tip(),
+        "the state reads the same Sprout tip tree from both databases",
+    );
     drop(source);
 
     let network = Network::Mainnet;
@@ -990,6 +1010,46 @@ fn export_refuses_missing_and_contradictory_rows() {
             ..
         },
     );
+
+    // A set row with a value, as a spending index stores for nullifiers, is refused.
+    let config = new_state(&dir.path().join("cache-set"), &blocks);
+    change_state(&config, |state, batch| {
+        insert(
+            state,
+            batch,
+            "sapling_nullifiers",
+            &[0x11; 32],
+            &tx_loc(12, 1),
+        );
+    });
+    assert_err!(
+        export_with_window(
+            &config,
+            &network,
+            TIP,
+            WINDOW_START,
+            &ArtifactStore::at(dir.path().join("store-set")),
+        ),
+        SnapshotError::Inconsistent {
+            component: ComponentId::SaplingNullifiers,
+            ..
+        },
+    );
+
+    // A state whose genesis block is not the network's is refused before any row is read.
+    let config = new_state(&dir.path().join("cache-genesis"), &blocks);
+    change_state(&config, |state, batch| {
+        insert(state, batch, "hash_by_height", &height_key(0), &[0x22; 32]);
+    });
+    let store = ArtifactStore::at(dir.path().join("store-genesis"));
+    assert_err!(
+        export_with_window(&config, &network, TIP, WINDOW_START, &store),
+        SnapshotError::Inconsistent {
+            component: ComponentId::HashByHeight,
+            ..
+        },
+    );
+    assert!(!store.objects_dir().exists());
 
     // The state reads the value pools only from the `()` key, so a row under another key is
     // refused rather than shipped in its place.
