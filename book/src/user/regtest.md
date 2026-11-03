@@ -179,12 +179,12 @@ agreement with `getbestblockhash`.
 Keep the P2P listener on loopback for local tests. Regtest still creates an
 inbound listener; its network magic is not an access-control mechanism.
 
-## Experimental early block relay
+## Compact block relay
 
-For private relay experiments, set `experimental_early_block_relay = true` in
-`[network]` on each participating Zebra node. It defaults to `false` and requires
-both ends of a connection to advertise the experimental capability during the
-handshake. Peers that have not opted in retain ordinary full-block relay.
+Compact block relay is enabled by default on Regtest, as on public networks.
+Both ends of a connection must advertise support during the handshake.
+Set `compact_block_relay = false` in `[network]` to turn it off on a node.
+Peers without support or with the setting disabled retain ordinary full-block relay.
 
 After NU5, opted-in nodes can advertise and serve an authenticated child of the
 committed best tip before transaction verification finishes. Full validation is
@@ -205,12 +205,12 @@ unavailable context remains non-punitive, while a failed authentication is score
 Withdrawn bodies are rechecked before their local wire write begins, falling back
 to committed state if necessary. Bytes already sent cannot be recalled.
 
-These connections also negotiate provisional compact encoding version 1 with
+These connections negotiate compact encoding version 1 with
 `sendcmpct`. At most three recipients per announcement receive `cmpctblock`;
 other connections receive ordinary inventory and full blocks. Up to three opted-in
 peers are selected as compact receive sources, preferring first announcers only
 after their block is committed locally. Unvalidated inventory cannot change this
-selection, and a stalled demotion write cannot hold a source slot.
+selection. Replacement waits until the demoted source is disabled or its connection closes.
 The compact encoding includes the complete Zcash header, a nonce, six-byte SipHash-2-4 short
 IDs, and a prefilled coinbase. Short IDs use the complete witnessed identity for
 v5/v6 transactions and the transaction ID for earlier versions.
@@ -225,10 +225,8 @@ bounded snapshot before connection cleanup. The normal consensus verifier still
 checks every reconstructed block. Coinbase-only blocks use full relay because
 compact encoding would not save bytes.
 
-This uses experimental service bit 25 from the
-[temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).
-Bit 25 avoids bit 24, which another implementation already uses for a different
-capability. This is not a production protocol allocation;
-[Mining Zcash with Zebra](mining.md#early-block-relay-and-compact-blocks) covers its use on mining
-nodes. Regtest's disabled proof of work does not measure the cost of authenticated admission on a
-public network.
+The draft [Compact Block Relay ZIP](https://github.com/zcash/zips/pull/1429)
+assigns service bit 16 (`NODE_COMPACT_BLOCKS`). Other service bits do not enable
+this feature. [Mining Zcash with Zebra](mining.md#early-block-relay-and-compact-blocks)
+covers its use on mining nodes. Regtest's disabled proof of work does not measure
+the cost of authenticated admission on a public network.

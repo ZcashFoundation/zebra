@@ -32,7 +32,7 @@ listen_addr = "127.0.0.1:8232"
 enable_cookie_auth = true
 
 [network]
-experimental_early_block_relay = true
+compact_block_relay = true
 ```
 
 See the [mining configuration reference](config.md#mining) for field defaults
@@ -173,22 +173,32 @@ access to well-behaved clients; the endpoint is not a defense against hostile cl
 
 ### Early block relay and compact blocks
 
-Set `[network] experimental_early_block_relay = true` on every mining node. Between two nodes that
-both enable it:
+Compact block relay is enabled by default. Keep it enabled on mining nodes to
+reduce block propagation delays and the time spent mining on an outdated tip:
 
-- A node advertises a block extending its best tip once the header, proof of work and transaction
-  commitments check out, before transaction verification finishes. Each receiver still verifies
-  the block fully before committing it.
-- Up to three such peers per announcement receive a compact block: the header and short
-  transaction IDs. Each rebuilds the block from its mempool and requests missing transactions once;
-  if that fails, it fetches the full block.
+```toml
+[network]
+compact_block_relay = true
+```
 
-Other peers, including zcashd, other node implementations and Zebra releases without this setting,
-get ordinary full-block relay. Nodes negotiate the feature with experimental service bit 25 and a
-`sendcmpct` exchange. Neither is an allocated Zcash protocol, and the encoding may change in later
-releases; nodes without a common encoding version fall back to full blocks.
-[Experimental early block relay](regtest.md#experimental-early-block-relay) describes the limits and
-failure handling.
+Set `compact_block_relay = false` to turn it off. Between Zebra nodes with it enabled:
+
+- A node can relay a block extending its best tip after checking the header,
+  proof of work and transaction commitments, before transaction verification
+  finishes. Every receiver still fully validates the block before committing it.
+- Up to three peers per announcement receive a compact block: the header,
+  short transaction IDs and the coinbase transaction. Receivers reconstruct the
+  block from their mempools, avoiding retransmission of transactions they already
+  have, and request any missing transactions.
+
+If reconstruction fails or recovery times out, the receiver requests the full
+block from the same peer. Peers that do not enable the feature, or do not support
+its compact encoding version, retain full-block relay.
+
+The draft ZIP [Compact Block Relay](https://github.com/zcash/zips/pull/1429)
+specifies the protocol, negotiated with service bit 16 and a `sendcmpct` exchange.
+See [Compact block relay on Regtest](regtest.md#compact-block-relay) for limits
+and failure handling.
 
 ## Running Zebra
 
