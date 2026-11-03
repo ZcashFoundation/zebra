@@ -5,6 +5,8 @@ use zebra_chain::{
     state_snapshot::{ObjectHash, StateSnapshotCommitment},
 };
 
+use crate::config::ZebradConfig;
+
 use super::commitment_toml;
 
 /// The printed commitment is a config table that configures the node to
@@ -34,16 +36,16 @@ fn printed_commitment_configures_the_sync_section() {
         "{printed}",
     );
 
-    let parsed: toml::Value = toml::from_str(&printed).expect("the printed table is valid TOML");
-    let snapshot = parsed
-        .get("sync")
-        .and_then(|sync| sync.get("state_snapshot"))
-        .expect("the printed table is in the sync section");
-    assert_eq!(
-        snapshot.get("height").and_then(toml::Value::as_integer),
-        Some(3_522_060)
-    );
+    // Pasted into an empty config, it is the only change from the defaults.
+    let config: ZebradConfig = toml::from_str(&printed).expect("the printed table is valid config");
+    assert_eq!(config.sync.state_snapshot, Some(commitment));
+    let mut expected = ZebradConfig::default();
+    expected.sync.state_snapshot = Some(commitment);
+    assert_eq!(config, expected);
 
-    let after_sync_keys = format!("[sync]\nstate_snapshot_sync = true\n\n{printed}");
-    toml::from_str::<toml::Value>(&after_sync_keys).expect("valid TOML after existing sync keys");
+    // And after the keys of an existing [sync] section.
+    let config = format!("[sync]\nstate_snapshot_sync = true\n\n{printed}");
+    let config: ZebradConfig = toml::from_str(&config).expect("valid config");
+    assert!(config.sync.state_snapshot_sync);
+    assert_eq!(config.sync.state_snapshot, Some(commitment));
 }
