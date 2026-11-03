@@ -1114,10 +1114,11 @@ fn promotion_keeps_work_for_another_parent() {
     );
 }
 
-/// Transaction-bearing builds are served only after proposal validation accepts them. A rejected
-/// build keeps the coinbase-only work for its parent, and a later accepted build replaces it.
+/// The first transaction-bearing build for a tip is served at once and validated in the
+/// background. A later build for the same tip replaces it only once validated: a rejected build
+/// keeps the served work, and an accepted one is served unchanged.
 #[tokio::test]
-async fn transaction_bearing_work_is_served_only_after_validation() {
+async fn later_builds_are_served_only_after_validation() {
     use zebra_test::mock_service::MockService;
 
     let _init_guard = zebra_test::init();
@@ -1215,49 +1216,35 @@ async fn transaction_bearing_work_is_served_only_after_validation() {
             verifier.clone(),
         ));
 
-        // Miners get coinbase-only work while the transaction-bearing build is validated.
-        let served = loop {
+        // The first transaction-bearing build is served at once, and validated meanwhile.
+        let first = loop {
             if let Some(template) = cache.template_for_tip(hash, &network, DateTime32::now()) {
-                break template;
+                if !template.transactions.is_empty() {
+                    break template;
+                }
             }
             publications.changed().await;
         };
-        assert!(served.transactions.is_empty());
+        assert_eq!(first.transactions.len(), 1);
         let request = verifier
             .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
             .await;
-        let first = staged
-            .borrow_and_update()
-            .clone()
-            .expect("the build under validation is staged");
-        assert_eq!(first.transactions.len(), 1);
         assert_eq!(
             *request.request().block(),
             proposal_block_from_template(&first, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap(),
-            "the validated proposal is the staged build"
+            "the served build is the one validated"
         );
-        assert!(cache
-            .template_for_tip(hash, &network, DateTime32::now())
-            .expect("coinbase-only work remains served")
-            .transactions
-            .is_empty());
-
-        // A rejected build keeps the coinbase-only work.
-        request.respond_error("rejected".into());
+        let proposal = request.request().block();
+        request.respond(proposal.hash());
         assert!(
             tokio::time::timeout(Duration::from_millis(200), publications.changed())
                 .await
                 .is_err(),
-            "a rejected build must not be served"
+            "validating work that is already served must not wake long polls"
         );
-        assert!(cache
-            .template_for_tip(hash, &network, DateTime32::now())
-            .expect("coinbase-only work remains served")
-            .transactions
-            .is_empty());
 
-        // A later accepted build replaces it.
+        // A rebuild for the same tip is staged, and a rejected one keeps the served work.
         let added = transaction(2);
         let added_id = added.transaction.id;
         pool.send_replace(vec![transaction(1), added]);
@@ -1272,17 +1259,52 @@ async fn transaction_bearing_work_is_served_only_after_validation() {
             .clone()
             .expect("the rebuilt work is staged");
         assert_eq!(second.transactions.len(), 2);
+        assert_eq!(
+            cache
+                .template_for_tip(hash, &network, DateTime32::now())
+                .expect("the first build remains served during validation"),
+            first
+        );
+        request.respond_error("rejected".into());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), publications.changed())
+                .await
+                .is_err(),
+            "a rejected build must not be served"
+        );
+        assert_eq!(
+            cache
+                .template_for_tip(hash, &network, DateTime32::now())
+                .expect("the first build remains served after a rejection"),
+            first
+        );
+
+        // The next rebuild is accepted and served unchanged.
+        let third_transaction = transaction(3);
+        let third_id = third_transaction.transaction.id;
+        pool.send_replace(vec![transaction(1), transaction(2), third_transaction]);
+        events
+            .send(MempoolChange::added([third_id].into_iter().collect()))
+            .unwrap();
+        let request = verifier
+            .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
+            .await;
+        let third = staged
+            .borrow_and_update()
+            .clone()
+            .expect("the rebuilt work is staged");
+        assert_eq!(third.transactions.len(), 3);
         let proposal = request.request().block();
         request.respond(proposal.hash());
         let validated = loop {
             if let Some(template) = cache.template_for_tip(hash, &network, DateTime32::now()) {
-                if !template.transactions.is_empty() {
+                if template.transactions.len() == 3 {
                     break template;
                 }
             }
             publications.changed().await;
         };
-        assert_eq!(validated, second, "the accepted build is served unchanged");
+        assert_eq!(validated, third, "the accepted build is served unchanged");
         updater.abort();
     })
     .await

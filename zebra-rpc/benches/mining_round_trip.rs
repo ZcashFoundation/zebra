@@ -17,7 +17,10 @@
 //! scripts, so no signing is needed, and they are not verified by a mempool, so a submission that
 //! misses the proposal cache pays full transaction verification.
 //!
-//! Run with `cargo bench -p zebra-rpc --bench mining_round_trip`.
+//! Run with `cargo bench -p zebra-rpc --bench mining_round_trip`. Set `ZEBRA_BENCH_SOLVE_MS` to
+//! the milliseconds a solve is assumed to take: the submission waits that long after the template
+//! is served, outside the timed region, so the template's background check can finish first as it
+//! does for real solves. The default of zero submits immediately.
 
 #![allow(missing_docs)]
 
@@ -58,6 +61,15 @@ use zebra_state::{ReadRequest, ReadResponse};
 
 /// Mempool sizes to benchmark, in transactions. Every transaction is selected into the template.
 const MEMPOOL_SIZES: [usize; 2] = [100, 1_000];
+
+/// The assumed solve time between receiving a template and submitting it, from
+/// `ZEBRA_BENCH_SOLVE_MS`.
+fn solve_delay() -> Duration {
+    std::env::var("ZEBRA_BENCH_SOLVE_MS")
+        .ok()
+        .and_then(|millis| millis.parse().ok())
+        .map_or(Duration::ZERO, Duration::from_millis)
+}
 
 /// The ZIP-317 marginal fee, which prices one logical action.
 const MARGINAL_FEE: i64 = 5_000;
@@ -350,6 +362,10 @@ async fn round_trip<Rpc: RpcServer>(
         mempool.set(block.hash(), spend_block_outputs(&block));
     }
     let data = block.zcash_serialize_to_vec().expect("blocks serialize");
+    let delay = solve_delay();
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
+    }
 
     let submitted = Instant::now();
     let response = rpc

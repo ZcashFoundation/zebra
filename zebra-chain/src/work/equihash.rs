@@ -136,8 +136,17 @@ impl Solution {
 
     /// Returns a [`Solution`] of `[0; SOLUTION_SIZE]` to be used in block proposals.
     pub fn for_proposal() -> Self {
-        // TODO: Accept network as an argument, and if it's Regtest, return the shorter null solution.
         Self::Common([0; SOLUTION_SIZE])
+    }
+
+    /// Returns a null solution of the size that solved blocks on `network` carry, so a proposal
+    /// is the same size as the block it becomes.
+    pub fn for_proposal_on(network: &crate::parameters::Network) -> Self {
+        if network.is_regtest() {
+            Self::Regtest([0; REGTEST_SOLUTION_SIZE])
+        } else {
+            Self::for_proposal()
+        }
     }
 
     /// Mines and returns one or more [`Solution`]s based on a template `header`.

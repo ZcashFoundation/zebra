@@ -212,14 +212,16 @@ in `getblockchaininfo`; it does not bypass the mining check.
 
 ## Reusing proposal validation
 
-Every template Zebra serves is either coinbase-only or already validated. When the chain tip
-changes, Zebra serves a coinbase-only template immediately, builds a template with mempool
-transactions, validates that build as a block proposal in the background, and only then serves it.
-Miners keep the coinbase-only template until the validated one is available. So a solved block that
-changes only the nonce and Equihash solution of a served template reuses the cached verdict in
-`submitblock`, which then checks proof of work and commits the block without repeating transaction
-and contextual validation. The state applies such a block by rebinding the chain it prepared while
-validating the template, so the commit does not depend on the number of transactions in the block.
+Zebra validates every transaction-bearing template as a block proposal. When the chain tip changes,
+it serves a coinbase-only template immediately, then serves the first template with mempool
+transactions as soon as it is built and validates it in the background, so miners are not left on
+coinbase-only work. A later rebuild for the same tip, after mempool changes, replaces the served
+template only once it has been validated too. So a solved block that changes only the nonce and
+Equihash solution of a served template reuses the cached verdict in `submitblock`, which then
+checks proof of work and commits the block without repeating transaction and contextual
+validation, as long as the check finished before the solve. The state applies such a block by
+rebinding the chain it prepared while validating the template, so the commit does not depend on
+the number of transactions in the block.
 If you change the coinbase, transactions, timestamp or another header
 field, submit the modified block with `getblocktemplate` parameters
 `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it. A successful proposal lets a
@@ -239,8 +241,7 @@ Long polls also recheck synchronization after waking. Expanding a clock-capped t
 not cancel still-valid work; a genuine difficulty-boundary transition still replaces it.
 New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
 If the updater stops, cached work is refreshed at the normal mempool polling interval, and a
-transaction-bearing template is validated before the RPC returns it; a rejected template is
-returned as an error instead of being served.
+transaction-bearing template is validated in the background after the RPC returns it.
 Long polls continue observing shared template publications after switching to on-demand refresh.
 When no usable work exists, snapshot failures are returned to the RPC caller rather than hidden
 behind an indefinite cache wait.
