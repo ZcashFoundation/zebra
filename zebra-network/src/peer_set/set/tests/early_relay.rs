@@ -185,7 +185,7 @@ async fn compact_block_service_bit_controls_early_adverts_and_serving() {
     .expect("service-bit negotiation and relay must complete within the test deadline");
 }
 
-/// Source credit requires a committed block, and backpressured demotion cannot delay replacement.
+/// Source credit requires a committed block, and replacement waits for the disabling write.
 #[tokio::test]
 async fn compact_receive_sources_prefer_committed_first_announcers_and_release_disconnections() {
     let _init_guard = zebra_test::init();
@@ -276,18 +276,19 @@ async fn compact_receive_sources_prefer_committed_first_announcers_and_release_d
                 _ => None,
             };
             if let Some((demoted, promoted)) = replacement {
-                // The new source proceeds even if the demoted peer has not read its notification.
-                assert_eq!(
-                    messages[promoted].next().await,
-                    Some(Message::SendCompact {
-                        high_bandwidth: true,
-                        version: 1,
-                    })
-                );
+                // Disable the old source before requesting announcements from its replacement.
+                assert!(messages[promoted].next().now_or_never().is_none());
                 assert_eq!(
                     messages[demoted].next().await,
                     Some(Message::SendCompact {
                         high_bandwidth: false,
+                        version: 1,
+                    })
+                );
+                assert_eq!(
+                    messages[promoted].next().await,
+                    Some(Message::SendCompact {
+                        high_bandwidth: true,
                         version: 1,
                     })
                 );
