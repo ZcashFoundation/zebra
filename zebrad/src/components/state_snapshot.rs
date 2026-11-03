@@ -3,7 +3,9 @@
 //! Before `zebrad start` initializes the state, [`decision`] decides whether
 //! an empty, pruned node bootstraps from a snapshot. [`scheduler`] downloads
 //! snapshot pieces, and [`progress`] names the stages the bootstrap logs.
+//! [`serving`] publishes this node's own snapshots to version 2 peers.
 
 pub mod decision;
 pub mod progress;
 pub mod scheduler;
+pub mod serving;
