@@ -44,7 +44,7 @@ use std::{
 use chrono::Utc;
 use derive_getters::Getters;
 use derive_new::new;
-use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
+use futures::TryFutureExt;
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
@@ -85,8 +85,8 @@ use zebra_consensus::{router::service_trait::BlockVerifierService, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService, MempoolTxSubscriber};
 use zebra_state::{
-    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
-    State as StateService, TransactionLocation,
+    AnyTx, BlockQueryFields, HashOrHeight, OutputLocation, ReadRequest, ReadResponse,
+    ReadState as ReadStateService, State as StateService, TransactionLocation,
 };
 
 use crate::{
@@ -107,9 +107,11 @@ pub(crate) mod hex_data;
 pub(crate) mod trees;
 pub(crate) mod types;
 
+use get_block::GetBlockPlan;
 use hex_data::HexData;
 use trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData};
 use types::{
+    get_block::GetBlockQuery,
     get_block_template::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
@@ -1854,13 +1856,15 @@ where
     //
     // `lightwalletd` calls this RPC with verosity 1 for its initial sync of 2 million blocks, the
     // performance of this RPC with verbosity 1 significantly affects `lightwalletd`s sync time.
+    //
+    // Every verbosity reads the state with one `BlockQuery`, so the block is resolved once, on one
+    // chain snapshot, and only the parts the response needs are read.
     async fn get_block(
         &self,
         hash_or_height: String,
         verbosity: Option<u8>,
     ) -> Result<GetBlockResponse> {
-        let verbosity = verbosity.unwrap_or(1);
-        let network = self.network.clone();
+        let query = GetBlockQuery::Verbosity(verbosity.unwrap_or(1));
 
         let hash_or_height =
             HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
@@ -1868,221 +1872,49 @@ where
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-        if verbosity == 0 {
-            let request = zebra_state::ReadRequest::Block(hash_or_height);
+        let plan = GetBlockPlan::try_from(&query)?;
+        let request = zebra_state::ReadRequest::BlockQuery {
+            hash_or_height,
+            fields: plan.state_fields,
+        };
+
+        if query == GetBlockQuery::Verbosity(0) {
+            // Verbosity 0 keeps its own errors: pruned bodies are internal errors and other
+            // state errors are `-1`, and an unknown block is `-8` for hashes and heights alike.
             let response = self
                 .read_state
                 .clone()
                 .oneshot(request)
                 .await
                 .map_body_read_error("Block not available (pruned data)")?;
-
-            match response {
-                zebra_state::ReadResponse::Block(Some(block)) => {
-                    Ok(GetBlockResponse::Raw(block.into()))
-                }
-                zebra_state::ReadResponse::Block(None) => {
-                    Err("Block not found").map_error(server::error::LegacyCode::InvalidParameter)
-                }
-                _ => unreachable!("unmatched response to a block request"),
-            }
-        } else if matches!(verbosity, 1..=3) {
-            // Reuse the already-resolved `hash_or_height` (rather than the
-            // caller-supplied string) so `get_block_header` resolves to the same
-            // block this call resolved above, even for tip-relative inputs like a
-            // negative height. Resolving the caller string a second time here would
-            // re-sample the best chain at a different instant and could pick a
-            // different block after a reorg or tip advance. See issue #10550.
-            let get_block_header_result: Result<GetBlockHeaderResponse> = self
-                .get_block_header(hash_or_height.to_string(), Some(true))
-                .await;
-
-            let GetBlockHeaderResponse::Object(block_header) = get_block_header_result? else {
-                panic!("must return Object")
+            let zebra_state::ReadResponse::BlockQuery(block) = response else {
+                unreachable!("unmatched response to a BlockQuery request");
             };
 
-            let BlockHeaderObject {
-                hash,
-                confirmations,
-                height,
-                version,
-                merkle_root,
-                block_commitments,
-                final_sapling_root,
-                sapling_tree_size,
-                time,
-                nonce,
-                solution,
-                bits,
-                difficulty,
-                previous_block_hash,
-                next_block_hash,
-            } = *block_header;
-
-            // # Concurrency
-            //
-            // We look up by block hash so the hash, transaction IDs, and confirmations
-            // are consistent. Bind every follow-up read to the resolved block hash
-            // rather than the caller-supplied hash-or-height, so a reorg between the
-            // header lookup and these reads cannot mix block A's header with block B's
-            // contents. See issue #10550.
-            let hash_or_height = hash.into();
-            let transactions_request = match verbosity {
-                1 => zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
-                2 | 3 => zebra_state::ReadRequest::BlockAndSize(hash_or_height),
-                _other => panic!("get_block_header_fut should be none"),
-            };
-
-            // Confirmations is `-1` when the resolved header is no longer on the
-            // best chain. Avoid panicking on `try_into()` in the verbosity-2 path,
-            // and label such transactions as not in the active chain.
-            let in_active_chain = confirmations >= 0;
-
-            // Verbosity 3 adds each input's prevout and the transaction fee, resolved from the
-            // outputs spent by this block in the best chain. Fetch them before the `futs` batch
-            // below: issuing this read while those requests are in flight would contend with them
-            // for a bounded `read_state` buffer's slot and deadlock, because `futs` is not polled
-            // while this future is awaited. A spent output not found in the best chain is absent
-            // from the map, so its input gets no `prevout` and its transaction gets no `fee`.
-            let spent_outputs = if verbosity == 3 {
-                let response = self
-                    .read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::SpentOutputs(hash_or_height))
-                    .await
-                    .map_body_read_error("Block not available (pruned data)")?;
-                let zebra_state::ReadResponse::SpentOutputs(spent_outputs) = response else {
-                    unreachable!("unmatched response to a SpentOutputs request");
-                };
-                // A reorg or lagging secondary can return no map without pruning any history.
-                spent_outputs.unwrap_or_default()
-            } else {
-                HashMap::new()
-            };
-
-            let requests = vec![
-                // Get transaction IDs from the transaction index by block hash
-                //
-                // # Concurrency
-                //
-                // A block's transaction IDs are never modified, so all possible responses are
-                // valid. Clients that query block heights must be able to handle chain forks,
-                // including getting transaction IDs from any chain fork.
-                transactions_request,
-                // Orchard trees
-                zebra_state::ReadRequest::OrchardTree(hash_or_height),
-                // Ironwood trees
-                zebra_state::ReadRequest::IronwoodTree(hash_or_height),
-                // Block info
-                zebra_state::ReadRequest::BlockInfo(previous_block_hash.into()),
-                zebra_state::ReadRequest::BlockInfo(hash_or_height),
-            ];
-
-            let mut futs = FuturesOrdered::new();
-
-            for request in requests {
-                futs.push_back(self.read_state.clone().oneshot(request));
-            }
-
-            let tx_ids_response = futs
-                .next()
-                .await
-                .expect("`futs` should not be empty")
-                .map_body_read_error("Block not available (pruned data)")?;
-            let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response {
-                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => (
-                    get_block::transaction_ids(&tx_ids.ok_or_misc_error("block not found")?),
-                    None,
-                ),
-                zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
-                    let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
-                    let transactions = get_block::transaction_objects(
-                        &block,
-                        height,
-                        confirmations,
-                        &network,
-                        hash,
-                        in_active_chain,
-                        (verbosity == 3).then_some(&spent_outputs),
-                    );
-                    (transactions, Some(size))
-                }
-                _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-            };
-
-            let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::OrchardTree(orchard_tree) =
-                orchard_tree_response.map_misc_error()?
-            else {
-                unreachable!("unmatched response to a OrchardTree request");
-            };
-
-            // This could be `None` if there's a chain reorg between state queries.
-            let orchard_tree = orchard_tree.ok_or_misc_error("missing Orchard tree")?;
-
-            let final_orchard_root = get_block::final_orchard_root(&network, height, &orchard_tree);
-
-            let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
-                ironwood_tree_response.map_misc_error()?
-            else {
-                unreachable!("unmatched response to an IronwoodTree request");
-            };
-
-            // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
-            // Ironwood tree is empty (size 0).
-            let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
-
-            let trees = get_block::trees(
-                sapling_tree_size,
-                orchard_tree.count(),
-                ironwood_tree.count(),
-            );
-
-            let block_info_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
-                block_info_response.map_misc_error()?
-            else {
-                unreachable!("unmatched response to a BlockInfo request");
-            };
-            let block_info_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::BlockInfo(block_info) =
-                block_info_response.map_misc_error()?
-            else {
-                unreachable!("unmatched response to a BlockInfo request");
-            };
-
-            let delta = get_block::value_pool_delta(block_info.as_ref(), prev_block_info);
-            let size = get_block::block_size(size, block_info.as_ref());
-
-            Ok(GetBlockResponse::Object(Box::new(BlockObject {
-                hash,
-                confirmations: Some(confirmations),
-                height: Some(height),
-                version: Some(version),
-                merkle_root: Some(merkle_root),
-                time: Some(time),
-                nonce: Some(nonce),
-                solution: Some(solution),
-                bits: Some(bits),
-                difficulty: Some(difficulty),
-                n_tx: Some(tx.len()),
-                tx: Some(tx),
-                trees: Some(trees),
-                chain_supply: get_block::chain_supply(block_info.as_ref()),
-                value_pools: get_block::value_pools(block_info, delta),
-                size,
-                block_commitments: Some(block_commitments),
-                auth_data_root: None,
-                final_sapling_root: Some(final_sapling_root),
-                final_orchard_root,
-                previous_block_hash: Some(previous_block_hash),
-                next_block_hash,
-                hex: None,
-            })))
-        } else {
-            Err("invalid verbosity value").map_error(server::error::LegacyCode::InvalidParameter)
+            return block
+                .and_then(|block| block.raw_block)
+                .map(GetBlockResponse::Raw)
+                .ok_or_error(
+                    server::error::LegacyCode::InvalidParameter,
+                    "Block not found",
+                );
         }
+
+        let response = self
+            .read_state
+            .clone()
+            .oneshot(request)
+            .await
+            .map_block_query_error("Block not available (pruned data)")?;
+        let zebra_state::ReadResponse::BlockQuery(block) = response else {
+            unreachable!("unmatched response to a BlockQuery request");
+        };
+        let block = block.ok_or_else(|| {
+            get_block::not_found(&hash_or_height, "block height not in best chain")
+        })?;
+
+        get_block::block_object(block, &plan, &self.network, false)
+            .map(|block| GetBlockResponse::Object(Box::new(block)))
     }
 
     async fn get_block_header(
@@ -2098,66 +1930,46 @@ where
                 // Reference for the legacy error code:
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
-        let not_found = || {
-            ErrorObject::owned(
-                // Preserve the hash/height distinction used by `getblock`.
-                i32::from(if hash_or_height.hash().is_some() {
-                    server::error::LegacyCode::InvalidAddressOrKey
-                } else {
-                    server::error::LegacyCode::InvalidParameter
-                }),
-                "block height not in best chain",
-                None::<()>,
-            )
+
+        // The header, depth, next hash and Sapling tree are read in one request, so they come
+        // from the same chain snapshot. See issue #10550.
+        let fields = if verbose {
+            BlockQueryFields::HEADER
+                | BlockQueryFields::DEPTH
+                | BlockQueryFields::NEXT_BLOCK_HASH
+                | BlockQueryFields::SAPLING_TREE
+        } else {
+            BlockQueryFields::HEADER
         };
-        let zebra_state::ReadResponse::BlockHeader(header) = self
+        let zebra_state::ReadResponse::BlockQuery(block) = self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
+            .oneshot(zebra_state::ReadRequest::BlockQuery {
+                hash_or_height,
+                fields,
+            })
             .await
-            .map_error(ErrorCode::InternalError)?
+            .map_block_query_error("Block not available (pruned data)")?
         else {
-            panic!("unexpected response to BlockHeader request")
+            panic!("unexpected response to BlockQuery request")
         };
-        let zebra_state::BlockHeader {
-            header,
-            hash,
-            height,
-            next_block_hash,
-        } = header.ok_or_else(not_found)?;
+        // Preserve the hash/height distinction used by `getblock`.
+        let block = block.ok_or_else(|| {
+            get_block::not_found(&hash_or_height, "block height not in best chain")
+        })?;
+        let hash = block.hash;
+        let height = block.height;
+        let header = block.header.ok_or_misc_error("Block not found")?;
 
         let response = if !verbose {
             GetBlockHeaderResponse::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
         } else {
-            // Bind follow-up reads to the resolved block hash so the SaplingTree
-            // and Depth lookups are taken from the same chain view as the header.
-            // Using the caller-supplied `hash_or_height` here would re-sample the
-            // best chain and could mix a header from block A with a Sapling tree
-            // from block B at the same height. See issue #10550.
-            let zebra_state::ReadResponse::SaplingTree(sapling_tree) = self
-                .read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::SaplingTree(hash.into()))
-                .await
-                .map_misc_error()?
-            else {
-                panic!("unexpected response to SaplingTree request")
-            };
+            // This could be `None` on a lagging secondary state.
+            let sapling_tree = block
+                .sapling_tree
+                .ok_or_misc_error("missing Sapling tree")?;
 
-            // This could be `None` if there's a chain reorg between state queries.
-            let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
-
-            let zebra_state::ReadResponse::Depth(depth) = self
-                .read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::Depth(hash))
-                .await
-                .map_misc_error()?
-            else {
-                panic!("unexpected response to SaplingTree request")
-            };
-
-            let confirmations = get_block::confirmations(depth);
+            let confirmations = get_block::confirmations(block.depth);
 
             let nonce = get_block::nonce(&header);
 
@@ -2184,7 +1996,7 @@ where
                 bits: header.difficulty_threshold,
                 difficulty,
                 previous_block_hash: header.previous_block_hash,
-                next_block_hash,
+                next_block_hash: block.next_block_hash,
             };
 
             GetBlockHeaderResponse::Object(Box::new(block_header))

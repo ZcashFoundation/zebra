@@ -83,6 +83,15 @@ pub(crate) trait MapError<T, E>: Sized {
     ) -> std::result::Result<T, ErrorObjectOwned>
     where
         E: Into<BoxError>;
+
+    /// Maps every error of a block query to an internal error: unavailable bodies with
+    /// `pruned_message`, and other errors with their own text.
+    fn map_block_query_error(
+        self,
+        pruned_message: &'static str,
+    ) -> std::result::Result<T, ErrorObjectOwned>
+    where
+        E: Into<BoxError>;
 }
 
 /// A trait for conditionally converting a value into a `Result<T, jsonrpc_core::Error>`.
@@ -123,6 +132,24 @@ where
             } else {
                 ErrorObject::owned(i32::from(LegacyCode::Misc), error.to_string(), None::<()>)
             }
+        })
+    }
+
+    fn map_block_query_error(self, pruned_message: &'static str) -> Result<T, ErrorObjectOwned>
+    where
+        E: Into<BoxError>,
+    {
+        self.map_err(|error| {
+            let error: BoxError = error.into();
+            let message = if matches!(
+                error.downcast_ref::<BlockReadError>(),
+                Some(BlockReadError::BlockBodyUnavailable { .. })
+            ) {
+                pruned_message.to_owned()
+            } else {
+                error.to_string()
+            };
+            ErrorObject::owned(ErrorCode::InternalError.code(), message, None::<()>)
         })
     }
 }
