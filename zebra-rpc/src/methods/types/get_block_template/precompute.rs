@@ -291,20 +291,11 @@ impl TemplateCache {
     ///
     /// A tip change publishes coinbase-only work for the new parent while a build for the old
     /// parent can still be in validation, so a build only replaces work for its own parent, or
-    /// fills a cache without work. Returns whether the build was published.
+    /// fills a cache without work. Returns whether the build is served, which includes a build
+    /// that was served ahead of its validation: that one is left in place, without waking long
+    /// polls.
     fn promote(&self, template: Arc<BlockTemplateResponse>) -> bool {
-        // Work served ahead of its validation is already in place: don't wake long polls for it.
-        if self
-            .served
-            .borrow()
-            .as_ref()
-            .and_then(|state| state.template.as_ref())
-            .is_some_and(|served| {
-                served.long_poll_id == template.long_poll_id && served.cur_time == template.cur_time
-            })
-        {
-            return true;
-        }
+        let mut served = false;
         self.served.send_if_modified(|state| {
             let previous = state.as_ref().and_then(|state| state.template.as_ref());
             if previous.is_some_and(|previous| {
@@ -312,6 +303,7 @@ impl TemplateCache {
             }) {
                 return false;
             }
+            served = true;
             let template =
                 match previous.and_then(|previous| preserved_max_timestamp(previous, &template)) {
                     Some(max_timestamp) if max_timestamp != template.long_poll_id.max_timestamp => {
@@ -321,13 +313,17 @@ impl TemplateCache {
                     }
                     _ => template,
                 };
+            if previous.is_some_and(|previous| **previous == *template) {
+                return false;
+            }
             *state = Some(TemplateState {
                 template: Some(template),
                 published_at: Instant::now(),
                 error: None,
             });
             true
-        })
+        });
+        served
     }
 
     /// Preserves the time component of work identity when only its usable upper bound grows.
