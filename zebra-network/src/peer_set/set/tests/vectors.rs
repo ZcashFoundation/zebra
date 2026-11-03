@@ -508,6 +508,169 @@ async fn block_advert_bypasses_buffer_with_all_peers_busy() {
     drop(pending_requests);
 }
 
+/// Block adverts only go to legacy peers: a version 2 peer neither receives one nor counts as an
+/// eligible advert peer, so it cannot use up the advert fanout without announcing the block.
+#[tokio::test]
+async fn block_adverts_skip_version_2_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let hash = block::Hash([21; 32]);
+    let legacy_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let v2_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+
+    // One version 2 peer and one legacy peer: only the legacy peer gets the adverts.
+    let (v2_client, _v2_connection) = connected_v2_client(&network).await;
+    let v2_client: LoadTrackedClient = v2_client.into();
+    let (mut minimum_peer_version, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    assert!(
+        v2_client.remote_version() >= minimum_peer_version.current(),
+        "the version 2 peer must be skipped for its protocol, not its version"
+    );
+    let (legacy_client, mut legacy) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .finish();
+    let discovery = stream::iter([
+        Ok::<_, BoxError>(Change::Insert(v2_addr, v2_client)),
+        Ok(Change::Insert(legacy_addr, legacy_client.into())),
+    ])
+    .chain(stream::pending());
+    let (peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network_service, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+
+    timeout(Duration::from_secs(10), async {
+        for request in [
+            Request::AdvertiseBlockToAll(hash),
+            Request::AdvertiseBlock(hash, None),
+        ] {
+            let advert = advertiser.ready().await.unwrap().call(request.clone());
+            // Writing to the version 2 peer's closed advert channel would fail the advert.
+            let advert_result = tokio::spawn(advert);
+            let queued = legacy
+                .block_advert_receiver
+                .recv()
+                .await
+                .expect("the legacy peer gets the advert");
+            assert_eq!(queued.hash, hash);
+            queued.result.send(Ok(())).unwrap();
+            assert_eq!(
+                advert_result.await.unwrap().unwrap(),
+                Response::Nil,
+                "{request:?} must only be written to the legacy peer"
+            );
+        }
+    })
+    .await
+    .expect("adverts to the legacy peer complete");
+
+    // Only a version 2 peer: it serves ordinary requests, but the advertiser has no eligible peer.
+    let (v2_client, _v2_connection) = connected_v2_client(&network).await;
+    let (minimum_peer_version, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    let discovery = stream::iter([Ok::<_, BoxError>(Change::Insert(v2_addr, v2_client.into()))])
+        .chain(stream::pending());
+    let (peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum_peer_version)
+        .build();
+    let mut advertiser = peer_set.block_advertiser();
+    let (mut network_service, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    timeout(Duration::from_secs(10), network_service.ready())
+        .await
+        .expect("the version 2 peer joins the peer set")
+        .unwrap();
+    assert!(
+        timeout(Duration::from_secs(2), advertiser.ready())
+            .await
+            .is_err(),
+        "a version 2 peer must not be an eligible advert peer"
+    );
+}
+
+/// A version 2 [`Client`] connected over loopback QUIC, and the peer's end of the connection,
+/// which must be kept for the client to stay connected.
+async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::Endpoint; 2])) {
+    use crate::{
+        peer::v2::{
+            connection::{spawn_connection, ConnectionParams},
+            handshake::{handshake, LocalIdentity, Role},
+            nonces::NonceRegistry,
+        },
+        quic,
+    };
+
+    let dialer = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let listener = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let listener_addr = listener.local_addr().expect("bound");
+    let (outbound, inbound) = tokio::join!(quic::connect(&dialer, listener_addr), async {
+        listener
+            .accept()
+            .await
+            .expect("the endpoint is open")
+            .accept()
+            .expect("the connection is acceptable")
+            .await
+    });
+    let (outbound, inbound) = (outbound.expect("connects"), inbound.expect("accepts"));
+
+    let identity = LocalIdentity {
+        user_agent: "/v2 advert test/".to_string(),
+        services: PeerServices::NODE_NETWORK,
+        relay: true,
+    };
+    let (dialer_nonces, listener_nonces) = (NonceRegistry::spawn(2), NonceRegistry::spawn(2));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let (mut dialer_version, mut listener_version) = (
+        MinimumPeerVersion::new(zebra_chain::chain_tip::NoChainTip, network),
+        MinimumPeerVersion::new(zebra_chain::chain_tip::NoChainTip, network),
+    );
+    let (dialer_handshake, listener_handshake) = tokio::join!(
+        handshake(
+            &outbound,
+            ConnectedAddr::new_outbound_direct(listener_addr.into()),
+            Role::Initiator,
+            &identity,
+            &mut dialer_version,
+            &dialer_nonces,
+            deadline,
+        ),
+        handshake(
+            &inbound,
+            ConnectedAddr::new_inbound_direct(inbound.remote_address().into()),
+            Role::Responder,
+            &identity,
+            &mut listener_version,
+            &listener_nonces,
+            deadline,
+        ),
+    );
+
+    let mut counter = ActiveConnectionCounter::new_counter();
+    let params = ConnectionParams {
+        inbound_service: tower::service_fn(|_| async { Ok::<_, BoxError>(Response::Nil) }),
+        inv_collector: tokio::sync::broadcast::channel(16).0,
+    };
+    let client = spawn_connection(
+        outbound,
+        dialer_handshake.expect("the handshake completes"),
+        counter.track_connection(),
+        params.clone(),
+        None,
+    );
+    let peer = spawn_connection(
+        inbound,
+        listener_handshake.expect("the handshake completes"),
+        counter.track_connection(),
+        params,
+        None,
+    );
+
+    (client, (peer, [dialer, listener]))
+}
+
 /// Discovery must reach block fanout without another ordinary buffered request.
 #[tokio::test(start_paused = true)]
 async fn block_advert_to_all_discovers_peer_while_buffer_idle() {
