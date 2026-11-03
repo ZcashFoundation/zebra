@@ -11,6 +11,7 @@ branch is published under [`/main/`](https://zebra.zfnd.org/main/).
   the code has diverged.
 - **Contributing:** the [contribution guide](CONTRIBUTING.md);
   [property testing](dev/proptests.md),
+  [concurrency testing with loom](dev/loom-testing.md),
   [profiling](dev/profiling-and-benchmarking.md),
   [tokio-console](dev/tokio-console.md),
   [private testnet tests](dev/private-testnet.md).

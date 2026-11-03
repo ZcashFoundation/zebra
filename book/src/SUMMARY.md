@@ -41,6 +41,7 @@
     - [Mempool specification](dev/mempool-specification.md)
     - [State database upgrades](dev/state-db-upgrades.md)
   - [Property testing](dev/proptests.md)
+  - [Concurrency testing with loom](dev/loom-testing.md)
   - [Profiling and benchmarking](dev/profiling-and-benchmarking.md)
   - [tokio-console](dev/tokio-console.md)
   - [Running a private testnet test](dev/private-testnet.md)
