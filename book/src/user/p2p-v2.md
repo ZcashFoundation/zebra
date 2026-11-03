@@ -72,6 +72,15 @@ peers are not recorded there (see below).
 - The same IP bans and per-IP limits as the legacy protocol, with separate
   inbound and outbound limits of half the legacy ones. Protocol violations
   close the connection with the draft's error codes.
+- Misbehavior scores as the draft describes them. A misbehaving response, such
+  as a header chain that does not follow from the request, adds to the peer's
+  score, which lasts across reconnections for about a ban duration. A peer
+  that reaches the ban threshold is disconnected and banned, and a banned
+  configured peer is not redialled until its ban lapses. The draft's penalty
+  table does not list header chains that do not follow from the request yet,
+  so their penalty, the same as for an over-long header chain, is Zebra's own
+  choice. Headers that start after the genesis block, when Zebra's request did
+  not include it, are ignored without a penalty.
 - When Zebra shuts down, it closes its version 2 connections, so its peers do
   not keep a dead connection to it. Like the legacy listener, a node accepts
   one connection attempt per IP address per reconnection delay, so a restarted
