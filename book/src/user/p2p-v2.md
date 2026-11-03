@@ -205,9 +205,11 @@ ranges, answers are small and few, so there is no setting to turn it off.
 A node with `v2_listen_addr` set advertises the `NODE_SYNC_ARTIFACTS` service in
 its version 2 handshake, and answers `get-object` requests from its version 2
 peers. A request names an object by its SHA-256 hash, and a byte range of at
-most 32 MiB. The node serves the objects in its object index: today, only the
+most 32 MiB. The node serves the objects in its object index: the
 [spentness-hint artifact](spentness-hints.md#serving-the-artifact) for the
-running release's pin, when the node has it. It answers that it does not have
+running release's pin, when the node has it, and, with
+[`serve_state_snapshots`](state-snapshot-sync.md) on, the verified state
+snapshots in its store. It answers that it does not have
 any other object, and a request for no data, or for data at or past the end of
 an object, with the object's size alone. The requester checks the whole
 object's hash, so a node's answer is never trusted on its own.

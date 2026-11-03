@@ -106,6 +106,7 @@ use crate::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
+        state_snapshot::serving,
         sync::{
             self, record_tip_block_delay, show_block_chain_progress,
             VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
@@ -486,6 +487,39 @@ impl StartCmd {
             None
         };
 
+        // Serving scans the artifact store on a blocking thread, and publishes its objects in the
+        // index once the scan finishes. The network does not wait for it: every node with an
+        // object source advertises `NODE_SYNC_ARTIFACTS`, and answers the objects it does not hold
+        // yet as not found.
+        let snapshot_store = zebra_state::state_snapshot::store::ArtifactStore::new(
+            &config.state,
+            &config.network.network,
+        );
+        // With any hints mode, a node with version 2 enabled serves the saved
+        // spentness-hint artifact to its version 2 peers. The state snapshot store's
+        // objects are added to the same index, which the network serves `get-object`
+        // requests from.
+        let (served_objects, object_source) = spentness_hints::object_source(&config.network)
+            .or_else(|| {
+                config.sync.serve_state_snapshots.then(|| {
+                    zebra_network::ObjectSource::channel(
+                        Arc::new(zebra_network::ObjectIndex::new()),
+                    )
+                })
+            })
+            .unzip();
+        if let Some(served_objects) = served_objects
+            .clone()
+            .filter(|_| config.sync.serve_state_snapshots)
+        {
+            info!(store = %snapshot_store.root().display(), "scanning the state snapshot store to serve");
+            serving::object_index(
+                snapshot_store.clone(),
+                config.network.network.clone(),
+                served_objects,
+            );
+        }
+
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
             config.consensus.clone(),
@@ -601,10 +635,6 @@ impl StartCmd {
         } else {
             (None, None)
         };
-        // With any hints mode, a node with version 2 enabled serves the saved
-        // spentness-hint artifact to its version 2 peers.
-        let (served_objects, object_source) =
-            spentness_hints::object_source(&config.network).unzip();
         let network_config = zebra_network::Config {
             v2_sync_peers,
             object_source,
