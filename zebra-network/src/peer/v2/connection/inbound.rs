@@ -18,7 +18,7 @@ use std::{
 };
 
 use quinn::{RecvStream, SendStream};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::Semaphore;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
@@ -44,7 +44,7 @@ use crate::{
     BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
-use super::{announcements::send_event, refuse_stream, Event, Overloads};
+use super::{refuse_stream, Event, Events, Overloads};
 
 /// How many of one peer's request streams may be served at once.
 ///
@@ -116,7 +116,7 @@ pub(super) async fn serve<S>(
     permits: Arc<Semaphore>,
     overloads: Arc<Overloads>,
     get_addr_allowed: Arc<AtomicBool>,
-    events: mpsc::Sender<Event>,
+    events: Events,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -146,12 +146,12 @@ pub(super) async fn serve<S>(
         // The peer went away or cancelled the stream: nothing to do.
         Ok(()) | Err(Outcome::Transport) => {}
         Err(Outcome::Violation { reason, code }) => {
-            send_event(&events, Event::Violation { reason, code }).await;
+            events.close(Event::Violation { reason, code });
         }
         Err(Outcome::Refuse(code)) => refuse_stream(Some(&mut send), &mut recv, code),
         Err(Outcome::Close(event)) => {
             refuse_stream(Some(&mut send), &mut recv, ErrorCode::Refused);
-            send_event(&events, event).await;
+            events.close(event);
         }
     }
 }

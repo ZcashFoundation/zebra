@@ -31,10 +31,7 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
-use super::{refuse_stream, Event, Overloads};
-
-/// How long a stream task waits to hand an event to the connection task.
-pub(super) const CHANNEL_TIMEOUT: Duration = Duration::from_secs(5);
+use super::{refuse_stream, Event, Events, Overloads};
 
 /// How many announcement batches may wait to be written before new ones are
 /// dropped (draft: announcements are best-effort under backpressure).
@@ -48,9 +45,25 @@ const STREAM_TYPE_TIMEOUT: Duration = Duration::from_secs(10);
 /// The most transaction announcements folded into one inbound service call.
 const MAX_ANNOUNCEMENT_BATCH: usize = 1000;
 
-/// Sends `event` to the connection task, giving up if it is gone or stuck.
+/// Sends `event` from a request task to the connection task. Addresses are
+/// best effort, and dropped if the connection task is behind; other events
+/// wait for room.
+///
+/// The wait is bounded: the connection task reads these events before the
+/// peer's traffic, ahead of later address events, which never wait, and
+/// aborts the request tasks when it ends.
 pub(super) async fn send_event(events: &mpsc::Sender<Event>, event: Event) {
-    let _ = tokio::time::timeout(CHANNEL_TIMEOUT, events.send(event)).await;
+    match event {
+        Event::Addresses(_) => {
+            if let Err(mpsc::error::TrySendError::Full(_)) = events.try_send(event) {
+                metrics::counter!("zebra.net.in.addresses.dropped").increment(1);
+            }
+        }
+        event => {
+            // The connection task holds the receiver while its request tasks run.
+            let _ = events.send(event).await;
+        }
+    }
 }
 
 /// This node's announcement stream of one type to the peer, written by its
@@ -193,7 +206,7 @@ pub(super) async fn serve<S>(
     inbound_service: S,
     overloads: Arc<Overloads>,
     inv_collector: broadcast::Sender<InventoryChange>,
-    events: mpsc::Sender<Event>,
+    events: Events,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -203,14 +216,10 @@ pub(super) async fn serve<S>(
     match read {
         Ok(Ok(())) => {}
         Ok(Err(quinn::ReadExactError::FinishedEarly(_))) => {
-            send_event(
-                &events,
-                Event::Violation {
-                    reason: "stream finished before its type byte".to_string(),
-                    code: ErrorCode::ProtocolError,
-                },
-            )
-            .await;
+            events.close(Event::Violation {
+                reason: "stream finished before its type byte".to_string(),
+                code: ErrorCode::ProtocolError,
+            });
             return;
         }
         // Reset by the peer, or the connection ended: nothing to do.
@@ -224,14 +233,10 @@ pub(super) async fn serve<S>(
     let stream_type = match StreamType::from_code(type_byte[0]) {
         Some(stream_type) if stream_type.is_announcement() => stream_type,
         Some(stream_type) => {
-            send_event(
-                &events,
-                Event::Violation {
-                    reason: format!("{stream_type} stream opened as unidirectional"),
-                    code: ErrorCode::ProtocolError,
-                },
-            )
-            .await;
+            events.close(Event::Violation {
+                reason: format!("{stream_type} stream opened as unidirectional"),
+                code: ErrorCode::ProtocolError,
+            });
             return;
         }
         None => {
@@ -246,14 +251,10 @@ pub(super) async fn serve<S>(
         // The connection task dropped the permits: it is shutting down.
         Ok(Err(_closed)) => return,
         Err(_elapsed) => {
-            send_event(
-                &events,
-                Event::Violation {
-                    reason: format!("third concurrent {stream_type} announcement stream"),
-                    code: ErrorCode::ProtocolError,
-                },
-            )
-            .await;
+            events.close(Event::Violation {
+                reason: format!("third concurrent {stream_type} announcement stream"),
+                code: ErrorCode::ProtocolError,
+            });
             return;
         }
     };
@@ -314,37 +315,29 @@ pub(super) async fn serve<S>(
                 )
                 .await
             }
-            StreamType::AddressAnnouncements => handle_addr_announcements(&payloads, &events).await,
+            StreamType::AddressAnnouncements => handle_addr_announcements(&payloads, &events),
             _ => unreachable!("only announcement types are handed to this task"),
         };
         match handled {
             Ok(()) => {}
             Err(Handled::Violation(code)) => {
-                send_event(
-                    &events,
-                    Event::Violation {
-                        reason: format!("nonconforming {stream_type} record"),
-                        code,
-                    },
-                )
-                .await;
+                events.close(Event::Violation {
+                    reason: format!("nonconforming {stream_type} record"),
+                    code,
+                });
                 break;
             }
             Err(Handled::Close(event)) => {
-                send_event(&events, event).await;
+                events.close(event);
                 break;
             }
         }
         if let Some(error) = framing_error {
             if let Some(Violation::Close(code)) = error.violation() {
-                send_event(
-                    &events,
-                    Event::Violation {
-                        reason: format!("{stream_type} stream: {error}"),
-                        code,
-                    },
-                )
-                .await;
+                events.close(Event::Violation {
+                    reason: format!("{stream_type} stream: {error}"),
+                    code,
+                });
             }
             break;
         }
@@ -443,11 +436,9 @@ where
 }
 
 /// Hands a batch of address announcement records to the connection task's
-/// cache; a batch with a nonconforming record contributes nothing to it.
-async fn handle_addr_announcements(
-    payloads: &[Bytes],
-    events: &mpsc::Sender<Event>,
-) -> Result<(), Handled> {
+/// cache, best effort; a batch with a nonconforming record contributes
+/// nothing to it.
+fn handle_addr_announcements(payloads: &[Bytes], events: &Events) -> Result<(), Handled> {
     let mut addrs = Vec::new();
     for payload in payloads {
         if let Some(addr) = decode_addr_record(payload).map_err(close_code)? {
@@ -455,7 +446,7 @@ async fn handle_addr_announcements(
         }
     }
     if !addrs.is_empty() {
-        send_event(events, Event::Addresses(addrs)).await;
+        events.addresses(addrs);
     }
     Ok(())
 }

@@ -111,6 +111,75 @@ enum Event {
     Overloaded(PeerError),
 }
 
+/// How many best-effort events may wait for the connection task before new
+/// address events are dropped.
+const EVENT_QUEUE: usize = 64;
+
+/// The most handshake-stream records of unknown kinds the connection task
+/// reads in one [`UNKNOWN_HANDSHAKE_RECORD_INTERVAL`]: after that many, it
+/// stops reading the handshake stream until the interval ends.
+///
+/// # Security
+///
+/// The draft has these records ignored, so that later revisions can define
+/// new kinds (draft, "Connection Handshake": a node MUST ignore them), but
+/// each one still costs a read of up to a maximum-size record. Pausing the
+/// reads applies backpressure instead of closing the connection (draft,
+/// "Misbehavior and Banning": rate limits and backpressure): once the
+/// stream's receive window of unread records fills, the peer's flow control
+/// stops it, and a conforming peer sending a few control records a minute is
+/// never affected. While the reads are paused, a peer finishing its
+/// handshake stream to disconnect is noticed when they resume.
+const MAX_UNKNOWN_HANDSHAKE_RECORDS: u32 = 16;
+
+/// The interval [`MAX_UNKNOWN_HANDSHAKE_RECORDS`] applies to.
+const UNKNOWN_HANDSHAKE_RECORD_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Where the stream tasks this module spawns for the peer's streams send
+/// their events.
+///
+/// # Security
+///
+/// Events that close the connection have their own queue, which the
+/// connection task reads before anything else, so the peer cannot delay or
+/// crowd them out with best-effort events, such as the addresses it
+/// announces, or with its own traffic.
+#[derive(Clone)]
+struct Events {
+    /// Connection-closing events. One is enough: the connection task closes
+    /// the connection on the first.
+    fatal: mpsc::Sender<Event>,
+    /// Best-effort events, shared with this node's request tasks.
+    others: mpsc::Sender<Event>,
+}
+
+impl Events {
+    /// The senders, and the receivers of the connection-closing and the
+    /// other events.
+    fn channel() -> (Self, mpsc::Receiver<Event>, mpsc::Receiver<Event>) {
+        let (fatal, fatal_rx) = mpsc::channel(1);
+        let (others, others_rx) = mpsc::channel(EVENT_QUEUE);
+        (Events { fatal, others }, fatal_rx, others_rx)
+    }
+
+    /// Hands a connection-closing event to the connection task, without
+    /// waiting: if one is already queued, the connection is closing anyway,
+    /// and if the task is gone, so is the connection.
+    fn close(&self, event: Event) {
+        let _ = self.fatal.try_send(event);
+    }
+
+    /// Hands addresses the peer sent to the connection task's cache, best
+    /// effort: they are dropped if the connection task is behind.
+    fn addresses(&self, addrs: Vec<MetaAddr>) {
+        if let Err(mpsc::error::TrySendError::Full(_)) =
+            self.others.try_send(Event::Addresses(addrs))
+        {
+            metrics::counter!("zebra.net.in.addresses.dropped").increment(1);
+        }
+    }
+}
+
 /// The connection's inbound service overloads, shared by its stream tasks:
 /// the version 2 form of the legacy connection's overload policy, which
 /// drops a connection at random on an overload or timeout, more likely the
@@ -224,7 +293,7 @@ where
     let (server_tx, server_rx) = futures_mpsc::channel::<ClientRequest>(0);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<CancelHeartbeatTask>();
     let error_slot = ErrorSlot::default();
-    let (events_tx, events_rx) = mpsc::channel(64);
+    let (events, fatal_rx, events_rx) = Events::channel();
 
     let connection_span = tracing::debug_span!("v2_connection", %addr_label);
 
@@ -249,8 +318,12 @@ where
         overloads: Arc::new(Overloads::new()),
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
         tasks: JoinSet::new(),
-        events_tx,
+        events,
+        fatal_rx,
         events_rx,
+        unknown_handshake_records: 0,
+        unknown_handshake_records_since: tokio::time::Instant::now(),
+        handshake_paused_until: None,
         _exit_notifier: exit_notifier,
     };
     let inv_collector = task.params.inv_collector.clone();
@@ -319,8 +392,21 @@ struct ConnectionTask<S> {
     /// Bounds how many of this node's requests are in flight to the peer at once.
     outbound_permits: Arc<Semaphore>,
     tasks: JoinSet<()>,
-    events_tx: mpsc::Sender<Event>,
+    events: Events,
+    /// Connection-closing events from the stream tasks.
+    fatal_rx: mpsc::Receiver<Event>,
+    /// Best-effort events from the stream tasks, and every event from this
+    /// node's request tasks.
     events_rx: mpsc::Receiver<Event>,
+    /// Handshake-stream records of unknown kinds since
+    /// `unknown_handshake_records_since`.
+    unknown_handshake_records: u32,
+    /// When the current [`UNKNOWN_HANDSHAKE_RECORD_INTERVAL`] started.
+    unknown_handshake_records_since: tokio::time::Instant,
+    /// When the connection task resumes reading the handshake stream, after
+    /// [`MAX_UNKNOWN_HANDSHAKE_RECORDS`] in the current interval; `None`
+    /// while it reads it.
+    handshake_paused_until: Option<tokio::time::Instant>,
     /// Dropped when the task ends, which tells the holder of the receiver.
     _exit_notifier: Option<tokio::sync::oneshot::Sender<()>>,
 }
@@ -371,12 +457,15 @@ where
     async fn run_loop(&mut self) -> Exit {
         loop {
             tokio::select! {
-                // Prefer the peer's traffic and task events over new local requests, like the
-                // legacy connection.
+                // Prefer task events and the peer's traffic over new local requests, like the
+                // legacy connection. Events come first, connection-closing ones before the rest,
+                // so the peer's traffic cannot hold them back.
                 biased;
 
-                record = self.handshake_recv.next() => {
-                    if let Some(exit) = self.handle_handshake_record(record) {
+                event = self.fatal_rx.recv() => {
+                    // The task holds a sender, so the channel never closes while it runs.
+                    let Some(event) = event else { continue };
+                    if let Some(exit) = self.handle_event(event) {
                         return exit;
                     }
                 }
@@ -387,6 +476,18 @@ where
                     if let Some(exit) = self.handle_event(event) {
                         return exit;
                     }
+                }
+
+                record = self.handshake_recv.next(), if self.handshake_paused_until.is_none() => {
+                    if let Some(exit) = self.handle_handshake_record(record) {
+                        return exit;
+                    }
+                }
+
+                () = tokio::time::sleep_until(
+                    self.handshake_paused_until.unwrap_or_else(tokio::time::Instant::now),
+                ), if self.handshake_paused_until.is_some() => {
+                    self.handshake_paused_until = None;
                 }
 
                 accepted = self.connection.accept_bi() => match accepted {
@@ -403,7 +504,7 @@ where
                             self.params.inbound_service.clone(),
                             self.overloads.clone(),
                             self.params.inv_collector.clone(),
-                            self.events_tx.clone(),
+                            self.events.clone(),
                         ));
                     }
                     Err(error) => return Self::connection_ended(error),
@@ -461,6 +562,25 @@ where
                         kind = payload[0],
                         "ignoring handshake record of unknown kind"
                     );
+                    let now = tokio::time::Instant::now();
+                    if now.duration_since(self.unknown_handshake_records_since)
+                        >= UNKNOWN_HANDSHAKE_RECORD_INTERVAL
+                    {
+                        self.unknown_handshake_records_since = now;
+                        self.unknown_handshake_records = 0;
+                    }
+                    self.unknown_handshake_records += 1;
+                    if self.unknown_handshake_records >= MAX_UNKNOWN_HANDSHAKE_RECORDS {
+                        tracing::debug!(
+                            ?UNKNOWN_HANDSHAKE_RECORD_INTERVAL,
+                            "too many handshake records of unknown kinds, \
+                             pausing reads of the handshake stream"
+                        );
+                        self.handshake_paused_until = Some(
+                            self.unknown_handshake_records_since
+                                + UNKNOWN_HANDSHAKE_RECORD_INTERVAL,
+                        );
+                    }
                     None
                 }
                 Err(error) => Some(Exit {
@@ -507,7 +627,7 @@ where
             self.inbound_permits.clone(),
             self.overloads.clone(),
             self.get_addr_allowed.clone(),
-            self.events_tx.clone(),
+            self.events.clone(),
         ));
     }
 
@@ -597,7 +717,7 @@ where
                         transient_addr: self.transient_addr,
                         genesis_hash: self.params.genesis_hash,
                         misbehavior: self.params.misbehavior.clone(),
-                        events: self.events_tx.clone(),
+                        events: self.events.others.clone(),
                     },
                 ));
                 return;

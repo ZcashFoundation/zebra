@@ -22,13 +22,14 @@ use crate::{
     peer::{
         v2::{
             connection::{
-                announcements::AnnouncementWriter,
+                announcements::{send_event, AnnouncementWriter},
                 inbound::{
                     INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
                     RESPONSE_BYTES_LIMIT,
                 },
                 outbound::{RequestSend, MAX_OUTBOUND_REQUEST_STREAMS},
-                spawn_connection, ConnectionParams,
+                spawn_connection, ConnectionParams, Event, Events, EVENT_QUEUE,
+                MAX_UNKNOWN_HANDSHAKE_RECORDS,
             },
             handshake::{CompletedHandshake, Role},
             misbehavior::MisbehaviorScores,
@@ -43,6 +44,7 @@ use crate::{
         internal::{InventoryResponse, Request, Response},
         v2::{
             announcement::{encode_tx_record, BLOCK_ANNOUNCEMENT_HEADER},
+            constants::MAX_RECORD_PAYLOAD_LEN,
             handshake::{InitRecord, INIT_RECORD_KIND},
             record::RecordCodec,
             request::{GetBlocks, GetHeaders, GetTx, Request as WireRequest},
@@ -2654,4 +2656,163 @@ async fn timed_out_announcements_close_the_connection() {
     })
     .await
     .expect("the test completes well within the timeout");
+}
+
+/// Handshake-stream records of unknown kinds are ignored, as the draft
+/// requires, and never close the connection, but only a few are read a
+/// minute: the node leaves the rest unread, so a peer that keeps sending
+/// them is stopped by its flow control, and the connection carries on.
+#[tokio::test]
+async fn unknown_handshake_records_beyond_the_rate_are_left_unread() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut raw = raw_peer_node(&network).await;
+        let unknown = RecordCodec::encode_record([0x07, 0xDE, 0xAD]).expect("valid");
+        for _ in 0..MAX_UNKNOWN_HANDSHAKE_RECORDS {
+            raw.hs_send.write_all(&unknown).await.expect("writes");
+        }
+        call(&mut raw.node.client, Request::Ping(Default::default()))
+            .await
+            .expect("the connection is open");
+
+        // More unknown records than the stream's 4 MiB receive window: none are read, so the
+        // writes stall on flow control.
+        let mut large = vec![0x07];
+        large.resize(MAX_RECORD_PAYLOAD_LEN, 0xAB);
+        let large = RecordCodec::encode_record(&large).expect("valid");
+        let flood = async {
+            for _ in 0..3 {
+                raw.hs_send.write_all(&large).await.expect("writes");
+            }
+        };
+        assert!(
+            tokio::time::timeout(SHORT_WAIT * 4, flood).await.is_err(),
+            "the node stops reading the handshake stream"
+        );
+
+        call(&mut raw.node.client, Request::Ping(Default::default()))
+            .await
+            .expect("the connection is still open");
+        assert!(raw.connection.close_reason().is_none());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A stream task's violation closes the connection at once, with
+/// `PROTOCOL_ERROR`, however the peer keeps the connection task busy
+/// beforehand: with address announcements beyond the event queue, and with
+/// handshake records of unknown kinds, below and beyond the rate the node
+/// reads them at.
+#[tokio::test]
+async fn violations_close_the_connection_behind_address_and_handshake_floods() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut raw = raw_peer_node(&network).await;
+
+        let addr = MetaAddr::new_gossiped_meta_addr(
+            "203.0.113.7:8233".parse::<SocketAddr>().unwrap().into(),
+            PeerServices::NODE_NETWORK,
+            DateTime32::now(),
+        );
+        // A one-address `get-addr` response is a one-byte count, then the record.
+        let response = encode_addr_response(std::slice::from_ref(&addr)).expect("encodes");
+        let addr_record = RecordCodec::encode_record(&response[1..]).expect("valid");
+        let mut addr_send = raw.connection.open_uni().await.expect("opens");
+        addr_send
+            .write_all(&[StreamType::AddressAnnouncements.code()])
+            .await
+            .expect("writes");
+        addr_send
+            .write_all(&addr_record.repeat(8 * EVENT_QUEUE))
+            .await
+            .expect("writes");
+
+        let unknown = RecordCodec::encode_record([0x07, 0xDE, 0xAD]).expect("valid");
+        raw.hs_send
+            .write_all(&unknown.repeat(4 * MAX_UNKNOWN_HANDSHAKE_RECORDS as usize))
+            .await
+            .expect("writes");
+
+        // A transaction announcement whose reference type byte is undefined.
+        let mut send = raw.connection.open_uni().await.expect("opens");
+        send.write_all(&[StreamType::TransactionAnnouncements.code()])
+            .await
+            .expect("writes");
+        let record = RecordCodec::encode_record([0xFF]).expect("valid");
+        send.write_all(&record).await.expect("writes");
+
+        let close = tokio::time::timeout(SHORT_WAIT * 4, raw.connection.closed())
+            .await
+            .expect("the violation closes the connection promptly");
+        match close {
+            quinn::ConnectionError::ApplicationClosed(close) => {
+                assert_eq!(
+                    close.error_code.into_inner(),
+                    ErrorCode::ProtocolError.code()
+                );
+            }
+            other => panic!("unexpected close {other:?}"),
+        }
+        let error = call(&mut raw.node.client, Request::Ping(Default::default()))
+            .await
+            .expect_err("the connection failed");
+        assert!(
+            error.inner_debug().contains("ProtocolViolation"),
+            "got {}",
+            error.inner_debug()
+        );
+        drop((addr_send, send));
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A stream task's connection-closing event reaches the connection task
+/// however many best-effort events are waiting, and handing over either
+/// kind never waits: address events beyond the queue are dropped, from the
+/// stream tasks and from the request tasks alike.
+#[tokio::test]
+async fn connection_closing_events_are_never_crowded_out() {
+    let _init_guard = zebra_test::init();
+
+    let (events, mut fatal_rx, mut events_rx) = Events::channel();
+    let addrs = Fixture::new().addrs;
+    tokio::time::timeout(SHORT_WAIT, async {
+        for _ in 0..2 * EVENT_QUEUE {
+            events.addresses(addrs.clone());
+            send_event(&events.others, Event::Addresses(addrs.clone())).await;
+        }
+    })
+    .await
+    .expect("best-effort events never wait");
+
+    events.close(Event::Violation {
+        reason: "nonconforming record".to_string(),
+        code: ErrorCode::ProtocolError,
+    });
+    assert!(
+        matches!(
+            fatal_rx.try_recv(),
+            Ok(Event::Violation {
+                code: ErrorCode::ProtocolError,
+                ..
+            })
+        ),
+        "the violation is queued for the connection task"
+    );
+
+    let mut queued = 0;
+    while let Ok(event) = events_rx.try_recv() {
+        assert!(matches!(event, Event::Addresses(_)));
+        queued += 1;
+    }
+    assert_eq!(
+        queued, EVENT_QUEUE,
+        "address events beyond the queue are dropped"
+    );
 }
