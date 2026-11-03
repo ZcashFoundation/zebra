@@ -3,8 +3,8 @@
 //! One task owns every download: it assigns each piece to one peer, requests
 //! it in sub-ranges sized from the peer's measured rate, hashes the bytes as
 //! they arrive, stores each verified piece, and reports it on a channel. It
-//! backs off from refusals and missing objects, and blames a peer only for a
-//! piece it delivered entirely.
+//! detects stalled peers, backs off from refusals and missing objects, and
+//! blames a peer only for a piece it delivered entirely.
 //!
 //! The scheduler is generic over the peer service, so tests drive it with
 //! mock peers, and it holds its state in the task alone: no locks.
@@ -370,6 +370,21 @@ struct Peer<S> {
     /// Refusals in a row.
     refusals: u32,
 
+    /// Short answers in a row.
+    short_answers: u32,
+
+    /// While the peer is downloading with its rate below the rate floor, when
+    /// that started.
+    slow_since: Option<Instant>,
+
+    /// How long the peer downloaded with its rate below the rate floor in its
+    /// earlier downloads, since its rate was last at or above the floor. The
+    /// time it spends without a download does not count.
+    slow_for: Duration,
+
+    /// How many times the peer has stalled.
+    stalls: u32,
+
     /// The peer is given no work until then.
     resting_until: Option<Instant>,
 
@@ -382,6 +397,15 @@ struct Peer<S> {
     /// Pieces the peer gave a different size for, which it is not asked for
     /// again.
     wrong_size: HashSet<usize>,
+}
+
+impl<S> Peer<S> {
+    /// Returns when the peer will have downloaded below the rate floor for
+    /// `slow_window`, if it is downloading below the floor now.
+    fn slow_deadline(&self, slow_window: Duration) -> Option<Instant> {
+        let since = self.slow_since?;
+        Some(after(since, slow_window.saturating_sub(self.slow_for)))
+    }
 }
 
 /// One peer's download of one piece.
@@ -718,6 +742,10 @@ where
                 download: None,
                 rate: None,
                 refusals: 0,
+                short_answers: 0,
+                slow_since: None,
+                slow_for: Duration::ZERO,
+                stalls: 0,
                 resting_until: None,
                 excluded: false,
                 not_found: HashMap::new(),
@@ -825,6 +853,15 @@ where
             peer.not_found.retain(|_, until| *until > now);
         }
 
+        // Design, §6.1 "Stalls": a peer whose rate stays below the floor for the slow window is
+        // stalled.
+        for peer in 0..self.peers.len() {
+            let slow_deadline = self.peers[peer].slow_deadline(self.config.slow_window);
+            if slow_deadline.is_some_and(|deadline| now >= deadline) {
+                self.stall(peer, now, "its rate stayed below the floor");
+            }
+        }
+
         // Design, §6 "Failure handling": abort if every peer is excluded.
         if self.unverified > 0 && self.peers.iter().all(|peer| peer.excluded) {
             return Err(SchedulerError::NoPeers);
@@ -845,6 +882,9 @@ where
                 if let Some(until) = peer.not_found.values().min() {
                     wake = wake.min(*until);
                 }
+            }
+            if let Some(deadline) = peer.slow_deadline(self.config.slow_window) {
+                wake = wake.min(deadline);
             }
         }
         wake
@@ -904,8 +944,15 @@ where
         let size = self.pieces[piece].size;
         self.downloads.insert(id, Download::new(peer, piece, size));
         self.pieces[piece].downloads.push(id);
-        self.peers[peer].download = Some(id);
         self.reserved = self.reserved.saturating_add(u64::from(size));
+
+        // A peer already below the rate floor is measured from the start of its download.
+        let floor = self.config.min_rate_bytes_per_sec;
+        let state = &mut self.peers[peer];
+        state.download = Some(id);
+        if state.rate.is_some_and(|rate| rate.bytes_per_sec() < floor) {
+            state.slow_since = Some(Instant::now());
+        }
 
         tracing::debug!(
             peer = %self.peers[peer].addr,
@@ -1055,7 +1102,11 @@ where
                 self.exclude(peer);
             }
             Answer::Failed(error) => self.refused(peer, now, &error),
-            Answer::TimedOut => download.give_back(offset, offset + u64::from(length)),
+            Answer::TimedOut => {
+                download.give_back(offset, offset + u64::from(length));
+                // Nothing arrived in time, so the sub-range is a short answer of no bytes.
+                self.measure(peer, 0, length, elapsed, now);
+            }
             Answer::Response(zn::Response::ObjectNotFound) => self.not_found(peer, piece, now),
             Answer::Response(zn::Response::Object { size, data }) => {
                 self.delivered(id, (offset, length), elapsed, size, data)
@@ -1112,9 +1163,11 @@ where
             }
         };
 
-        let state = &mut self.peers[peer];
-        state.rate = Some(Rate::update(state.rate, delivered, elapsed));
-        state.refusals = 0;
+        self.peers[peer].refusals = 0;
+        if !self.measure(peer, delivered, length, elapsed, Instant::now()) {
+            // The peer stalled, so its partial piece was discarded.
+            return;
+        }
 
         let Some(download) = self.downloads.get_mut(&id) else {
             return;
@@ -1174,6 +1227,10 @@ where
         let peer = &mut self.peers[download.peer];
         if peer.download == Some(id) {
             peer.download = None;
+            // Only the time a peer spends downloading counts towards the slow window.
+            if let Some(since) = peer.slow_since.take() {
+                peer.slow_for = peer.slow_for.saturating_add(since.elapsed());
+            }
         }
         let piece = &mut self.pieces[download.piece];
         piece.downloads.retain(|other| *other != id);
@@ -1203,6 +1260,74 @@ where
     fn exclude(&mut self, peer: usize) {
         self.release_peer(peer);
         self.peers[peer].excluded = true;
+    }
+
+    /// Updates `peer`'s rate with an answer of `delivered` bytes to a
+    /// sub-range of `length` bytes, which took `elapsed`, and stalls the peer
+    /// after too many short answers in a row (design, §6.1 "Stalls"). Returns
+    /// whether the peer is still downloading.
+    fn measure(
+        &mut self,
+        peer: usize,
+        delivered: u32,
+        length: u32,
+        elapsed: Duration,
+        now: Instant,
+    ) -> bool {
+        let config = &self.config;
+        let state = &mut self.peers[peer];
+        let rate = Rate::update(state.rate, delivered, elapsed);
+        state.rate = Some(rate);
+
+        // Sub-ranges never go past the end of the piece, so a short answer is always one that
+        // ends before the end of the piece.
+        if delivered < config.short_answer_bytes.min(length) {
+            state.short_answers = state.short_answers.saturating_add(1);
+        } else {
+            state.short_answers = 0;
+        }
+
+        if rate.bytes_per_sec() < config.min_rate_bytes_per_sec {
+            state.slow_since.get_or_insert(now);
+        } else {
+            state.slow_since = None;
+            state.slow_for = Duration::ZERO;
+        }
+
+        if state.short_answers >= config.max_short_answers {
+            self.stall(peer, now, "it gave too many short answers in a row");
+            return false;
+        }
+        true
+    }
+
+    /// Takes `peer`'s piece away, to be downloaded whole by another peer with
+    /// the partial data discarded, and rests the peer for the stall cooldown,
+    /// or excludes it once it has stalled too often (design, §6.1 "Stalls").
+    fn stall(&mut self, peer: usize, now: Instant, reason: &str) {
+        self.release_peer(peer);
+        let state = &mut self.peers[peer];
+        state.stalls = state.stalls.saturating_add(1);
+        state.short_answers = 0;
+        state.slow_since = None;
+        state.slow_for = Duration::ZERO;
+        if state.stalls >= self.config.max_stalls {
+            state.excluded = true;
+            tracing::info!(
+                peer = %state.addr,
+                reason,
+                stalls = state.stalls,
+                "excluding a stalled state snapshot peer",
+            );
+        } else {
+            state.resting_until = Some(after(now, self.config.stall_cooldown));
+            tracing::info!(
+                peer = %state.addr,
+                reason,
+                stalls = state.stalls,
+                "a state snapshot peer stalled; resting it and downloading its piece elsewhere",
+            );
+        }
     }
 
     /// Rests `peer` after a refused or failed request, for a backoff that

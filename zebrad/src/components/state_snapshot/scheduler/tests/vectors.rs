@@ -66,6 +66,10 @@ struct Behavior {
     /// The delay before every answer.
     latency: Duration,
 
+    /// Later delays before every answer: from each time since the test
+    /// started, the delay for the requests that start then.
+    phases: Vec<(Duration, Duration)>,
+
     /// An extra delay before answering a request at offset 0.
     first_range_latency: Duration,
 
@@ -253,7 +257,14 @@ impl FakePeer {
         let mut guard = CallGuard::start(&self, hash, offset, length);
         let behavior = &self.behavior;
 
-        tokio::time::sleep(behavior.latency).await;
+        let started = self.epoch.elapsed();
+        let latency = behavior
+            .phases
+            .iter()
+            .rev()
+            .find(|(from, _)| started >= *from)
+            .map_or(behavior.latency, |(_, latency)| *latency);
+        tokio::time::sleep(latency).await;
         if offset == 0 {
             tokio::time::sleep(behavior.first_range_latency).await;
         }
@@ -933,11 +944,12 @@ async fn a_refusing_peer_backs_off_without_penalty() {
         refuse: true,
         ..Behavior::default()
     };
-    let slow = Behavior {
-        latency: secs(8),
+    // Above the rate floor, and busy for longer than the backoffs below.
+    let honest = Behavior {
+        latency: secs(2),
         ..Behavior::default()
     };
-    let outcome = Scenario::new(objects(&[256 * KIB; 20]), vec![refusing, slow])
+    let outcome = Scenario::new(objects(&[256 * KIB; 50]), vec![refusing, honest])
         .run()
         .await;
 
@@ -1250,4 +1262,239 @@ async fn an_empty_piece_needs_no_peer() {
         .calls
         .iter()
         .all(|call| call.hash != outcome.hash(0)));
+}
+
+/// A peer that finishes every answer early with fewer bytes than the
+/// short-answer threshold is stalled after three of them: its piece goes,
+/// whole, to another peer, and it rests for the stall cooldown.
+#[tokio::test(start_paused = true)]
+async fn short_answers_stall_a_peer() {
+    let _init_guard = zebra_test::init();
+
+    let early_fin = Behavior {
+        latency: ms(100),
+        cap: Some(32 * KIB),
+        ..Behavior::default()
+    };
+    let honest = Behavior {
+        latency: secs(1),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[2 * MIB; 6]), vec![early_fin, honest])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    assert!(outcome.blamed.is_empty());
+
+    // Two short answers at 0.1 s, the third at 0.2 s, then nothing for the rest of the run.
+    let calls = outcome.calls_of(0);
+    assert_eq!(calls.len(), 4, "{calls:?}");
+    assert!(calls.iter().all(|call| call.hash == outcome.hash(0)));
+    assert!(calls.iter().all(|call| call.start <= ms(100)));
+    assert!(outcome.elapsed < secs(60), "{:?}", outcome.elapsed);
+
+    // The other peer downloaded the piece from its start.
+    let taken_over = outcome.calls_of_for(1, 0);
+    assert_eq!(taken_over[0].offset, 0);
+    let requested: u64 = taken_over.iter().map(|call| u64::from(call.length)).sum();
+    assert_eq!(requested, u64::from(2 * MIB));
+}
+
+/// A peer that trickles one byte per answer is stalled after three answers
+/// each time it is given the piece, rests 60 seconds after each stall, and is
+/// excluded after the third, which stops the scheduler.
+#[tokio::test(start_paused = true)]
+async fn a_trickling_peer_is_stalled_then_excluded() {
+    let _init_guard = zebra_test::init();
+
+    let trickle = Behavior {
+        latency: secs(5),
+        cap: Some(1),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[MIB]), vec![trickle]).run().await;
+
+    assert!(
+        matches!(outcome.result, Err(SchedulerError::NoPeers)),
+        "{:?}",
+        outcome.result
+    );
+    // Stalls at 10 s, 80 s and 150 s, each 60 s of rest after the one before.
+    assert_eq!(outcome.elapsed, secs(150));
+    let starts: Vec<Duration> = outcome.calls.iter().map(|call| call.start).collect();
+    assert_eq!(
+        starts,
+        [0, 5, 5, 70, 70, 75, 75, 140, 140, 145, 145].map(secs),
+        "{:?}",
+        outcome.calls
+    );
+    // Each time, the piece starts again from nothing.
+    for start in [70, 140].map(secs) {
+        assert!(outcome
+            .calls
+            .iter()
+            .any(|call| call.start == start && call.offset == 0));
+    }
+}
+
+/// A peer that never answers misses each sub-range's deadline, which counts
+/// as a short answer of no bytes: it is stalled after three. Its rate is then
+/// below the floor, so after each rest it is stalled again 30 seconds into
+/// its next download, and it is excluded after its third stall.
+#[tokio::test(start_paused = true)]
+async fn a_peer_that_never_answers_is_stalled_then_excluded() {
+    let _init_guard = zebra_test::init();
+
+    let hung = Behavior {
+        hang: true,
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[MIB]), vec![hung]).run().await;
+
+    assert!(
+        matches!(outcome.result, Err(SchedulerError::NoPeers)),
+        "{:?}",
+        outcome.result
+    );
+    // A 1 MiB sub-range gets 16 s, and so do the 256 KiB ones after it. Three missed deadlines
+    // stall the peer at 32 s; then the rate floor stalls it at 122 s and 212 s.
+    assert_eq!(outcome.elapsed, secs(212));
+    assert!(outcome.calls.iter().all(|call| call.dropped));
+    let times: Vec<(Duration, Duration)> = outcome
+        .calls
+        .iter()
+        .map(|call| (call.start, call.end))
+        .collect();
+    let expected = [
+        (0, 16),
+        (16, 32),
+        (16, 32),
+        (92, 108),
+        (92, 108),
+        (108, 122),
+        (108, 122),
+        (182, 198),
+        (182, 198),
+        (198, 212),
+        (198, 212),
+    ]
+    .map(|(start, end)| (secs(start), secs(end)));
+    assert_eq!(times, expected);
+}
+
+/// A peer whose rate stays below the floor for 30 seconds of downloading is
+/// stalled, though it finishes each of its small pieces in less.
+#[tokio::test(start_paused = true)]
+async fn a_slow_peer_is_stalled_across_small_pieces() {
+    let _init_guard = zebra_test::init();
+
+    // 100 KiB in 4 s is 25 KiB/s.
+    let slow = Behavior {
+        latency: secs(4),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[100 * KIB; 10]), vec![slow])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    // Below the floor from its first answer at 4 s, so stalled at 34 s, during the ninth piece,
+    // which it downloads again after resting until 94 s.
+    let starts: Vec<Duration> = outcome.calls.iter().map(|call| call.start).collect();
+    assert_eq!(starts, [0, 4, 8, 12, 16, 20, 24, 28, 32, 94, 98].map(secs));
+    assert!(outcome.calls[8].dropped);
+    assert_eq!(outcome.elapsed, secs(102));
+}
+
+/// The time a slow peer spends without a download, here waiting to ask again
+/// for an object it did not have, does not count towards the slow window.
+#[tokio::test(start_paused = true)]
+async fn time_without_a_download_does_not_count_as_slow() {
+    let _init_guard = zebra_test::init();
+
+    let objects = objects(&[100 * KIB; 2]);
+    let slow = Behavior {
+        latency: secs(4),
+        missing_until: [(ObjectHash::of(&objects[1]), secs(50))].into(),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects, vec![slow]).run().await;
+
+    outcome.assert_complete();
+    // The second object is not found at 8 s and 42 s, then found at 76 s, with no stall: the peer
+    // downloaded below the floor for 16 s in all.
+    let starts: Vec<Duration> = outcome.calls.iter().map(|call| call.start).collect();
+    assert_eq!(starts, [0, 4, 38, 72].map(secs));
+    assert_eq!(outcome.elapsed, secs(76));
+}
+
+/// When a peer's rate recovers to the floor, its slow window starts again:
+/// the time it was slow before does not count.
+#[tokio::test(start_paused = true)]
+async fn a_recovered_rate_restarts_the_slow_window() {
+    let _init_guard = zebra_test::init();
+
+    // 100 KiB in 4 s is 25 KiB/s, below the floor; in 0.5 s it is 200 KiB/s.
+    let peer = Behavior {
+        phases: vec![(secs(0), secs(4)), (secs(20), ms(500)), (secs(40), secs(4))],
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[100 * KIB; 52]), vec![peer])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    // Five pieces in 4 s each, forty in 0.5 s, then seven in 4 s. The rate is below the floor for
+    // 18 s of downloading until it recovers at 22.5 s, and below it again from 48 s, so the run
+    // ends at 68 s without a stall.
+    assert_eq!(outcome.elapsed, secs(68));
+}
+
+/// A peer whose rate stays below the 64 KiB/s floor for 30 seconds is
+/// stalled, though it answers every sub-range in full and in time: its piece
+/// starts again from nothing after its rest, and it is excluded after its
+/// third stall.
+#[tokio::test(start_paused = true)]
+async fn a_slow_peer_is_stalled_below_the_rate_floor() {
+    let _init_guard = zebra_test::init();
+
+    let slow = Behavior {
+        rate: Some((32 * KIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario {
+        // Small first sub-ranges, which a peer at 32 KiB/s delivers within their deadline.
+        config: SchedulerConfig {
+            initial_range_bytes: 256 * KIB,
+            ..SchedulerConfig::default()
+        },
+        ..Scenario::new(objects(&[8 * MIB]), vec![slow])
+    }
+    .run()
+    .await;
+
+    assert!(
+        matches!(outcome.result, Err(SchedulerError::NoPeers)),
+        "{:?}",
+        outcome.result
+    );
+    assert!(outcome.calls.iter().all(
+        |call| call.delivered.is_none() || call.delivered == usize::try_from(call.length).ok()
+    ));
+
+    // 256 KiB, which is also 8 s of the rate, takes 8 s at 32 KiB/s. The rate is below the floor
+    // from the first answers, at 8 s, so the first stall is at 38 s; after each 60 s rest, the
+    // rate is still below the floor, so the next download is stalled 30 s after it starts, at
+    // 128 s and 218 s.
+    assert_eq!(outcome.elapsed, secs(218));
+    for rest_end in [98, 188].map(secs) {
+        let restart: Vec<&Call> = outcome
+            .calls
+            .iter()
+            .filter(|call| call.start == rest_end)
+            .collect();
+        assert_eq!(restart.len(), 2, "{:?}", outcome.calls);
+        assert_eq!(restart[0].offset, 0, "the partial piece was discarded");
+    }
 }
