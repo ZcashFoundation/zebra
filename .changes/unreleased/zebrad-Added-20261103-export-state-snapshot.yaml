@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added the `zebrad export-state-snapshot --height H [--out DIR]` command, which exports a stopped node's finalized state at its tip `H` as a state snapshot for other nodes to bootstrap from, and prints the `[sync.state_snapshot]` commitment that names it.
+time: 2026-11-03T04:01:07.143888747-05:00
