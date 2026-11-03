@@ -966,14 +966,21 @@ impl DiskDb {
         }
     }
 
-    /// The ideal open file limit for Zebra
-    const IDEAL_OPEN_FILE_LIMIT: u64 = 1024;
+    /// The ideal open file limit for Zebra.
+    ///
+    /// `zebra-network`'s default connection limits allow 2,000 peer connections, the database
+    /// gets half of the open file limit, and RPC connections, log files, and OS libraries need
+    /// descriptors too. So this is far above the common default soft limit of 1,024, and it is
+    /// the same as the Windows low-level I/O file limit.
+    const IDEAL_OPEN_FILE_LIMIT: u64 = 8192;
 
     /// The minimum number of open files for Zebra to operate normally. Also used
     /// as the default open file limit, when the OS doesn't tell us how many
     /// files we can use.
     ///
-    /// We want 100+ file descriptors for peers, and 100+ for the database.
+    /// This leaves 200+ file descriptors for peers and 200+ for the database, which is
+    /// enough to sync with a small `peerset_initial_target_size`, but far below the default
+    /// connection limits, see `IDEAL_OPEN_FILE_LIMIT`.
     ///
     /// On Windows, the default limit is 512 high-level I/O files, and 8192
     /// low-level I/O files:
@@ -1417,14 +1424,15 @@ impl DiskDb {
         // https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks
         // http://smallvoid.com/article/winnt-tcpip-max-limit.html
         //
-        // `zebra-state`'s `IDEAL_OPEN_FILE_LIMIT` is much less than
+        // `zebra-state`'s `IDEAL_OPEN_FILE_LIMIT` is the same as
         // the Windows low-level I/O file limit.
         //
         // The [`setmaxstdio` and `getmaxstdio`](https://docs.rs/rlimit/latest/rlimit/#windows)
         // functions from the `rlimit` crate only change the high-level I/O file limit.
         //
-        // `zebra-network`'s default connection limit is much less than
-        // the TCP Control Block limit on Windows.
+        // `zebra-network`'s default connection limits allow 2,000 connections, which is
+        // above the TCP Control Block limit on Windows, so Windows nodes may need a
+        // smaller `peerset_initial_target_size`.
 
         // We try setting the ideal limit, then the minimum limit.
         let current_limit = match increase_nofile_limit(DiskDb::IDEAL_OPEN_FILE_LIMIT) {
