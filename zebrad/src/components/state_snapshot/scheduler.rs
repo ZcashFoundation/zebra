@@ -39,6 +39,14 @@ use crate::BoxError;
 #[cfg(test)]
 mod tests;
 
+/// How much longer than the network layer's request timeout the scheduler
+/// waits for a sub-range. The scheduler's clock starts before the request is
+/// sent to the peer's service, the network layer's when the request is
+/// dispatched on the connection, so the grace covers the wait between them:
+/// normally nothing, since the bootstrap clients serve only the scheduler,
+/// which keeps fewer requests in flight than the connection has streams for.
+const SUB_RANGE_DEADLINE_GRACE: Duration = Duration::from_secs(5);
+
 /// The limits of the scheduler (design, §6.1), with the design's values as
 /// the default.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,19 +162,21 @@ impl SchedulerConfig {
         len.max(1)
     }
 
-    /// Returns how long a sub-range may take when its peer has `bytes` to
-    /// deliver with it, its own and those of the sub-ranges in flight ahead of
-    /// it, which share the peer's connection: as long as a peer at the rate
-    /// floor needs to deliver them, and at least twice the duration sub-ranges
-    /// are sized for.
+    /// Returns how long the scheduler waits for a sub-range when its peer has
+    /// `bytes` to deliver with it, its own and those of the sub-ranges in
+    /// flight with it, which share the peer's connection: longer than the
+    /// network layer's own request timeout, and as long as a peer at the rate
+    /// floor needs to deliver the bytes, if that is longer.
     ///
-    /// With the defaults, a lone first 1 MiB sub-range gets 16 seconds, inside
-    /// the network layer's own 20-second request timeout. The sub-range behind
-    /// it gets 32, so the network layer's timeout comes first, which counts as
-    /// this deadline does.
+    /// The network layer's timeout always comes first, and gives back the
+    /// bytes received so far as a short answer (design, §5 "Requester"), as
+    /// does the serving node's early FIN before it. This deadline only catches
+    /// a service that never resolves; it must not cancel a stream the network
+    /// layer is still reading, which would discard every byte received.
     fn sub_range_deadline(&self, bytes: u64) -> Duration {
         let at_floor_micros = bytes.saturating_mul(1_000_000) / self.min_rate_bytes_per_sec.max(1);
-        Duration::from_micros(at_floor_micros).max(self.range_duration.saturating_mul(2))
+        Duration::from_micros(at_floor_micros)
+            .max(zn::constants::REQUEST_TIMEOUT.saturating_add(SUB_RANGE_DEADLINE_GRACE))
     }
 
     /// Returns how long a peer rests after `refusals` refusals in a row:
@@ -1091,7 +1101,8 @@ where
                 download.unrequested.insert(request_end, end);
             }
 
-            // The peer delivers the sub-ranges in flight ahead of this one first.
+            // The sub-ranges in flight share the peer's connection, so this one is delivered with,
+            // or after, those ahead of it.
             let ahead: u64 = download
                 .in_flight
                 .values()

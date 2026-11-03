@@ -1,5 +1,4 @@
-//! The scheduler against fake peers, in paused time (design, §10 "the
-//! scheduler against mock peers").
+//! The scheduler against fake peers, in paused time.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -15,7 +14,10 @@ use std::{
 };
 
 use futures::{future::BoxFuture, FutureExt};
-use tokio::{sync::mpsc, time::Instant};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Instant,
+};
 use tower::Service;
 
 use zebra_chain::state_snapshot::ObjectHash;
@@ -76,8 +78,15 @@ struct Behavior {
     /// The rate of the peer's link, in bytes per second, which its requests
     /// in flight share as a real connection's streams do: an answer's bytes
     /// are sent after those of the answers before it, `n` bytes in `n / rate`
-    /// seconds. `None` delivers them at once.
+    /// seconds, unless the link is [`Self::shared`]. `None` delivers them at
+    /// once.
     rate: Option<u64>,
+
+    /// The link's rate is divided equally among the answers in flight, as
+    /// quinn divides a connection among its streams of one priority, so two
+    /// answers that start together progress at half the rate each and finish
+    /// together.
+    shared: bool,
 
     /// The most bytes one answer carries, as a responder that finishes early.
     cap: Option<u32>,
@@ -192,6 +201,71 @@ impl Counters {
     }
 }
 
+/// An answer's bytes to send on a shared link.
+struct LinkSend {
+    /// How many bytes.
+    bytes: u64,
+
+    /// Resolved once they are sent.
+    sent: oneshot::Sender<()>,
+}
+
+/// Sends the answers of one peer on a link of `rate` bytes per second,
+/// divided equally among the answers in flight: while `k` answers are in
+/// flight, each progresses at `rate / k`, as quinn's streams of one priority
+/// do. Ends once every sender of `sends` is dropped and the link is idle.
+async fn run_shared_link(rate: u64, mut sends: mpsc::UnboundedReceiver<LinkSend>) {
+    let rate = u128::from(rate.max(1));
+    // Each answer's bytes left to send, in millionths of a byte, so a share of the rate over a
+    // number of microseconds is exact.
+    let mut in_flight: Vec<(u128, oneshot::Sender<()>)> = Vec::new();
+    let mut open = true;
+    let mut last = Instant::now();
+
+    loop {
+        if in_flight.is_empty() && !open {
+            return;
+        }
+        let shares = u128::try_from(in_flight.len()).expect("a length fits in a u128");
+        // When the answer with the fewest bytes left has been sent.
+        let next_done = in_flight.iter().map(|(left, _)| *left).min().map(|left| {
+            let micros = (left * shares).div_ceil(rate);
+            last + Duration::from_micros(u64::try_from(micros).unwrap_or(u64::MAX))
+        });
+
+        let arrival = tokio::select! {
+            biased;
+            send = sends.recv(), if open => Some(send),
+            () = tokio::time::sleep_until(next_done.unwrap_or(last)), if next_done.is_some() => None,
+        };
+
+        let now = Instant::now();
+        if shares > 0 {
+            let elapsed = now.saturating_duration_since(last).as_micros();
+            let sent_each = (elapsed * rate)
+                .checked_div(shares)
+                .expect("the in-flight share count is nonzero");
+            for (left, _) in &mut in_flight {
+                *left = left.saturating_sub(sent_each);
+            }
+        }
+        last = now;
+        for (_, sent) in in_flight.extract_if(.., |(left, _)| *left == 0) {
+            let _ = sent.send(());
+        }
+        // A cancelled answer stops taking its share, as a stopped stream does.
+        in_flight.retain(|(_, sent)| !sent.is_closed());
+
+        match arrival {
+            Some(Some(LinkSend { bytes, sent })) => {
+                in_flight.push((u128::from(bytes) * 1_000_000, sent));
+            }
+            Some(None) => open = false,
+            None => {}
+        }
+    }
+}
+
 /// A fake bootstrap peer.
 #[derive(Clone)]
 struct FakePeer {
@@ -200,6 +274,9 @@ struct FakePeer {
 
     /// How it answers.
     behavior: Arc<Behavior>,
+
+    /// The peer's link, when its rate is shared among the answers in flight.
+    link: Option<mpsc::UnboundedSender<LinkSend>>,
 
     /// The objects every honest peer has.
     objects: Arc<HashMap<ObjectHash, Vec<u8>>>,
@@ -354,8 +431,17 @@ impl FakePeer {
                 *byte ^= 1;
             }
         }
-        if let Some(rate) = behavior.rate {
-            let bytes = u64::try_from(data.len()).expect("a usize fits in a u64");
+        let bytes = u64::try_from(data.len()).expect("a usize fits in a u64");
+        if let Some(link) = &self.link {
+            let (sent_tx, sent_rx) = oneshot::channel();
+            let send = LinkSend {
+                bytes,
+                sent: sent_tx,
+            };
+            link.send(send)
+                .expect("the link runs until every peer is dropped");
+            sent_rx.await.expect("the link answers every send");
+        } else if let Some(rate) = behavior.rate {
             let send = Duration::from_micros(bytes * 1_000_000 / rate.max(1));
             let sent = self.counters.send_on_link(self.epoch.elapsed(), send);
             tokio::time::sleep_until(self.epoch + sent).await;
@@ -528,9 +614,16 @@ impl Scenario {
                     Some((*hash, lie))
                 })
                 .collect();
+            let link = behavior.shared.then(|| {
+                let rate = behavior.rate.expect("a shared link has a rate");
+                let (sends_tx, sends_rx) = mpsc::unbounded_channel();
+                tokio::spawn(run_shared_link(rate, sends_rx));
+                sends_tx
+            });
             let peer = FakePeer {
                 index,
                 behavior: Arc::new(behavior),
+                link,
                 objects: honest.clone(),
                 lies: Arc::new(lies),
                 epoch,
@@ -799,46 +892,80 @@ async fn sub_ranges_follow_the_peer_rate() {
     }
 }
 
-/// A sub-range in flight behind another one has time for both: a peer above
-/// the rate floor delivers it in full, though it takes longer than a lone
-/// sub-range's deadline.
+/// The scheduler waits for a sub-range longer than the network layer does:
+/// two first sub-ranges that share a link above the rate floor, and so finish
+/// together after the time a lone one would need at the floor, are both
+/// delivered in full rather than cancelled.
 #[tokio::test(start_paused = true)]
-async fn a_pipelined_sub_range_has_time_for_the_one_ahead() {
+async fn sub_ranges_outlast_the_network_timeout() {
     let _init_guard = zebra_test::init();
 
     let peer = Behavior {
-        rate: Some((100 * KIB).into()),
+        rate: Some((120 * KIB).into()),
+        shared: true,
         ..Behavior::default()
     };
     let outcome = Scenario::new(objects(&[2 * MIB]), vec![peer]).run().await;
 
     outcome.assert_complete();
-    // Two 1 MiB sub-ranges: the second is sent after the first, from 10.24 s to 20.48 s, past the
-    // 16 s a lone 1 MiB sub-range gets.
+    // Two 1 MiB sub-ranges at 60 KiB/s each: both finish at 17.07 s, past the 16 s a 1 MiB
+    // sub-range takes at the 64 KiB/s floor, and inside the network layer's 20 s.
     let calls = outcome.calls_of(0);
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert!(calls
         .iter()
         .all(|call| call.delivered == Some(usize::try_from(MIB).expect("fits"))));
-    assert_eq!(outcome.elapsed, ms(20_480));
+    assert_eq!(outcome.elapsed, ms(17_067));
+}
+
+/// A sub-range in flight behind another one on a link that sends them one
+/// after another has time for both: a peer above the rate floor delivers it
+/// in full, though it takes longer than the network layer's timeout.
+#[tokio::test(start_paused = true)]
+async fn a_pipelined_sub_range_has_time_for_the_one_ahead() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        rate: Some((80 * KIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[2 * MIB]), vec![peer]).run().await;
+
+    outcome.assert_complete();
+    // Two 1 MiB sub-ranges: the second is sent after the first, from 12.8 s to 25.6 s, past the
+    // 25 s a lone sub-range gets, within the 32 s that 2 MiB take at the floor.
+    let calls = outcome.calls_of(0);
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(calls
+        .iter()
+        .all(|call| call.delivered == Some(usize::try_from(MIB).expect("fits"))));
+    assert_eq!(outcome.elapsed, ms(25_600));
 }
 
 /// A peer whose connection delivers above the 64 KiB/s floor is not stalled,
-/// though each of its two sub-ranges in flight gets half of it.
+/// though each of its two sub-ranges in flight gets half of it, whether the
+/// link sends them together or one after another.
 #[tokio::test(start_paused = true)]
 async fn a_pipelining_peer_above_the_rate_floor_is_not_stalled() {
     let _init_guard = zebra_test::init();
 
-    let peer = Behavior {
-        rate: Some((96 * KIB).into()),
-        ..Behavior::default()
-    };
-    let outcome = Scenario::new(objects(&[8 * MIB]), vec![peer]).run().await;
+    for shared in [true, false] {
+        let peer = Behavior {
+            rate: Some((96 * KIB).into()),
+            shared,
+            ..Behavior::default()
+        };
+        let outcome = Scenario::new(objects(&[8 * MIB]), vec![peer]).run().await;
 
-    outcome.assert_complete();
-    assert!(outcome.calls.iter().all(|call| !call.dropped));
-    // 8 MiB at 96 KiB/s takes 85.3 s, with the connection always busy.
-    assert!(outcome.elapsed < secs(86), "{:?}", outcome.elapsed);
+        outcome.assert_complete();
+        assert!(
+            outcome.calls.iter().all(|call| !call.dropped),
+            "shared link: {shared}: {:?}",
+            outcome.calls
+        );
+        // 8 MiB at 96 KiB/s takes 85.3 s, with the connection always busy.
+        assert!(outcome.elapsed < secs(86), "{:?}", outcome.elapsed);
+    }
 }
 
 /// A peer that finishes each answer early, with more than the short-answer
@@ -1485,9 +1612,10 @@ async fn a_peer_that_never_answers_is_stalled_then_excluded() {
         "{:?}",
         outcome.result
     );
-    // A 1 MiB sub-range gets 16 s, and so do the 256 KiB ones after it. Three missed deadlines
-    // stall the peer at 32 s; then the rate floor stalls it at 122 s and 212 s.
-    assert_eq!(outcome.elapsed, secs(212));
+    // Every sub-range gets 25 s, 5 s past the network layer's 20 s timeout: 1 MiB takes 16 s at the
+    // rate floor, and 256 KiB less. Three missed deadlines stall the peer at 50 s; then the rate
+    // floor stalls it 30 s into each of its next downloads, at 140 s and 230 s.
+    assert_eq!(outcome.elapsed, secs(230));
     assert!(outcome.calls.iter().all(|call| call.dropped));
     let times: Vec<(Duration, Duration)> = outcome
         .calls
@@ -1495,17 +1623,17 @@ async fn a_peer_that_never_answers_is_stalled_then_excluded() {
         .map(|call| (call.start, call.end))
         .collect();
     let expected = [
-        (0, 16),
-        (16, 32),
-        (16, 32),
-        (92, 108),
-        (92, 108),
-        (108, 122),
-        (108, 122),
-        (182, 198),
-        (182, 198),
-        (198, 212),
-        (198, 212),
+        (0, 25),
+        (25, 50),
+        (25, 50),
+        (110, 135),
+        (110, 135),
+        (135, 140),
+        (135, 140),
+        (200, 225),
+        (200, 225),
+        (225, 230),
+        (225, 230),
     ]
     .map(|(start, end)| (secs(start), secs(end)));
     assert_eq!(times, expected);
