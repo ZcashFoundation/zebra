@@ -1498,3 +1498,71 @@ async fn a_slow_peer_is_stalled_below_the_rate_floor() {
         assert_eq!(restart[0].offset, 0, "the partial piece was discarded");
     }
 }
+
+/// In the end-game, the piece of a peer below a quarter of the median rate
+/// is downloaded again, whole and independently, by an idle fast peer; the
+/// first download to verify wins and the slow one is cancelled, with no
+/// penalty.
+#[tokio::test(start_paused = true)]
+async fn the_end_game_duplicates_the_piece_of_a_slow_peer() {
+    let _init_guard = zebra_test::init();
+
+    let fast = Behavior {
+        rate: Some((100 * MIB).into()),
+        ..Behavior::default()
+    };
+    // Above the rate floor, so it is never stalled.
+    let slow = Behavior {
+        rate: Some((200 * KIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[4 * MIB; 3]), vec![fast.clone(), fast, slow])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    assert!(outcome.blamed.is_empty());
+
+    // The slow peer's first answers, at 5.12 s, give its rate; the duplicate takes 40 ms.
+    assert!(outcome.elapsed < secs(6), "{:?}", outcome.elapsed);
+    let duplicates: Vec<&Call> = [0, 1]
+        .into_iter()
+        .flat_map(|peer| outcome.calls_of_for(peer, 2))
+        .collect();
+    assert_eq!(duplicates.len(), 1, "one duplicate: {duplicates:?}");
+    assert_eq!(duplicates[0].offset, 0);
+    assert_eq!(duplicates[0].length, 4 * MIB);
+    assert_eq!(duplicates[0].start, Duration::from_millis(5120));
+
+    // The slow peer was cancelled, not stalled.
+    let slow_calls = outcome.calls_of(2);
+    assert!(slow_calls.iter().all(|call| call.hash == outcome.hash(2)));
+    assert!(slow_calls.iter().any(|call| call.dropped));
+}
+
+/// In the end-game, a peer slower than the others, but above a quarter of the
+/// median rate, keeps its piece to itself.
+#[tokio::test(start_paused = true)]
+async fn the_end_game_leaves_a_peer_above_a_quarter_of_the_median() {
+    let _init_guard = zebra_test::init();
+
+    let fast = Behavior {
+        rate: Some((10 * MIB).into()),
+        ..Behavior::default()
+    };
+    // 40% of the median rate.
+    let slower = Behavior {
+        rate: Some((4 * MIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[8 * MIB; 3]), vec![fast.clone(), fast, slower])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    // The fast peers are idle from 0.5 s, and the slower one finishes its piece at 1.25 s.
+    assert!(outcome.calls_of_for(0, 2).is_empty());
+    assert!(outcome.calls_of_for(1, 2).is_empty());
+    assert!(outcome.calls.iter().all(|call| !call.dropped));
+    assert_eq!(outcome.elapsed, ms(1250));
+}

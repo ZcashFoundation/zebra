@@ -3,8 +3,9 @@
 //! One task owns every download: it assigns each piece to one peer, requests
 //! it in sub-ranges sized from the peer's measured rate, hashes the bytes as
 //! they arrive, stores each verified piece, and reports it on a channel. It
-//! detects stalled peers, backs off from refusals and missing objects, and
-//! blames a peer only for a piece it delivered entirely.
+//! detects stalled peers, duplicates the slowest pieces in the end-game,
+//! backs off from refusals and missing objects, and blames a peer only for a
+//! piece it delivered entirely.
 //!
 //! The scheduler is generic over the peer service, so tests drive it with
 //! mock peers, and it holds its state in the task alone: no locks.
@@ -932,6 +933,73 @@ where
             }
             if let Some(piece) = self.pending.remove(position) {
                 self.start_download(peer, piece);
+            }
+        }
+
+        if self.pending.is_empty() {
+            self.duplicate_slow_pieces();
+        }
+    }
+
+    /// In the end-game, when no piece is waiting for a peer, gives the piece
+    /// of each peer below a quarter of the median rate to the fastest idle
+    /// peer as well, as an independent whole-piece download: the first to
+    /// verify wins, and the other is cancelled (design, §6.1 "Stalls"; sync
+    /// draft, "End-game duplication"). Each piece gets at most one duplicate,
+    /// and each download is by one peer, so blame stays exact.
+    fn duplicate_slow_pieces(&mut self) {
+        let Some(median) = self.median_rate() else {
+            return;
+        };
+        let threshold = median / u64::from(self.config.endgame_slow_divisor.max(1));
+
+        let mut slow: Vec<(u64, usize)> = self
+            .peers
+            .iter()
+            .filter_map(|peer| {
+                let rate = peer.rate?.bytes_per_sec();
+                let piece = self.downloads.get(&peer.download?)?.piece;
+                (rate < threshold && self.pieces[piece].downloads.len() == 1)
+                    .then_some((rate, piece))
+            })
+            .collect();
+        slow.sort_unstable();
+
+        for (_, piece) in slow {
+            let fastest = (0..self.peers.len())
+                .filter(|&peer| self.is_idle(peer) && self.can_serve(peer, piece))
+                .max_by_key(|&peer| self.peers[peer].rate.map(Rate::bytes_per_sec));
+            let Some(peer) = fastest else {
+                continue;
+            };
+            if !self.budget_allows(self.pieces[piece].size) {
+                break;
+            }
+            tracing::debug!(
+                peer = %self.peers[peer].addr,
+                hash = %self.pieces[piece].hash,
+                "duplicating the piece of a slow state snapshot peer",
+            );
+            self.start_download(peer, piece);
+        }
+    }
+
+    /// Returns the median rate of the peers in use that have answered.
+    fn median_rate(&self) -> Option<u64> {
+        let mut rates: Vec<u64> = self
+            .peers
+            .iter()
+            .filter(|peer| !peer.excluded)
+            .filter_map(|peer| peer.rate.map(Rate::bytes_per_sec))
+            .collect();
+        rates.sort_unstable();
+        let middle = rates.len() / 2;
+        match rates.len() {
+            0 => None,
+            len if len % 2 == 1 => Some(rates[middle]),
+            _ => {
+                let sum = u128::from(rates[middle - 1]) + u128::from(rates[middle]);
+                Some(u64::try_from(sum / 2).unwrap_or(u64::MAX))
             }
         }
     }
