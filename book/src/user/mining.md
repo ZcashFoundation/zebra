@@ -15,6 +15,7 @@ Contents:
   - [Extra coinbase data](#extra-coinbase-data)
   - [Miner memo](#miner-memo)
   - [RPC section](#rpc-section)
+  - [Compact block relay](#compact-block-relay)
   - [ZMQ block notifications](#zmq-block-notifications)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
@@ -145,6 +146,29 @@ successful commit notification. The default notification channel holds at most 1
 A full or closed channel produces an operational error before committing a mined block, without
 blocking ordinary state writes. Notification insertion does not guarantee delivery to peers.
 Restrict RPC access to trusted miners.
+
+### Compact block relay
+
+Compact block relay is enabled by default. Keep it enabled on every mining node in
+your fleet to reduce propagation delay between participating nodes:
+
+```toml
+[network]
+compact_block_relay = true
+```
+
+Set `compact_block_relay = false` to disable it. It only helps between nodes that
+both keep it enabled.
+After NU5, a block extending the best tip can be announced once its proof of work
+and transaction commitments have been checked, before full validation. Selected
+peers receive a compact block when it is smaller than the full block. The receiver
+rebuilds it from its mempool, requests missing transactions once, and falls back to
+the full block if reconstruction fails or times out. It still validates the block
+fully. Other peers retain ordinary full-block relay.
+
+End-to-end Mainnet propagation benefits have not been measured. Negotiation uses
+service bit 16 (`NODE_COMPACT_BLOCKS`), assigned by the
+[draft Compact Block Relay ZIP](https://github.com/zcash/zips/pull/1429).
 
 ### ZMQ block notifications
 

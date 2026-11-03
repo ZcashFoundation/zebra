@@ -78,8 +78,8 @@ internal_miner = false
 
 [network]
 cache_dir = true
+compact_block_relay = true
 crawl_new_peer_interval = "1m 1s"
-experimental_early_block_relay = false
 initial_mainnet_peers = [
     "dnsseed.str4d.xyz:8233",
     "dnsseed.z.cash:8233",

@@ -517,18 +517,21 @@ impl GenesisPeer {
 
             async move {
                 let response = match request {
-                    Request::BlocksByHash(hashes) => Response::Blocks(
-                        hashes
-                            .into_iter()
-                            .map(|hash| {
-                                if hash == genesis_hash {
-                                    InventoryResponse::Available((genesis.clone(), None))
-                                } else {
-                                    InventoryResponse::Missing(hash)
-                                }
-                            })
-                            .collect(),
-                    ),
+                    // Negotiated compact-relay connections request blocks as `EarlyBlocksByHash`.
+                    Request::BlocksByHash(hashes) | Request::EarlyBlocksByHash(hashes) => {
+                        Response::Blocks(
+                            hashes
+                                .into_iter()
+                                .map(|hash| {
+                                    if hash == genesis_hash {
+                                        InventoryResponse::Available((genesis.clone(), None))
+                                    } else {
+                                        InventoryResponse::Missing(hash)
+                                    }
+                                })
+                                .collect(),
+                        )
+                    }
                     Request::Peers => Response::Peers(Vec::new()),
                     _ => Response::Nil,
                 };

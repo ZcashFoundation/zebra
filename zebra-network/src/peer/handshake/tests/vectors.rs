@@ -236,19 +236,18 @@ async fn outbound_direct_accepts_serving_peer() {
 async fn early_block_relay_requires_bilateral_handshake() {
     let _init_guard = zebra_test::init();
     timeout(TEST_TIMEOUT, async {
-        for local_setting in [
-            "",
-            "experimental_early_block_relay = false",
-            "experimental_early_block_relay = true",
+        for (local_setting, local_enabled) in [
+            ("", true),
+            ("compact_block_relay = false", false),
+            ("compact_block_relay = true", true),
         ] {
             for remote_enabled in [false, true] {
                 for isolated in [false, true] {
                     let config: Config = toml::from_str(local_setting).unwrap();
-                    let local_enabled = config.experimental_early_block_relay;
                     // Exercise the serialized operator configuration, not just a Rust field.
                     let config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
                     let remote_config = Config {
-                        experimental_early_block_relay: remote_enabled,
+                        compact_block_relay: remote_enabled,
                         ..Config::default()
                     };
                     let (local, remote) = tokio::io::duplex(65536);
@@ -286,7 +285,7 @@ async fn early_block_relay_requires_bilateral_handshake() {
                         ),
                     )
                     .expect("both peers support this network version");
-                    let bit = PeerServices::NODE_EARLY_BLOCK_RELAY;
+                    let bit = PeerServices::NODE_COMPACT_BLOCKS;
                     assert_eq!(local_info.remote.services.contains(bit), remote_enabled);
                     assert_eq!(
                         remote_info.remote.services.contains(bit),
@@ -309,18 +308,18 @@ async fn local_version_advertises_configured_services() {
     let _init_guard = zebra_test::init();
     timeout(TEST_TIMEOUT, async {
         for archive in [false, true] {
-            for experimental_early_block_relay in [false, true] {
+            for compact_block_relay in [false, true] {
                 let mut config = Config {
                     listen_addr: "127.0.0.1:8233".parse().unwrap(),
-                    experimental_early_block_relay,
+                    compact_block_relay,
                     ..Config::default()
                 };
                 if !archive {
                     config.local_services.remove(PeerServices::NODE_NETWORK);
                 }
                 let mut expected = config.local_services;
-                if experimental_early_block_relay {
-                    expected.insert(PeerServices::NODE_EARLY_BLOCK_RELAY);
+                if compact_block_relay {
+                    expected.insert(PeerServices::NODE_COMPACT_BLOCKS);
                 }
                 let listen_addr = config.listen_addr;
                 let codec = Codec::builder().for_network(&config.network).finish();
@@ -360,7 +359,7 @@ async fn local_version_advertises_configured_services() {
                 let client = client.expect("the remote peer advertises archive service");
                 assert_eq!(
                     client.connection_info.early_block_relay,
-                    experimental_early_block_relay
+                    compact_block_relay
                 );
             }
         }
@@ -376,8 +375,8 @@ async fn alternate_listener_cache_preserves_advertised_services() {
     timeout(TEST_TIMEOUT, async {
         for services in [
             PeerServices::empty(),
-            PeerServices::NODE_EARLY_BLOCK_RELAY,
-            PeerServices::NODE_NETWORK | PeerServices::NODE_EARLY_BLOCK_RELAY,
+            PeerServices::NODE_COMPACT_BLOCKS,
+            PeerServices::NODE_NETWORK | PeerServices::NODE_COMPACT_BLOCKS,
         ] {
             let network = Network::Mainnet;
             let handshake = Handshake::builder()

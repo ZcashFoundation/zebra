@@ -27,18 +27,18 @@ async fn local_address_advertises_configured_services() {
     let _init_guard = zebra_test::init();
 
     for archive in [false, true] {
-        for experimental_early_block_relay in [false, true] {
+        for compact_block_relay in [false, true] {
             let mut config = Config {
                 listen_addr: "127.0.0.1:8233".parse().unwrap(),
-                experimental_early_block_relay,
+                compact_block_relay,
                 ..Config::default()
             };
             if !archive {
                 config.local_services.remove(PeerServices::NODE_NETWORK);
             }
             let mut expected = config.local_services;
-            if experimental_early_block_relay {
-                expected.insert(PeerServices::NODE_EARLY_BLOCK_RELAY);
+            if compact_block_relay {
+                expected.insert(PeerServices::NODE_COMPACT_BLOCKS);
             }
 
             let (book, _bans, _changes, _service, _metrics, updater) =

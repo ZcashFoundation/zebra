@@ -109,7 +109,7 @@ fn pruned_network_services_preserve_independent_capabilities() {
     use zebra_state::HistoryCapabilities;
 
     let mut config = crate::config::ZebradConfig::default();
-    config.network.local_services |= PeerServices::NODE_EARLY_BLOCK_RELAY;
+    config.network.local_services |= PeerServices::NODE_COMPACT_BLOCKS;
     let archive_services = config.network.local_services;
     assert_eq!(
         super::StartCmd::network_services(&config, HistoryCapabilities::default()).unwrap(),

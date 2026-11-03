@@ -112,18 +112,19 @@ pub struct Config {
     /// Runtime service capabilities advertised to peers.
     ///
     /// Defaults to archive service. At startup, zebrad sets this from the node's storage mode.
-    /// Enabled experimental services are added separately.
+    /// Enabled optional services are added separately.
     /// This field is not serialized or read from configuration files.
     #[serde(skip)]
     pub local_services: PeerServices,
 
-    /// Enable experimental next-tip early block relay with peers that also opt in.
+    /// Enable compact blocks and early relay with peers that also support them.
     ///
-    /// Disabled by default. Negotiated peers can serve authenticated blocks before full
+    /// Enabled by default. Negotiated peers can serve authenticated blocks before full
     /// transaction validation; callers must still fully verify every block.
-    /// Ordinary committed relay is unchanged.
-    /// The temporary service bit is experimental; a production allocation is pending.
-    pub experimental_early_block_relay: bool,
+    /// Ordinary committed relay is unchanged. See the [draft Compact Block Relay ZIP].
+    ///
+    /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+    pub compact_block_relay: bool,
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
@@ -236,10 +237,7 @@ impl Config {
     /// Returns the service mask for version messages and local address advertisements.
     pub(crate) fn advertised_services(&self) -> PeerServices {
         let mut services = self.local_services;
-        services.set(
-            PeerServices::NODE_EARLY_BLOCK_RELAY,
-            self.experimental_early_block_relay,
-        );
+        services.set(PeerServices::NODE_COMPACT_BLOCKS, self.compact_block_relay);
         services
     }
 
@@ -601,7 +599,7 @@ impl Default for Config {
             external_addr: None,
             network: Network::Mainnet,
             local_services: PeerServices::NODE_NETWORK,
-            experimental_early_block_relay: false,
+            compact_block_relay: true,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             cache_dir: CacheDir::default(),
@@ -687,7 +685,7 @@ struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
     network: DNetwork,
-    experimental_early_block_relay: bool,
+    compact_block_relay: bool,
 
     /// Legacy testnet parameters, kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -709,7 +707,7 @@ impl Default for DConfig {
             listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
-            experimental_early_block_relay: config.experimental_early_block_relay,
+            compact_block_relay: config.compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
@@ -772,7 +770,7 @@ impl From<Config> for DConfig {
             external_addr,
             network,
             local_services: _,
-            experimental_early_block_relay,
+            compact_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -806,7 +804,7 @@ impl From<Config> for DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
             network: dnetwork,
-            experimental_early_block_relay,
+            compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -827,7 +825,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             external_addr,
             network: dnetwork,
-            experimental_early_block_relay,
+            compact_block_relay,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -911,7 +909,7 @@ impl<'de> Deserialize<'de> for Config {
             external_addr: external_socket_addr,
             network,
             local_services: PeerServices::NODE_NETWORK,
-            experimental_early_block_relay,
+            compact_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,

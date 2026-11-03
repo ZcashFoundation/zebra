@@ -31,6 +31,23 @@ fn local_services_are_runtime_only() {
 }
 
 #[test]
+fn compact_block_relay_configuration() {
+    assert!(Config::default().compact_block_relay);
+    let omitted: Config = toml::from_str("").unwrap();
+    assert!(omitted.compact_block_relay);
+    for enabled in [false, true] {
+        let config: Config = toml::from_str(&format!("compact_block_relay = {enabled}")).unwrap();
+        assert_eq!(config.compact_block_relay, enabled);
+        let serialized = toml::to_string(&config).unwrap();
+        let fields: toml::Value = toml::from_str(&serialized).unwrap();
+        assert_eq!(fields["compact_block_relay"].as_bool(), Some(enabled));
+        let restored: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.compact_block_relay, enabled);
+    }
+    assert!(toml::from_str::<Config>("experimental_early_block_relay = true").is_err());
+}
+
+#[test]
 fn parse_config_listen_addr() {
     let _init_guard = zebra_test::init();
 

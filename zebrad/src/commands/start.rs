@@ -408,7 +408,7 @@ impl StartCmd {
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
-        let early_blocks = if config.network.experimental_early_block_relay {
+        let early_blocks = if config.network.compact_block_relay {
             match read_only_state_service
                 .clone()
                 .oneshot(zebra_state::ReadRequest::EarlyRelayCache)
