@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Correct stale documentation for `Rpc::get_block_template`, `Rpc::get_block_subsidy`, `Rpc::generate`, `Rpc::generate_to_address`, `config::mining::Config::internal_miner`, and `config::rpc::Config::indexer_listen_addr` so it describes current behavior.
+time: 2026-10-30T22:49:12.818862964Z

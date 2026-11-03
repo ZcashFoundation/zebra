@@ -211,7 +211,6 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     let buffered_mempool = Buffer::new(BoxService::new(mempool_service), 10);
     let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
-        zebra_network::types::PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -673,12 +672,12 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
+        .respond(zs::ReadResponse::BlockHeader {
             header: block_1.header.clone(),
             hash: block_1.hash(),
             height: Height(1),
             next_block_hash: Some(hash),
-        })));
+        });
 
     let error = downloads
         .next()
@@ -748,12 +747,12 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
+        .respond(zs::ReadResponse::BlockHeader {
             header: genesis.header.clone(),
             hash: genesis.hash(),
             height: Height(0),
             next_block_hash: Some(hash),
-        })));
+        });
 
     let error = downloads
         .next()
@@ -809,7 +808,7 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader(None));
+        .respond(Err(zn::BoxError::from("block not found in any chain")));
 
     let error = downloads
         .next()

@@ -1,8 +1,0 @@
-project: zebrad
-kind: Changed
-body: >-
-  Nodes with pruned block history no longer advertise archive service, return `notfound` for
-  unavailable blocks, and stop block inventory at missing history while continuing to serve headers.
-  Alternate listener addresses learned during handshakes retain their advertised capabilities,
-  rather than being relabeled as archive peers. The zcashd sidecar mode requires an archive node.
-time: 2026-10-25T00:55:27.185483328+02:00

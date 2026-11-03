@@ -27,9 +27,6 @@ use crate::indexer::{
     NonFinalizedStateChangeRequest,
 };
 
-#[cfg(test)]
-mod tests;
-
 /// How long to wait between calls to `subscribe_to_non_finalized_state_change` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_secs(5);
 
@@ -98,7 +95,6 @@ async fn update_finalized_chain_tip(
     mut started_sync_receiver: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut chain_tip_change_stream = None;
-    let mut pending_tip_update = false;
 
     loop {
         // Stop as soon as `sync()` has received its first parseable non-finalized block. From then
@@ -142,33 +138,29 @@ async fn update_finalized_chain_tip(
         let message = tokio::select! {
             biased;
             _ = started_sync_receiver.changed() => return,
-            _ = tokio::time::sleep(POLL_DELAY), if pending_tip_update => None,
-            message = tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()),
-                if !pending_tip_update => Some(message),
+            message = tokio::time::timeout(STREAM_MESSAGE_TIMEOUT, chain_tip_change.message()) => message,
         };
 
         match message {
-            None | Some(Ok(Ok(Some(_)))) => {}
-            Some(Ok(Ok(None))) => {
+            Ok(Ok(Some(_block_hash_and_height))) => {}
+            Ok(Ok(None)) => {
                 tracing::warn!("chain_tip_change stream ended unexpectedly");
                 chain_tip_change_stream = None;
                 tokio::time::sleep(STREAM_RESTART_DELAY).await;
                 continue;
             }
-            Some(Ok(Err(err))) => {
+            Ok(Err(err)) => {
                 tracing::warn!(?err, "error receiving chain tip change");
                 chain_tip_change_stream = None;
                 tokio::time::sleep(STREAM_RESTART_DELAY).await;
                 continue;
             }
-            Some(Err(_)) => {
+            Err(_) => {
                 tracing::debug!("chain tip change stream timed out, re-subscribing");
                 chain_tip_change_stream = None;
                 continue;
             }
         }
-        // Keep the consumed notification until a complete secondary tip can be published.
-        pending_tip_update = true;
 
         // Don't advance the secondary or publish once `sync()` has taken over (it may have done so
         // while we waited above), so we never catch up concurrently with `sync()`'s commits.
@@ -193,10 +185,7 @@ async fn update_finalized_chain_tip(
             continue;
         }
 
-        if let Some(tip_block) = finalized_chain_tip_block(&db)
-            .await
-            .expect("the finalized tip must have a complete stored body")
-        {
+        if let Some(tip_block) = finalized_chain_tip_block(&db).await {
             // Re-check immediately before publishing, after the awaits above: `sync()` can take over
             // while we wait on `spawn_try_catch_up_with_primary` or `finalized_chain_tip_block`, so
             // checking any earlier would leave a window where we still publish the stale tip.
@@ -211,29 +200,19 @@ async fn update_finalized_chain_tip(
             }
 
             finalized_chain_tip_sender.set_finalized_tip(tip_block);
-            pending_tip_update = false;
-        }
-        #[cfg(test)]
-        if pending_tip_update {
-            let _ = tests::INCOMPLETE_TIP_READ.try_with(|notify| notify.notify_one());
         }
     }
 }
 
 /// Reads the finalized tip block from the secondary db instance and converts it to a
 /// [`ChainTipBlock`].
-async fn finalized_chain_tip_block(
-    db: &ZebraDb,
-) -> Result<Option<ChainTipBlock>, zebra_state::BlockReadError> {
+async fn finalized_chain_tip_block(db: &ZebraDb) -> Option<ChainTipBlock> {
     let db = db.clone();
     tokio::task::spawn_blocking(move || {
-        let Some((height, hash)) = db.tip() else {
-            return Ok(None);
-        };
-        Ok(db
-            .block(height.into())?
+        let (height, hash) = db.tip()?;
+        db.block(height.into())
             .map(|block| CheckpointVerifiedBlock::with_hash(block, hash))
-            .map(ChainTipBlock::from))
+            .map(ChainTipBlock::from)
     })
     .wait_for_panics()
     .await
@@ -308,10 +287,7 @@ impl TrustedChainSync {
         // Whether we've signalled `update_finalized_chain_tip` to stop, so we only send once.
         let mut signalled_started = false;
         self.try_catch_up_with_primary().await;
-        if let Some(finalized_tip_block) = finalized_chain_tip_block(&self.db)
-            .await
-            .expect("the finalized tip must have a complete stored body")
-        {
+        if let Some(finalized_tip_block) = finalized_chain_tip_block(&self.db).await {
             self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
         }
 

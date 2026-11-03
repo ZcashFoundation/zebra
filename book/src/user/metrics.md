@@ -1,126 +1,151 @@
-# Zebra Metrics
+# Zebra metrics
 
-Zebra has support for Prometheus, configured using the `prometheus` compile-time feature,
-and the [`MetricsSection`][metrics_section] runtime configuration.
+Zebra exposes counters, gauges, and timing distributions through a Prometheus
+HTTP exporter. Prometheus stores the samples; Grafana queries Prometheus to
+render dashboards. Metrics complement [health checks](health.md): a
+successful scrape does not establish that the node is ready to serve clients.
 
-The following steps can be used to send real time Zebra metrics data into a grafana
-front end that you can visualize:
+## Enable the exporter
 
-1. Get a Zebra binary with the `prometheus` feature. The [prebuilt release
-   binaries and Docker images](https://zebra.zfnd.org/user/install.html)
-   already include it, so no rebuild is needed. If you are building from
-   source with a custom feature set, enable it explicitly:
+Use a build with the [`prometheus` feature](install.md#cargo-features).
 
-   ```bash
-   cargo install --features prometheus --locked --git https://github.com/ZcashFoundation/zebra zebrad
-   ```
+If no configuration file exists, create one:
 
-2. Create a `zebrad.toml` file that we can edit:
+```sh
+zebrad generate -o zebrad.toml
+```
 
-   ```bash
-   zebrad generate -o zebrad.toml
-   ```
+In `zebrad.toml`, set [`[metrics] endpoint_addr`](config.md#metrics):
 
-3. Add `endpoint_addr` to the `metrics` section:
+```toml
+[metrics]
+endpoint_addr = "127.0.0.1:9999"
+```
 
-   ```toml
-   [metrics]
-   endpoint_addr = "127.0.0.1:9999"
-   ```
+Start Zebra with that configuration and retrieve the metrics:
 
-4. Run Zebra, and specify the path to the `zebrad.toml` file, for example:
+```sh
+zebrad -c zebrad.toml start
+```
 
-   ```bash
-   zebrad -c zebrad.toml start
-   ```
+From another terminal:
 
-5. Install and run Prometheus and Grafana via Docker.
+```sh
+curl --fail http://127.0.0.1:9999/metrics
+```
 
-   First, save a minimal Prometheus config that scrapes the Zebra metrics
-   endpoint configured above, for example as `prometheus.yaml`:
+The exporter provides no authentication or TLS configuration. Bind it to
+loopback when Prometheus runs on the same host. For remote scrapes, bind to a
+private interface and restrict access with a firewall or authenticated proxy.
+Failure to bind the configured address terminates startup.
 
-   ```yaml
-   global:
-     scrape_interval: 15s
+For Prometheus running on the same host, use:
 
-   scrape_configs:
-     - job_name: "zebra"
-       metrics_path: "/metrics"
-       static_configs:
-         - targets: ["localhost:9999"]
-   ```
+```yaml
+global:
+  scrape_interval: 15s
 
-   Then start both containers:
+scrape_configs:
+  - job_name: zebra
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:9999"]
+```
 
-   ```bash
-   # create a storage volume for grafana (once)
-   sudo docker volume create grafana-storage
-   # create a storage volume for prometheus (once)
-   sudo docker volume create prometheus-storage
+For container deployments, use an address reachable from Prometheus; the
+supplied Compose stack uses `zebra:9999`.
 
-   # run prometheus with the config created above
-   sudo docker run --detach --network host --volume prometheus-storage:/prometheus --volume /path/to/prometheus.yaml:/etc/prometheus/prometheus.yml prom/prometheus
+Configure Grafana's Prometheus data source with the Prometheus server URL,
+not Zebra's exporter URL. For a same-host deployment without containers, the
+usual Prometheus URL is `http://127.0.0.1:9090`. The Compose stack provisions
+its own data source automatically.
 
-   # run grafana
-   sudo docker run --detach --network host --env GF_SERVER_HTTP_PORT=3030 --env GF_SERVER_HTTP_ADDR=localhost --volume grafana-storage:/var/lib/grafana grafana/grafana
-   ```
+## Metric names and types
 
-   > **Note:** the config shipped at `docker/observability/prometheus/prometheus.yaml`
-   > is written for the pre-configured
-   > [observability stack](https://github.com/ZcashFoundation/zebra/blob/main/docker/observability/README.md)
-   > and scrapes Compose service names such as `zebra:9999`, so it won't work with the
-   > standalone host-networked container used here. If you'd rather skip this manual
-   > setup, that stack starts Zebra, Prometheus, Grafana, Jaeger, and AlertManager
-   > with a single command:
-   >
-   > ```bash
-   > docker compose -f docker/docker-compose.observability.yml up
-   > ```
+Zebra's source uses dot-separated names, such as
+`sync.estimated_distance_to_tip`. The exporter replaces dots with underscores,
+so Prometheus queries use `sync_estimated_distance_to_tip`. Counter names are
+not automatically given a `_total` suffix: use the exported name as written.
 
-   Now the grafana dashboard is available at [http://localhost:3030](http://localhost:3030) ; the default username and password is `admin`/`admin`.
-   Prometheus scrapes Zebra on `localhost:9999`, and provides the results on `localhost:9090`.
+Counters accumulate during a process run; use `rate()` or `increase()` for
+activity over time. Gauges represent a current or most recently measured
+value. A metric can be absent until its recording path executes; absence is
+not equivalent to zero.
 
-6. Configure Grafana with a Prometheus HTTP Data Source, using Zebra's `metrics.endpoint_addr`.
+Zebra exports timing distributions as Prometheus **summaries**, with a
+`quantile` label and `_sum` and `_count` series, not `_bucket` series:
 
-   In the grafana dashboard:
-   1. Create a new Prometheus Data Source `Prometheus-Zebra`
-   2. Enter the HTTP URL: `127.0.0.1:9090`
-   3. Save the configuration
+```promql
+rpc_request_duration_seconds{quantile="0.99"}
+```
 
-7. Now you can add the grafana dashboards from `zebra/docker/observability/grafana/dashboards/` (Create > Import > Upload JSON File), or create your own.
+Do not apply `histogram_quantile()` to these Zebra summaries or average their
+quantiles across nodes. For a mean duration over five minutes, divide the rate
+of `_sum` by the rate of `_count`. Metrics generated separately by Jaeger's
+span-metrics connector have their own types and naming.
 
-![image info](grafana.png)
+## Principal operator metrics
 
-[metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html
+The table uses source names; replace dots with underscores in Prometheus.
+Suggested alert conditions are operational choices, not Zebra defaults.
+Choose sustained thresholds that distinguish initial sync from steady-state
+operation and accommodate the network's block production intervals.
+
+| Metric | Exported type | Meaning and alert use |
+| --- | --- | --- |
+| `zcash.chain.verified.block.height` | Gauge | Best verified chain height, updated as blocks commit. Alert on sustained lack of change when blocks are expected. |
+| `sync.estimated_distance_to_tip` | Gauge | Estimated blocks behind the network tip, clamped to zero. Alert on sustained lag after initial sync; this is an estimate, not a peer-agreed height. |
+| `sync.estimated_network_tip_height` | Gauge | Estimated network tip height used to interpret the lag gauge. |
+| `zcash.net.peers` | Gauge, `network` label | Peer-set size, including ready and busy peers. Alert on zero peers or sustained low connectivity. |
+| `candidate_set.recently_live` | Gauge, `network` label | Address-book peers that have responded recently. Use with the peer-set size to diagnose connectivity. |
+| `zcash.net.connection.outcomes.total` | Counter | TCP connection and handshake outcomes by `network`, `direction`, `address_family`, `stage`, and `outcome`. Alert on sustained increases in failed outcomes relative to successes. |
+| `zebra.net.in.errors` | Counter, `error` label | Incoming message decoding errors. Investigate sustained increases by error category. |
+| `sync.verified.block.count` | Counter | Successfully verified blocks in the sync download pipeline. Use its rate to track sync throughput. |
+| `state.checkpoint.error.block.count` | Counter | Failed checkpoint-block commits. Investigate increases with the node logs. |
+| `rpc.requests.total` | Counter, `method` and `status` labels | Completed RPC requests, separated into `success` and `error`. |
+| `rpc.errors.total` | Counter, `method` and `error_code` labels | RPC errors; compare their rate with the request rate for the same method. |
+| `rpc.request.duration_seconds` | Summary, `method` label | RPC latency in seconds. Alert on sustained latency for methods whose response-time budget is known. |
+| `rpc.active_requests` | Gauge | RPC calls currently being processed. Track sustained concurrency alongside latency. |
+| `mempool.failed.verify.tasks.total` | Counter, `reason` label | Mempool download or verification task failures. Distinguish invalid transactions from state or download failures. |
+| `zcash.mempool.cost.bytes` | Gauge | Aggregate mempool eviction cost, in cost bytes rather than process memory bytes. Compare with `[mempool] tx_cost_limit`. |
+| `zebra.state.rocksdb.total_disk_size_bytes` | Gauge | Sum of RocksDB's `total-sst-files-size` properties across column families, in bytes. Track growth, but monitor filesystem free space separately. |
+| `zebra.state.rocksdb.batch_commit.duration_seconds` | Summary | RocksDB batch-write latency in seconds. Use sustained increases to diagnose storage bottlenecks. |
+
+Prometheus also generates `up{job="zebra"}` for scrape success. Alert on zero
+or missing scrape data separately from chain progress. This metric comes
+from Prometheus, not Zebra.
 
 ## Network metric aggregation
 
-Connection state, request, response, message, and byte metrics are aggregated across
-peers: they no longer have an `addr` label. `zebra.net.connection.state` counts live
-connections by `command`, decrementing the old state on transitions and disconnects.
-Request, response, and message counters retain their `command` labels.
+Network metrics omit per-peer labels to bound the number of time series.
+Update dashboards, recording rules, and joins that depend on peer identities:
 
-Handshake counters (`zcash.net.peers.connected`, `zcash.net.peers.obsolete`, and
-`zcash.net.peers.missing_services`) no longer have `remote_ip` or `user_agent` labels.
-The `zcash.net.peers.version.connected` and `zcash.net.peers.version.obsolete` gauges
-report the remote protocol version of the most recent corresponding handshake,
-without a `remote_ip` label. `zebra.net.in.errors` also omits `addr`.
+- Connection-state, request, response, message, and byte metrics have no
+  `addr` label. The `zebra.net.connection.state` gauge counts live connections
+  by `command`; transitions and disconnects decrement the old state. Request,
+  response, and message counters retain `command` labels.
+- The counters `zcash.net.peers.connected`, `zcash.net.peers.obsolete`, and
+  `zcash.net.peers.missing_services` have no `remote_ip` or `user_agent` labels.
+  They count handshake activity, not currently connected peers.
+- The gauges `zcash.net.peers.version.connected` and
+  `zcash.net.peers.version.obsolete` contain the remote protocol version from
+  the most recent corresponding handshake, without `remote_ip` labels.
+  They are not peer counts or a distribution of connected versions.
+- The `zebra.net.in.errors` counter has no `addr` label.
 
-Update custom dashboards to remove selectors and joins using these removed labels.
-The supplied dashboards use aggregate totals and the bounded `implementation` label
-on `zcash.net.peer.version.outcomes.total` for successful handshake software breakdowns.
-These are cumulative handshake counts, not counts of currently connected peers.
-Peer addresses and full user agents remain available in logs and peer metadata.
+The counter `zcash.net.peer.version.outcomes.total` provides a software
+breakdown through the bounded `implementation` values `zebra`, `zakura`,
+`legacy_zcashd`, and `other`. Select `outcome="success"` for successful
+handshakes. These remain cumulative handshake counts, not current peer counts.
 
-Metric labels use bounded values:
+Other bounded labels include:
 
-- `mempool.failed.verify.tasks.total` `reason`: `in_state`, `state_error`,
-  `download_failed`, `cancelled`, `invalid`, or `timeout`.
-- `zebra.net.in.errors` `error`: `io`, `parse`, `utf8_error`,
-  `try_from_slice_error`, `try_from_int_error`, `from_hex_error`, `amount`,
-  `bad_transaction_balance`, `script`, `opcode`, or `num`.
-- Handshake `remote_version` and `negotiated_version`: known protocol versions or
-  `other`.
+| Metric or label | Values |
+| --- | --- |
+| `mempool.failed.verify.tasks.total`, `reason` | `in_state`, `state_error`, `download_failed`, `cancelled`, `invalid`, `timeout` |
+| `zebra.net.in.errors`, `error` | `io`, `parse`, `utf8_error`, `try_from_slice_error`, `try_from_int_error`, `from_hex_error`, `amount`, `bad_transaction_balance`, `script`, `opcode`, `num` |
+| Handshake `remote_version` and `negotiated_version` | Protocol versions defined by Zebra, or `other`; arbitrary received numbers do not create new labels. |
+| RPC `method` | Registered RPC method names, or `unknown` for unregistered names. |
 
 ## Mining metrics
 
@@ -160,3 +185,67 @@ No peer count is exported because the broadcast response does not carry one.
 Watch increases in rejected submissions and failed announcements alongside rising announcement
 durations. A successful local write is not proof against stale blocks, and a stalled attempt has no
 completion sample yet. These metrics do not measure network-wide propagation or stale-block rates.
+
+## Observability stack
+
+The [Compose stack][compose-source] builds Zebra and starts Prometheus,
+Grafana, Jaeger, and Alertmanager using configuration in
+[`docker/observability/`][stack-source]. It persists Zebra's state, Prometheus,
+Grafana, and Alertmanager in volumes.
+
+The supplied stack is a development deployment, not a hardened public
+service. Zebra's RPC and metrics ports stay on the Compose network, and RPC
+requires cookie authentication. The remaining port mappings bind on all host
+interfaces; restrict published management ports to loopback or a private
+network before starting it. Prometheus's admin and lifecycle APIs are
+disabled.
+
+Export `GF_SECURITY_ADMIN_PASSWORD` with a strong, unique password; Compose
+rejects an unset or empty value. Run from the repository root:
+
+```sh
+docker compose -f docker/docker-compose.observability.yml up -d
+docker compose -f docker/docker-compose.observability.yml logs -f zebra
+```
+
+| Service | Host URL |
+| --- | --- |
+| Grafana | <http://localhost:3000> |
+| Prometheus | <http://localhost:9094> |
+| Jaeger | <http://localhost:16686> |
+| Alertmanager | <http://localhost:9093> |
+
+Log in to Grafana as `admin` with the password supplied through
+`GF_SECURITY_ADMIN_PASSWORD`. It initializes new Grafana volumes only; change
+existing account passwords in Grafana. The stack provisions the Prometheus
+and Jaeger data sources and the dashboards in
+`docker/observability/grafana/dashboards/`. The home dashboard is
+`zebra_overview.json`; other dashboards include `peers.json`,
+`network_health.json`, `syncer.json`, `mempool.json`, `rocksdb.json`,
+`rpc_metrics.json`, `rpc_tracing.json`, and `value_pools.json`. For a separate
+Grafana deployment, import the JSON files and select its Prometheus data
+source.
+
+The file `docker/observability/prometheus/prometheus.yaml` scrapes
+`zebra:9999` and Jaeger's span metrics at `jaeger:8889`, every 15 seconds.
+Zebra exports traces to `http://jaeger:4318` with 100% sampling in this stack.
+Reduce `[tracing] opentelemetry_sample_percent` through the Compose environment
+when lower trace volume is required; see [OpenTelemetry export](tracing.md#opentelemetry-export).
+
+Review `docker/observability/prometheus/rules/zebra_alerts.yml` before relying
+on its alerts. Its latency rules use exported summary quantiles: RPC p99 above
+two seconds and successful-handshake p95 above two seconds, each sustained for
+five minutes. Zebra abandons handshakes after three seconds, so slower ones
+never reach the handshake series. The RPC latency panels show per-method
+quantiles, not a combined percentile across methods or nodes.
+The receivers in `docker/observability/alertmanager/alertmanager.yml` have no
+notification destinations; configure them before expecting notifications.
+
+Stop the stack without deleting its volumes:
+
+```sh
+docker compose -f docker/docker-compose.observability.yml down
+```
+
+[compose-source]: https://github.com/ZcashFoundation/zebra/blob/main/docker/docker-compose.observability.yml
+[stack-source]: https://github.com/ZcashFoundation/zebra/tree/main/docker/observability

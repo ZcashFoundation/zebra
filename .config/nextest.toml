@@ -22,6 +22,9 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^
 [profile.ci]
 fail-fast = false
 failure-output = "immediate"
+# Many of the slowest tests wait on timers or live peers rather than the CPU, so run 8 tests at a
+# time on the 4-CPU runners.
+test-threads = 8
 slow-timeout = { period = "5m", terminate-after = 4 }
 default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
@@ -84,15 +87,6 @@ serial-zcashd-compat = { max-threads = 1 }
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
 retries = 1
 
-# Run alone because the known-port helper releases the socket before zebrad binds it.
-[[profile.default.overrides]]
-filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart)'
-threads-required = "num-test-threads"
-
-[[profile.ci.overrides]]
-filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart)'
-threads-required = "num-test-threads"
-
 # Force live Testnet peer-limit tests to run serially with each other, while
 # allowing them to run concurrently with live Mainnet tests.
 #
@@ -139,6 +133,11 @@ test-group = 'serial-live-mainnet'
 [[profile.ci.overrides]]
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
+
+# Start the slowest tests first, so they overlap the rest of the run instead of extending it.
+[[profile.ci.overrides]]
+filter = 'test(=integration::network::disconnects_from_misbehaving_peers) or test(=integration::network::synced_node_keeps_upstream_peer_connected) or test(=unit::config::persistent_mode_peer_cache) or test(=methods::types::get_block_template::tests::coinbase) or test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_(mainnet|testnet)$/)'
+priority = 100
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test

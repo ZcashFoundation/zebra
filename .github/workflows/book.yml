@@ -3,12 +3,25 @@ name: Book
 on:
   push:
     branches: [main]
+  # The site root documents the latest release. A published release appears at the
+  # root on the next push to `main`, or immediately through a manual run. A
+  # `release` trigger would expose this workflow's caches to cache poisoning.
+  workflow_dispatch:
+  # Publishes each `next` book build from `book-next.yml` at `/next`. Runs after
+  # a failed build too: it may have replaced a queued deploy from `main`.
+  # zizmor: ignore[dangerous-triggers] -- runs `main`'s copy of this file and no code
+  # from `next`; it only publishes the rendered HTML from that run's artifact
+  workflow_run:
+    workflows: ["Book (next)"]
+    types: [completed]
+    branches: [next]
 
-# GitHub Pages accepts one deployment at a time. Runs queue in push order, so an
-# older build never publishes over a newer one, and a newer push replaces any
-# run still waiting. In-progress runs are not cancelled midway through a deploy.
+# GitHub Pages accepts one deployment at a time, and every run publishes the
+# whole site. One concurrency group for all triggers keeps deployments from
+# overlapping; a newer run replaces any run still waiting, and an in-progress
+# run is not cancelled midway through a deploy.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 permissions:
@@ -37,14 +50,17 @@ jobs:
     needs: changes
     if: needs.changes.outputs.book == 'true'
     permissions:
+      actions: read
       contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
+      # `main` is always published under /main/, even from a manual run on another branch.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
+          ref: main
           persist-credentials: false
 
       - name: Setup mdBook
@@ -52,7 +68,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mdbook-version: ~0.5
-          use-linkcheck: true
           use-mermaid: true
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
@@ -64,9 +79,34 @@ jobs:
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
 
+      # Operators read the site root, so it documents the release they can install.
+      # Setting the BOOK_ROOT_REF repository variable publishes another ref there,
+      # for example `main` when a documentation fix should not wait for a release,
+      # or in a fork without releases. A failed release lookup fails the build,
+      # rather than publishing unreleased documentation at the root.
+      - name: Select the ref published at the site root
+        id: root
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROOT_REF: ${{ vars.BOOK_ROOT_REF }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ROOT_REF" ]; then
+            ROOT_REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          test -n "$ROOT_REF"
+          echo "ref=$ROOT_REF" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          ref: ${{ steps.root.outputs.ref }}
+          path: root-ref
+          persist-credentials: false
+
       - name: Build Zebra book
         run: |
-          mdbook build book --dest-dir "$(pwd)"/target/docs
+          mdbook build root-ref/book --dest-dir "$(pwd)"/target/docs
+          mdbook build book --dest-dir "$(pwd)"/target/docs/main
         env:
           # The -A and -W settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
@@ -107,6 +147,34 @@ jobs:
           mkdir -p target/docs/dev/bench
           git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
           git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
+
+      # `book-next.yml` builds the `next` book in a run on `next`, because its
+      # unreviewed preprocessors could otherwise write caches that `main` restores.
+      - name: Find the next branch book
+        id: next-book
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Only this repository's branches create push runs, so a fork's pull
+          # request can't stand in for `next`.
+          RUN_ID=$(gh api "repos/${REPO}/actions/workflows/book-next.yml/runs?branch=next&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+          if [[ -n "${RUN_ID}" ]] && gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?name=next-book" \
+              --jq '.artifacts[] | select(.expired | not) | .id' | grep -q .; then
+            echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::No unexpired next book build was found, so /next is not published."
+          fi
+
+      - name: Include the next branch book
+        if: steps.next-book.outputs.run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: next-book
+          path: target/docs/next
+          run-id: ${{ steps.next-book.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d #v6.0.0

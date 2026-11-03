@@ -1927,11 +1927,11 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
     )
     .expect("opening an ephemeral database should succeed");
 
-    let backup_dir_path = tempfile::Builder::new()
+    let backup_dir = tempfile::Builder::new()
         .prefix("zebra-non-finalized-state-backup-cache")
         .tempdir()
-        .expect("temporary directory is created successfully")
-        .keep();
+        .expect("temporary directory is created successfully");
+    let backup_dir_path = backup_dir.path().to_path_buf();
 
     let (mut non_finalized_state, non_finalized_state_sender, _receiver) =
         NonFinalizedState::new(&network)

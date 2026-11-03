@@ -1,22 +1,5 @@
 //! RPC error codes & their handling.
 use jsonrpsee_types::{ErrorCode, ErrorObject, ErrorObjectOwned};
-use zebra_node_services::BoxError;
-use zebra_state::BlockReadError;
-
-/// Distinguishes unavailable history from unknown objects and operational failures.
-pub(crate) fn map_body_read_error(
-    error: BoxError,
-    pruned_message: &'static str,
-) -> ErrorObjectOwned {
-    if matches!(
-        error.downcast_ref::<BlockReadError>(),
-        Some(BlockReadError::BlockBodyUnavailable { .. })
-    ) {
-        ErrorObject::owned(ErrorCode::InternalError.code(), pruned_message, None::<()>)
-    } else {
-        ErrorObject::owned(i32::from(LegacyCode::Misc), error.to_string(), None::<()>)
-    }
-}
 
 /// Bitcoin RPC error codes
 ///

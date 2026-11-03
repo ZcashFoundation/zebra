@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     env, fs,
     io::Write as _,
+    net::TcpListener,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
@@ -19,7 +20,7 @@ use crate::common::{
     check::{EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config,
-        random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
+        read_listen_addr_from_logs, rpc_port_config, testdir,
     },
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
     sync::TINY_CHECKPOINT_TIMEOUT,
@@ -742,8 +743,10 @@ fn non_blocking_logger() -> Result<()> {
         let result: Result<()> = async {
             // This test configures zebrad to drop log lines, so it can't learn an OS-assigned port
             // by reading the logs: the line reporting that port is dropped like any other line.
-            // [Note on port conflict](#Note on port conflict)
-            let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+            // TODO: release-before-spawn still races; a non-log address channel would remove it.
+            let port_reservation = TcpListener::bind("127.0.0.1:0")?;
+            let mut config =
+                rpc_port_config(port_reservation.local_addr()?.port(), false, &Mainnet)?;
             config.tracing.filter = Some("trace".to_string());
             config.tracing.buffer_limit = 100;
 
@@ -753,6 +756,7 @@ fn non_blocking_logger() -> Result<()> {
                 .expect("config was just created with a known RPC port");
 
             let dir = testdir()?.with_config(&mut config)?;
+            drop(port_reservation);
             let mut child = dir
                 .spawn_child(args!["start"])?
                 .with_timeout(TINY_CHECKPOINT_TIMEOUT)?;
@@ -951,6 +955,20 @@ fn config_env_override_defaults() {
         config.rpc.listen_addr.unwrap().to_string(),
         "127.0.0.1:8232"
     );
+}
+
+#[test]
+fn config_source_and_target_env_are_isolated() {
+    let env = EnvGuard::new();
+    env.set_var("ZEBRA_STATE__CACHE_DIR", "/source/cache");
+    env.set_var("ZEBRA_TARGET_STATE__CACHE_DIR", "/target/cache");
+
+    let source = ZebradConfig::load(None).expect("source namespace should load");
+    let target =
+        ZebradConfig::load_with_env(None, "ZEBRA_TARGET").expect("target namespace should load");
+
+    assert_eq!(source.state.cache_dir, PathBuf::from("/source/cache"));
+    assert_eq!(target.state.cache_dir, PathBuf::from("/target/cache"));
 }
 
 #[test]

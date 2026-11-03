@@ -16,10 +16,13 @@ use tracing::Span;
 use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
     service::finalized_state::restorable_db_versions,
-    state_database_format_version_in_code, BoxError, StateInitError,
+    state_database_format_version_in_code, BoxError,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
 /// are not written to logs by types that derive `Debug`.
@@ -62,7 +65,7 @@ pub struct Config {
     ///
     /// This cache stores permanent blockchain state that can be replicated from
     /// the network, including the best chain, blocks, the UTXO set, and other indexes.
-    /// Any state that can be rolled back is only stored in memory.
+    /// Non-finalized state is held in memory and, by default, backed up to disk for restart.
     ///
     /// The `zebra-state` cache does *not* include any private data, such as wallet data.
     ///
@@ -93,11 +96,12 @@ pub struct Config {
     /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
     /// underneath the `cache_dir` path, where `N` is the state format version.
     ///
-    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
-    /// and re-syncs from genesis.
+    /// Compatible state formats can be upgraded in place or reused from the preceding major
+    /// version. Without a reusable database, Zebra creates a new state directory and re-syncs from
+    /// genesis.
     ///
-    /// Old state versions are automatically deleted at startup. You can also manually delete old
-    /// state versions.
+    /// Old state versions are deleted at startup when [`Self::delete_old_database`] is enabled.
+    /// You can also manually delete old state versions.
     pub cache_dir: PathBuf,
 
     /// Whether to use an ephemeral database.
@@ -113,22 +117,6 @@ pub struct Config {
     ///
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
-
-    /// The number of recent finalized block bodies to retain, or `None` for archive operation.
-    ///
-    /// Defaults to `None`. The minimum is 10,000 on Mainnet and Testnet, or
-    /// [`MAX_BLOCK_REORG_HEIGHT`] + 1 on Regtest. Zero is invalid.
-    ///
-    /// Retention is measured from the durable finalized tip; non-finalized blocks and genesis
-    /// are always retained. Only historical transaction bodies are deleted, not validation state.
-    /// Increasing retention affects future pruning only and never restores deleted bodies.
-    ///
-    /// Pruning is irreversible. To disable it after deletion, restore an archive snapshot or
-    /// fully resync in a separate cache directory. Normal RocksDB compaction reclaims space
-    /// eventually; deletion does not guarantee an immediate reduction in disk usage.
-    ///
-    /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
-    pub prune_blocks_older_than: Option<u32>,
 
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
     ///
@@ -186,6 +174,14 @@ pub struct Config {
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch database password.
     pub elasticsearch_password: RedactedString,
+
+    #[cfg(feature = "elasticsearch")]
+    /// Skip TLS certificate validation when connecting to Elasticsearch.
+    ///
+    /// Defaults to `false`, so the server certificate is validated. Set to `true` only for a
+    /// trusted local cluster with a self-signed certificate: it exposes the connection, including
+    /// authentication credentials, to interception.
+    pub elasticsearch_skip_cert_validation: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -197,25 +193,6 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 }
 
 impl Config {
-    /// Rejects retention windows that cannot safely serve this network.
-    pub(crate) fn validate_pruning(&self, network: &Network) -> Result<(), StateInitError> {
-        let Some(configured) = self.prune_blocks_older_than else {
-            return Ok(());
-        };
-        let minimum = if network.is_regtest() {
-            MAX_BLOCK_REORG_HEIGHT + 1
-        } else {
-            10_000
-        };
-        if configured < minimum {
-            return Err(StateInitError::InvalidPruningRetention {
-                configured,
-                minimum,
-            });
-        }
-        Ok(())
-    }
-
     /// Returns the path for the database, based on the kind, major version and network.
     /// Each incompatible database format or network gets its own unique path.
     pub fn db_path(
@@ -274,6 +251,18 @@ impl Config {
             ..Config::default()
         }
     }
+
+    /// Returns how the Elasticsearch server certificate is validated.
+    #[cfg(feature = "elasticsearch")]
+    pub(crate) fn elasticsearch_cert_validation(
+        &self,
+    ) -> elasticsearch::cert::CertificateValidation {
+        if self.elasticsearch_skip_cert_validation {
+            elasticsearch::cert::CertificateValidation::None
+        } else {
+            elasticsearch::cert::CertificateValidation::Default
+        }
+    }
 }
 
 impl Default for Config {
@@ -281,7 +270,6 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
-            prune_blocks_older_than: None,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
@@ -293,6 +281,8 @@ impl Default for Config {
             elasticsearch_username: "elastic".to_string(),
             #[cfg(feature = "elasticsearch")]
             elasticsearch_password: RedactedString::default(),
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_skip_cert_validation: false,
         }
     }
 }
@@ -508,7 +498,7 @@ pub fn state_database_format_version_on_disk(
 /// returns `Ok(Some(major_version.0.0))`.
 /// (This happens even if the database directory was just newly created.)
 ///
-/// If there is no existing on-disk database, returns `Ok(None)`.
+/// If there is no existing on-disk database, or `config` is ephemeral, returns `Ok(None)`.
 ///
 /// This is the format of the data on disk, the version
 /// implemented by the running Zebra code can be different.
@@ -518,6 +508,11 @@ pub fn database_format_version_on_disk(
     major_version: u64,
     network: &Network,
 ) -> Result<Option<Version>, BoxError> {
+    // Each ephemeral database is created in a new temporary directory when it is opened.
+    if config.ephemeral {
+        return Ok(None);
+    }
+
     let version_path = config.version_file_path(&db_kind, major_version, network);
     let db_path = config.db_path(db_kind, major_version, network);
 
@@ -574,7 +569,8 @@ pub(crate) fn database_format_version_at_path(
 // Hide this destructive method from the public API, except in tests.
 #[allow(unused_imports)]
 pub(crate) use hidden::{
-    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+    write_database_format_version_at_path, write_database_format_version_to_disk,
+    write_state_database_format_version_to_disk,
 };
 
 pub(crate) mod hidden {
@@ -626,37 +622,23 @@ pub(crate) mod hidden {
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
+        write_database_format_version_at_path(
+            config.version_file_path(db_kind, major_version_in_code, network),
+            changed_version,
+        )
+    }
+
+    /// Writes `changed_version` to the version file at `version_path`.
+    ///
+    /// See [`write_database_format_version_to_disk()`] for details.
+    pub(crate) fn write_database_format_version_at_path(
+        version_path: PathBuf,
+        changed_version: &Version,
+    ) -> Result<(), BoxError> {
         // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
         // crashes.
-        atomic_write(
-            config.version_file_path(db_kind, major_version_in_code, network),
-            changed_version.to_string().as_bytes(),
-        )??;
+        atomic_write(version_path, changed_version.to_string().as_bytes())??;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redacted_string_hides_contents_from_debug() {
-        let secret = RedactedString::from("hunter2");
-
-        assert_eq!(format!("{secret:?}"), "[REDACTED]");
-        assert_eq!(secret.as_str(), "hunter2");
-    }
-
-    #[cfg(feature = "elasticsearch")]
-    #[test]
-    fn config_debug_does_not_contain_elasticsearch_password() {
-        let config = Config {
-            elasticsearch_password: RedactedString::from("hunter2"),
-            ..Config::default()
-        };
-
-        assert!(!format!("{config:?}").contains("hunter2"));
     }
 }

@@ -1,9 +1,0 @@
-project: zebrad
-kind: breaking
-body: >-
-  Moved to state format v30 for opt-in block-body pruning. Compatible v29 archive databases are
-  reused by moving their network directory without a resync. Keep a separate archive backup for
-  rollback: older binaries cannot use the new directory, and disabling old-database cleanup does
-  not prevent the move. Pruning is irreversible; returning to archive operation requires an archive
-  snapshot or full resync.
-time: 2026-10-24T21:56:39.657595187+02:00

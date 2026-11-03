@@ -249,7 +249,6 @@ fn spent_outputs_resolves_value_height_and_generated() {
 
     // The single parent commits at height 1 (genesis is 0), and the spender at height 2.
     let spent = spent_outputs_for_block(None::<Arc<Chain>>, &state.db, Height(2).into())
-        .expect("stored block body is complete")
         .expect("block is in the best chain");
 
     let utxo = spent
@@ -270,53 +269,6 @@ fn spent_outputs_resolves_value_height_and_generated() {
         utxo.from_coinbase,
         "the spent output was created by a coinbase transaction",
     );
-}
-
-#[test]
-fn spent_outputs_rejects_pruned_and_corrupt_parent_bodies() {
-    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
-
-    let _init_guard = zebra_test::init();
-    for height in [Height(1), Height(2)] {
-        let (state, _, spender) = commit_chain(
-            vec![vec![small_output()], vec![small_output()]],
-            |parents| {
-                parents
-                    .iter()
-                    .map(|parent| OutPoint {
-                        hash: parent.transactions[0].hash(),
-                        index: 0,
-                    })
-                    .collect()
-            },
-        );
-        let query = spender.coinbase_height().unwrap().into();
-        assert_eq!(
-            spent_outputs_for_block(None::<Arc<Chain>>, &state.db, query)
-                .unwrap()
-                .unwrap()
-                .len(),
-            2
-        );
-        let mut batch = DiskWriteBatch::new();
-        batch.zs_delete_range(
-            &state.db.cf_handle("tx_by_loc").unwrap(),
-            TransactionLocation::min_for_height(height),
-            TransactionLocation::min_for_height(height.next().unwrap()),
-        );
-        state.db.write_batch(batch).unwrap();
-
-        assert!(state.db.block(query).unwrap().is_some());
-        let expected = if height == Height(1) {
-            BlockReadError::BlockBodyUnavailable { height }
-        } else {
-            BlockReadError::CorruptBlock { height }
-        };
-        assert_eq!(
-            spent_outputs_for_block(None::<Arc<Chain>>, &state.db, query).unwrap_err(),
-            expected
-        );
-    }
 }
 
 /// Every input spends a small output of a distinct large parent. The lookup must not keep all
@@ -358,9 +310,7 @@ fn spent_outputs_memory_does_not_hold_every_parent() {
         )
     });
 
-    let spent = spent
-        .expect("stored block body is complete")
-        .expect("block is in the best chain");
+    let spent = spent.expect("block is in the best chain");
     assert_eq!(spent.len(), PARENTS, "every spent output is resolved");
 
     // Holding every parent would peak around PARENTS * PADDING (20 MB).
@@ -390,9 +340,7 @@ fn spent_outputs_work_is_linear_for_a_shared_parent() {
     let (spent, heap) =
         measure(|| spent_outputs_for_block(None::<Arc<Chain>>, &state.db, Height(2).into()));
 
-    let spent = spent
-        .expect("stored block body is complete")
-        .expect("block is in the best chain");
+    let spent = spent.expect("block is in the best chain");
     assert_eq!(spent.len(), OUTPUTS, "every spent output is resolved");
 
     // Converting the parent's outputs once per input would allocate ~OUTPUTS times the parent.

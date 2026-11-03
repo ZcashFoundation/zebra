@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: With `ephemeral = true`, `zebrad` no longer leaves empty directories in the temporary directory each time it starts.
+time: 2026-10-24T20:43:52.702615707+02:00

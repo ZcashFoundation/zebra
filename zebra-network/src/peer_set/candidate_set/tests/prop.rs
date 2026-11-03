@@ -66,7 +66,7 @@ proptest! {
         });
 
         // Since the address book is empty, there won't be any available peers
-        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), crate::types::PeerServices::NODE_NETWORK, &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
+        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
 
         let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =
             AddressBookUpdater::spawn_with_address_book(address_book, MIN_CHANNEL_SIZE);
@@ -113,7 +113,7 @@ proptest! {
             unreachable!("Mock peer service is never used");
         });
 
-        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), crate::types::PeerServices::NODE_NETWORK, &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
+        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
         address_book.extend(peers);
 
         let (_address_book, _bans_receiver, _change_sender, address_book_service, _address_metrics, _updater_guard) =

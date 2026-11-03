@@ -7,8 +7,8 @@
 #   workflow_dispatch            -> manual readiness check or post-merge recovery
 #
 # Downstream triggers (independent workflows, not managed here):
-#   release:released  -> release-binaries.yml (Docker Hub)
-#   release:published -> zfnd-deploy-nodes-gcp.yml (GCP deployment)
+#   release:published -> release-binaries.yml (Docker Hub and binaries)
+#   release:released  -> zfnd-deploy-nodes-gcp.yml (GCP deployment)
 name: Release
 
 on:

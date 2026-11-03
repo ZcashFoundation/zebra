@@ -99,7 +99,7 @@ use crate::{
     queue::Queue,
     server::{
         self,
-        error::{map_body_read_error, MapError, OkOrError},
+        error::{MapError, OkOrError},
     },
 };
 
@@ -225,10 +225,6 @@ pub trait Rpc {
     ///
     /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockchainInfoResponse`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
-    ///
-    /// The `pruned` flag reflects actual missing historical bodies. When true, `pruneheight`
-    /// gives the start of the complete retained suffix; genesis remains available separately.
-    /// An archive omits `pruneheight`.
     #[method(name = "getblockchaininfo")]
     async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse>;
 
@@ -306,10 +302,6 @@ pub trait Rpc {
     ///
     /// Verbosity 3 resolves each spent output by reading its parent transaction, so it is more
     /// expensive than lower verbosities.
-    ///
-    /// Pruned bodies return code `-32603`, "Block not available (pruned data)", at verbosity
-    /// 0, 2, or 3. Verbosity 3 also fails if a required parent transaction was pruned.
-    /// Historical verbosity 1 remains available with complete transaction IDs.
     ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblock")]
@@ -393,9 +385,6 @@ pub trait Rpc {
     /// negative where -1 is the last known valid block". On the other hand,
     /// `lightwalletd` only uses positive heights, so Zebra does not support
     /// negative heights.
-    ///
-    /// Historical tree states remain available without transaction bodies, using retained
-    /// headers to resolve the block's identity, height, and time.
     #[method(name = "z_gettreestate")]
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse>;
 
@@ -436,10 +425,6 @@ pub trait Rpc {
     /// - `txid`: (string, required, example="mytxid") The transaction ID of the transaction to be returned.
     /// - `verbose`: (number, optional, default=0, example=1) If 0, return a string of hex-encoded data, otherwise return a JSON object.
     /// - `blockhash` (string, optional) The block in which to look for the transaction
-    ///
-    /// A known pruned transaction returns code `-32603`,
-    /// "Transaction not available (pruned data)", with or without `blockhash`.
-    /// Unknown transactions still return code `-5`; mempool and retained bodies remain available.
     #[method(name = "getrawtransaction")]
     async fn get_raw_transaction(
         &self,
@@ -568,8 +553,8 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Arguments to this RPC are currently ignored.
-    /// Long polling, block proposals, server lists, and work IDs are not supported.
+    /// Supports long polling and block proposals through the request parameters.
+    /// Server lists and work IDs are not supported.
     ///
     /// Miners can make arbitrary changes to blocks, as long as:
     /// - the data sent to `submitblock` is a valid Zcash block, and
@@ -739,7 +724,6 @@ pub trait Rpc {
     async fn get_standard_fee(&self) -> Result<GetStandardFeeResponse>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
-    /// Returns an error if `height` is less than the height of the first halving for the current network.
     /// Once NSM reissuance starts, the preceding block must exist: future reserves cannot be forecast.
     ///
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
@@ -825,7 +809,7 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Only works if the network of the running zebrad process is `Regtest`.
+    /// Only works on networks with proof of work disabled, including Regtest.
     ///
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
@@ -844,7 +828,7 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Only works if the network of the running zebrad process is `Regtest`.
+    /// Only works on networks with proof of work disabled, including Regtest.
     /// Unlike [`Self::generate`], the coinbase is paid to `address` instead of
     /// the configured `mining.miner_address`, which lets a test harness fund
     /// several wallets from one node.
@@ -886,10 +870,6 @@ pub trait Rpc {
     #[method(name = "rpc.discover")]
     fn openrpc(&self) -> openrpsee::openrpc::Response;
     /// Returns details about an unspent transaction output.
-    ///
-    /// The value, script, confirmations, and coinbase flag remain available without the creating
-    /// transaction body. The `version` field is `null` when that body has been pruned.
-    /// Unlike Zebra, zcashd persists the version in its coins database.
     ///
     /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
     /// method: post
@@ -1656,16 +1636,6 @@ where
             (size_on_disk, tip, value_balance, difficulty)
         };
 
-        let zebra_state::ReadResponse::HistoryCapabilities(history) = self
-            .read_state
-            .clone()
-            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
-            .await
-            .map_misc_error()?
-        else {
-            unreachable!("unmatched response to a HistoryCapabilities request");
-        };
-
         let now = Utc::now();
         let (estimated_height, verification_progress) = self
             .latest_chain_tip
@@ -1752,10 +1722,7 @@ where
             verification_progress,
             // TODO: store work in the finalized state for each height (#7109)
             chain_work: 0,
-            pruned: history.is_pruned(),
-            prune_height: history
-                .is_pruned()
-                .then_some(history.lowest_retained_height),
+            pruned: false,
             size_on_disk,
             // TODO: Investigate whether this needs to be implemented (it's sprout-only in zcashd)
             commitments: 0,
@@ -1876,7 +1843,7 @@ where
                 .clone()
                 .oneshot(request)
                 .await
-                .map_err(|error| map_body_read_error(error, "Block not available (pruned data)"))?;
+                .map_misc_error()?;
 
             match response {
                 zebra_state::ReadResponse::Block(Some(block)) => {
@@ -1951,13 +1918,11 @@ where
                     .clone()
                     .oneshot(zebra_state::ReadRequest::SpentOutputs(hash_or_height))
                     .await
-                    .map_err(|error| {
-                        map_body_read_error(error, "Block not available (pruned data)")
-                    })?;
+                    .map_misc_error()?;
                 let zebra_state::ReadResponse::SpentOutputs(spent_outputs) = response else {
                     unreachable!("unmatched response to a SpentOutputs request");
                 };
-                spent_outputs.ok_or_misc_error("spent output history unavailable")?
+                spent_outputs.unwrap_or_default()
             } else {
                 HashMap::new()
             };
@@ -1987,9 +1952,7 @@ where
             }
 
             let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-            let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response
-                .map_err(|error| map_body_read_error(error, "Block not available (pruned data)"))?
-            {
+            let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response.map_misc_error()? {
                 zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => (
                     tx_ids
                         .ok_or_misc_error("block not found")?
@@ -2141,33 +2104,31 @@ where
                 // Reference for the legacy error code:
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
-        let not_found = || {
-            ErrorObject::owned(
-                // Preserve the hash/height distinction used by `getblock`.
-                i32::from(if hash_or_height.hash().is_some() {
-                    server::error::LegacyCode::InvalidAddressOrKey
-                } else {
-                    server::error::LegacyCode::InvalidParameter
-                }),
-                "block height not in best chain",
-                None::<()>,
-            )
-        };
-        let zebra_state::ReadResponse::BlockHeader(header) = self
-            .read_state
-            .clone()
-            .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
-            .await
-            .map_err(|_| not_found())?
-        else {
-            panic!("unexpected response to BlockHeader request")
-        };
-        let zebra_state::BlockHeader {
+        let zebra_state::ReadResponse::BlockHeader {
             header,
             hash,
             height,
             next_block_hash,
-        } = header.ok_or_else(not_found)?;
+        } = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
+            .await
+            .map_err(|_| "block height not in best chain")
+            .map_error(
+                // ## Compatibility with `zcashd`.
+                //
+                // Since this function is reused by getblock(), we return the errors
+                // expected by it (they differ whether a hash or a height was passed).
+                if hash_or_height.hash().is_some() {
+                    server::error::LegacyCode::InvalidAddressOrKey
+                } else {
+                    server::error::LegacyCode::InvalidParameter
+                },
+            )?
+        else {
+            panic!("unexpected response to BlockHeader request")
+        };
 
         let response = if !verbose {
             GetBlockHeaderResponse::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
@@ -2478,9 +2439,8 @@ where
             .clone()
             .oneshot(zebra_state::ReadRequest::AnyChainTransaction(txid))
             .await
-            .map_err(|error| {
-                map_body_read_error(error, "Transaction not available (pruned data)")
-            })? {
+            .map_misc_error()?
+        {
             zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
                 if let Some((caller_block_hash, in_best_chain)) = caller_block_context {
                     // Use the caller-provided block context to avoid TOCTOU races
@@ -2582,7 +2542,7 @@ where
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-        // Fetch the retained header before looking up trees.
+        // Fetch the block referenced by [`hash_or_height`] from the state.
         //
         // # Concurrency
         //
@@ -2590,26 +2550,33 @@ where
         // be based on the hash. The tree lookups check every chain, so a reorg that moves the
         // block onto a side chain after this lookup can't make its treestate disappear.
         //
-        let zebra_state::ReadResponse::BlockHeader(header) = read_state
+        // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
+        let block = match read_state
             .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::BlockHeader(hash_or_height)))
+            .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
             .await
             .map_misc_error()?
-        else {
-            unreachable!("unmatched response to a BlockHeader request");
+        {
+            zebra_state::ReadResponse::Block(Some(block)) => block,
+            zebra_state::ReadResponse::Block(None) => {
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                return Err("the requested block is not in the main chain")
+                    .map_error(server::error::LegacyCode::InvalidParameter);
+            }
+            _ => unreachable!("unmatched response to a block request"),
         };
-        let zebra_state::BlockHeader {
-            header,
-            hash,
-            height,
-            ..
-        } = header.ok_or_error(
-            server::error::LegacyCode::InvalidParameter,
-            "the requested block is not in the main chain",
-        )?;
 
-        let time = u32::try_from(header.time.timestamp())
-            .expect("timestamps of valid blocks always fit into u32");
+        let hash = hash_or_height
+            .hash_or_else(|_| Some(block.hash()))
+            .expect("block hash");
+
+        let height = hash_or_height
+            .height_or_else(|_| block.coinbase_height())
+            .expect("verified blocks have a coinbase height");
+
+        let time = u32::try_from(block.header.time.timestamp())
+            .expect("Timestamps of valid blocks always fit into u32.");
 
         let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
             match read_state
@@ -4086,7 +4053,7 @@ where
                             &output,
                             last_seen_hash.to_string(),
                             0,
-                            Some(tx_version),
+                            tx_version,
                             false,
                             self.network(),
                         ),
@@ -4100,27 +4067,64 @@ where
             };
         }
 
-        // Read spentness, the output, and its tip metadata together.
+        // Issue the Transaction query first and reuse the best-chain tip hash
+        // captured in that same chain snapshot, instead of doing a separate Tip
+        // query that re-samples the chain. The follow-up IsTransparentOutputSpent
+        // query may still observe a later tip, but the response's `bestblock`
+        // field is now anchored to the same view used to compute confirmations.
+        // See issue #10550.
         let rsp = self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::UnspentOutput(outpoint))
+            .oneshot(zebra_state::ReadRequest::Transaction(txid))
             .await
             .map_misc_error()?;
 
         match rsp {
-            zebra_state::ReadResponse::UnspentOutput(Some(output)) => Ok(GetTxOutResponse(Some(
-                types::transaction::OutputObject::from_output(
-                    &output.utxo.output,
-                    output.best_chain_tip_hash.to_string(),
-                    output.confirmations,
-                    output.transaction_version,
-                    output.utxo.from_coinbase,
-                    self.network(),
-                ),
-            ))),
-            zebra_state::ReadResponse::UnspentOutput(None) => Ok(GetTxOutResponse(None)),
-            _ => unreachable!("unmatched response to an `UnspentOutput` request"),
+            zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                let best_block_hash = tx.best_chain_tip_hash;
+                let outputs = tx.tx.outputs();
+                let index: usize = n.try_into().expect("u32 always fits in usize");
+                let output = match outputs.get(index) {
+                    Some(output) => output,
+                    // return null if the output is not found
+                    None => return Ok(GetTxOutResponse(None)),
+                };
+
+                // Prune state outputs that are spent
+                let is_spent = {
+                    let rsp = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
+                        .await
+                        .map_misc_error()?;
+
+                    match rsp {
+                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
+                        _ => unreachable!(
+                            "unmatched response to an `IsTransparentOutputSpent` request"
+                        ),
+                    }
+                };
+
+                if is_spent {
+                    return Ok(GetTxOutResponse(None));
+                }
+
+                Ok(GetTxOutResponse(Some(
+                    types::transaction::OutputObject::from_output(
+                        output,
+                        best_block_hash.to_string(),
+                        tx.confirmations,
+                        tx.tx.version(),
+                        tx.tx.is_coinbase(),
+                        self.network(),
+                    ),
+                )))
+            }
+            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
+            _ => unreachable!("unmatched response to a `Transaction` request"),
         }
     }
 }
@@ -4371,15 +4375,8 @@ pub struct GetBlockchainInfoResponse {
     #[serde(rename = "chainwork")]
     chain_work: u64,
 
-    /// Whether a historical body prefix is unavailable.
+    /// Whether this node is pruned, currently always false in Zebra.
     pruned: bool,
-
-    /// The start of the complete retained body suffix, absent for an archive.
-    ///
-    /// Genesis remains available even below this height.
-    #[serde(rename = "pruneheight", skip_serializing_if = "Option::is_none")]
-    #[getter(copy)]
-    prune_height: Option<Height>,
 
     /// The estimated size of the block and undo files on disk
     size_on_disk: u64,
@@ -4434,7 +4431,6 @@ impl Default for GetBlockchainInfoResponse {
             verification_progress: 0.0,
             chain_work: 0,
             pruned: false,
-            prune_height: None,
             size_on_disk: 0,
             commitments: 0,
         }
@@ -4460,7 +4456,6 @@ impl GetBlockchainInfoResponse {
         verification_progress: f64,
         chain_work: u64,
         pruned: bool,
-        prune_height: Option<Height>,
         size_on_disk: u64,
         commitments: u64,
     ) -> Self {
@@ -4478,7 +4473,6 @@ impl GetBlockchainInfoResponse {
             verification_progress,
             chain_work,
             pruned,
-            prune_height,
             size_on_disk,
             commitments,
         }

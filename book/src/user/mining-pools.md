@@ -71,7 +71,7 @@ tips can be skipped during rapid changes, and notifications are not a replayable
 
 Keep periodic polling enabled as a backstop for missed notifications or a restarted pool. Block
 notifications only signal tip changes, so retain the pool's periodic job refresh for transaction-only
-updates too. See the [s-nomp testnet guide](mining-testnet-s-nomp.md#important) for its compatibility and
+updates too. See the [s-nomp testnet guide](mining-testnet-s-nomp.md#compatibility-and-limitations) for its compatibility and
 payment limitations; this command does not make an unsupported pool version production-ready.
 
 ### ZMQ subscribers
@@ -183,11 +183,10 @@ the configured unshielding fee and permit the transparent staging recipient:
 +            minConfShield, fee, 'AllowRevealedRecipients'];
 ```
 
-1. Run an **archive** Zebra and an [externally managed sidecar](zcashd-compat.md#running-externally-managed).
+1. Run Zebra and an [externally managed sidecar](zcashd-compat.md#running-externally-managed).
    Pin the sidecar's only peer with `connect=<Zebra-P2P-address>` and `listen=0`; keep both RPC
    endpoints on loopback with separate credentials. Set `[zcashd_compat] enabled = true` and
-   `manage_zcashd = false` on Zebra. Do not set `state.prune_blocks_older_than`: startup rejects
-   sidecars with pruning enabled, even before deletion. The sidecar synchronizes over P2P and does
+   `manage_zcashd = false` on Zebra. The sidecar synchronizes over P2P and does
    not read Zebra's database, so the database-format mismatch does not affect it.
 2. Create two distinct wallet-controlled transparent addresses with `getnewaddress` and a Sapling
    address with `z_getnewaddress sapling`. Enable `allowdeprecated=getnewaddress`,
@@ -234,12 +233,6 @@ NU6.3 onward](zcashd-compat.md#wallet-shielded-pool-support-orchard--ironwood).
 [miningcore-payments]: https://github.com/oliverw/miningcore/blob/a553f62301f44c6df80891e408b6526d1dd98692/src/Miningcore/Blockchain/Equihash/EquihashPayoutHandler.cs
 [zallet-rpcs]: https://github.com/zcash/zallet/blob/987382f67e622915228686e9f956c6a9c9a7514c/book/src/zcashd/rpc_status.md
 [zallet-semantics]: https://zcash.github.io/zallet/zcashd/json_rpc.html#z_sendmany
-
-To reduce backend disk use, see [pruned mining nodes](pruning.md). Choose retention for the oldest
-block and transaction bodies used by payout and accounting queries, including outage recovery.
-The minimum 10,000-block window is about 8.7 days at 75-second spacing but only 2.9 days at
-25-second spacing. Use a separate archive when those queries need older history; a pruned
-backend cannot also serve a zcashd sidecar.
 
 ## Plan for restarts and replacement
 

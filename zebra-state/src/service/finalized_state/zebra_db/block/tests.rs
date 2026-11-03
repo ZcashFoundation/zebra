@@ -5,12 +5,6 @@
 mod snapshot;
 mod vectors;
 
-thread_local! {
-    /// Commits a block between a missing-header read and the height-membership check.
-    pub(super) static AFTER_MISSING_HEADER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 #[test]
 fn parallel_spent_utxo_reads_match_serial_with_same_block_spends() {
     use std::collections::HashMap;

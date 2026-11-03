@@ -22,10 +22,6 @@ impl DiskFormatUpgrade for FixTreeKeyTypeAndCacheGenesisRoots {
         "tree keys and caches upgrade"
     }
 
-    fn requires_full_history(&self) -> bool {
-        false
-    }
-
     #[allow(clippy::unwrap_in_result)]
     fn run(
         &self,

@@ -67,6 +67,53 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     HalvingIntervalAfterFundingStreams,
 
+    /// A funding stream group omits a field without a corresponding public Testnet default.
+    #[error("funding stream {field} is required when no positional default exists")]
+    #[non_exhaustive]
+    MissingFundingStreamDefault {
+        /// The omitted field.
+        field: &'static str,
+    },
+
+    /// A funding stream height range is reversed.
+    #[error("funding stream end height must be at or above start height")]
+    #[non_exhaustive]
+    InvalidFundingStreamHeightRange,
+
+    /// The effective funding stream shares exceed the subsidy.
+    #[error("sum of funding stream numerators must not exceed the denominator of 100")]
+    #[non_exhaustive]
+    InvalidFundingStreamNumerators,
+
+    /// A configured funding stream address cannot be parsed.
+    #[error("invalid funding stream address: {address}")]
+    #[non_exhaustive]
+    InvalidFundingStreamAddress {
+        /// The malformed address.
+        address: String,
+    },
+
+    /// A non-deferred funding stream address is not a Testnet address.
+    #[error("configured funding stream address must be for Testnet: {address}")]
+    #[non_exhaustive]
+    WrongFundingStreamAddressNetwork {
+        /// The address for the wrong network.
+        address: crate::transparent::Address,
+    },
+
+    /// A configured lockbox disbursement address cannot be parsed.
+    #[error("invalid lockbox disbursement address: {address}")]
+    #[non_exhaustive]
+    InvalidLockboxDisbursementAddress {
+        /// The malformed address.
+        address: String,
+    },
+
+    /// The configured lockbox disbursements exceed the monetary range.
+    #[error("lockbox disbursement total must not exceed MAX_MONEY")]
+    #[non_exhaustive]
+    InvalidLockboxDisbursementTotal,
+
     /// A funding stream recipient does not cover the configured address periods.
     #[error("funding stream recipient {receiver:?} requires {required} addresses, but only {provided} were provided")]
     #[non_exhaustive]

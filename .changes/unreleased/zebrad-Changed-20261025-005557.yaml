@@ -1,7 +1,0 @@
-project: zebrad
-kind: Changed
-body: >-
-  Report unavailable historical bodies explicitly in JSON-RPC and gRPC, preserve retained-index
-  queries, and expose actual pruning availability through `getblockchaininfo`.
-  Keep historical tree-state headers on the requested fork when cached state is stale.
-time: 2026-10-25T00:55:57.037495517+02:00

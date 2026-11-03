@@ -12,9 +12,7 @@ use zebra_chain::{
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
-use zebra_state::{
-    BlockReadError, HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse,
-};
+use zebra_state::{HashOrHeight, NonFinalizedBlocksListener, ReadRequest, ReadResponse};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     prelude::color_eyre::{eyre::eyre, Result},
@@ -40,58 +38,6 @@ async fn rpc_server_spawn() -> Result<()> {
     test_mempool_change(client.clone(), mempool_transaction_sender).await?;
     test_get_block(client.clone(), mock_read_service.clone()).await?;
     test_non_finalized_state_change(client.clone(), mock_read_service).await?;
-
-    Ok(())
-}
-
-/// Only typed pruning errors change the status of a failed block read.
-#[tokio::test]
-async fn get_block_distinguishes_pruned_history() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let (_server_task, client, mut read_state, _chain_tip_sender, _mempool_change) =
-        start_server_and_get_client().await?;
-    let height = Height(42);
-
-    for (response, expected_code) in [
-        (Ok(ReadResponse::Block(None)), tonic::Code::NotFound),
-        (
-            Err(BoxError::from(BlockReadError::BlockBodyUnavailable {
-                height,
-            })),
-            tonic::Code::FailedPrecondition,
-        ),
-        (
-            Err(BoxError::from(BlockReadError::CorruptBlock { height })),
-            tonic::Code::Unavailable,
-        ),
-        (
-            Err(BoxError::from(
-                "block not available at height 42 (pruned data)",
-            )),
-            tonic::Code::Unavailable,
-        ),
-    ] {
-        let mut client = client.clone();
-        let request_task = tokio::spawn(async move {
-            client
-                .get_block(tonic::Request::new(BlockRequest {
-                    hash_or_height: height.0.to_be_bytes().to_vec(),
-                }))
-                .await
-        });
-        read_state
-            .expect_request(ReadRequest::Block(height.into()))
-            .await
-            .respond(response);
-
-        let status = tokio::time::timeout(Duration::from_secs(3), request_task)
-            .await??
-            .expect_err("an unavailable block must not be served");
-        assert_eq!(status.code(), expected_code);
-        if expected_code == tonic::Code::FailedPrecondition {
-            assert!(status.message().contains("42"));
-        }
-    }
 
     Ok(())
 }

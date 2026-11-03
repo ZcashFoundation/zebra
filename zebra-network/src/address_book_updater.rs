@@ -315,7 +315,6 @@ impl AddressBookUpdater {
     ) {
         let address_book = AddressBook::new(
             local_listener,
-            config.advertised_services(),
             &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),

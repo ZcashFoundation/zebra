@@ -1,8 +1,9 @@
 //! Tests for parsing zebrad commands
 
+use abscissa_core::Configurable;
 use clap::Parser;
 
-use crate::commands::ZebradCmd;
+use crate::{commands::ZebradCmd, config::ZebradConfig};
 
 use super::EntryPoint;
 
@@ -46,6 +47,43 @@ fn args_with_subcommand_pass_through() {
     }
 }
 
+#[test]
+fn start_filters_override_config() {
+    let test_cases = [
+        (vec!["zebrad", "--filters", "warn"], "warn"),
+        (vec!["zebrad", "--filters", "warn", "start"], "warn"),
+        (
+            vec![
+                "zebrad",
+                "--filters",
+                "warn",
+                "start",
+                "info",
+                "zebra_network=debug",
+            ],
+            "info,zebra_network=debug",
+        ),
+    ];
+
+    for (args, expected_filter) in test_cases {
+        let processed_args = EntryPoint::process_cli_args(args.iter().map(Into::into).collect())
+            .expect("hardcoded args should process successfully");
+        let command = EntryPoint::try_parse_from(processed_args)
+            .expect("processed args should parse successfully");
+        let mut config = ZebradConfig::default();
+        config.tracing.filter = Some("error".to_owned());
+        let config = command
+            .process_config(config)
+            .expect("command filters should override the configured filter");
+
+        assert_eq!(
+            config.tracing.filter.as_deref(),
+            Some(expected_filter),
+            "{args:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn halo2_key_preload_completion_does_not_exit_zebra() {
     use futures::{future::FusedFuture, FutureExt};
@@ -72,119 +110,4 @@ async fn halo2_key_preload_panic_exits_zebra() {
         .await
         .expect("startup task must finish");
     super::start::StartCmd::halo2_key_preload_should_exit(result);
-}
-
-#[test]
-fn startup_rejects_pruning_sidecars_before_state_init() {
-    use futures::FutureExt;
-
-    for managed in [false, true] {
-        for retention in [0, 10_000, u32::MAX] {
-            let dir = tempfile::tempdir().unwrap();
-            let state_path = dir.path().join("state");
-            let mut config = crate::config::ZebradConfig::default();
-            config.state.cache_dir = state_path.clone();
-            config.state.prune_blocks_older_than = Some(retention);
-            config.zcashd_compat.enabled = true;
-            config.zcashd_compat.manage_zcashd = managed;
-
-            // No runtime: reaching async state initialization fails this test.
-            let error = super::StartCmd::default()
-                .start(std::sync::Arc::new(config))
-                .now_or_never()
-                .expect("configuration errors must precede async initialization")
-                .expect_err("sidecars require pruning disabled");
-            assert!(!state_path.exists(), "startup must not open writable state");
-            assert!(error
-                .to_string()
-                .contains("zcashd-compat requires an archive node"));
-        }
-    }
-}
-
-#[test]
-fn pruned_network_services_preserve_independent_capabilities() {
-    use zebra_chain::block::Height;
-    use zebra_network::types::PeerServices;
-    use zebra_state::HistoryCapabilities;
-
-    let mut config = crate::config::ZebradConfig::default();
-    config.network.local_services |= PeerServices::NODE_EARLY_BLOCK_RELAY;
-    let archive_services = config.network.local_services;
-    assert_eq!(
-        super::StartCmd::network_services(&config, HistoryCapabilities::default()).unwrap(),
-        archive_services,
-    );
-    for (retention, lowest_retained_height) in [
-        (None, Height(10_000)),
-        (Some(10_000), Height(0)),
-        (Some(10_000), Height(10_000)),
-    ] {
-        config.state.prune_blocks_older_than = retention;
-        assert_eq!(
-            super::StartCmd::network_services(
-                &config,
-                HistoryCapabilities {
-                    lowest_retained_height,
-                },
-            )
-            .unwrap(),
-            archive_services & !PeerServices::NODE_NETWORK,
-        );
-    }
-}
-
-#[test]
-fn pruned_history_rejects_both_sidecar_modes() {
-    use zebra_chain::block::Height;
-    use zebra_state::HistoryCapabilities;
-
-    let mut config = crate::config::ZebradConfig::default();
-    config.zcashd_compat.enabled = true;
-    for managed in [false, true] {
-        config.zcashd_compat.manage_zcashd = managed;
-        config.state.prune_blocks_older_than = None;
-        super::StartCmd::network_services(&config, HistoryCapabilities::default())
-            .expect("archive nodes can serve sidecars");
-        for (retention, lowest_retained_height) in [
-            (None, Height(10_000)),
-            (Some(10_000), Height(0)),
-            (Some(10_000), Height(10_000)),
-        ] {
-            config.state.prune_blocks_older_than = retention;
-            let error = super::StartCmd::network_services(
-                &config,
-                HistoryCapabilities {
-                    lowest_retained_height,
-                },
-            )
-            .expect_err("sidecars require complete block history and pruning disabled");
-            assert!(error
-                .to_string()
-                .contains("zcashd-compat requires an archive node"));
-        }
-    }
-}
-
-#[test]
-fn pruning_config_defaults_and_round_trips() {
-    let config: crate::config::ZebradConfig = toml::from_str("").unwrap();
-    assert_eq!(config.state.prune_blocks_older_than, None);
-
-    for retention in [None, Some(10_000), Some(u32::MAX)] {
-        let mut config = config.clone();
-        config.state.prune_blocks_older_than = retention;
-        let value = toml::Value::try_from(&config).unwrap();
-        assert_eq!(
-            value["state"].get("prune_blocks_older_than").is_some(),
-            retention.is_some(),
-        );
-        let encoded = toml::to_string(&value).unwrap();
-        let decoded: crate::config::ZebradConfig = toml::from_str(&encoded).unwrap();
-        assert_eq!(decoded, config);
-    }
-
-    let config: crate::config::ZebradConfig =
-        toml::from_str("[state]\nprune_blocks_older_than = 10000\n").unwrap();
-    assert_eq!(config.state.prune_blocks_older_than, Some(10_000));
 }

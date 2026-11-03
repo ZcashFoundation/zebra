@@ -118,10 +118,18 @@ impl ConfiguredFundingStreamRecipient {
 
     /// Converts a [`ConfiguredFundingStreamRecipient`] to a [`FundingStreamReceiver`] and [`FundingStreamRecipient`].
     pub fn into_recipient(self) -> (FundingStreamReceiver, FundingStreamRecipient) {
-        (
+        self.try_into_recipient()
+            .expect("funding stream address must deserialize")
+    }
+
+    /// Parses the configured recipient's addresses.
+    fn try_into_recipient(
+        self,
+    ) -> Result<(FundingStreamReceiver, FundingStreamRecipient), ParametersBuilderError> {
+        Ok((
             self.receiver,
-            FundingStreamRecipient::new(self.numerator, self.addresses.unwrap_or_default()),
-        )
+            FundingStreamRecipient::try_new(self.numerator, self.addresses.unwrap_or_default())?,
+        ))
     }
 }
 
@@ -233,59 +241,50 @@ impl ConfiguredFundingStreams {
     /// Converts a [`ConfiguredFundingStreams`] to a [`FundingStreams`], using the provided default values
     /// if `height_range` or `recipients` are None.
     ///
-    /// # Panics
-    ///
-    /// If a default is required but was not passed
+    /// Returns an error for missing defaults, reversed ranges, malformed addresses, or excessive
+    /// effective numerator totals.
     fn convert_with_default(
         self,
         default_funding_streams: Option<FundingStreams>,
-    ) -> FundingStreams {
-        let height_range = self.height_range.unwrap_or_else(|| {
-            default_funding_streams
-                .as_ref()
-                .expect("default required")
-                .height_range()
-                .clone()
-        });
-
-        let recipients = self
-            .recipients
-            .map(|recipients| {
-                recipients
-                    .into_iter()
-                    .map(ConfiguredFundingStreamRecipient::into_recipient)
-                    .collect()
-            })
-            .unwrap_or_else(|| {
+    ) -> Result<FundingStreams, ParametersBuilderError> {
+        let height_range = self
+            .height_range
+            .or_else(|| {
                 default_funding_streams
                     .as_ref()
-                    .expect("default required")
-                    .recipients()
-                    .clone()
-            });
+                    .map(|streams| streams.height_range().clone())
+            })
+            .ok_or(ParametersBuilderError::MissingFundingStreamDefault {
+                field: "height_range",
+            })?;
+        if height_range.start > height_range.end {
+            return Err(ParametersBuilderError::InvalidFundingStreamHeightRange);
+        }
 
-        assert!(
-            height_range.start <= height_range.end,
-            "funding stream end height must be above start height"
-        );
-
-        let funding_streams = FundingStreams::new(height_range.clone(), recipients);
-
-        // check that sum of receiver numerators is valid.
-
-        let sum_numerators: u64 = funding_streams
+        let recipients = match self.recipients {
+            Some(recipients) => recipients
+                .into_iter()
+                .map(ConfiguredFundingStreamRecipient::try_into_recipient)
+                .collect::<Result<_, _>>()?,
+            None => default_funding_streams
+                .ok_or(ParametersBuilderError::MissingFundingStreamDefault {
+                    field: "recipients",
+                })?
+                .recipients()
+                .clone(),
+        };
+        let funding_streams = FundingStreams::new(height_range, recipients);
+        let sum_numerators = funding_streams
             .recipients()
             .values()
-            .map(|r| r.numerator())
-            .sum();
+            .try_fold(0u64, |sum, recipient| {
+                sum.checked_add(recipient.numerator())
+            });
+        if sum_numerators.is_none_or(|sum| sum > FUNDING_STREAM_RECEIVER_DENOMINATOR) {
+            return Err(ParametersBuilderError::InvalidFundingStreamNumerators);
+        }
 
-        assert!(
-            sum_numerators <= FUNDING_STREAM_RECEIVER_DENOMINATOR,
-            "sum of funding stream numerators must not be \
-         greater than denominator of {FUNDING_STREAM_RECEIVER_DENOMINATOR}"
-        );
-
-        funding_streams
+        Ok(funding_streams)
     }
 
     /// Converts the [`ConfiguredFundingStreams`] to a [`FundingStreams`].
@@ -360,11 +359,11 @@ fn check_funding_stream_address_period(
         }
 
         for address in recipient.addresses() {
-            assert_eq!(
-                address.network_kind(),
-                NetworkKind::Testnet,
-                "configured funding stream addresses must be for Testnet"
-            );
+            if address.network_kind() != NetworkKind::Testnet {
+                return Err(ParametersBuilderError::WrongFundingStreamAddressNetwork {
+                    address: *address,
+                });
+            }
         }
     }
 
@@ -763,9 +762,22 @@ impl ParametersBuilder {
     ///
     /// # Panics
     ///
-    /// If `funding_streams` is longer than `testnet::FUNDING_STREAMS`, and one
-    /// of the extra streams requires a default value.
-    pub fn with_funding_streams(mut self, funding_streams: Vec<ConfiguredFundingStreams>) -> Self {
+    /// If defaults are missing, a range is reversed, an address is malformed, or the effective
+    /// numerators exceed the denominator. Use [`Self::try_with_funding_streams`] for operator input.
+    pub fn with_funding_streams(self, funding_streams: Vec<ConfiguredFundingStreams>) -> Self {
+        self.try_with_funding_streams(funding_streams)
+            .expect("configured funding streams must be valid")
+    }
+
+    /// Sets funding streams, returning errors for missing defaults, reversed ranges, malformed
+    /// addresses, or effective numerator totals above the denominator.
+    ///
+    /// Address counts, network kinds, and overlapping ranges are checked by [`Self::to_network`]
+    /// after optional address extension with [`Self::extend_funding_streams`].
+    pub fn try_with_funding_streams(
+        mut self,
+        funding_streams: Vec<ConfiguredFundingStreams>,
+    ) -> Result<Self, ParametersBuilderError> {
         let nu7 = self.nu7_activation_height();
         self.funding_streams = funding_streams
             .into_iter()
@@ -782,9 +794,9 @@ impl ParametersBuilder {
                 }
                 streams.convert_with_default(default_streams)
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         self.should_lock_funding_stream_address_period = true;
-        self
+        Ok(self)
     }
 
     /// Clears funding streams from the [`Parameters`] being built.
@@ -804,12 +816,12 @@ impl ParametersBuilder {
         self.validate_halving_interval(&network)?;
 
         for funding_streams in &mut self.funding_streams {
-            funding_streams.extend_recipient_addresses(
+            funding_streams.try_extend_recipient_addresses(
                 num_funding_stream_addresses_required_for_height_range(
                     funding_streams.height_range(),
                     &network,
                 ),
-            );
+            )?;
         }
 
         Ok(self)
@@ -912,6 +924,8 @@ impl ParametersBuilder {
     }
 
     /// Sets the expected one-time lockbox disbursement outputs for this network
+    ///
+    /// Addresses and the aggregate amount are validated when building the network.
     pub fn with_lockbox_disbursements(
         mut self,
         lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
@@ -921,6 +935,21 @@ impl ParametersBuilder {
             .map(|ConfiguredLockboxDisbursement { address, amount }| (address, amount))
             .collect();
         self
+    }
+
+    /// Checks configured lockbox outputs before they can reach subsidy consumers.
+    fn check_lockbox_disbursements(&self) -> Result<(), ParametersBuilderError> {
+        let mut total = Amount::zero();
+        for (address, amount) in &self.lockbox_disbursements {
+            address.parse::<transparent::Address>().map_err(|_| {
+                ParametersBuilderError::InvalidLockboxDisbursementAddress {
+                    address: address.clone(),
+                }
+            })?;
+            total = (total + *amount)
+                .map_err(|_| ParametersBuilderError::InvalidLockboxDisbursementTotal)?;
+        }
+        Ok(())
     }
 
     /// Sets the checkpoints for the network as the provided [`ConfiguredCheckpoints`].
@@ -1100,9 +1129,11 @@ impl ParametersBuilder {
     /// greater than [`LN2_SCALED`],
     /// so its integer coefficient is nonzero.
     /// Effective funding stream ranges must not overlap, and non-deferred recipients must use
-    /// P2SH or P2PKH addresses.
+    /// Testnet P2SH or P2PKH addresses covering every period. Lockbox addresses must parse and
+    /// their aggregate amount must not exceed [`MAX_MONEY`].
     pub fn to_network(self) -> Result<Network, ParametersBuilderError> {
         self.check_nsm_reissuance_height()?;
+        self.check_lockbox_disbursements()?;
         let mut network = self.to_network_unchecked();
         self.validate_halving_interval(&network)?;
 
@@ -1271,8 +1302,8 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    /// Returns an error for overlapping effective funding stream ranges or unsupported
-    /// non-deferred recipient addresses, as on configured Testnets.
+    /// Returns an error for invalid funding streams or lockbox disbursements, including
+    /// insufficient or wrong-network funding addresses, as on configured Testnets.
     pub fn new_regtest(
         RegtestParameters {
             activation_heights,
@@ -1301,7 +1332,7 @@ impl Parameters {
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(activation_heights.for_regtest())?
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)?
-            .with_funding_streams(funding_streams.unwrap_or_default())
+            .try_with_funding_streams(funding_streams.unwrap_or_default())?
             .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
             .with_checkpoints(checkpoints.unwrap_or_default())?;
 
@@ -1317,14 +1348,22 @@ impl Parameters {
         }
 
         parameters.check_nsm_reissuance_height()?;
+        parameters.check_lockbox_disbursements()?;
         check_funding_streams(&parameters.funding_streams)?;
 
-        Self {
+        let mut network = Network::new_configured_testnet(Self {
             network_name: "Regtest".to_string(),
             network_magic: magics::REGTEST,
             ..parameters.finish()
+        });
+        for streams in network.all_funding_streams() {
+            check_funding_stream_address_period(streams, &network)?;
         }
-        .with_calculated_reissuance_height()
+        Self::calculate_reissuance_height(&mut network)?;
+        let Network::Testnet(parameters) = network else {
+            unreachable!("this method just constructed Regtest parameters")
+        };
+        Ok(Arc::unwrap_or_clone(parameters))
     }
 
     /// Returns true if the instance of [`Parameters`] represents the default public Testnet.
@@ -1510,11 +1549,11 @@ impl Parameters {
 
     /// Returns the expected total value of the sum of all NU6.1 one-time lockbox disbursement output values for this network.
     pub fn lockbox_disbursement_total_amount(&self) -> Amount<NonNegative> {
-        self.lockbox_disbursements()
-            .into_iter()
-            .map(|(_addr, amount)| amount)
-            .reduce(|a, b| (a + b).expect("sum of configured amounts should be valid"))
-            .unwrap_or_default()
+        self.lockbox_disbursements
+            .iter()
+            .map(|(_, amount)| amount)
+            .sum::<Result<_, _>>()
+            .expect("the lockbox total was validated when constructing network parameters")
     }
 
     /// Returns the expected NU6.1 lockbox disbursement outputs for this network.
@@ -1523,7 +1562,9 @@ impl Parameters {
             .iter()
             .map(|(addr, amount)| {
                 (
-                    addr.parse().expect("hard-coded address must deserialize"),
+                    addr.parse().expect(
+                        "lockbox addresses were validated when constructing network parameters",
+                    ),
                     *amount,
                 )
             })

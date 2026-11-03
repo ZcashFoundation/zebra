@@ -19,8 +19,7 @@ use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{
-        default_test_config, os_assigned_rpc_port_config, random_known_rpc_port_config,
-        read_listen_addr_from_logs, testdir,
+        default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir,
     },
     launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
@@ -28,7 +27,6 @@ use crate::common::{
 
 mod compact_relay;
 mod nu7;
-mod pruning;
 
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]
@@ -116,18 +114,14 @@ async fn getblocktemplate_long_poll_returns_submit_old_false_on_new_tip() -> Res
         .into(),
     );
 
-    // All-features builds compile out INFO logs, including the OS-assigned-port announcement.
-    // Use the existing known-unused-port fixture rather than blocking on that diagnostic.
-    let mut config = random_known_rpc_port_config(false, &network)?;
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
-    let rpc_address = config
-        .rpc
-        .listen_addr
-        .expect("the RPC fixture configures a listener");
 
     let mut zebrad = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
+
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
     let client = RpcRequestClient::new(rpc_address);
     wait_for_mempool_activation(&client).await?;
