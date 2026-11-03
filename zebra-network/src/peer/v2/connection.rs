@@ -493,11 +493,13 @@ where
                     request,
                     tx,
                     permit,
-                    self.connection.clone(),
-                    self.transient_addr,
-                    self.params.genesis_hash,
-                    self.params.misbehavior.clone(),
-                    self.events_tx.clone(),
+                    outbound::RequestContext {
+                        connection: self.connection.clone(),
+                        transient_addr: self.transient_addr,
+                        genesis_hash: self.params.genesis_hash,
+                        misbehavior: self.params.misbehavior.clone(),
+                        events: self.events_tx.clone(),
+                    },
                 ));
                 return;
             }

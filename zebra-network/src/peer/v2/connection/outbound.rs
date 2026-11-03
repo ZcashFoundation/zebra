@@ -95,6 +95,25 @@ impl Drop for ResponseGuard {
     }
 }
 
+/// What [`drive`] needs from the connection.
+pub(super) struct RequestContext {
+    /// The connection to open the request's streams on.
+    pub connection: Connection,
+
+    /// The peer's address, if it has one: delivered blocks are tagged with it,
+    /// and its misbehavior is scored by it.
+    pub transient_addr: Option<PeerSocketAddr>,
+
+    /// The network's genesis block hash, for checking `get-headers` responses.
+    pub genesis_hash: block::Hash,
+
+    /// The misbehavior scores of every version 2 peer.
+    pub misbehavior: MisbehaviorScores,
+
+    /// Where to send what the connection task must act on.
+    pub events: mpsc::Sender<Event>,
+}
+
 /// Drives one client request to completion and answers the client, holding
 /// `permit`, one of the connection's [`MAX_OUTBOUND_REQUEST_STREAMS`], until
 /// its streams end.
@@ -107,17 +126,19 @@ impl Drop for ResponseGuard {
 /// client gets its error; once the score reaches the ban threshold, the
 /// connection is closed with `MISBEHAVIOR` (draft, "Misbehavior and
 /// Banning").
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn drive(
     request: Request,
     tx: MustUseClientResponseSender,
     permit: OwnedSemaphorePermit,
-    connection: Connection,
-    transient_addr: Option<PeerSocketAddr>,
-    genesis_hash: block::Hash,
-    misbehavior: MisbehaviorScores,
-    events: mpsc::Sender<Event>,
+    context: RequestContext,
 ) {
+    let RequestContext {
+        connection,
+        transient_addr,
+        genesis_hash,
+        misbehavior,
+        events,
+    } = context;
     let mut guard = ResponseGuard(Some(tx));
     let command = request.command();
     let work = tokio::time::timeout(
