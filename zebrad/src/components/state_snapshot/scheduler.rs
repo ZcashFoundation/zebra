@@ -15,6 +15,10 @@ use std::{
     convert::Infallible,
     fmt,
     path::PathBuf,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -24,7 +28,7 @@ use thiserror::Error;
 use tokio::{
     sync::{
         mpsc::{self, error::TrySendError},
-        oneshot,
+        oneshot, Notify,
     },
     time::Instant,
 };
@@ -593,6 +597,27 @@ struct Assembly {
     bytes: Vec<u8>,
 }
 
+/// Accounts for blocking work even after its join handle is dropped during
+/// scheduler shutdown.
+struct BlockingTaskGuard {
+    active: Arc<AtomicUsize>,
+    done: Arc<Notify>,
+}
+
+impl BlockingTaskGuard {
+    fn new(active: Arc<AtomicUsize>, done: Arc<Notify>) -> Self {
+        active.fetch_add(1, Ordering::SeqCst);
+        BlockingTaskGuard { active, done }
+    }
+}
+
+impl Drop for BlockingTaskGuard {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        self.done.notify_waiters();
+    }
+}
+
 /// Something the scheduler waited for.
 enum Event {
     /// A sub-range request ended.
@@ -795,6 +820,12 @@ struct Run<S, P> {
     /// Everything the run waits for: requests, hashing, storing, and reports.
     futures: FuturesUnordered<BoxFuture<'static, Event>>,
 
+    /// Blocking hashing and storing work that must finish before shutdown.
+    active_blocking: Arc<AtomicUsize>,
+
+    /// Wakes shutdown when a blocking task finishes.
+    blocking_done: Arc<Notify>,
+
     /// Where verified pieces are stored.
     store: P,
 
@@ -873,6 +904,8 @@ where
             remaining: pieces.len(),
             last_progress: Instant::now(),
             futures: FuturesUnordered::new(),
+            active_blocking: Arc::new(AtomicUsize::new(0)),
+            blocking_done: Arc::new(Notify::new()),
             pieces,
             store,
             verified,
@@ -880,8 +913,31 @@ where
         }
     }
 
-    /// Downloads every piece.
+    /// Downloads every piece, then waits for any blocking work left by a
+    /// closed receiver or another early return.
     async fn run(mut self) -> Result<(), SchedulerError> {
+        let outcome = self.run_inner().await;
+        let active_blocking = self.active_blocking.clone();
+        let blocking_done = self.blocking_done.clone();
+        drop(self);
+        Self::wait_for_blocking_tasks(active_blocking, blocking_done).await;
+        outcome
+    }
+
+    async fn wait_for_blocking_tasks(
+        active_blocking: Arc<AtomicUsize>,
+        blocking_done: Arc<Notify>,
+    ) {
+        loop {
+            let notified = blocking_done.notified();
+            if active_blocking.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    async fn run_inner(&mut self) -> Result<(), SchedulerError> {
         for piece in 0..self.pieces.len() {
             if self.pieces[piece].size == 0 {
                 self.verify_empty(piece);
@@ -1212,9 +1268,12 @@ where
             return;
         };
         let chunks = std::mem::take(&mut download.queued);
+        let guard =
+            BlockingTaskGuard::new(self.active_blocking.clone(), self.blocking_done.clone());
 
         self.futures.push(
             tokio::task::spawn_blocking(move || {
+                let _guard = guard;
                 for chunk in chunks {
                     assembly.hasher.update(&chunk);
                     assembly.bytes.extend_from_slice(&chunk);
@@ -1614,11 +1673,16 @@ where
     fn store_piece(&mut self, piece: usize, bytes: Vec<u8>) {
         let store = self.store.clone();
         let hash = self.pieces[piece].hash;
+        let guard =
+            BlockingTaskGuard::new(self.active_blocking.clone(), self.blocking_done.clone());
         self.futures.push(
-            tokio::task::spawn_blocking(move || store.put(hash, &bytes))
-                .wait_for_panics()
-                .map(move |path| Event::Stored { piece, path })
-                .boxed(),
+            tokio::task::spawn_blocking(move || {
+                let _guard = guard;
+                store.put(hash, &bytes)
+            })
+            .wait_for_panics()
+            .map(move |path| Event::Stored { piece, path })
+            .boxed(),
         );
     }
 

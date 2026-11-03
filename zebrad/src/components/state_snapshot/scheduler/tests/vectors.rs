@@ -6,7 +6,7 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
         Arc,
     },
@@ -485,6 +485,22 @@ impl PieceStore for MemoryStore {
     }
 }
 
+#[derive(Clone)]
+struct BlockingStore {
+    started: mpsc::UnboundedSender<()>,
+    release: Arc<AtomicBool>,
+}
+
+impl PieceStore for BlockingStore {
+    fn put(&self, hash: ObjectHash, _object: &[u8]) -> Result<PathBuf, SnapshotError> {
+        let _ = self.started.send(());
+        while !self.release.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(PathBuf::from("objects").join(hash.to_string()))
+    }
+}
+
 /// The objects to download, and the peers to download them from.
 struct Scenario {
     /// The scheduler's limits.
@@ -883,7 +899,10 @@ async fn three_peers_download_every_piece() {
         for call in calls {
             assert_eq!(call.offset, next_offset, "no duplicate or retry: {call:?}");
             let delivered = call.delivered.expect("every happy-path answer has data");
-            assert_eq!(delivered, usize::try_from(call.length).expect("a u32 fits in usize"));
+            assert_eq!(
+                delivered,
+                usize::try_from(call.length).expect("a u32 fits in usize")
+            );
             next_offset += u64::try_from(delivered).expect("a usize fits in u64");
         }
         assert_eq!(next_offset, outcome.size_of(hash));
@@ -2073,4 +2092,69 @@ async fn the_end_game_leaves_a_peer_above_a_quarter_of_the_median() {
     assert!(outcome.calls_of_for(1, 2).is_empty());
     assert!(outcome.calls.iter().all(|call| !call.dropped));
     assert_eq!(outcome.elapsed, secs(2));
+}
+
+/// Closing the verified-piece receiver stops new scheduling, but the run does
+/// not return until an already-started blocking store write has finished.
+#[tokio::test]
+async fn shutdown_waits_for_blocking_store_writes() {
+    let _init_guard = zebra_test::init();
+
+    let object = objects(&[1000]).pop().expect("one test object");
+    let hash = ObjectHash::of(&object);
+    let honest = Arc::new(HashMap::from([(hash, object)]));
+    let (calls_tx, _calls_rx) = mpsc::unbounded_channel();
+    let all = Arc::new(Counters::default());
+    let peer = FakePeer {
+        index: 0,
+        behavior: Arc::new(Behavior::default()),
+        link: None,
+        objects: honest,
+        lies: Arc::new(HashMap::new()),
+        epoch: Instant::now(),
+        calls: calls_tx,
+        counters: Arc::new(Counters::default()),
+        all,
+    };
+    let addr = zn::PeerSocketAddr::from(SocketAddr::from(([127, 0, 0, 1], 8233)));
+    let descriptor = PieceDescriptor {
+        component: ComponentId::HashByHeight,
+        index: 0,
+        size: 1000,
+        hash,
+    };
+    let (verified_tx, verified_rx) = mpsc::channel(1);
+    let (blame_tx, _blame_rx) = mpsc::channel(1);
+    let scheduler = Scheduler::new(
+        SchedulerConfig::default(),
+        vec![descriptor],
+        vec![(addr, peer)],
+        ArtifactStore::at(PathBuf::from("unused")),
+        verified_tx,
+        blame_tx,
+    );
+
+    let (started_tx, mut started_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(AtomicBool::new(false));
+    let store = BlockingStore {
+        started: started_tx,
+        release: release.clone(),
+    };
+    let run = tokio::spawn(scheduler.run_storing_in(store));
+    tokio::time::timeout(Duration::from_secs(5), started_rx.recv())
+        .await
+        .expect("the store write starts")
+        .expect("the store observer stays open");
+
+    drop(verified_rx);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let finished_early = run.is_finished();
+    release.store(true, Ordering::SeqCst);
+    assert!(!finished_early, "the blocking write is still running");
+
+    let result = tokio::time::timeout(Duration::from_secs(5), run)
+        .await
+        .expect("the scheduler finishes after the write")
+        .expect("the scheduler task does not panic");
+    assert!(matches!(result, Err(SchedulerError::Closed)), "{result:?}");
 }
