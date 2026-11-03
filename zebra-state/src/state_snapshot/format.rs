@@ -38,11 +38,26 @@ use zebra_chain::{
     state_snapshot::ObjectHash,
 };
 
+mod canonical;
+
 #[cfg(test)]
 mod tests;
 
+pub use canonical::canonical_value;
+
 /// The string every manifest starts with.
 pub const MAGIC: &[u8; 20] = b"ZEBRA-STATE-SNAPSHOT";
+
+/// The number of complete blocks a snapshot ships, ending at its height: the
+/// `NODE_NETWORK_LIMITED` window, so the importing node serves the recent
+/// blocks from the start (design, §3).
+pub const WINDOW_LEN: u32 = 2304;
+
+/// Returns the first height of the window of complete blocks that a snapshot
+/// at `height` ships: `L = max(1, H - 2303)`. Genesis is shipped as well.
+pub fn window_start(height: block::Height) -> block::Height {
+    block::Height(height.0.saturating_sub(WINDOW_LEN - 1).max(1))
+}
 
 /// The snapshot format this code reads and writes. It changes only when the
 /// shipped encodings change; the importer maps it onto the running database
@@ -983,6 +998,22 @@ pub enum FormatError {
     /// The record does not fit in the piece being written.
     #[error("the piece is full")]
     PieceFull,
+
+    /// A value of a canonicalized component does not decode.
+    #[error("invalid {component} value: {reason}")]
+    InvalidValue {
+        /// The component.
+        component: ComponentId,
+        /// Why the value does not decode.
+        reason: &'static str,
+    },
+
+    /// A note commitment tree's cached root is not its root.
+    #[error("a {component} tree's cached root is not its root")]
+    WrongCachedRoot {
+        /// The component.
+        component: ComponentId,
+    },
 
     /// Reading or writing the bytes failed.
     #[error("I/O error: {0}")]
