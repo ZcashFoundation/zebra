@@ -3036,6 +3036,43 @@ async fn v2_listener_refuses_banned_ip() {
     }
 }
 
+/// The version 2 dialer does not dial a configured peer whose IP is banned, so a misbehaving
+/// configured peer is not reconnected, and dials it once the ban is lifted.
+#[tokio::test]
+async fn v2_dialer_skips_banned_initial_peers() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let mut bans = crate::BanList::default();
+    bans.ban(Ipv4Addr::LOCALHOST.into());
+    let (bans_tx, bans_rx) = watch::channel(bans);
+
+    let listener_addr = free_udp_addr();
+    let (mut listener_rx, listener_task) =
+        spawn_v2_node(v2_test_config(listener_addr, &[]), no_bans());
+    let (_dialer_rx, dialer_task) =
+        spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), bans_rx);
+
+    // Several reconnection delays, so the dialer has retried while the peer is banned.
+    tokio::time::sleep(V2_TEST_QUIET_PERIOD).await;
+    assert_eq!(
+        drain_discovered_peers(&mut listener_rx),
+        0,
+        "a banned configured peer must not be dialled"
+    );
+
+    bans_tx.send_replace(Default::default());
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the configured peer is dialled once it is no longer banned")
+        .expect("the listener is running");
+
+    listener_task.abort();
+    dialer_task.abort();
+}
+
 /// The version 2 listener refuses connections over its share of the inbound limit.
 #[tokio::test]
 async fn v2_listener_refuses_connections_over_inbound_limit() {

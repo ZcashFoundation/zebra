@@ -232,13 +232,14 @@ where
             let mut listener = pin!(accept_connections(
                 shared.clone(),
                 peerset_tx.clone(),
-                bans_receiver,
+                bans_receiver.clone(),
                 open_inbound_tx,
             ));
             let mut dialer = pin!(keep_initial_peers_connected(
                 shared,
                 initial_v2_peers,
                 outbound_limit,
+                bans_receiver,
                 peerset_tx
             )
             .fuse());
@@ -525,11 +526,15 @@ impl InitialPeerSlots {
 /// Resolution runs here rather than in `start`, so a slow or failing DNS
 /// lookup does not delay peer set initialization. Returns once there are no
 /// peers to keep connected and no hosts left to resolve.
+///
+/// A configured peer whose IP is in `bans_receiver` is not dialled until its
+/// ban lapses.
 #[instrument(skip_all)]
 async fn keep_initial_peers_connected<S, C>(
     shared: Shared<S, C>,
     hosts: IndexSet<String>,
     outbound_limit: usize,
+    bans_receiver: watch::Receiver<BanList>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -607,6 +612,7 @@ async fn keep_initial_peers_connected<S, C>(
                     shared.clone(),
                     addr,
                     active_outbound_connections.track_connection(),
+                    bans_receiver.clone(),
                     peerset_tx.clone(),
                 )
                 .in_current_span(),
@@ -644,10 +650,15 @@ async fn keep_initial_peers_connected<S, C>(
 /// connections would have the same peer set key and per-IP slot, and the peer
 /// set would drop one of them, at each end independently. Waits for that
 /// connection to end, or the reconnection delay, instead.
+///
+/// If the peer's IP is banned, does not dial it either, so a misbehaving
+/// configured peer is not reconnected: waits the reconnection delay and
+/// returns, and the ban is checked again on the next attempt.
 async fn connect_once<S, C>(
     shared: Shared<S, C>,
     addr: PeerSocketAddr,
     tracker: ConnectionTracker,
+    bans_receiver: watch::Receiver<BanList>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> PeerSocketAddr
 where
@@ -657,6 +668,16 @@ where
 {
     let network = shared.network.clone();
     let reconnection_delay = shared.reconnection_delay;
+
+    // `is_banned` checks the ban's age when it is called, so a lapsed ban is seen on the next
+    // attempt without waiting for the ban list to change.
+    if bans_receiver.borrow().is_banned(addr.ip()) {
+        tracing::debug!(?addr, "initial v2 peer is banned, not dialling it");
+        // No connection is attempted, so its slot is free while this waits.
+        drop(tracker);
+        tokio::time::sleep(with_jitter(reconnection_delay)).await;
+        return addr;
+    }
 
     let mut open_inbound = shared.open_inbound.clone();
     if open_inbound.borrow().contains_key(&addr) {
