@@ -12,7 +12,8 @@ body: >-
   an archive snapshot or fully resync in a separate cache.
   Retention counts finalized bodies, keeps genesis, and requires at least 10,000 bodies on
   Mainnet/Testnet or 1,001 on Regtest. Increasing retention affects future deletion only.
-  Normal compaction reclaims disk space without an immediate reduction guarantee.
+  Catch-up pruning compacts deleted bodies after clearing the backlog; normal compaction handles
+  ongoing deletion.
   Enabling pruning immediately stops advertising archive service and rejects zcashd sidecars.
   Unavailable bodies return `notfound`; block inventory stops at missing history while headers
   remain available. Pruning retains a restart witness and waits without deleting bodies when
