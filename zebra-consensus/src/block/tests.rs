@@ -2360,6 +2360,7 @@ async fn changed_proposals_require_transaction_verification() {
                     transaction_bytes: size - original.header.zcash_serialized_size(),
                     block: Arc::new(original.clone()),
                     contextual: contextual.clone(),
+                    wire: original.zcash_serialize_to_vec().unwrap().into(),
                     retained_bytes: contextual.retained_bytes(),
                 });
             });
