@@ -571,8 +571,12 @@ impl ZebraDb {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<[transaction::Hash]>> {
-        // Block
+        // A snapshot can retain transaction index rows below its first complete block for UTXO
+        // parents. Those rows are not a block index, so check availability before reading them.
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        if !self.contains_height(height) {
+            return None;
+        }
 
         // Transaction hashes
         let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
