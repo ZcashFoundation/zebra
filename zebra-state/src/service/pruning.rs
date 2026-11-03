@@ -2,7 +2,11 @@
 
 use std::{
     ops::Range,
-    sync::{Arc, Mutex},
+    panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -21,6 +25,7 @@ mod tests;
 pub(super) struct PruningTask {
     cancel: Sender<()>,
     task: Mutex<Option<JoinHandle<()>>>,
+    finished: Arc<AtomicBool>,
 }
 
 impl PruningTask {
@@ -28,32 +33,38 @@ impl PruningTask {
     pub(super) fn spawn(db: ZebraDb, retention: u32, wake: Receiver<()>) -> Arc<Self> {
         let (cancel, cancelled) = bounded(1);
         let span = tracing::Span::current();
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = finished.clone();
         let task = thread::spawn(move || {
-            span.in_scope(|| {
-                run(db, retention, wake, cancelled).unwrap_or_else(|error| {
-                    panic!("unexpected block-body pruning failure: {error}")
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                span.in_scope(|| {
+                    run(db, retention, wake, cancelled).unwrap_or_else(|error| {
+                        panic!("unexpected block-body pruning failure: {error}")
+                    });
                 });
-            });
+            }));
+            worker_finished.store(true, Ordering::Release);
+            if let Err(panic) = result {
+                resume_unwind(panic);
+            }
         });
         Arc::new(Self {
             cancel,
             task: Mutex::new(Some(task)),
+            finished,
         })
     }
 
     /// Propagates worker failures through the state service's background-task checks.
     pub(super) fn check_for_panics(&self) {
-        let task = {
-            let mut task = self
-                .task
-                .lock()
-                .expect("pruning task handle is not poisoned");
-            if task.as_ref().is_some_and(JoinHandle::is_finished) {
-                task.take()
-            } else {
-                None
-            }
-        };
+        if !self.finished.load(Ordering::Acquire) {
+            return;
+        }
+        let task = self
+            .task
+            .lock()
+            .expect("pruning task handle is not poisoned")
+            .take();
         if let Some(task) = task {
             task.wait_for_panics();
         }
@@ -97,7 +108,8 @@ fn prune_batch(
     let history = db.history_capabilities()?;
     metrics::gauge!("state.pruning.retained.height")
         .set(f64::from(history.lowest_retained_height.0));
-    if !db.ready_for_pruning() {
+    let ready = db.ready_for_pruning();
+    if !ready {
         return Ok(None);
     }
     let Some(tip) = db.finalized_tip_height() else {
@@ -117,7 +129,9 @@ fn prune_batch(
 
     let started = Instant::now();
     let mut batch = DiskWriteBatch::new();
-    let Some(end) = batch.prepare_history_pruning(db, target, witness)? else {
+    let Some(end) =
+        batch.prepare_history_pruning(db, target, history, ready, Some(tip), witness)?
+    else {
         return Ok(None);
     };
     db.write_batch(batch)?;
