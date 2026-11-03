@@ -60,7 +60,10 @@ mod tests;
 #[allow(unused_imports)]
 pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 #[allow(unused_imports)]
-pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, RocksDbMemoryLimits, WriteDisk};
+pub use disk_db::{
+    BlockCacheSample, DiskDb, DiskWriteBatch, ReadDisk, RocksDbMemoryLimits, RocksDbMemorySample,
+    RocksDbStatisticsSample, WriteBufferManagerSample, WriteDisk,
+};
 #[allow(unused_imports)]
 pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,

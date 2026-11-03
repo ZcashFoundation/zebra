@@ -32,7 +32,7 @@ use crate::{
         STATE_DATABASE_KIND,
     },
     service::finalized_state::{
-        disk_db::{DiskDb, RocksDbMemoryLimits},
+        disk_db::{DiskDb, RocksDbMemoryLimits, RocksDbMemorySample},
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
             transparent::AddressLocation,
@@ -598,6 +598,14 @@ impl ZebraDb {
     /// Returns the memory limits this database was opened with.
     pub fn memory_limits(&self) -> &RocksDbMemoryLimits {
         self.db.limits()
+    }
+
+    /// Returns a sample of the database's memory use and write stalls.
+    ///
+    /// The memtable, block cache and table reader bytes are the database's share of the
+    /// process's memory; the stall fields say whether RocksDB is holding the state writer back.
+    pub fn memory_sample(&self) -> RocksDbMemorySample {
+        self.db.memory_sample()
     }
 
     /// Applies `limits` to the open database, where RocksDB allows a live change.

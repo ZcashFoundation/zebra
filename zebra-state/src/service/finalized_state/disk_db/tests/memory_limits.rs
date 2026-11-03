@@ -11,20 +11,33 @@ use std::{
     fmt::Write as _,
     fs,
     path::{Path, PathBuf},
+    sync::{
+        mpsc::{self, RecvTimeoutError},
+        Arc,
+    },
+    thread,
+    time::Duration,
 };
 
 use semver::Version;
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    amount::Amount,
+    block::Block,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+    transparent::{Output, Script},
+};
 
 use crate::{
     service::finalized_state::{
-        disk_db::{DiskDb, RocksDbMemoryLimits, MIB},
+        disk_db::{DiskDb, RocksDbMemoryLimits, RocksDbMemorySample, MIB},
         zebra_db::transparent::{
             BALANCE_BY_TRANSPARENT_ADDR, BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
         },
         FinalizedState, READ_PATH_COLUMN_FAMILIES, STATE_COLUMN_FAMILIES_IN_CODE,
     },
-    Config,
+    tests::FakeChainHelper,
+    CheckpointVerifiedBlock, Config,
 };
 
 /// RocksDB's default block cache capacity, which Zebra uses today.
@@ -848,5 +861,254 @@ async fn spawn_apply_memory_limits_resizes_an_open_state() {
         &options,
         "CFOptions \"tx_by_loc\"",
         &[("write_buffer_size", "16777216")],
+    );
+}
+
+/// The outputs in each smoke test block's coinbase.
+const SMOKE_TEST_OUTPUTS_PER_BLOCK: usize = 250;
+
+/// The script size of each smoke test output: a block writes about 0.25 MB of transaction bytes
+/// and about as many UTXO bytes, and its coinbase stays well below the 2 MB transaction size
+/// limit that deserialization enforces.
+const SMOKE_TEST_OUTPUT_SCRIPT_BYTES: usize = 1_000;
+
+/// Returns `len` deterministic pseudo-random bytes, so compaction cannot shrink the flushed
+/// files and the on-disk size measures what was written.
+fn incompressible_bytes(height: u32, index: usize, len: usize) -> Vec<u8> {
+    let index = u64::try_from(index).expect("an output index fits in a u64");
+    // xorshift64*, seeded by the block height and output index.
+    let mut state = (u64::from(height) << 32) | index | 1;
+
+    let mut bytes = vec![0; len];
+    for chunk in bytes.chunks_mut(8) {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        let output = state.wrapping_mul(0x2545_F491_4F6C_DD1D).to_le_bytes();
+        chunk.copy_from_slice(&output[..chunk.len()]);
+    }
+
+    bytes
+}
+
+/// Returns a coinbase-only child of `parent` whose coinbase outputs are replaced by large
+/// incompressible outputs, so committing it writes about 0.5 MB into the memtables.
+///
+/// The outputs are replaced, not added, so every child is the same size whatever its parent.
+fn bulky_fake_child(parent: &Arc<Block>) -> Arc<Block> {
+    let mut child = parent.make_fake_child();
+    let height = child
+        .coinbase_height()
+        .expect("fake children have a coinbase height");
+
+    let outputs = (0..SMOKE_TEST_OUTPUTS_PER_BLOCK)
+        .map(|index| Output {
+            value: Amount::zero(),
+            lock_script: Script::new(&incompressible_bytes(
+                height.0,
+                index,
+                SMOKE_TEST_OUTPUT_SCRIPT_BYTES,
+            )),
+        })
+        .collect();
+
+    let block = Arc::make_mut(&mut child);
+    Arc::make_mut(&mut block.transactions[0]).set_outputs(outputs);
+
+    child
+}
+
+/// How long the smoke tests' commits may take before the test fails as stalled.
+///
+/// The commits take under 30 seconds on a loaded development machine. A write stop blocks the
+/// committing thread inside RocksDB, possibly forever, so the test reports it at this deadline
+/// instead of the test runner's.
+const SMOKE_TEST_DEADLINE: Duration = Duration::from_secs(180);
+
+/// Commits the continuous Mainnet blocks and `bulky_blocks` padded children to a state bounded
+/// by `limits`, asserting after every commit that RocksDB neither stopped nor delayed writes,
+/// and failing if the commits take longer than [`SMOKE_TEST_DEADLINE`].
+///
+/// Returns the peak write buffer manager usage and the final memory sample.
+fn commit_bulky_blocks_without_stalls(
+    limits: &RocksDbMemoryLimits,
+    bulky_blocks: usize,
+) -> (u64, RocksDbMemorySample) {
+    let limits = *limits;
+    let (result_sender, result_receiver) = mpsc::channel();
+
+    let committer = thread::spawn(move || {
+        let result = commit_bulky_blocks(&limits, bulky_blocks);
+        // The receiver is only gone after the deadline, which already fails the test.
+        let _ = result_sender.send(result);
+    });
+
+    match result_receiver.recv_timeout(SMOKE_TEST_DEADLINE) {
+        Ok(result) => {
+            committer
+                .join()
+                .expect("the committing thread sent its result, so it did not panic");
+            result
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            panic!("the commits took more than {SMOKE_TEST_DEADLINE:?}: writes stalled")
+        }
+        // The committing thread panicked before sending its result: report its panic.
+        Err(RecvTimeoutError::Disconnected) => std::panic::resume_unwind(
+            committer
+                .join()
+                .expect_err("the committing thread dropped its sender without a result"),
+        ),
+    }
+}
+
+/// Commits the blocks of [`commit_bulky_blocks_without_stalls`] on the current thread.
+fn commit_bulky_blocks(
+    limits: &RocksDbMemoryLimits,
+    bulky_blocks: usize,
+) -> (u64, RocksDbMemorySample) {
+    let mut state = open_state(limits);
+
+    let real_blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|bytes| {
+            bytes
+                .zcash_deserialize_into()
+                .expect("the block test vectors deserialize")
+        })
+        .collect();
+    let mut tip = real_blocks
+        .last()
+        .expect("there are continuous Mainnet blocks")
+        .clone();
+    let bulky_blocks = std::iter::from_fn(|| {
+        tip = bulky_fake_child(&tip);
+        Some(tip.clone())
+    })
+    .take(bulky_blocks);
+
+    let mut peak_usage = 0;
+    for block in real_blocks.into_iter().chain(bulky_blocks) {
+        let height = block
+            .coinbase_height()
+            .expect("test blocks have a coinbase height");
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block).into(),
+                None,
+                "memory limits smoke test",
+            )
+            .unwrap_or_else(|error| panic!("block {height:?} must commit: {error:?}"));
+
+        let sample = state.db.memory_sample();
+        assert!(
+            !sample.write_stopped,
+            "writes were stopped after block {height:?}: {sample:?}"
+        );
+        assert_eq!(
+            sample.delayed_write_rate, 0,
+            "writes were delayed after block {height:?}: {sample:?}"
+        );
+        let manager = sample
+            .write_buffer_manager
+            .expect("the database was opened with a write buffer manager");
+        peak_usage = peak_usage.max(manager.usage_bytes);
+    }
+
+    let sample = state.db.memory_sample();
+    let statistics = sample
+        .statistics
+        .expect("a bounded database collects statistics");
+    assert_eq!(statistics.stall_micros, 0, "writers stalled: {sample:?}");
+
+    // The blocks wrote more than twice the total, and flushes moved more than the whole total
+    // to disk, so the manager bounded the memtables. The written bytes are the flushed SST
+    // files and the memtables still waiting for a flush.
+    let total = limits
+        .write_buffer_total
+        .expect("the smoke test bounds the write buffers");
+    let flushed = state.db.size();
+    let unflushed = sample
+        .write_buffer_manager
+        .expect("the database was opened with a write buffer manager")
+        .usage_bytes;
+    assert!(
+        flushed > total,
+        "flushes only wrote {flushed} bytes of SST files: {sample:?}"
+    );
+    assert!(
+        flushed.saturating_add(unflushed) > 2 * total,
+        "the blocks only wrote {flushed} flushed and {unflushed} unflushed bytes: {sample:?}"
+    );
+
+    (peak_usage, sample)
+}
+
+/// Under a 64 MiB write buffer total, a few hundred blocks commit without a write stall: the
+/// memtable shape derived from the total lets the natural flushes lead and the manager's extra
+/// flushes keep up (design §4.1 P1; §6.3 asserts the same gauges on a budgeted node).
+#[test]
+fn bounded_database_commits_blocks_without_write_stalls() {
+    let _init_guard = zebra_test::init();
+
+    let write_buffer_total = 64 * MIB;
+    // A cache size that differs from RocksDB's default, so the sample is shown to read the
+    // shared cache and not the unused `default` column family's own cache.
+    let block_cache_bytes = 48 * MIB;
+    let limits = RocksDbMemoryLimits {
+        write_buffer_total: Some(write_buffer_total),
+        block_cache_bytes: Some(block_cache_bytes),
+        charge_index_and_filter_cfs: READ_PATH_COLUMN_FAMILIES,
+        ..RocksDbMemoryLimits::default()
+    };
+
+    let (peak_usage, sample) = commit_bulky_blocks_without_stalls(&limits, 300);
+
+    // The total is soft: usage can exceed it while a flush runs, but never by much.
+    assert!(
+        peak_usage < 2 * write_buffer_total,
+        "the memtables grew to {peak_usage} bytes"
+    );
+    let manager = sample
+        .write_buffer_manager
+        .expect("the database was opened with a write buffer manager");
+    assert_eq!(manager.total_bytes, write_buffer_total);
+    let cache = sample.block_cache.expect("the database has a block cache");
+    assert_eq!(cache.capacity_bytes, block_cache_bytes);
+    assert!(cache.usage_bytes > 0, "{sample:?}");
+    assert!(sample.table_readers_bytes > 0, "{sample:?}");
+    let statistics = sample
+        .statistics
+        .expect("a bounded database collects statistics");
+    assert!(
+        statistics.index_and_filter_cache_hits + statistics.index_and_filter_cache_misses > 0,
+        "the charged column families' index and filter blocks went through the cache: {sample:?}"
+    );
+}
+
+/// A write buffer total below the hot column families' memtables makes the manager, not the
+/// natural flush points, trigger most flushes; it flushes the oldest memtable instead of
+/// stalling writers (`allow_stall = false`, design §4.1).
+#[test]
+fn write_buffer_manager_flushes_instead_of_stalling() {
+    let _init_guard = zebra_test::init();
+
+    let write_buffer_total = 16 * MIB;
+    let limits = RocksDbMemoryLimits {
+        write_buffer_total: Some(write_buffer_total),
+        ..RocksDbMemoryLimits::default()
+    };
+    // 16 MiB / 8 is below the 8 MiB floor: two hot column families alone can fill the total.
+    assert_eq!(limits.effective_write_buffer_size(), Some(8 * MIB));
+
+    let (peak_usage, _sample) = commit_bulky_blocks_without_stalls(&limits, 100);
+
+    assert!(
+        peak_usage >= write_buffer_total / 2,
+        "the memtables never filled: {peak_usage} bytes"
+    );
+    assert!(
+        peak_usage < 4 * write_buffer_total,
+        "the memtables grew to {peak_usage} bytes"
     );
 }
