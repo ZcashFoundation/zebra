@@ -101,6 +101,10 @@ impl<S> HttpRequestMiddleware<S> {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
+        response.headers_mut().insert(
+            header::WWW_AUTHENTICATE,
+            header::HeaderValue::from_static("Basic realm=\"jsonrpc\""),
+        );
         response
     }
 
@@ -375,33 +379,83 @@ mod tests {
 
     use tower::{service_fn, ServiceExt};
 
-    #[tokio::test]
-    async fn request_without_credentials_gets_a_401_response() {
-        let inner = service_fn(|_request: HttpRequest| async {
-            Ok::<_, BoxError>(HttpResponse::new(HttpBody::from("inner service reached")))
-        });
-        let mut middleware = HttpRequestMiddleware::new(inner, Some(Cookie::default()), 1024);
+    use crate::server::cookie;
 
-        let request = HttpRequest::new(HttpBody::from(
+    const INNER_BODY: &str = "inner service reached";
+
+    /// Sends a `getinfo` request with the given `Authorization` header through a middleware
+    /// that requires `cookie`, and returns the response.
+    async fn call_with_auth(cookie: Cookie, auth: Option<String>) -> HttpResponse<HttpBody> {
+        let inner = service_fn(|_request: HttpRequest| async {
+            Ok::<_, BoxError>(HttpResponse::new(HttpBody::from(INNER_BODY)))
+        });
+        let mut middleware = HttpRequestMiddleware::new(inner, Some(cookie), 1024);
+
+        let mut request = HttpRequest::new(HttpBody::from(
             r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}"#,
         ));
-        let response = middleware
+        if let Some(auth) = auth {
+            request.headers_mut().insert(
+                header::AUTHORIZATION,
+                header::HeaderValue::from_str(&format!("Basic {}", STANDARD.encode(auth))).unwrap(),
+            );
+        }
+
+        middleware
             .ready()
             .await
             .expect("the middleware is always ready")
             .call(request)
             .await
-            .expect("an unauthenticated request gets an HTTP response, not a transport error");
+            .expect("the middleware returns an HTTP response, not a transport error")
+    }
 
+    /// Returns the `user:password` credentials `zcash-cli` would read from the cookie file.
+    fn cookie_credentials(cookie: &Cookie) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        cookie::write_to_disk(cookie, dir.path()).unwrap();
+        std::fs::read_to_string(dir.path().join(".cookie")).unwrap()
+    }
+
+    async fn assert_unauthenticated(response: HttpResponse<HttpBody>) {
         assert_eq!(response.status(), hyper::StatusCode::UNAUTHORIZED);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE),
             Some(&header::HeaderValue::from_static("application/json"))
+        );
+        assert_eq!(
+            response.headers().get(header::WWW_AUTHENTICATE),
+            Some(&header::HeaderValue::from_static("Basic realm=\"jsonrpc\""))
         );
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"]["code"], 401);
         assert_eq!(body["error"]["message"], "unauthenticated method");
+    }
+
+    #[tokio::test]
+    async fn request_without_credentials_gets_a_401_response() {
+        assert_unauthenticated(call_with_auth(Cookie::default(), None).await).await;
+    }
+
+    #[tokio::test]
+    async fn request_with_wrong_password_gets_a_401_response() {
+        let cookie = Cookie::default();
+        let wrong = cookie_credentials(&Cookie::default());
+
+        assert_unauthenticated(call_with_auth(cookie, Some(wrong)).await).await;
+    }
+
+    #[tokio::test]
+    async fn request_with_valid_credentials_reaches_inner_service() {
+        let cookie = Cookie::default();
+        let credentials = cookie_credentials(&cookie);
+
+        let response = call_with_auth(cookie, Some(credentials)).await;
+
+        assert_eq!(response.status(), hyper::StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.as_ref(), INNER_BODY.as_bytes());
     }
 }
