@@ -2,15 +2,18 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+use chrono::DateTime;
 use futures::stream::StreamExt;
 use indexmap::IndexSet;
 use tokio::time::Instant;
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Height, MAX_BLOCK_BYTES},
     chain_tip::mock::MockChainTip,
     parameters::checkpoint::list::CheckpointList,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::{LockTime, Transaction},
+    transparent,
 };
 use zebra_network::{self as zn, InventoryResponse::Available};
 use zebra_state as zs;
@@ -679,4 +682,269 @@ async fn syncer_keeps_deferred_hashes_and_reobtains_without_waiting() {
             advertiser: None,
         })
         .await;
+}
+
+/// Returns a unique non-null hash for a synthetic checkpoint or downloaded height.
+fn synthetic_hash(height: u32) -> block::Hash {
+    let mut bytes = [0; 32];
+    bytes[..4].copy_from_slice(&height.to_le_bytes());
+    bytes[4] = 1;
+    block::Hash(bytes)
+}
+
+/// A full 400-block range of 2 MB charges is admitted above a 32 MiB bound, then drains to zero.
+/// The charges are simulated so this test does not retain 800 MB of actual blocks.
+#[tokio::test(start_paused = true)]
+async fn full_size_oldest_checkpoint_range_is_admitted_and_drains() {
+    let _init_guard = zebra_test::init();
+
+    let range_len = u32::try_from(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP)
+        .expect("the checkpoint height gap fits in a block height");
+    let max_checkpoint_height = Height(range_len * 2);
+    let checkpoints = Arc::new(
+        CheckpointList::from_list(
+            [0, range_len, range_len * 2].map(|height| (Height(height), synthetic_hash(height))),
+        )
+        .expect("synthetic checkpoints start at genesis and have unique entries"),
+    );
+    let budget = bounded(zebra_consensus::MAX_CHECKPOINT_BYTE_COUNT);
+    let mut admission =
+        PipelineAdmission::new(budget.clone(), checkpoints.clone(), max_checkpoint_height)
+            .expect("a bounded budget has an admission state");
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(0));
+
+    let started = Instant::now();
+    let mut downloads = Vec::new();
+    for height in 1..=range_len {
+        admission
+            .admit(&tip, Instant::now())
+            .await
+            .expect("the oldest checkpoint range is always admitted");
+        let mut download = admission.track(synthetic_hash(height));
+        download.downloaded(Height(height), MAX_BLOCK_BYTES);
+        downloads.push(download);
+    }
+    admission.drain();
+
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert_eq!(
+        budget.charged_bytes(),
+        MAX_BLOCK_BYTES * u64::from(range_len)
+    );
+    assert!(budget.is_over_limit());
+    assert!(oldest_range_is_fully_requested(
+        &checkpoints,
+        max_checkpoint_height,
+        Some(Height(0)),
+        &admission.heights,
+        admission.unknown_heights,
+    ));
+
+    admission
+        .admit(&tip, Instant::now())
+        .await
+        .expect_err("the next range waits while the completed oldest range is over the bound");
+
+    for (height, download) in (1..=range_len).zip(downloads) {
+        drop(download);
+        admission.observe(&synthetic_hash(height));
+    }
+    assert_eq!(budget.charged_bytes(), 0);
+    assert!(admission.is_empty());
+
+    tip_sender.send_best_tip_height(Height(range_len));
+    admission
+        .admit(&tip, Instant::now())
+        .await
+        .expect("draining the oldest range admits the next range");
+}
+
+/// The retained-charge ratio stays below the documented adversarial maximum for the three block
+/// shapes that maximize decoded transaction structures relative to their wire bytes.
+#[test]
+fn adversarial_block_charge_ratios_stay_below_the_documented_maximum() {
+    let _init_guard = zebra_test::init();
+
+    // Many minimal transactions are the dominant shape at about 36 times their wire bytes with the
+    // current decoded `Transaction` representation. Leave headroom for representation changes.
+    const MAX_ADVERSARIAL_CHARGE_RATIO: u64 = 40;
+
+    let shapes = [
+        ("many transactions", large_multi_transaction_block()),
+        ("many inputs", large_single_transaction_block_many_inputs()),
+        (
+            "many outputs",
+            large_single_transaction_block_many_outputs(),
+        ),
+    ];
+
+    for (shape, block) in shapes {
+        let wire = u64::try_from(block.zcash_serialized_size())
+            .expect("serialized block sizes fit in u64");
+        assert!((MAX_BLOCK_BYTES - 100..=MAX_BLOCK_BYTES).contains(&wire));
+
+        let charge = downloaded_block_charge(&block);
+        let ratio_thousandths = charge.saturating_mul(1000) / wire;
+        tracing::info!(
+            shape,
+            wire,
+            charge,
+            ratio_thousandths,
+            "adversarial retained-charge ratio"
+        );
+        assert!(
+            charge <= wire.saturating_mul(MAX_ADVERSARIAL_CHARGE_RATIO),
+            "{shape} charge {charge} exceeds {MAX_ADVERSARIAL_CHARGE_RATIO} times {wire} wire bytes",
+        );
+    }
+}
+
+/// Refusing an addition that would overflow preserves the exact charge for every guard's release.
+#[test]
+fn charge_overflow_never_corrupts_accounting() {
+    let _init_guard = zebra_test::init();
+
+    let budget = bounded(u64::MAX);
+    let first = budget
+        .try_charge(u64::MAX)
+        .expect("the first charge fits exactly")
+        .expect("the budget is bounded");
+    let overflow = match budget.try_charge(1) {
+        Err(error) => error,
+        Ok(unexpected_charge) => {
+            std::mem::forget(unexpected_charge);
+            std::mem::forget(first);
+            panic!("an overflowing charge must not return a guard");
+        }
+    };
+    assert_eq!(
+        overflow,
+        OverLimit {
+            charged: u64::MAX,
+            limit: u64::MAX,
+        }
+    );
+    assert_eq!(budget.charged_bytes(), u64::MAX);
+    drop(first);
+    assert_eq!(budget.charged_bytes(), 0);
+
+    let first = budget.charge(u64::MAX).expect("the budget is bounded");
+    let overflow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| budget.charge(1)));
+    if let Ok(unexpected_charge) = overflow {
+        std::mem::forget(unexpected_charge);
+        std::mem::forget(first);
+        panic!("an overflowing charge must not return a guard");
+    }
+    assert_eq!(budget.charged_bytes(), u64::MAX);
+    drop(first);
+    assert_eq!(budget.charged_bytes(), 0);
+}
+
+/// Returns a block just below the wire-size limit with as many small transactions as possible.
+fn large_multi_transaction_block() -> Block {
+    let transaction = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..])
+        .expect("the hard-coded transaction deserializes");
+    let transaction_bytes = transaction
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded transaction serializes");
+    let (header, header_bytes) = test_block_header();
+    let max_bytes = usize::try_from(MAX_BLOCK_BYTES).expect("the block size limit fits in usize");
+    let transaction_count = (max_bytes - header_bytes.len() - 4) / transaction_bytes.len();
+    let transactions = std::iter::repeat_n(Arc::new(transaction), transaction_count).collect();
+
+    Block {
+        header: header.into(),
+        transactions,
+    }
+}
+
+/// Returns a block just below the wire-size limit with as many transparent inputs as possible.
+fn large_single_transaction_block_many_inputs() -> Block {
+    let input = transparent::Input::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..])
+        .expect("the hard-coded input deserializes");
+    let input_bytes = input
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded input serializes");
+    let output = transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..])
+        .expect("the hard-coded output deserializes");
+    let output_bytes = output
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded output serializes");
+    let (header, header_bytes) = test_block_header();
+    let lock_time =
+        LockTime::Time(DateTime::from_timestamp(61, 0).expect("the hard-coded lock time is valid"));
+    let lock_time_bytes = lock_time
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded lock time serializes");
+    let max_bytes = usize::try_from(MAX_BLOCK_BYTES).expect("the block size limit fits in usize");
+    let input_count = (max_bytes
+        - header_bytes.len()
+        - 1
+        - 4
+        - lock_time_bytes.len()
+        - 4
+        - 1
+        - output_bytes.len())
+        / input_bytes.len();
+    let transaction = Transaction::test_v1(
+        std::iter::repeat_n(input, input_count).collect(),
+        vec![output],
+        lock_time,
+    );
+
+    Block {
+        header: header.into(),
+        transactions: vec![Arc::new(transaction)],
+    }
+}
+
+/// Returns a block just below the wire-size limit with as many transparent outputs as possible.
+fn large_single_transaction_block_many_outputs() -> Block {
+    let input = transparent::Input::zcash_deserialize(&zebra_test::vectors::DUMMY_INPUT1[..])
+        .expect("the hard-coded input deserializes");
+    let input_bytes = input
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded input serializes");
+    let output = transparent::Output::zcash_deserialize(&zebra_test::vectors::DUMMY_OUTPUT1[..])
+        .expect("the hard-coded output deserializes");
+    let output_bytes = output
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded output serializes");
+    let (header, header_bytes) = test_block_header();
+    let lock_time =
+        LockTime::Time(DateTime::from_timestamp(61, 0).expect("the hard-coded lock time is valid"));
+    let lock_time_bytes = lock_time
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded lock time serializes");
+    let max_bytes = usize::try_from(MAX_BLOCK_BYTES).expect("the block size limit fits in usize");
+    let output_count = (max_bytes
+        - header_bytes.len()
+        - 1
+        - 4
+        - lock_time_bytes.len()
+        - 1
+        - input_bytes.len()
+        - 4)
+        / output_bytes.len();
+    let transaction = Transaction::test_v1(
+        vec![input],
+        std::iter::repeat_n(output, output_count).collect(),
+        lock_time,
+    );
+
+    Block {
+        header: header.into(),
+        transactions: vec![Arc::new(transaction)],
+    }
+}
+
+/// Returns a test header and its canonical serialized bytes.
+fn test_block_header() -> (block::Header, Vec<u8>) {
+    let header = block::Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..])
+        .expect("the hard-coded header deserializes");
+    let bytes = header
+        .zcash_serialize_to_vec()
+        .expect("the hard-coded header serializes");
+    (header, bytes)
 }

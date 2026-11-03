@@ -110,25 +110,63 @@ impl PipelineBudget {
             .is_some_and(|bound| bound.charged.load(Ordering::Acquire) > bound.limit)
     }
 
+    /// Charges `bytes` to the pipeline until the returned guard is dropped, unless that takes
+    /// the charge above the bound (design §4.2 step 5).
+    ///
+    /// Returns `Ok(None)` without a byte bound, and [`OverLimit`] without charging if the bytes
+    /// don't fit. Never waits.
+    pub(crate) fn try_charge(&self, bytes: u64) -> Result<Option<PipelineCharge>, OverLimit> {
+        let Some(bound) = self.bound.as_ref() else {
+            return Ok(None);
+        };
+
+        let charged = bound
+            .charged
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |charged| {
+                charged
+                    .checked_add(bytes)
+                    .filter(|charged| *charged <= bound.limit)
+            })
+            .map_err(|charged| OverLimit {
+                charged,
+                limit: bound.limit,
+            })?
+            .saturating_add(bytes);
+        bound.export_metrics(charged);
+
+        Ok(Some(PipelineCharge {
+            bound: bound.clone(),
+            bytes,
+        }))
+    }
+
     /// Charges `bytes` to the pipeline until the returned guard is dropped.
     ///
     /// Returns `None` without a byte bound.
     pub(crate) fn charge(&self, bytes: u64) -> Option<PipelineCharge> {
-        let bound = self.bound.as_ref()?;
-        let charged = bound
-            .charged
-            .fetch_add(bytes, Ordering::AcqRel)
-            .saturating_add(bytes);
-        bound.export_metrics(charged);
-
-        Some(PipelineCharge {
-            bound: bound.clone(),
-            bytes,
-        })
+        Some(self.bound.as_ref()?.charge(bytes))
     }
 }
 
 impl Bound {
+    /// Charges `bytes` even above this bound's limit, as required for sync checkpoint liveness.
+    fn charge(self: &Arc<Self>, bytes: u64) -> PipelineCharge {
+        let charged = self
+            .charged
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |charged| {
+                charged.checked_add(bytes)
+            })
+            .expect("live downloaded blocks own their memory, so their total charge fits in u64")
+            .checked_add(bytes)
+            .expect("the successful atomic update already checked this addition");
+        self.export_metrics(charged);
+
+        PipelineCharge {
+            bound: self.clone(),
+            bytes,
+        }
+    }
+
     /// Exports the `charged` gauge and its excess over the limit (design §5).
     fn export_metrics(&self, charged: u64) {
         // Gauges are `f64`; byte counts lose precision only above 2^53 bytes.
@@ -136,6 +174,16 @@ impl Bound {
         metrics::gauge!("sync.pipeline.over_admitted_bytes")
             .set(charged.saturating_sub(self.limit) as f64);
     }
+}
+
+/// A block's charge did not fit under the pipeline's byte bound.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OverLimit {
+    /// The charge when the block was refused.
+    pub charged: u64,
+
+    /// The byte bound.
+    pub limit: u64,
 }
 
 /// The charge of one downloaded block, released when it is dropped.

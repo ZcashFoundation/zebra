@@ -875,6 +875,7 @@ impl StartCmd {
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
+            pipeline_budget: syncer.pipeline_budget(),
         };
         setup_tx
             .send(setup_data)

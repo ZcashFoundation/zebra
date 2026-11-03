@@ -469,6 +469,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
         state: state_service,
         latest_chain_tip,
         misbehavior_sender,
+        pipeline_budget: Default::default(),
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug.
@@ -1079,6 +1080,7 @@ async fn caches_getaddr_response() {
             state: state_service.clone(),
             latest_chain_tip,
             misbehavior_sender,
+            pipeline_budget: Default::default(),
         };
         let r = setup_tx.send(setup_data);
         // We can't expect or unwrap because the returned Result does not implement Debug
@@ -1336,6 +1338,7 @@ async fn setup(
         state: state_service.clone(),
         latest_chain_tip,
         misbehavior_sender,
+        pipeline_budget: Default::default(),
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
@@ -1466,6 +1469,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
         state: state_service,
         latest_chain_tip,
         misbehavior_sender,
+        pipeline_budget: Default::default(),
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug.
@@ -2128,6 +2132,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
             state: state.clone(),
             latest_chain_tip,
             misbehavior_sender,
+            pipeline_budget: Default::default(),
         })
         .is_ok());
 
@@ -2330,6 +2335,7 @@ async fn setup_block_range_serving(
         state: ServiceBuilder::new().buffer(1).service(state),
         latest_chain_tip,
         misbehavior_sender,
+        pipeline_budget: Default::default(),
     };
     // We can't expect or unwrap because the returned Result does not implement Debug.
     assert!(

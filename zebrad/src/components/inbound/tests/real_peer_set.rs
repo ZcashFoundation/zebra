@@ -849,6 +849,7 @@ async fn setup(
         state: state_service.clone(),
         latest_chain_tip,
         misbehavior_sender,
+        pipeline_budget: Default::default(),
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
