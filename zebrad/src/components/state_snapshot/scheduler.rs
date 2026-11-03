@@ -380,9 +380,6 @@ struct Peer<S> {
     /// The rate the peer delivers at, once it has answered.
     rate: Option<Rate>,
 
-    /// When the peer's last answer arrived.
-    last_answer: Option<Instant>,
-
     /// Refusals in a row.
     refusals: u32,
 
@@ -496,6 +493,51 @@ impl Download {
         self.unrequested.insert(start, end);
     }
 
+    /// Records the request for `length` bytes at `offset` as in flight from
+    /// `now`.
+    fn start_request(
+        &mut self,
+        offset: u64,
+        length: u32,
+        cancel: oneshot::Sender<Infallible>,
+        now: Instant,
+    ) {
+        self.settle(now);
+        self.in_flight.insert(
+            offset,
+            InFlight {
+                length,
+                effective: Duration::ZERO,
+                since: now,
+                _cancel: cancel,
+            },
+        );
+    }
+
+    /// Ends the request at `offset` at `now`, and returns how long it had the
+    /// peer's connection to itself, if it was in flight.
+    fn end_request(&mut self, offset: u64, now: Instant) -> Option<Duration> {
+        self.settle(now);
+        self.in_flight
+            .remove(&offset)
+            .map(|in_flight| in_flight.effective)
+    }
+
+    /// Brings every in-flight request's time with the connection to itself up
+    /// to `now`. The requests in flight share the peer's connection equally, as
+    /// quinn's streams of one priority do, so each gets the time since the
+    /// last change divided by their number.
+    fn settle(&mut self, now: Instant) {
+        let shares = u32::try_from(self.in_flight.len())
+            .expect("fewer requests are in flight than fit in a u32")
+            .max(1);
+        for in_flight in self.in_flight.values_mut() {
+            let share = now.saturating_duration_since(in_flight.since) / shares;
+            in_flight.effective = in_flight.effective.saturating_add(share);
+            in_flight.since = now;
+        }
+    }
+
     /// Adds `data`, received at `offset`, to the piece.
     fn accept(&mut self, offset: u64, data: Vec<u8>) {
         if data.is_empty() {
@@ -518,6 +560,13 @@ impl Download {
 struct InFlight {
     /// The requested length.
     length: u32,
+
+    /// How long the request has had the peer's connection to itself: each
+    /// moment it was in flight, divided by the requests in flight then.
+    effective: Duration,
+
+    /// When `effective` was last brought up to date.
+    since: Instant,
 
     /// Dropping it cancels the request, so dropping the download cancels them
     /// all.
@@ -548,8 +597,6 @@ enum Event {
         offset: u64,
         /// The requested length.
         length: u32,
-        /// When the request started.
-        started: Instant,
         /// How it ended.
         answer: Answer,
     },
@@ -625,9 +672,10 @@ fn after(instant: Instant, duration: Duration) -> Instant {
 }
 
 /// A peer's rate: moving averages of the bytes it delivers per answer and of
-/// the time each answer adds, each the first answer's, then moved a quarter of
-/// the way to each new answer's. Their ratio is the rate, which a small
-/// answer, such as the last few bytes of a piece, barely moves.
+/// the time each answer had the peer's connection to itself, each the first
+/// answer's, then moved a quarter of the way to each new answer's. Their ratio
+/// is the rate, which a small answer, such as the last few bytes of a piece,
+/// barely moves.
 #[derive(Clone, Copy, Debug)]
 struct Rate {
     /// The average bytes per answer.
@@ -678,7 +726,6 @@ where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
     S::Future: Send + 'static,
 {
-    let started = Instant::now();
     async move {
         let call = async {
             match service.ready().await {
@@ -699,7 +746,6 @@ where
             download,
             offset,
             length,
-            started,
             answer,
         }
     }
@@ -779,7 +825,6 @@ where
                 service,
                 download: None,
                 rate: None,
-                last_answer: None,
                 refusals: 0,
                 short_answers: 0,
                 slow_since: None,
@@ -1089,6 +1134,7 @@ where
             return;
         };
         let hash = self.pieces[download.piece].hash;
+        let now = Instant::now();
 
         while download.in_flight.len() < self.config.max_in_flight_per_peer {
             let Some((start, end)) = download.unrequested.pop_first() else {
@@ -1113,13 +1159,7 @@ where
                 .sub_range_deadline(ahead.saturating_add(u64::from(length)));
 
             let (cancel, cancelled) = oneshot::channel();
-            download.in_flight.insert(
-                start,
-                InFlight {
-                    length,
-                    _cancel: cancel,
-                },
-            );
+            download.start_request(start, length, cancel, now);
             self.futures.push(request(
                 self.peers[peer].service.clone(),
                 id,
@@ -1174,9 +1214,8 @@ where
                 download,
                 offset,
                 length,
-                started,
                 answer,
-            } => self.answered(download, (offset, length), started, answer),
+            } => self.answered(download, (offset, length), answer),
             Event::Hashed { download, assembly } => {
                 if let Some(state) = self.downloads.get_mut(&download) {
                     state.assembly = Some(assembly);
@@ -1198,21 +1237,18 @@ where
     }
 
     /// Handles the answer to the sub-range of download `id` at `offset`.
-    fn answered(
-        &mut self,
-        id: DownloadId,
-        (offset, length): (u64, u32),
-        started: Instant,
-        answer: Answer,
-    ) {
+    fn answered(&mut self, id: DownloadId, (offset, length): (u64, u32), answer: Answer) {
         // An abandoned download's answers are dropped.
         let Some(download) = self.downloads.get_mut(&id) else {
             return;
         };
-        download.in_flight.remove(&offset);
+        let now = Instant::now();
+        // So is an answer to a request the download no longer has in flight.
+        let Some(elapsed) = download.end_request(offset, now) else {
+            return;
+        };
         let peer = download.peer;
         let piece = download.piece;
-        let now = Instant::now();
 
         match answer {
             Answer::Cancelled => {}
@@ -1228,11 +1264,11 @@ where
             Answer::TimedOut => {
                 download.give_back(offset, offset + u64::from(length));
                 // Nothing arrived in time, so the sub-range is a short answer of no bytes.
-                self.measure(peer, 0, length, started, now);
+                self.measure(peer, 0, length, elapsed, now);
             }
             Answer::Response(zn::Response::ObjectNotFound) => self.not_found(peer, piece, now),
             Answer::Response(zn::Response::Object { size, data }) => {
-                self.delivered(id, (offset, length), started, size, data)
+                self.delivered(id, (offset, length), elapsed, size, data)
             }
             Answer::Response(response) => {
                 self.refused(peer, now, &format!("unexpected response {response}"))
@@ -1241,12 +1277,13 @@ where
     }
 
     /// Handles `data` delivered for the sub-range of download `id` at
-    /// `offset`, from an object the peer says has `size` bytes.
+    /// `offset`, from an object the peer says has `size` bytes, by a request
+    /// that had the peer's connection to itself for `elapsed`.
     fn delivered(
         &mut self,
         id: DownloadId,
         (offset, length): (u64, u32),
-        started: Instant,
+        elapsed: Duration,
         size: u64,
         data: Vec<u8>,
     ) {
@@ -1287,7 +1324,7 @@ where
         };
 
         self.peers[peer].refusals = 0;
-        if !self.measure(peer, delivered, length, started, Instant::now()) {
+        if !self.measure(peer, delivered, length, elapsed, Instant::now()) {
             // The peer stalled, so its partial piece was discarded.
             return;
         }
@@ -1386,26 +1423,25 @@ where
     }
 
     /// Updates `peer`'s rate with an answer of `delivered` bytes, at `now`, to
-    /// a sub-range of `length` bytes requested at `started`, and stalls the
-    /// peer after too many short answers in a row (design, §6.1 "Stalls").
-    /// Returns whether the peer is still downloading.
+    /// a sub-range of `length` bytes whose request had the peer's connection to
+    /// itself for `elapsed`, and stalls the peer after too many short answers
+    /// in a row (design, §6.1 "Stalls"). Returns whether the peer is still
+    /// downloading.
     fn measure(
         &mut self,
         peer: usize,
         delivered: u32,
         length: u32,
-        started: Instant,
+        elapsed: Duration,
         now: Instant,
     ) -> bool {
         let config = &self.config;
         let state = &mut self.peers[peer];
 
-        // The rate is the peer's, not one sub-range's (design, §6.1 "Stalls"). Its sub-ranges in
-        // flight share its connection, so a sub-range requested before the peer's last answer was
-        // delivered behind it, and only its time since then counts.
-        let from = state.last_answer.map_or(started, |last| last.max(started));
-        state.last_answer = Some(now);
-        let rate = Rate::update(state.rate, delivered, now.saturating_duration_since(from));
+        // The rate is the peer's, not one sub-range's (design, §6.1 "Stalls"): its sub-ranges in
+        // flight share its connection, so each is measured over the time it had the connection
+        // to itself.
+        let rate = Rate::update(state.rate, delivered, elapsed);
         state.rate = Some(rate);
 
         // Sub-ranges never go past the end of the piece, so a short answer is always one that
