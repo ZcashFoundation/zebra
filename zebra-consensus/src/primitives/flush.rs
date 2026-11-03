@@ -3,12 +3,9 @@
 //! Unlike a yielded notifier, these guards wait for actual queue admission, including cache
 //! misses delayed by backpressure.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::{collections::HashMap, sync::Arc};
 
-use parking_lot::Mutex;
+use crate::loom::parking_lot::Mutex;
 
 use super::{ed25519, halo2, sapling};
 
@@ -17,8 +14,14 @@ pub(crate) mod tests;
 
 type Pending = Arc<Mutex<Progress>>;
 
-static BLOCKS: LazyLock<Mutex<HashMap<usize, Pending>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(not(all(test, zebra_loom)))]
+static BLOCKS: std::sync::LazyLock<Mutex<HashMap<usize, Pending>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(all(test, zebra_loom))]
+::loom::lazy_static! {
+    static ref BLOCKS: Mutex<HashMap<usize, Pending>> = Mutex::new(HashMap::new());
+}
 
 tokio::task_local! {
     static CURRENT: Pending;

@@ -22,3 +22,30 @@ pub(crate) mod sync {
         pub(crate) use std::sync::atomic::{AtomicUsize, Ordering};
     }
 }
+
+/// `parking_lot::Mutex::lock()` is infallible, while loom's returns a `LockResult`, so the loom
+/// half wraps loom's mutex and call sites are the same in both builds.
+#[cfg(all(test, zebra_loom))]
+pub(crate) mod parking_lot {
+    /// A loom mutex with `parking_lot`'s infallible `lock()`.
+    #[derive(Debug)]
+    pub(crate) struct Mutex<T>(::loom::sync::Mutex<T>);
+
+    impl<T> Mutex<T> {
+        pub(crate) fn new(value: T) -> Self {
+            Self(::loom::sync::Mutex::new(value))
+        }
+
+        #[track_caller]
+        pub(crate) fn lock(&self) -> ::loom::sync::MutexGuard<'_, T> {
+            self.0
+                .lock()
+                .expect("loom's lock() always returns Ok: it panics itself on a poisoned lock")
+        }
+    }
+}
+
+#[cfg(not(all(test, zebra_loom)))]
+pub(crate) mod parking_lot {
+    pub(crate) use ::parking_lot::Mutex;
+}
