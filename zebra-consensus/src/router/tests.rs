@@ -484,3 +484,92 @@ async fn init_with_checkpoint_tip_verifies_like_init() -> Result<(), Report> {
 
     Ok(())
 }
+
+/// The state checkpoint validation of a snapshot-imported state checks genesis, skips the
+/// checkpoints the state never stored, and continues from the first checkpoint in its window.
+#[tokio::test(flavor = "multi_thread")]
+async fn state_checkpoint_validation_starts_at_the_snapshot_window() {
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(VERIFY_TIMEOUT_SECONDS), async {
+        let network = Network::Mainnet;
+        let checkpoints = network.checkpoint_list();
+        let genesis_hash = checkpoints
+            .hash(Height(0))
+            .expect("genesis is a checkpoint");
+        let window_start = Height(1_000_000);
+        let first_window_checkpoint = checkpoints
+            .min_height_in_range(window_start..)
+            .expect("Mainnet has checkpoints above the window start");
+        assert!(
+            checkpoints
+                .min_height_in_range(Height(1)..window_start)
+                .is_some(),
+            "the test needs checkpoints between genesis and the window start"
+        );
+
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let init = init_test(
+            Config::default(),
+            &network,
+            state.clone(),
+            read_state.clone(),
+        );
+
+        let answer = async {
+            read_state
+                .expect_request(zs::ReadRequest::HistoryCapabilities)
+                .await
+                .respond(zs::ReadResponse::HistoryCapabilities(
+                    zs::HistoryCapabilities {
+                        lowest_retained_height: window_start,
+                        lowest_known_height: window_start,
+                        snapshot_base: None,
+                    },
+                ));
+
+            // The checkpoint task and the tip request race for the state, so answer whichever
+            // comes until the task reaches a checkpoint the state does not have.
+            let mut checked = Vec::new();
+            let mut tip_answered = false;
+            loop {
+                let handler = state.expect_request_that(|_| true).await;
+                match *handler.request() {
+                    zs::Request::Tip => {
+                        tip_answered = true;
+                        handler.respond(zs::Response::Tip(Some((window_start, genesis_hash))));
+                    }
+                    zs::Request::BestChainBlockHash(height) => {
+                        checked.push(height);
+                        if height == Height(0) {
+                            handler.respond(zs::Response::BlockHash(Some(genesis_hash)));
+                        } else {
+                            handler.respond(zs::Response::BlockHash(None));
+                            break;
+                        }
+                    }
+                    ref request => panic!("unexpected state request: {request:?}"),
+                }
+            }
+            if !tip_answered {
+                state
+                    .expect_request(zs::Request::Tip)
+                    .await
+                    .respond(zs::Response::Tip(Some((window_start, genesis_hash))));
+            }
+            checked
+        };
+
+        let ((_router, _transaction_verifier, handles, _max_checkpoint_height, _prepared), checked) =
+            tokio::join!(init, answer);
+        assert_eq!(checked, vec![Height(0), first_window_checkpoint]);
+        handles
+            .state_checkpoint_verify_handle
+            .await
+            .expect("the checkpoint task does not panic");
+    })
+    .await
+    .expect("the test finishes in time");
+}

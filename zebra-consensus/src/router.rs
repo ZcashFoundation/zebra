@@ -18,6 +18,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use futures::{FutureExt, TryFutureExt};
@@ -67,6 +68,10 @@ mod tests;
 /// We deliberately add extra slots, because they only cost a small amount of
 /// memory, but missing slots can significantly slow down Zebra.
 const VERIFIER_BUFFER_BOUND: usize = 5;
+
+/// How long initialization waits for the state's history capabilities, which are a few point
+/// reads, before assuming a complete history.
+const HISTORY_CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The block verifier router routes requests to either the checkpoint verifier or the
 /// semantic block verifier, depending on the maximum checkpoint height.
@@ -468,11 +473,43 @@ where
     // Give other tasks priority before spawning the checkpoint task.
     tokio::task::yield_now().await;
 
+    // A state imported from a snapshot knows no blocks between genesis and its window start, and
+    // may still owe the chain a check of its snapshot block hash (DESIGN §2, §7). Both the
+    // checkpoint validation task and the checkpoint verifier need to know.
+    let history = match tokio::time::timeout(
+        HISTORY_CAPABILITIES_TIMEOUT,
+        read_state_service
+            .clone()
+            .oneshot(zs::ReadRequest::HistoryCapabilities),
+    )
+    .await
+    {
+        Ok(Ok(zs::ReadResponse::HistoryCapabilities(history))) => history,
+        Ok(Ok(response)) => {
+            unreachable!("unexpected response type: {response:?} to a history capabilities request")
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(
+                ?error,
+                "failed to read the state's history capabilities: assuming a complete history"
+            );
+            zs::HistoryCapabilities::default()
+        }
+        Err(_elapsed) => {
+            tracing::warn!(
+                ?HISTORY_CAPABILITIES_TIMEOUT,
+                "timed out reading the state's history capabilities: assuming a complete history"
+            );
+            zs::HistoryCapabilities::default()
+        }
+    };
+
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
     let checkpoint_state_service = state_service.clone();
     let checkpoint_sync = config.checkpoint_sync;
     let checkpoint_network = network.clone();
+    let lowest_known_height = history.lowest_known_height;
 
     let state_checkpoint_verify_handle = tokio::task::spawn(
         // TODO: move this into an async function?
@@ -499,6 +536,12 @@ where
             let mut already_warned = false;
 
             for (height, checkpoint_hash) in full_checkpoints.iter() {
+                // A snapshot-imported state has genesis and the blocks from its window start,
+                // but nothing in between, so those checkpoints cannot be checked: the snapshot
+                // commitment pins the chain at the window instead (DESIGN §7).
+                if *height > Height::MIN && *height < lowest_known_height {
+                    continue;
+                }
                 let checkpoint_state_service = checkpoint_state_service.clone();
                 let request = zebra_state::Request::BestChainBlockHash(*height);
 
@@ -585,7 +628,8 @@ where
         None => block,
     };
     let prepared_blocks = block.prepared_blocks();
-    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
+    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service)
+        .with_snapshot_base(history.snapshot_base);
     let checkpoint = match checkpoint_tip {
         Some(checkpoint_tip) => checkpoint.with_checkpoint_tip(checkpoint_tip),
         None => checkpoint,

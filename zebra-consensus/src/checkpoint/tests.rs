@@ -1583,3 +1583,91 @@ async fn fast_forward_applies_tip_sent_before_sender_drop() -> Result<(), Report
 
     Ok(())
 }
+
+/// A chain from the next checkpoint that does not reach a state snapshot's unchecked block hash
+/// fails its blocks with a specific error and leaves the verifier where it was, instead of
+/// panicking: the snapshot is wrong, not the checkpoint list.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_base_mismatch_fails_the_range_without_panicking() -> Result<(), Report> {
+    use zebra_chain::state_snapshot::ObjectHash;
+
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = (0..=5)
+        .map(|height| Arc::<Block>::zcash_deserialize(zebra_test::vectors::MAINNET_BLOCKS[&height]))
+        .collect::<Result<_, _>>()?;
+    let checkpoint_list: BTreeMap<block::Height, block::Hash> = [
+        (block::Height(0), blocks[0].hash()),
+        (block::Height(5), blocks[5].hash()),
+    ]
+    .into_iter()
+    .collect();
+
+    // The snapshot claims a block hash at height 2 that the chain never had.
+    let snapshot_height = block::Height(2);
+    let snapshot_hash = block::Hash([0x42; 32]);
+    let base = SnapshotBase {
+        window_start: block::Height(1),
+        height: snapshot_height,
+        block_hash: snapshot_hash,
+        manifest: ObjectHash([0; 32]),
+        deferred_checks: SnapshotBase::DEFERRED_BLOCK_HASH,
+    };
+
+    let state_service = zebra_state::init_test(&Mainnet).await;
+    let mut checkpoint_verifier = CheckpointVerifier::from_list(
+        checkpoint_list,
+        &Mainnet,
+        Some((snapshot_height, snapshot_hash)),
+        state_service,
+    )
+    .map_err(|e| eyre!(e))?
+    .with_snapshot_base(Some(base));
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        InitialTip(snapshot_height)
+    );
+
+    let mut verify_futures = Vec::new();
+    for block in &blocks[3..=5] {
+        let ready_verifier_service = checkpoint_verifier.ready().map_err(|e| eyre!(e)).await?;
+        verify_futures.push(timeout(
+            Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+            ready_verifier_service.call(block.clone()),
+        ));
+    }
+    for verify_future in verify_futures {
+        let error = verify_future
+            .await
+            .expect("timeout should not happen")
+            .expect_err("the chain does not reach the snapshot's block hash");
+        assert!(
+            matches!(
+                error,
+                VerifyCheckpointError::SnapshotBaseMismatch {
+                    checkpoint_height,
+                    snapshot_height: height,
+                    snapshot_hash: hash,
+                    chain_hash,
+                } if checkpoint_height == block::Height(5)
+                    && height == snapshot_height
+                    && hash == snapshot_hash
+                    && chain_hash == blocks[2].hash()
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(error.misbehavior_score(), 0);
+        assert!(!error.is_duplicate_request());
+    }
+
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        InitialTip(snapshot_height)
+    );
+    assert_eq!(
+        checkpoint_verifier.target_checkpoint_height(),
+        WaitingForBlocks
+    );
+
+    Ok(())
+}
