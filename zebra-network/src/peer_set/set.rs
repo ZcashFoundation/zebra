@@ -2232,6 +2232,10 @@ where
         // `poll_discover` can fill in the same poll cycle.
         self.drain_stall_events(&mut peer_cx);
 
+        // Remove banned and outdated connections before they can block admission
+        // of eligible replacements in the same connection-limit group.
+        self.disconnect_from_ineligible_peers();
+
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
         // available/useful peers.
