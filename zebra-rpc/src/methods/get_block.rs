@@ -20,6 +20,9 @@ use super::{
     SaplingTrees,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Returns the `confirmations` of a block at `depth` below the best chain tip.
 pub(crate) fn confirmations(depth: Option<u32>) -> i64 {
     // From <https://zcash.github.io/rpc/getblock.html>
