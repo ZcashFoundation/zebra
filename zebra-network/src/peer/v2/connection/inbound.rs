@@ -8,9 +8,20 @@
 //! response byte, is bounded by one request deadline, [`REQUEST_TIMEOUT`]
 //! after the stream was accepted: the type byte, the permit, the request
 //! body, the inbound service calls, and every write of the response. A
-//! request that misses its deadline is abandoned and its stream reset with
-//! `REFUSED` (draft, "Request Streams": a responder that cannot or will not
-//! serve a request MAY reset with `REFUSED`).
+//! request that misses its deadline, or whose connection is closing, is
+//! abandoned: its stream is reset with `REFUSED` while no response byte has
+//! been written (draft, "Request Streams": a responder that cannot or will
+//! not serve a request MAY reset with `REFUSED` instead of sending a
+//! response), and with `CANCELLED` once the response has begun. The draft
+//! defines no code for a responder that abandons a response part way: it
+//! gives `CANCELLED` to a requester that no longer wants a response, and has a
+//! responder that stops after a complete entry finish its sending direction.
+//! Finishing is not safe here, since a write cut off at the deadline may have
+//! sent part of an entry, which the requester would read as a truncated
+//! response, and `REFUSED` would tell the requester that a request it has
+//! part of an answer to was not served at all, so the stream is reset with
+//! `CANCELLED`, the code for a request that is no longer wanted, which is the
+//! closest the draft has.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -134,7 +145,7 @@ const MAX_TX_LOOKUPS_PER_RESPONSE: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 /// `get_addr_allowed` is cleared by the first `get-addr` request it lets
 /// through; a `get-addr` request is refused while it is clear.
 pub(super) async fn serve<S>(
-    mut send: SendStream,
+    send: SendStream,
     mut recv: RecvStream,
     inbound_service: S,
     permits: Arc<Semaphore>,
@@ -151,10 +162,14 @@ pub(super) async fn serve<S>(
     // many entries, cannot hold a request permit and the request's objects for longer than a
     // requester waits for a response. Dropping the exchange at the deadline releases both.
     let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+    let mut response = ResponseSend {
+        send,
+        written: false,
+    };
     let served = tokio::time::timeout_at(
         deadline,
         serve_inner(
-            &mut send,
+            &mut response,
             &mut recv,
             inbound_service,
             permits,
@@ -162,19 +177,21 @@ pub(super) async fn serve<S>(
             &get_addr_allowed,
         ),
     )
-    .await
-    // The response did not complete in time: abandon the request (draft, "Request Streams": a
-    // responder that will not serve a request MAY reset with `REFUSED`).
-    .unwrap_or(Err(Outcome::Refuse(ErrorCode::Refused)));
-    match served {
+    .await;
+    // The response did not complete in time: abandon the request.
+    let abandoned = Outcome::Refuse(response.abandon_code());
+    match served.unwrap_or(Err(abandoned)) {
         // The peer went away or cancelled the stream: nothing to do.
         Ok(()) | Err(Outcome::Transport) => {}
         Err(Outcome::Violation { reason, code }) => {
             events.close(Event::Violation { reason, code });
         }
-        Err(Outcome::Refuse(code)) => refuse_stream(Some(&mut send), &mut recv, code),
+        Err(Outcome::Refuse(code)) => refuse_stream(Some(&mut response.send), &mut recv, code),
+        // The connection is closing: the request is abandoned like one at its deadline, then the
+        // connection task closes the connection.
         Err(Outcome::Close(event)) => {
-            refuse_stream(Some(&mut send), &mut recv, ErrorCode::Refused);
+            let code = response.abandon_code();
+            refuse_stream(Some(&mut response.send), &mut recv, code);
             events.close(event);
         }
     }
@@ -213,7 +230,7 @@ impl From<WireError> for Outcome {
 /// bounds the whole exchange, every wait here included, by the request
 /// deadline.
 async fn serve_inner<S>(
-    send: &mut SendStream,
+    response: &mut ResponseSend,
     recv: &mut RecvStream,
     inbound_service: S,
     permits: Arc<Semaphore>,
@@ -289,9 +306,9 @@ where
         overloads,
     };
     match wire_request {
-        WireRequest::Headers(request) => serve_headers(send, request, inbound_service).await,
-        WireRequest::Blocks(request) => serve_blocks(send, request, inbound_service).await,
-        WireRequest::Tx(request) => serve_txs(send, request, inbound_service).await,
+        WireRequest::Headers(request) => serve_headers(response, request, inbound_service).await,
+        WireRequest::Blocks(request) => serve_blocks(response, request, inbound_service).await,
+        WireRequest::Tx(request) => serve_txs(response, request, inbound_service).await,
         WireRequest::Addr => {
             // To impede address-based fingerprinting, `get-addr` is only answered on a connection
             // the peer dialled, and only once (draft, "`get-addr`": reset with `REFUSED`
@@ -299,9 +316,9 @@ where
             if !get_addr_allowed.swap(false, Ordering::Relaxed) {
                 return Err(Outcome::Refuse(ErrorCode::Refused));
             }
-            serve_addr(send, inbound_service).await
+            serve_addr(response, inbound_service).await
         }
-        WireRequest::Mempool => serve_mempool(send, inbound_service).await,
+        WireRequest::Mempool => serve_mempool(response, inbound_service).await,
     }?;
 
     metrics::counter!(
@@ -311,7 +328,7 @@ where
     .increment(1);
 
     // `finish` only fails if the stream was already closed, which the peer may do at will.
-    let _ = send.finish();
+    let _ = response.send.finish();
     Ok(())
 }
 
@@ -338,13 +355,42 @@ where
     })
 }
 
-/// Writes `bytes` to the response stream. A peer that stops reading is
-/// bounded by the request deadline in [`serve`], not here, so a slow reader
-/// cannot extend the exchange one write at a time.
-async fn write(send: &mut SendStream, bytes: &[u8]) -> Result<(), Outcome> {
-    send.write_all(bytes)
-        .await
-        .map_err(|_error| Outcome::Transport)
+/// This node's sending direction of a request stream, which the response is
+/// written to.
+struct ResponseSend {
+    send: SendStream,
+    /// Whether any of the response may have reached the stream, which decides
+    /// the code the stream is reset with if the request is abandoned (see
+    /// [`ResponseSend::abandon_code`]).
+    written: bool,
+}
+
+impl ResponseSend {
+    /// The code the stream is reset with if the request is abandoned now, at
+    /// its deadline or because the connection is closing: `REFUSED` while none
+    /// of the response has been written (draft, "Request Streams": a
+    /// responder that will not serve a request MAY reset with `REFUSED`
+    /// instead of sending a response), and `CANCELLED` once it has begun,
+    /// which `REFUSED` would misreport as never served (see the module docs).
+    fn abandon_code(&self) -> ErrorCode {
+        if self.written {
+            ErrorCode::Cancelled
+        } else {
+            ErrorCode::Refused
+        }
+    }
+
+    /// Writes `bytes` to the response stream. A peer that stops reading is
+    /// bounded by the request deadline in [`serve`], not here, so a slow
+    /// reader cannot extend the exchange one write at a time.
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), Outcome> {
+        // Set before the write: a write abandoned at the deadline may have sent some of its bytes.
+        self.written = true;
+        self.send
+            .write_all(bytes)
+            .await
+            .map_err(|_error| Outcome::Transport)
+    }
 }
 
 /// Serves a `get-headers` request.
@@ -352,7 +398,7 @@ async fn write(send: &mut SendStream, bytes: &[u8]) -> Result<(), Outcome> {
 /// Transaction IDs are not supplied yet: with `tx_ids = 1`, every entry has
 /// `has_txs = 0`, and the requester falls back to `get-blocks`.
 async fn serve_headers<S>(
-    send: &mut SendStream,
+    response: &mut ResponseSend,
     request: GetHeaders,
     service: Inbound<'_, S>,
 ) -> Result<(), Outcome>
@@ -410,7 +456,7 @@ where
 
     let mut body = Vec::new();
     write_headers_response(&mut body, &headers, request.tx_ids)?;
-    write(send, &body).await
+    response.write(&body).await
 }
 
 /// Serves a `get-blocks` request, answering each hash in request order.
@@ -433,7 +479,7 @@ where
 /// A hash repeated in the request is answered again from its first answer
 /// without another lookup, and each copy counts against the byte budget.
 async fn serve_blocks<S>(
-    send: &mut SendStream,
+    response: &mut ResponseSend,
     request: GetBlocks,
     service: Inbound<'_, S>,
 ) -> Result<(), Outcome>
@@ -475,7 +521,7 @@ where
             Some(None) => ObjectResult::NotFound,
             None => unreachable!("the lookup loop only ends once the hash is answered"),
         };
-        sent = sent.saturating_add(write_entry(send, &entry).await?);
+        sent = sent.saturating_add(write_entry(response, &entry).await?);
     }
     Ok(())
 }
@@ -494,7 +540,7 @@ where
 /// them. A repeated reference is answered again from its first answer, and
 /// each copy counts against the byte budget.
 async fn serve_txs<S>(
-    send: &mut SendStream,
+    response: &mut ResponseSend,
     request: GetTx,
     service: Inbound<'_, S>,
 ) -> Result<(), Outcome>
@@ -546,7 +592,7 @@ where
                 }
             }
         };
-        sent = sent.saturating_add(write_entry(send, &entry).await?);
+        sent = sent.saturating_add(write_entry(response, &entry).await?);
     }
     Ok(())
 }
@@ -687,28 +733,28 @@ where
 /// Writes one `get-blocks` or `get-tx` response entry, and returns its
 /// length in bytes.
 async fn write_entry<T: zebra_chain::serialization::ZcashSerialize>(
-    send: &mut SendStream,
+    response: &mut ResponseSend,
     entry: &ObjectResult<T>,
 ) -> Result<usize, Outcome> {
     let mut bytes = Vec::new();
     entry.write(&mut bytes)?;
-    write(send, &bytes).await?;
+    response.write(&bytes).await?;
     Ok(bytes.len())
 }
 
 /// Serves a `get-addr` request with the addresses the inbound service
 /// supplies (already sanitized by the address book).
-async fn serve_addr<S>(send: &mut SendStream, service: Inbound<'_, S>) -> Result<(), Outcome>
+async fn serve_addr<S>(response: &mut ResponseSend, service: Inbound<'_, S>) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
-    let response = call_service(service, Request::Peers).await?;
-    let addrs: Vec<_> = match response {
+    let answer = call_service(service, Request::Peers).await?;
+    let addrs: Vec<_> = match answer {
         Response::Peers(addrs) => addrs.into_iter().take(MAX_ADDRS_PER_RESPONSE).collect(),
         _ => Vec::new(),
     };
     let body = encode_addr_response(&addrs)?;
-    write(send, &body).await
+    response.write(&body).await
 }
 
 /// Serves a `get-mempool` request with the current mempool contents, up to
@@ -716,7 +762,10 @@ where
 ///
 /// The subscription is not kept open yet: after the snapshot, the stream is
 /// finished, which the draft defines as ending the subscription.
-async fn serve_mempool<S>(send: &mut SendStream, service: Inbound<'_, S>) -> Result<(), Outcome>
+async fn serve_mempool<S>(
+    response: &mut ResponseSend,
+    service: Inbound<'_, S>,
+) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
@@ -724,8 +773,8 @@ where
         .try_into()
         .expect("the constant is 25,000, which fits in any usize");
 
-    let response = call_service(service, Request::MempoolTransactionIds).await?;
-    if let Response::TransactionIds(ids) = response {
+    let answer = call_service(service, Request::MempoolTransactionIds).await?;
+    if let Response::TransactionIds(ids) = answer {
         // # Security
         //
         // As on the legacy connection, a snapshot this large is unlikely with the default mempool
@@ -742,7 +791,7 @@ where
         for id in ids.into_iter().take(max_ids) {
             let payload = encode_tx_record(id);
             let record = RecordCodec::encode_record(&payload)?;
-            write(send, &record).await?;
+            response.write(&record).await?;
         }
     }
     Ok(())

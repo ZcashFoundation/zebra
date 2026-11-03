@@ -4,7 +4,7 @@
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use quinn::{Connection, Endpoint, RecvStream, SendStream};
 use tokio::{sync::broadcast, task::JoinSet, time::Instant};
 use tower::{service_fn, util::BoxCloneService, Service, ServiceExt};
@@ -24,11 +24,11 @@ use crate::{
             connection::{
                 announcements::AnnouncementWriter,
                 inbound::{
-                    INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
-                    RESPONSE_BYTES_LIMIT,
+                    serve as serve_request_stream, INBOUND_REQUEST_CONCURRENCY,
+                    MAX_LOOKUP_CALLS_PER_RESPONSE, RESPONSE_BYTES_LIMIT,
                 },
                 outbound::{drive, RequestContext, RequestSend, MAX_OUTBOUND_REQUEST_STREAMS},
-                spawn_connection, ConnectionParams, Event, Events, EVENT_QUEUE,
+                spawn_connection, ConnectionParams, Event, Events, Overloads, EVENT_QUEUE,
                 MAX_UNKNOWN_HANDSHAKE_RECORDS,
             },
             handshake::{CompletedHandshake, Role},
@@ -2339,8 +2339,9 @@ fn witnessed_mempool_service(counts: Vec<usize>) -> TestService {
 
 /// A response is bounded by one deadline from when its stream is accepted,
 /// however the peer paces its reads: a peer that reads just fast enough to
-/// keep every write moving still has the stream reset with `REFUSED` at
-/// `REQUEST_TIMEOUT`, and the connection stays open.
+/// keep every write moving still has the stream reset at `REQUEST_TIMEOUT`,
+/// with `CANCELLED`, since the response had begun, and the connection stays
+/// open.
 ///
 /// The raw peer grants the node a small receive window and reads one
 /// `get-mempool` snapshot, about 1.7 MB, at about 32 kB a second, so it
@@ -2391,7 +2392,7 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
         );
         match read {
             Err(quinn::ReadError::Reset(code)) => {
-                assert_eq!(code, app_error_code(ErrorCode::Refused))
+                assert_eq!(code, app_error_code(ErrorCode::Cancelled))
             }
             other => panic!("expected a reset, got {other:?}"),
         }
@@ -2406,7 +2407,8 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
 
 /// An inbound service call is bounded by the request deadline too: a
 /// request the inbound service never answers has its stream reset with
-/// `REFUSED` at `REQUEST_TIMEOUT`, and the connection stays open.
+/// `REFUSED` at `REQUEST_TIMEOUT`, since none of the response was written,
+/// and the connection stays open.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time.
 #[tokio::test]
@@ -2429,6 +2431,164 @@ async fn unanswered_lookups_end_at_the_request_deadline() {
             raw.connection.close_reason().is_none(),
             "the connection stays open"
         );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A response the deadline interrupts part way is cancelled, not refused: a
+/// `get-blocks` request whose second lookup the inbound service never
+/// answers delivers its first entry, then has its stream reset with
+/// `CANCELLED` at `REQUEST_TIMEOUT`, so the requester keeps the entry it
+/// received instead of learning that its request was refused, and the
+/// connection stays open.
+///
+/// This takes `REQUEST_TIMEOUT` of real time.
+#[tokio::test]
+async fn interrupted_responses_are_cancelled_at_the_request_deadline() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let block = Fixture::new().blocks[1].clone();
+        // Answers a lookup of `block`'s hash with that block alone, and never answers another.
+        let service = {
+            let block = block.clone();
+            service_fn(move |request: Request| {
+                let block = block.clone();
+                async move {
+                    match request {
+                        Request::BlocksByHash(hashes) if hashes.contains(&block.hash()) => {
+                            Ok::<Response, BoxError>(Response::Blocks(vec![
+                                InventoryResponse::Available((block, None)),
+                            ]))
+                        }
+                        _ => futures::future::pending().await,
+                    }
+                }
+            })
+        };
+        let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(service))).await;
+        let started = Instant::now();
+
+        let request = WireRequest::Blocks(GetBlocks {
+            hashes: vec![block.hash(), block::Hash([0xAB; 32])],
+        });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        let mut received = Vec::new();
+        let read = loop {
+            match recv.read_chunk(usize::MAX, true).await {
+                Ok(Some(chunk)) => received.extend_from_slice(&chunk.bytes),
+                other => break other,
+            }
+        };
+        assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
+        assert_eq!(received, found(&block), "the first entry is delivered");
+        match read {
+            Err(quinn::ReadError::Reset(code)) => {
+                assert_eq!(code, app_error_code(ErrorCode::Cancelled))
+            }
+            other => panic!("expected a reset, got {other:?}"),
+        }
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the connection stays open"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An inbound service that answers one call from the fixture, is busy until
+/// `shutdown` resolves, and has shut down after that: it fails while a
+/// response is under way, at a moment the test chooses.
+#[derive(Clone)]
+struct ShutsDownAfterOneCall {
+    fixture: Fixture,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    shutdown: futures::future::Shared<tokio::sync::oneshot::Receiver<()>>,
+}
+
+impl Service<Request> for ShutsDownAfterOneCall {
+    type Response = Response;
+    type Error = BoxError;
+    type Future = futures::future::Ready<Result<Response, BoxError>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), BoxError>> {
+        if self.calls.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            return std::task::Poll::Ready(Ok(()));
+        }
+        std::future::Future::poll(std::pin::Pin::new(&mut self.shutdown), cx)
+            .map(|_shutdown| Err("the inbound service has shut down".into()))
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        futures::future::ready(Ok(self.fixture.answer(request)))
+    }
+}
+
+/// A response abandoned because the inbound service shut down part way
+/// through it is cancelled, not refused, like one abandoned at its deadline,
+/// and the connection task is told to close the connection. The stream task
+/// is driven directly, with nothing closing the connection, so the reset
+/// reaches the requester.
+#[tokio::test]
+async fn interrupted_responses_are_cancelled_when_the_inbound_service_shuts_down() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
+        let fixture = Fixture::new();
+        let block = fixture.blocks[1].clone();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let service = ShutsDownAfterOneCall {
+            fixture,
+            calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            shutdown: shutdown_rx.shared(),
+        };
+        let (events, mut fatal_rx, mut events_rx) = Events::channel();
+
+        // The first hash is looked up and written; the second lookup waits on the busy service.
+        let request = WireRequest::Blocks(GetBlocks {
+            hashes: vec![block.hash(), block::Hash([0xAB; 32])],
+        });
+        let mut recv = raw_request(&requester, &request).await;
+        let (send, server_recv) = responder.accept_bi().await.expect("accepts");
+        let served = tokio::spawn(serve_request_stream(
+            send,
+            server_recv,
+            service,
+            Arc::new(tokio::sync::Semaphore::new(INBOUND_REQUEST_CONCURRENCY)),
+            Arc::new(Overloads::new()),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            events,
+        ));
+
+        let expected = found(&block);
+        let mut received = vec![0; expected.len()];
+        recv.read_exact(&mut received)
+            .await
+            .expect("the first entry is delivered");
+        assert_eq!(received, expected);
+        assert!(
+            fatal_rx.try_recv().is_err(),
+            "nothing closes the connection while the service is busy"
+        );
+
+        // The inbound service shuts down between two lookups: the response is abandoned part way.
+        shutdown_tx.send(()).expect("the service is waiting");
+        assert_reset(recv.read_to_end(1024).await, ErrorCode::Cancelled);
+        served.await.expect("the stream task completes");
+        assert!(
+            matches!(fatal_rx.try_recv(), Ok(Event::ServiceShutdown)),
+            "the connection task is told to close the connection"
+        );
+        assert!(events_rx.try_recv().is_err(), "no other event is queued");
     })
     .await
     .expect("the test completes well within the timeout");
