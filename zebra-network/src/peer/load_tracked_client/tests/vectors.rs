@@ -1,8 +1,11 @@
 //! Fixed test vectors for request routing by connection capability.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
-use zebra_chain::{block::Height, state_snapshot::ObjectHash};
+use zebra_chain::{
+    block::{self, Height},
+    state_snapshot::ObjectHash,
+};
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
@@ -75,4 +78,37 @@ async fn object_requests_route_only_to_v2_artifact_servers() {
         // Version 2 address records go to the version 2 address segment instead.
         assert_eq!(client.supports(&Request::Peers), !v2);
     }
+}
+
+/// A zero-service v2 peer can be a short-lived bootstrap client, so ordinary
+/// peer-set work is never routed to it. Artifact routing is independent, and
+/// limited-service peers remain usable for ordinary block requests.
+#[tokio::test]
+async fn zero_service_v2_peers_are_not_used_for_ordinary_requests() {
+    let _init_guard = zebra_test::init();
+    let headers = Request::FindHeaders {
+        known_blocks: Vec::new(),
+        stop: Some(block::Hash([0; 32])),
+    };
+
+    // An ordinary request that is neither an inventory download nor a find request.
+    let advertise = Request::AdvertiseTransactionIds(HashSet::new(), None);
+
+    let (client, _harness) = test_client(PeerServices::empty(), true);
+    assert!(!client.supports(&advertise));
+    assert!(!client.supports(&headers));
+
+    let (client, _harness) = test_client(PeerServices::NODE_NETWORK_LIMITED, true);
+    assert!(client.supports(&advertise));
+    assert!(client.supports(&headers));
+    // Version 2 address records go to the version 2 address segment, whatever the services.
+    assert!(!client.supports(&Request::Peers));
+
+    let (client, _harness) = test_client(PeerServices::NODE_SYNC_ARTIFACTS, true);
+    assert!(!client.supports(&headers));
+    assert!(client.supports(&Request::Object {
+        hash: ObjectHash([0; 32]),
+        offset: 0,
+        length: 1,
+    }));
 }
