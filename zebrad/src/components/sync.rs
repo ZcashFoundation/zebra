@@ -1603,7 +1603,20 @@ where
 
     /// Download and verify the genesis block, if it isn't currently known to
     /// our node.
+    ///
+    /// A state that already has a tip is not checked: a snapshot-imported state
+    /// ships genesis with its window (design, §7), and any other state committed
+    /// genesis before its tip, so asking would only download a block below the
+    /// tip.
     async fn request_genesis(&mut self) -> Result<(), Report> {
+        if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+            debug!(
+                ?tip_height,
+                "the state has a tip, so the genesis block is not requested"
+            );
+            return Ok(());
+        }
+
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
         //  - getblocks requires at least one hash
