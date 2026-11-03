@@ -152,7 +152,8 @@ pub(crate) fn export_with_window(
         STATE_DATABASE_KIND,
         &state_database_format_version_in_code(),
         network,
-        true,
+        // A read-only instance never runs format upgrades, whatever this flag says.
+        false,
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
             .map(ToString::to_string),
@@ -290,7 +291,9 @@ fn check_tip(
 
 /// Refuses a state that has no body for the first block of the window.
 fn check_history(db: &ZebraDb, window_start: block::Height) -> Result<(), SnapshotError> {
-    let history = db.history_capabilities()?;
+    let history = db
+        .history_capabilities()
+        .map_err(SnapshotError::HistoryRead)?;
 
     if !history.has_block_body(window_start) || window_start < history.lowest_known_height {
         return Err(SnapshotError::PrunedBelowWindow {
