@@ -22,6 +22,12 @@ use crate::{
 const RETENTION: u32 = MAX_BLOCK_REORG_HEIGHT + 1;
 const TIP: u32 = RETENTION + 249;
 
+thread_local! {
+    /// Delivers cancellation during the first batch that finds pruning caught up.
+    pub(super) static CANCEL_DURING_IDLE_BATCH: std::cell::RefCell<Option<Sender<()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 fn network() -> Network {
     Network::new_regtest(zebra_chain::parameters::testnet::RegtestParameters {
         activation_heights: ConfiguredActivationHeights {
@@ -144,15 +150,23 @@ fn archive_conversion_is_bounded_and_retention_never_restores_bodies() {
     let cache = tempfile::tempdir().unwrap();
     let state = populated(&config(cache.path().to_path_buf()));
     state.db.mark_ready_for_pruning();
-    assert!(prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap());
+    assert_eq!(
+        prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap(),
+        Some(Height(1)..Height(101)),
+    );
     assert_eq!(floor(&state.db), Height(101));
     assert!(state.db.block(Height(0).into()).unwrap().is_some());
     assert!(state.db.block(Height(1).into()).is_err());
     assert!(state.db.block(Height(101).into()).unwrap().is_some());
 
-    assert!(!prune_batch(&state.db, TIP + 1, &mut Default::default()).unwrap());
+    assert!(prune_batch(&state.db, TIP + 1, &mut Default::default())
+        .unwrap()
+        .is_none());
     assert_eq!(floor(&state.db), Height(101));
-    while prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap() {}
+    while prune_batch(&state.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .is_some()
+    {}
     assert_eq!(floor(&state.db), Height(250));
     assert!(state.db.block(Height(TIP).into()).unwrap().is_some());
 }
@@ -164,7 +178,9 @@ fn committed_batches_resume_after_process_exit() {
     if let Some(cache) = std::env::var_os(CHILD_CACHE) {
         let state = populated(&config(cache.into()));
         state.db.mark_ready_for_pruning();
-        assert!(prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap());
+        assert!(prune_batch(&state.db, RETENTION, &mut Default::default())
+            .unwrap()
+            .is_some());
         assert_eq!(floor(&state.db), Height(101));
         // Skip database and worker destructors, as an abrupt process exit would.
         std::process::exit(0);
@@ -196,9 +212,14 @@ fn committed_batches_resume_after_process_exit() {
     let state = open(&config(cache.path().to_path_buf()));
     assert_eq!(floor(&state.db), Height(101));
     state.db.mark_ready_for_pruning();
-    assert!(prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap());
+    assert!(prune_batch(&state.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .is_some());
     assert_eq!(floor(&state.db), Height(201));
-    while prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap() {}
+    while prune_batch(&state.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .is_some()
+    {}
     assert_eq!(floor(&state.db), Height(250));
 }
 
@@ -285,7 +306,10 @@ fn pruning_preserves_non_finalized_forks_and_reorg_validation() {
         .commit_new_chain(competing.clone().prepare(), &finalized.db)
         .unwrap();
     finalized.db.mark_ready_for_pruning();
-    while prune_batch(&finalized.db, RETENTION, &mut Default::default()).unwrap() {}
+    while prune_batch(&finalized.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .is_some()
+    {}
     pruned
         .commit_new_chain(competing.clone().prepare(), &finalized.db)
         .unwrap();
@@ -294,4 +318,151 @@ fn pruning_preserves_non_finalized_forks_and_reorg_validation() {
     archive.invalidate_block(competing.hash()).unwrap();
     pruned.invalidate_block(competing.hash()).unwrap();
     assert!(archive.eq_internal_state(&pruned));
+}
+
+#[test]
+fn catch_up_compaction_reclaims_bodies_but_skips_single_batches() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&config(cache.path().to_path_buf()));
+    let transactions = state.db.cf_handle("tx_by_loc").unwrap();
+    state
+        .db
+        .set_options_cf(&transactions, &[("disable_auto_compactions", "true")])
+        .unwrap();
+    state.db.flush_cf(&transactions).unwrap();
+    let body_files = || {
+        state
+            .db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|file| file.column_family_name == "tx_by_loc")
+            .map(|file| (file.name, file.num_entries))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let original_entries: u64 = body_files().values().sum();
+
+    state.db.mark_ready_for_pruning();
+    let deleted = prune_batch(&state.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .unwrap();
+    state.db.flush_cf(&transactions).unwrap();
+    let before = body_files();
+    compact_catch_up(&state.db, deleted, false);
+    assert_eq!(
+        body_files(),
+        before,
+        "one batch must not trigger compaction"
+    );
+
+    while prune_batch(&state.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .is_some()
+    {}
+    compact_catch_up(&state.db, Height(1)..floor(&state.db), false);
+    assert!(
+        body_files().values().sum::<u64>() < original_entries,
+        "catch-up must remove obsolete transaction rows from SST files"
+    );
+    assert!(state.db.block(Height(0).into()).unwrap().is_some());
+    assert!(state.db.block(Height(249).into()).is_err());
+    assert!(state.db.block(Height(250).into()).unwrap().is_some());
+}
+
+#[test]
+fn restarted_worker_reclaims_previously_pruned_bodies_without_a_backlog() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&config(cache.path().to_path_buf()));
+    let transactions = state.db.cf_handle("tx_by_loc").unwrap();
+    state
+        .db
+        .set_options_cf(&transactions, &[("disable_auto_compactions", "true")])
+        .unwrap();
+    state.db.flush_cf(&transactions).unwrap();
+    let body_entries = || {
+        state
+            .db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|file| file.column_family_name == "tx_by_loc")
+            .map(|file| file.num_entries)
+            .sum::<u64>()
+    };
+    let original_entries = body_entries();
+
+    // Simulate stopping after the last catch-up batch, before compaction starts.
+    state.db.mark_ready_for_pruning();
+    while prune_batch(&state.db, RETENTION, &mut Default::default())
+        .unwrap()
+        .is_some()
+    {}
+    state.db.flush_cf(&transactions).unwrap();
+    assert!(body_entries() >= original_entries);
+    assert_eq!(floor(&state.db), retention_floor(Height(TIP), RETENTION));
+
+    let (_wake, receiver) = bounded(1);
+    let task = PruningTask::spawn(state.db.clone(), RETENTION, receiver);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while body_entries() >= original_entries {
+        task.check_for_panics();
+        assert!(
+            Instant::now() < deadline,
+            "startup must reclaim tombstoned SST rows even without a deletion backlog"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    task.stop();
+    assert!(state.db.block(Height(0).into()).unwrap().is_some());
+    assert!(state.db.block(Height(250).into()).unwrap().is_some());
+}
+
+#[test]
+fn cancellation_during_a_batch_skips_pending_compaction() {
+    let _init_guard = zebra_test::init();
+    for previously_pruned in [false, true] {
+        let cache = tempfile::tempdir().unwrap();
+        let state = populated(&config(cache.path().to_path_buf()));
+        let transactions = state.db.cf_handle("tx_by_loc").unwrap();
+        state
+            .db
+            .set_options_cf(&transactions, &[("disable_auto_compactions", "true")])
+            .unwrap();
+        state.db.flush_cf(&transactions).unwrap();
+        let body_entries = || {
+            state
+                .db
+                .live_files()
+                .unwrap()
+                .into_iter()
+                .filter(|file| file.column_family_name == "tx_by_loc")
+                .map(|file| file.num_entries)
+                .sum::<u64>()
+        };
+        let original_entries = body_entries();
+        state.db.mark_ready_for_pruning();
+
+        // Cover both a new backlog and the zero-width startup range on already-pruned state.
+        if previously_pruned {
+            while prune_batch(&state.db, RETENTION, &mut Default::default())
+                .unwrap()
+                .is_some()
+            {}
+            state.db.flush_cf(&transactions).unwrap();
+        }
+
+        let (cancel, cancelled) = bounded(1);
+        CANCEL_DURING_IDLE_BATCH.with(|hook| *hook.borrow_mut() = Some(cancel));
+        let (_wake, wake) = bounded(1);
+        run(state.db.clone(), RETENTION, wake, cancelled).unwrap();
+
+        CANCEL_DURING_IDLE_BATCH.with(|hook| assert!(hook.borrow().is_none()));
+        assert_eq!(floor(&state.db), retention_floor(Height(TIP), RETENTION));
+        assert!(
+            body_entries() >= original_entries,
+            "cancellation during a batch must leave tombstoned bodies uncompacted"
+        );
+    }
 }
