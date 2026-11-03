@@ -18,7 +18,7 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::{
-    disk_format::upgrade::{CancelFormatChange, DiskFormatUpgrade},
+    disk_format::upgrade::{CancelFormatChange, DiskFormatUpgrade, FormatCheckError},
     DiskWriteBatch, ZebraDb,
 };
 
@@ -215,14 +215,24 @@ pub fn reset(
 /// it can run before the upgrade. Once pruning may run, or after pruning, it checks the stored
 /// subtree against the vector, because pruning can delete the completing block's body at any time.
 pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String> {
+    subtree_format_calculation_pre_checks_typed(db).map_err(|error| error.to_string())
+}
+
+/// The typed form used by snapshot import error attribution.
+pub fn subtree_format_calculation_pre_checks_typed(db: &ZebraDb) -> Result<(), FormatCheckError> {
+    if db.network() != Mainnet {
+        return Ok(());
+    }
+    let history = db.history_capabilities()?;
+
     // Check the entire format before returning any errors.
-    let sapling_result = quick_check_sapling_subtrees(db);
-    let orchard_result = quick_check_orchard_subtrees(db);
+    let sapling_result = quick_check_sapling_subtrees(db, history);
+    let orchard_result = quick_check_orchard_subtrees(db, history);
 
     if sapling_result.is_err() || orchard_result.is_err() {
-        let err = Err(format!(
+        let err = Err(FormatCheckError::Invalid(format!(
             "missing or bad first subtree: sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        ));
+        )));
         warn!(?err);
         return err;
     }
@@ -268,20 +278,15 @@ fn first_orchard_mainnet_subtree() -> NoteCommitmentSubtree<orchard::tree::Node>
 /// rather than waiting ~20 minutes to see if it failed.
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
-fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
-    // We check the first sapling subtree on mainnet, so skip this check if it isn't available.
-    if db.network() != Mainnet {
-        return Ok(());
-    }
-
+fn quick_check_sapling_subtrees(
+    db: &ZebraDb,
+    history: crate::HistoryCapabilities,
+) -> Result<(), &'static str> {
     let expected_subtree = first_sapling_mainnet_subtree();
     // Pruning can delete the completing block's body between any availability check and the
     // body read, so once it may run, only the stored subtree is checked.
     let pruning_may_run = db.ready_for_pruning() && db.config().prune_blocks_older_than.is_some();
-    let body_retained = db
-        .history_capabilities()
-        .map_err(|_| "could not read historical body availability")?
-        .has_block_body(expected_subtree.end_height);
+    let body_retained = history.has_block_body(expected_subtree.end_height);
     if pruning_may_run || !body_retained {
         if let Some(stored_subtree) = db.sapling_subtree_by_index(0) {
             return if stored_subtree == expected_subtree {
@@ -357,20 +362,15 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 /// rather than waiting ~20 minutes to see if it failed.
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
-fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
-    // We check the first orchard subtree on mainnet, so skip this check if it isn't available.
-    if db.network() != Mainnet {
-        return Ok(());
-    }
-
+fn quick_check_orchard_subtrees(
+    db: &ZebraDb,
+    history: crate::HistoryCapabilities,
+) -> Result<(), &'static str> {
     let expected_subtree = first_orchard_mainnet_subtree();
     // Pruning can delete the completing block's body between any availability check and the
     // body read, so once it may run, only the stored subtree is checked.
     let pruning_may_run = db.ready_for_pruning() && db.config().prune_blocks_older_than.is_some();
-    let body_retained = db
-        .history_capabilities()
-        .map_err(|_| "could not read historical body availability")?
-        .has_block_body(expected_subtree.end_height);
+    let body_retained = history.has_block_body(expected_subtree.end_height);
     if pruning_may_run || !body_retained {
         if let Some(stored_subtree) = db.orchard_subtree_by_index(0) {
             return if stored_subtree == expected_subtree {

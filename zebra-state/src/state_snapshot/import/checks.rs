@@ -26,7 +26,7 @@ use zebra_chain::{
 
 use crate::{
     service::finalized_state::{
-        CancelFormatChange, DbFormatChange, TransactionLocation, ZebraDb,
+        CancelFormatChange, DbFormatChange, FormatCheckError, TransactionLocation, ZebraDb,
         OUTPUT_LOCATION_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES,
     },
     state_snapshot::format::{ComponentId, Manifest},
@@ -505,7 +505,6 @@ fn check_tree_roots(
 
     let sprout = singletons.sprout_tree.recalculate_root();
     anchor(ComponentId::SproutAnchors, sprout.into(), "Sprout tip")?;
-
     anchor(
         ComponentId::SproutAnchors,
         sprout::tree::NoteCommitmentTree::default()
@@ -782,13 +781,17 @@ pub(super) fn check_database(
     network: &Network,
     base: &SnapshotBase,
 ) -> Result<(), SnapshotError> {
-    let fail = |detail: String| refused(ImportCheck::DatabaseFormat, detail);
     let db = ZebraDb::open_without_format_change(config, network).map_err(SnapshotError::Open)?;
+    check_open_database(&db, base)
+}
 
+/// Runs the post-open database checks on `db`.
+pub(super) fn check_open_database(db: &ZebraDb, base: &SnapshotBase) -> Result<(), SnapshotError> {
+    let fail = |detail: String| refused(ImportCheck::DatabaseFormat, detail);
     let running_version = db.format_version_in_code();
     let disk_version = db
         .format_version_on_disk()
-        .map_err(|error| fail(format!("unreadable database version: {error}")))?;
+        .map_err(|source| SnapshotError::FormatVersion { source })?;
     if !matches!(
         DbFormatChange::open_database(&running_version, disk_version.clone()),
         DbFormatChange::CheckOpenCurrent { .. }
@@ -823,9 +826,17 @@ pub(super) fn check_database(
 
     // The checks are never cancelled: the sender lives until they return.
     let (_cancel, cancel_receiver) = crossbeam_channel::bounded(1);
-    match DbFormatChange::format_validity_checks_detailed(&db, &cancel_receiver) {
+    match DbFormatChange::format_validity_checks_detailed_typed(db, &cancel_receiver) {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(detail)) => Err(fail(detail)),
+        Ok(Err(error)) => Err(database_format_error(error)),
         Err(CancelFormatChange) => Err(fail("the format checks were cancelled".to_string())),
+    }
+}
+
+/// Maps invalid snapshot contents to a refusal, but keeps local history-read failures retryable.
+pub(super) fn database_format_error(error: FormatCheckError) -> SnapshotError {
+    match error {
+        FormatCheckError::Invalid(detail) => refused(ImportCheck::DatabaseFormat, detail),
+        FormatCheckError::HistoryRead(error) => SnapshotError::HistoryRead(error),
     }
 }

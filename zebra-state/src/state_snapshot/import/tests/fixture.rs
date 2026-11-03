@@ -17,11 +17,12 @@ use std::{
 use zebra_chain::{
     amount::Amount,
     block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, Height},
+    orchard,
     parameters::{
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
         Network, NetworkKind, NetworkUpgrade,
     },
-    sapling,
+    sapling, sprout,
     state_snapshot::{ObjectHash, StateSnapshotCommitment},
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, LockTime, Transaction},
@@ -76,12 +77,27 @@ pub(super) fn network_with_nu5_at(nu5: u32) -> Network {
     regtest(nu5, vec![checkpoint_above_snapshot()])
 }
 
+/// The fixture network with NU6.3 active from height one.
+pub(super) fn ironwood_network() -> Network {
+    regtest_with_nu6_3(1, Some(1), vec![checkpoint_above_snapshot()])
+}
+
 fn regtest(nu5: u32, checkpoints: Vec<(Height, block::Hash)>) -> Network {
+    regtest_with_nu6_3(nu5, None, checkpoints)
+}
+
+fn regtest_with_nu6_3(
+    nu5: u32,
+    nu6_3: Option<u32>,
+    checkpoints: Vec<(Height, block::Hash)>,
+) -> Network {
     let genesis = block::genesis::regtest_genesis_block().hash();
     Network::new_regtest(RegtestParameters {
         activation_heights: ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(nu5),
+            nu6: nu6_3.map(|_| 1),
+            nu6_3,
             ..Default::default()
         },
         funding_streams: Some(Vec::new()),
@@ -141,8 +157,15 @@ pub(super) fn chain() -> Chain {
 
 /// Builds the source chain up to [`HEIGHT`], calling `after_commit` with the
 /// state after each block is committed.
-pub(super) fn chain_with(mut after_commit: impl FnMut(&FinalizedState, Height)) -> Chain {
-    let network = network();
+pub(super) fn chain_with(after_commit: impl FnMut(&FinalizedState, Height)) -> Chain {
+    chain_with_network(network(), after_commit)
+}
+
+/// Builds a source chain on `network`, calling `after_commit` after each block.
+pub(super) fn chain_with_network(
+    network: Network,
+    mut after_commit: impl FnMut(&FinalizedState, Height),
+) -> Chain {
     let cache = tempfile::tempdir().unwrap();
     let config = Config {
         cache_dir: cache.path().to_path_buf(),
@@ -622,5 +645,52 @@ pub(super) fn inject_subtrees(state: &FinalizedState, height: Height) {
             data,
         );
     }
+    state.db.write_batch(batch).unwrap();
+}
+
+/// Returns an Orchard-shaped tree with one small field element per seed.
+pub(super) fn orchard_tree(seeds: &[u8]) -> orchard::tree::NoteCommitmentTree {
+    use halo2::pasta::{group::ff::PrimeField, pallas};
+
+    let mut tree = orchard::tree::NoteCommitmentTree::default();
+    for seed in seeds {
+        let mut bytes = [0; 32];
+        bytes[0] = *seed;
+        tree.append(pallas::Base::from_repr(bytes).unwrap())
+            .unwrap();
+    }
+    tree.root();
+    tree
+}
+
+/// Returns a Sprout tree with one note commitment per seed.
+pub(super) fn sprout_tree(seeds: &[u8]) -> sprout::tree::NoteCommitmentTree {
+    let mut tree = sprout::tree::NoteCommitmentTree::default();
+    for seed in seeds {
+        tree.append(sprout::NoteCommitment::from([*seed; 32]))
+            .unwrap();
+    }
+    tree.root();
+    tree
+}
+
+/// Gives the chain non-empty Orchard and Sprout tip trees, carried forward by later blocks.
+pub(super) fn inject_orchard_and_sprout_trees(state: &FinalizedState, height: Height) {
+    if height != Height(30) {
+        return;
+    }
+    let mut batch = DiskWriteBatch::new();
+    batch.create_orchard_tree(&state.db, &height, &orchard_tree(&[1, 2]));
+    batch.update_sprout_tree(&state.db, &sprout_tree(&[3, 4]));
+    state.db.write_batch(batch).unwrap();
+}
+
+/// Gives a NU6.3 chain a non-empty Ironwood tip tree, carried forward by later blocks.
+pub(super) fn inject_ironwood_tree(state: &FinalizedState, height: Height) {
+    if height != Height(30) {
+        return;
+    }
+    let mut batch = DiskWriteBatch::new();
+    batch.create_ironwood_tree(&state.db, &height, &orchard_tree(&[5, 6]));
     state.db.write_batch(batch).unwrap();
 }

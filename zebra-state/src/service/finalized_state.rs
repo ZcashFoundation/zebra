@@ -80,7 +80,7 @@ pub(crate) use disk_format::{
     block::{HEIGHT_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES},
     chain::{check_history_tree_peaks, HistoryTreeParts},
     transparent::OUTPUT_LOCATION_DISK_BYTES,
-    upgrade::{CancelFormatChange, DbFormatChange},
+    upgrade::{CancelFormatChange, DbFormatChange, FormatCheckError},
 };
 pub(crate) use zebra_db::chain::SNAPSHOT_BASE;
 
