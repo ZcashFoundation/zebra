@@ -147,6 +147,35 @@ Other bounded labels include:
 | Handshake `remote_version` and `negotiated_version` | Protocol versions defined by Zebra, or `other`; arbitrary received numbers do not create new labels. |
 | RPC `method` | Registered RPC method names, or `unknown` for unregistered names. |
 
+## Block writer metrics
+
+The state's block writer times each phase of committing a semantically verified block.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `state.block_writer.phase.duration_seconds` | Summary | `phase` | Seconds spent in one phase of a block commit, by `phase`. |
+
+| `phase` | Measures |
+| --- | --- |
+| `queue` | The wait in the writer's queue, from the state sending the block to the writer starting on it. |
+| `contextual_commit` | Contextual validation and the non-finalized commit, including the sub-phases below. |
+| `update_latest_chain_channels` | Publishing the new tip and non-finalized snapshot to readers, before the commit is acknowledged. |
+| `finalization` | Finalizing blocks past the reorg limit, after the acknowledgement. |
+| `transparent_spend` | Sub-phase: the transparent spend checks, including UTXO reads from the database. |
+| `anchor_reads` | Sub-phase: the Sapling and Orchard anchor checks and the Sprout treestate reads. |
+| `pickup` | Sub-phase: the wait for a rayon thread to start the job that copies the parent chain. |
+| `chain_clone` | Sub-phase: copying the parent chain before adding the block to it. |
+| `trees` | Sub-phase: the note commitment tree appends and root calculations. |
+| `chain_updates` | Sub-phase: the chain's other indexes and value pools, which update in parallel with `trees`. |
+| `history` | Sub-phase: the history tree update, which needs the new tree roots. |
+
+The sub-phases are recorded once a block is committed, so rejected blocks have none. They are not
+recorded for block proposals, or for mined blocks committed from an already validated proposal. At
+startup they include blocks restored from the non-finalized state backup, which `contextual_commit`
+excludes. Some sub-phases run in parallel, so they don't add up to `contextual_commit`. A
+`zebra-rpc` trusted chain sync, which follows another node's chain without a block writer, also
+records the sub-phases.
+
 ## Mining metrics
 
 Prometheus replaces dots in metric names with underscores. The RPC dashboard includes mining

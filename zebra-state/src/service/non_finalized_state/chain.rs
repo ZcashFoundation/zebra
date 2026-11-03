@@ -6,6 +6,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::{Deref, DerefMut, RangeInclusive},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Utc};
@@ -75,6 +76,22 @@ pub struct Chain {
     /// diagnostics only use the best chain, and others need to modify the Chain state, but that's
     /// difficult with `Arc<Chain>`s.
     pub(super) last_fork_height: Option<Height>,
+}
+
+/// How long the parallel phases of a [`Chain::push_timed`] took.
+///
+/// The phases run on rayon threads, so they are returned rather than recorded, and the committing
+/// thread records them.
+#[derive(Copy, Clone, Debug)]
+pub(super) struct PushPhases {
+    /// The note commitment tree appends and root calculations.
+    pub(super) trees: Duration,
+
+    /// The chain updates other than the trees, which run in parallel with the trees.
+    pub(super) chain_updates: Duration,
+
+    /// The history tree push, after the trees.
+    pub(super) history: Duration,
 }
 
 /// Spending transaction id type when the `indexer` feature is selected.
@@ -370,16 +387,24 @@ impl Chain {
     /// The state service must also complete its other contextual checks, including reserve-funded
     /// subsidy and miner fees. This method validates the chain updates in
     /// [`Self::update_chain_tip_with`]; success alone does not establish contextual validity.
-    #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
+    pub fn push(self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
+        self.push_timed(block).map(|(chain, _phases)| chain)
+    }
+
+    /// [`Chain::push`], also returning how long its tree, chain update and history phases took.
+    #[instrument(name = "push", level = "debug", skip(self, block), fields(block = %block.block))]
+    pub(super) fn push_timed(
+        mut self,
+        block: ContextuallyVerifiedBlock,
+    ) -> Result<(Chain, PushPhases), ValidateContextError> {
         // update cumulative data members
-        self.update_chain_tip_with(&block)?;
+        let phases = self.update_chain_tip_with_block_parallel(&block)?;
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, Arc::new(block));
         self.precious_rank = None;
 
-        Ok(self)
+        Ok((self, phases))
     }
 
     /// Pops the lowest height block of the non-finalized portion of a chain,
@@ -1715,7 +1740,7 @@ impl Chain {
     fn update_chain_tip_with_block_parallel(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
-    ) -> Result<(), ValidateContextError> {
+    ) -> Result<PushPhases, ValidateContextError> {
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
@@ -1737,16 +1762,21 @@ impl Chain {
         // - the rest of the Chain updates
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
-                partial_result =
-                    Some(self.update_chain_tip_with_block_except_trees(contextually_valid));
+                let phase_start = Instant::now();
+                let result = self.update_chain_tip_with_block_except_trees(contextually_valid);
+                partial_result = Some((result, phase_start.elapsed()));
             });
 
             // Spawns a separate rayon task for each note commitment tree
-            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
+            let phase_start = Instant::now();
+            let result = nct.update_trees_parallel(&contextually_valid.block.clone());
+            tree_result = Some((result, phase_start.elapsed()));
         });
 
-        tree_result.expect("scope has already finished")?;
-        partial_result.expect("scope has already finished")?;
+        let (tree_result, trees) = tree_result.expect("scope has already finished");
+        tree_result?;
+        let (partial_result, chain_updates) = partial_result.expect("scope has already finished");
+        partial_result?;
 
         // Update the note commitment trees in the chain.
         self.add_sprout_tree_and_anchor(height, nct.sprout);
@@ -1767,6 +1797,7 @@ impl Chain {
                 .insert(subtree.index, subtree.into_data());
         }
 
+        let phase_start = Instant::now();
         let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
         let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
         let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
@@ -1788,7 +1819,11 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
-        Ok(())
+        Ok(PushPhases {
+            trees,
+            chain_updates,
+            history: phase_start.elapsed(),
+        })
     }
 
     /// Update the chain tip with the `contextually_valid` block,
@@ -1973,6 +2008,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
         self.update_chain_tip_with_block_parallel(contextually_valid)
+            .map(|_phases| ())
     }
 
     #[instrument(

@@ -7,6 +7,7 @@ use std::{
     mem,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use indexmap::IndexMap;
@@ -45,8 +46,55 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 mod tests;
 
 use address_transfers::AddressTransfers;
+use chain::PushPhases;
 pub(crate) use chain::{Chain, SpendingTransactionId};
 pub(crate) use created_utxos::CreatedUtxos;
+
+/// How long each sub-phase of a block commit took.
+///
+/// Some phases run on rayon threads, so the commit collects their durations and records them on
+/// the committing thread, once the block is committed.
+#[derive(Copy, Clone, Debug)]
+struct CommitPhases {
+    /// The transparent spend checks and UTXO reads.
+    transparent_spend: Duration,
+
+    /// The Sapling, Orchard and Sprout anchor reads.
+    anchor_reads: Duration,
+
+    /// The wait for a rayon thread to start the job that clones the parent chain.
+    pickup: Duration,
+
+    /// The parent chain clone.
+    chain_clone: Duration,
+
+    /// The note commitment tree appends and root calculations.
+    trees: Duration,
+
+    /// The chain updates other than the trees.
+    chain_updates: Duration,
+
+    /// The history tree push.
+    history: Duration,
+}
+
+impl CommitPhases {
+    /// Records each phase in the block writer's phase histogram.
+    fn record(&self) {
+        for (phase, duration) in [
+            ("transparent_spend", self.transparent_spend),
+            ("anchor_reads", self.anchor_reads),
+            ("pickup", self.pickup),
+            ("chain_clone", self.chain_clone),
+            ("trees", self.trees),
+            ("chain_updates", self.chain_updates),
+            ("history", self.history),
+        ] {
+            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => phase)
+                .record(duration.as_secs_f64());
+        }
+    }
+}
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -719,14 +767,17 @@ impl NonFinalizedState {
         // Reads from disk
         //
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
+        let phase_start = Instant::now();
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &new_chain.created_utxos,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
+        let transparent_spend = phase_start.elapsed();
 
         // Reads from disk
+        let phase_start = Instant::now();
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
             &new_chain,
@@ -739,6 +790,7 @@ impl NonFinalizedState {
             &new_chain,
             &prepared,
         );
+        let anchor_reads = phase_start.elapsed();
 
         let (height, block_hash) = (prepared.height, prepared.hash);
         let transaction_count = prepared.block.transactions.len();
@@ -781,10 +833,29 @@ impl NonFinalizedState {
             )?;
         }
 
-        Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+        let (new_chain, pickup, chain_clone, push_phases) =
+            Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)?;
+
+        if self.should_count_metrics() {
+            CommitPhases {
+                transparent_spend,
+                anchor_reads,
+                pickup,
+                chain_clone,
+                trees: push_phases.trees,
+                chain_updates: push_phases.chain_updates,
+                history: push_phases.history,
+            }
+            .record();
+        }
+
+        Ok(new_chain)
     }
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
+    ///
+    /// Also returns how long the push job waited for a rayon thread, and how long the chain clone
+    /// and the push phases took.
     #[allow(clippy::unwrap_in_result)]
     #[tracing::instrument(
         skip(new_chain, contextual, sprout_final_treestates),
@@ -794,7 +865,7 @@ impl NonFinalizedState {
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
-    ) -> Result<Arc<Chain>, ValidateContextError> {
+    ) -> Result<(Arc<Chain>, Duration, Duration, PushPhases), ValidateContextError> {
         let mut block_commitment_result = None;
         let mut sprout_anchor_result = None;
         let mut chain_push_result = None;
@@ -808,6 +879,8 @@ impl NonFinalizedState {
         let height = contextual.height;
         let transaction_hashes = contextual.transaction_hashes.clone();
 
+        // The jobs are spawned as the scope starts.
+        let spawned_at = Instant::now();
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
                 block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
@@ -836,9 +909,16 @@ impl NonFinalizedState {
             scope.spawn_fifo(|_scope| {
                 // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
                 // https://github.com/rust-lang/rust/issues/93610
+                let phase_start = Instant::now();
+                let pickup = phase_start.duration_since(spawned_at);
                 let new_chain = Arc::try_unwrap(new_chain)
                     .unwrap_or_else(|shared_chain| (*shared_chain).clone());
-                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
+                let chain_clone = phase_start.elapsed();
+                chain_push_result = Some(new_chain.push_timed(contextual).map(
+                    |(new_chain, push_phases)| {
+                        (Arc::new(new_chain), pickup, chain_clone, push_phases)
+                    },
+                ));
             });
         });
 
