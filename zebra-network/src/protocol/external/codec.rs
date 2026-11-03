@@ -42,6 +42,11 @@ mod tests;
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
 
+/// The largest buffer reservation made while waiting for more body bytes.
+///
+/// Reserving incrementally avoids allocating the full peer-declared body length from its header.
+const DECODE_READ_CHUNK_SIZE: usize = 8 * 1024;
+
 /// The maximum body length allowed before the handshake completes.
 ///
 /// Version messages are ~344 bytes max (including a 256-byte user agent);
@@ -452,9 +457,6 @@ impl Decoder for Codec {
                 metrics::counter!("zcash.net.in.bytes.total")
                     .increment((body_len + HEADER_LEN) as u64);
 
-                // Reserve buffer space for the expected body and the following header.
-                src.reserve(body_len + HEADER_LEN);
-
                 self.state = DecodeState::Body {
                     body_len,
                     command,
@@ -470,6 +472,11 @@ impl Decoder for Codec {
                 checksum,
             } => {
                 if src.len() < body_len {
+                    // Reserve a bounded read chunk, not the entire peer-declared body length.
+                    // Include space for the following header when the body completes.
+                    let remaining = body_len - src.len() + HEADER_LEN;
+                    src.reserve(min(remaining, DECODE_READ_CHUNK_SIZE));
+
                     // Need to wait for the full body
                     trace!(?self.state, len = src.len(), "src buffer does not have an entire body, waiting");
                     return Ok(None);

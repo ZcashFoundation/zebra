@@ -392,6 +392,15 @@ impl Config {
         self.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER
     }
 
+    /// The maximum number of addresses accepted from a peer after each `getaddr` request.
+    ///
+    /// This is half the configured outbound connection limit, capped by the protocol message
+    /// limit. Scaling the response with the peer target prevents one response from dominating a
+    /// deliberately small peer set.
+    pub fn peer_addr_response_limit(&self) -> usize {
+        (self.peerset_outbound_connection_limit() / 2).min(crate::constants::MAX_ADDRS_IN_MESSAGE)
+    }
+
     /// The maximum number of inbound connections that Zebra will accept at the same time.
     /// When this limit is reached, Zebra drops new inbound connections,
     /// without handshaking on them.

@@ -601,3 +601,87 @@ async fn arbitrary_inventory_cannot_replace_compact_sources() {
         );
     }
 }
+
+#[test]
+fn multi_inventory_changes_consume_only_bounded_input() {
+    let _init_guard = zebra_test::init();
+    let peer = "1.1.1.1:1".parse().expect("the test peer address is valid");
+    let hashes = vec![InventoryHash::Block(block::Hash([1; 32])); MAX_INV_PER_MAP + 1];
+
+    let mut available_hashes = hashes.iter();
+    let available = InventoryStatus::new_available_multi(&mut available_hashes, peer)
+        .expect("the input contains inventory");
+    assert_eq!(available.to_inner().0.len(), MAX_INV_PER_MAP);
+    assert_eq!(
+        available_hashes.count(),
+        1,
+        "constructing a change must not consume hashes beyond its cap",
+    );
+
+    let mut missing_hashes = hashes.iter();
+    let missing = InventoryStatus::new_missing_multi(&mut missing_hashes, peer)
+        .expect("the input contains inventory");
+    assert_eq!(missing.to_inner().0.len(), MAX_INV_PER_MAP);
+    assert_eq!(missing_hashes.count(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inventory_poll_bounds_work_and_schedules_remaining_changes() {
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        task::{Context, Poll, Wake, Waker},
+    };
+
+    struct CountWake(AtomicUsize);
+
+    impl Wake for CountWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let (mut registry, sender) = new_inv_registry();
+    let peer = "1.1.1.1:1".parse().expect("the test peer address is valid");
+    for index in 0..=crate::peer_set::inventory_registry::MAX_INVENTORY_CHANGES_PER_POLL {
+        let mut bytes = [0; 32];
+        bytes[..4].copy_from_slice(
+            &u32::try_from(index)
+                .expect("the poll budget fits in u32")
+                .to_le_bytes(),
+        );
+        sender
+            .send(InventoryStatus::new_available(
+                InventoryHash::Block(block::Hash(bytes)),
+                peer,
+            ))
+            .expect("the registry receiver is open");
+    }
+
+    let wake_count = Arc::new(CountWake(AtomicUsize::new(0)));
+    let waker = Waker::from(wake_count.clone());
+    let mut cx = Context::from_waker(&waker);
+    assert!(matches!(
+        registry.poll_inventory(&mut cx),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(
+        registry.status_hashes().count(),
+        crate::peer_set::inventory_registry::MAX_INVENTORY_CHANGES_PER_POLL,
+    );
+    assert!(
+        wake_count.0.load(Ordering::Relaxed) > 0,
+        "a full work budget must schedule the remaining queued changes",
+    );
+
+    assert!(matches!(
+        registry.poll_inventory(&mut cx),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(
+        registry.status_hashes().count(),
+        crate::peer_set::inventory_registry::MAX_INVENTORY_CHANGES_PER_POLL + 1,
+    );
+}

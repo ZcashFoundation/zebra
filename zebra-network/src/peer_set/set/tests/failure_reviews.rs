@@ -365,7 +365,7 @@ async fn connection_block_error_attribution(not_found: bool) {
         }),
         ActiveConnectionCounter::new_counter().track_connection(),
         connection_info,
-        Vec::new(),
+        (Vec::new(), crate::constants::PEER_ADDR_RESPONSE_LIMIT),
     );
     let connection_task = tokio::spawn(connection.run(remote_rx));
     client_tx

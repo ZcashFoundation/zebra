@@ -1084,6 +1084,7 @@ where
                 data_stream,
                 Codec::builder().for_network(&config.network).finish(),
             );
+            let peer_addr_response_limit = config.peer_addr_response_limit();
 
             let (connection_info, remote_canonical_addr) = match negotiate_version(
                 &mut peer_conn,
@@ -1320,7 +1321,7 @@ where
                 peer_tx,
                 connection_tracker,
                 connection_info.clone(),
-                alternate_addrs.collect(),
+                (alternate_addrs.collect(), peer_addr_response_limit),
             );
             server.compact_recovery = compact_recovery;
 

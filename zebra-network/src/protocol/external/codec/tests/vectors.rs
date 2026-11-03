@@ -510,6 +510,32 @@ fn version_user_agent_size_limits() {
     };
 }
 
+#[test]
+fn message_header_does_not_reserve_full_declared_body() {
+    let _init_guard = zebra_test::init();
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    let mut bytes = BytesMut::with_capacity(HEADER_LEN);
+
+    bytes.extend_from_slice(&Network::Mainnet.magic().0);
+    bytes.extend_from_slice(b"block\0\0\0\0\0\0\0");
+    let body_len =
+        u32::try_from(MAX_PROTOCOL_MESSAGE_LEN).expect("the protocol message limit fits in u32");
+    bytes.extend_from_slice(&body_len.to_le_bytes());
+    bytes.extend_from_slice(&[0; 4]);
+
+    assert!(
+        matches!(codec.decode(&mut bytes), Ok(None)),
+        "a header without its body must wait for more bytes",
+    );
+    assert!(
+        bytes.capacity() <= DECODE_READ_CHUNK_SIZE,
+        "a header reserved {} bytes instead of at most {DECODE_READ_CHUNK_SIZE}",
+        bytes.capacity(),
+    );
+}
+
 /// Check that the codec enforces size limits on `message` and `reason` fields of reject messages.
 #[test]
 fn reject_command_and_reason_size_limits() {
