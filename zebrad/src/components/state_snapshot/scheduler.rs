@@ -930,9 +930,17 @@ where
             return Err(SchedulerError::Stalled(self.config.piece_phase_stall));
         }
 
+        let floor = self.config.min_rate_bytes_per_sec;
         for peer in &mut self.peers {
             if peer.resting_until.is_some_and(|until| until <= now) {
                 peer.resting_until = None;
+                // A peer that kept its download through a refusal's rest goes on downloading below
+                // the floor, if that is where its rate was.
+                if peer.download.is_some()
+                    && peer.rate.is_some_and(|rate| rate.bytes_per_sec() < floor)
+                {
+                    peer.slow_since = Some(now);
+                }
             }
             peer.not_found.retain(|_, until| *until > now);
         }
@@ -1114,11 +1122,14 @@ where
     }
 
     /// Requests every download's next sub-ranges, and hashes the bytes they
-    /// have queued.
+    /// have queued. A resting peer keeps its download, but is not asked for
+    /// more until its rest ends.
     fn dispatch(&mut self) {
         for peer in 0..self.peers.len() {
             if let Some(id) = self.peers[peer].download {
-                self.request_sub_ranges(peer, id);
+                if self.peers[peer].resting_until.is_none() {
+                    self.request_sub_ranges(peer, id);
+                }
                 self.hash_queued(id);
             }
         }
@@ -1260,7 +1271,7 @@ where
                 );
                 self.exclude(peer);
             }
-            Answer::Failed(error) => self.refused(peer, now, &error),
+            Answer::Failed(error) => self.refused(peer, (offset, length), now, &error),
             Answer::TimedOut => {
                 download.give_back(offset, offset + u64::from(length));
                 // Nothing arrived in time, so the sub-range is a short answer of no bytes.
@@ -1270,9 +1281,12 @@ where
             Answer::Response(zn::Response::Object { size, data }) => {
                 self.delivered(id, (offset, length), elapsed, size, data)
             }
-            Answer::Response(response) => {
-                self.refused(peer, now, &format!("unexpected response {response}"))
-            }
+            Answer::Response(response) => self.refused(
+                peer,
+                (offset, length),
+                now,
+                &format!("unexpected response {response}"),
+            ),
         }
     }
 
@@ -1495,20 +1509,43 @@ where
         }
     }
 
-    /// Rests `peer` after a refused or failed request, for a backoff that
-    /// doubles with each refusal in a row, with no penalty (design, §6.1).
-    fn refused(&mut self, peer: usize, now: Instant, reason: &dyn fmt::Display) {
-        self.release_peer(peer);
+    /// Rests `peer` after a refused or failed request for the sub-range of
+    /// `length` bytes at `offset`, for a backoff that doubles with each refusal
+    /// in a row, with no penalty (design, §6.1): the peer keeps its piece and
+    /// its other request in flight, its slow window pauses, and it is asked for
+    /// the refused sub-range again after the rest, since `REFUSED` is how a
+    /// server that has enough requests already says it is busy. Once the
+    /// backoff reaches its longest, the refusals persist, and the piece goes to
+    /// another peer.
+    fn refused(
+        &mut self,
+        peer: usize,
+        (offset, length): (u64, u32),
+        now: Instant,
+        reason: &dyn fmt::Display,
+    ) {
         let state = &mut self.peers[peer];
         state.refusals = state.refusals.saturating_add(1);
         let backoff = self.config.refused_backoff(state.refusals);
         state.resting_until = Some(after(now, backoff));
+        if let Some(since) = state.slow_since.take() {
+            state.slow_for = state
+                .slow_for
+                .saturating_add(now.saturating_duration_since(since));
+        }
         tracing::debug!(
             peer = %state.addr,
             %reason,
             ?backoff,
             "a state snapshot peer refused a request; backing off",
         );
+
+        let download = state.download;
+        if backoff >= self.config.max_refused_backoff {
+            self.release_peer(peer);
+        } else if let Some(download) = download.and_then(|id| self.downloads.get_mut(&id)) {
+            download.give_back(offset, offset + u64::from(length));
+        }
     }
 
     /// Handles `peer` not having `piece`: it is not asked for the piece's
