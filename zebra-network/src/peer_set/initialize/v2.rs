@@ -208,6 +208,7 @@ where
         connection_params: ConnectionParams {
             inbound_service,
             inv_collector,
+            genesis_hash: config.network.genesis_hash(),
         },
         endpoint,
         identity,

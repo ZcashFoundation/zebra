@@ -105,13 +105,14 @@ pub(super) async fn drive(
     _permit: OwnedSemaphorePermit,
     connection: Connection,
     transient_addr: Option<PeerSocketAddr>,
+    genesis_hash: block::Hash,
     events: mpsc::Sender<Event>,
 ) {
     let mut guard = ResponseGuard(Some(tx));
     let command = request.command();
     let work = tokio::time::timeout(
         REQUEST_TIMEOUT,
-        drive_inner(request, &connection, transient_addr),
+        drive_inner(request, &connection, transient_addr, genesis_hash),
     );
     let result = {
         let cancelled = guard
@@ -319,6 +320,7 @@ async fn drive_inner(
     request: Request,
     connection: &Connection,
     transient_addr: Option<PeerSocketAddr>,
+    genesis_hash: block::Hash,
 ) -> Result<Response, Failure> {
     let response = match request {
         Request::Peers => {
@@ -361,7 +363,7 @@ async fn drive_inner(
         }
 
         Request::FindHeaders { known_blocks, stop } => {
-            let headers = fetch_headers(connection, known_blocks, stop).await?;
+            let headers = fetch_headers(connection, known_blocks, stop, genesis_hash).await?;
             Response::BlockHeaders(
                 headers
                     .into_iter()
@@ -371,7 +373,7 @@ async fn drive_inner(
         }
         // There is no `get-hashes` yet: headers give the same chain walk, 160 at a time.
         Request::FindBlocks { known_blocks, stop } => {
-            let headers = fetch_headers(connection, known_blocks, stop).await?;
+            let headers = fetch_headers(connection, known_blocks, stop, genesis_hash).await?;
             Response::BlockHashes(headers.iter().map(|header| header.hash()).collect())
         }
 
@@ -524,30 +526,90 @@ fn matches_reference(transaction: &UnminedTx, requested: UnminedTxId) -> bool {
 
 /// Fetches headers after the first known block, as `get-headers` without
 /// transaction IDs.
+///
+/// `genesis_hash` is the network's genesis block hash: a peer that knows none
+/// of the locator hashes answers from height 1, after the genesis block.
 async fn fetch_headers(
     connection: &Connection,
     known_blocks: Vec<block::Hash>,
     stop: Option<block::Hash>,
+    genesis_hash: block::Hash,
 ) -> Result<Vec<Arc<block::Header>>, Failure> {
     let mut locator_hashes = known_blocks;
     locator_hashes.truncate(MAX_LOCATOR_HASHES);
-    let request = WireRequest::Headers(GetHeaders {
+    let request = GetHeaders {
         locator_hashes,
         hash_stop: stop.unwrap_or(block::Hash([0; 32])),
         // `read_headers` below decodes only the `tx_ids = 0` layout.
         tx_ids: false,
-    });
-    let mut recv = open_request(connection, &request).await?;
+    };
+    let wire_request = WireRequest::Headers(request.clone());
+    let mut recv = open_request(connection, &wire_request).await?;
     let headers = read_headers(&mut recv.reader()).await?;
 
-    // Draft, "get-headers": the headers must form a contiguous chain.
+    check_headers_response(&request, &headers, genesis_hash).map_err(Failure::Misbehavior)?;
+    Ok(headers)
+}
+
+/// Checks that `headers` is a response `request` could have selected (draft,
+/// "`get-headers`"), returning why it is not.
+///
+/// Every check depends only on the request and the response, never on this
+/// node's chain, so a peer on a different best chain passes them all: it
+/// starts after the first locator hash in its best chain, or after the genesis
+/// block if it has none of them.
+fn check_headers_response(
+    request: &GetHeaders,
+    headers: &[Arc<block::Header>],
+    genesis_hash: block::Hash,
+) -> Result<(), String> {
+    let Some(first) = headers.first() else {
+        return Ok(());
+    };
+    let hashes: Vec<block::Hash> = headers.iter().map(|header| header.hash()).collect();
+
+    // The headers must form a contiguous chain.
     if headers
-        .windows(2)
-        .any(|pair| pair[1].previous_block_hash != pair[0].hash())
+        .iter()
+        .skip(1)
+        .zip(&hashes)
+        .any(|(header, previous_hash)| header.previous_block_hash != *previous_hash)
     {
-        return Err(Failure::Misbehavior(
-            "get-headers response is not a contiguous chain".to_string(),
+        return Err("get-headers response is not a contiguous chain".to_string());
+    }
+
+    if request.locator_hashes.is_empty() {
+        // An empty locator selects only the header `hash_stop` names.
+        if hashes != [request.hash_stop] {
+            return Err(format!(
+                "get-headers response to an empty locator is not the single header {}",
+                request.hash_stop,
+            ));
+        }
+        return Ok(());
+    }
+
+    // The response starts after one of the locator hashes, or after the genesis block.
+    if first.previous_block_hash != genesis_hash
+        && !request.locator_hashes.contains(&first.previous_block_hash)
+    {
+        return Err(format!(
+            "get-headers response starts after {}, which is not a locator hash or the genesis \
+             block",
+            first.previous_block_hash,
         ));
     }
-    Ok(headers)
+
+    // The response ends at `hash_stop`, if it reaches it. An all-zeros `hash_stop` is not the
+    // hash of any header, so it never matches.
+    if let Some(index) = hashes.iter().position(|hash| *hash == request.hash_stop) {
+        if index + 1 != hashes.len() {
+            return Err(format!(
+                "get-headers response continues past hash_stop {}",
+                request.hash_stop,
+            ));
+        }
+    }
+
+    Ok(())
 }

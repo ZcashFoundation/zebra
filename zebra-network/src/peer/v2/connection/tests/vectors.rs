@@ -193,6 +193,7 @@ fn spawn_node_with(
         ConnectionParams {
             inbound_service,
             inv_collector: inv_tx,
+            genesis_hash: Network::Mainnet.genesis_hash(),
         },
         None,
     );
@@ -1439,6 +1440,150 @@ async fn outbound_responses_are_verified() {
                     assert!(
                         raw.connection.close_reason().is_none(),
                         "{case}: the connection stays open"
+                    );
+                }
+            }
+        }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A `get-headers` response must be one the request could have selected
+/// (draft, "`get-headers`"): it starts after a locator hash, or after the
+/// genesis block for a peer that knows none of them; it ends at `hash_stop` if
+/// it reaches it; and an empty locator selects only the header `hash_stop`
+/// names. Any other response is misbehavior, for headers and hashes alike.
+#[tokio::test]
+async fn header_responses_are_bound_to_the_request() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let genesis = fixture.blocks[0].hash();
+        let block_1 = fixture.blocks[1].clone();
+        let block_2 = fixture.blocks[2].clone();
+        let unknown = block::Hash([0xAB; 32]);
+
+        // The locator, the stop hash, whether to ask for hashes rather than headers, the headers
+        // the raw peer answers with, and the error the client gets, if any.
+        let cases: [(
+            Vec<block::Hash>,
+            Option<block::Hash>,
+            bool,
+            Vec<&Arc<Block>>,
+            Option<&str>,
+        ); 11] = [
+            (vec![genesis], None, false, vec![&block_1, &block_2], None),
+            (
+                vec![block_1.hash(), genesis],
+                None,
+                false,
+                vec![&block_2],
+                None,
+            ),
+            (vec![unknown], None, false, vec![&block_1, &block_2], None),
+            (
+                vec![genesis],
+                None,
+                false,
+                vec![&block_2],
+                Some("not a locator hash"),
+            ),
+            (
+                vec![genesis],
+                None,
+                true,
+                vec![&block_2],
+                Some("not a locator hash"),
+            ),
+            (
+                vec![genesis],
+                Some(block_1.hash()),
+                false,
+                vec![&block_1],
+                None,
+            ),
+            (
+                vec![genesis],
+                Some(block_1.hash()),
+                false,
+                vec![&block_1, &block_2],
+                Some("past hash_stop"),
+            ),
+            (
+                vec![genesis],
+                Some(block_1.hash()),
+                true,
+                vec![&block_1, &block_2],
+                Some("past hash_stop"),
+            ),
+            (
+                Vec::new(),
+                Some(block_1.hash()),
+                false,
+                vec![&block_1],
+                None,
+            ),
+            (
+                Vec::new(),
+                Some(block_1.hash()),
+                false,
+                vec![&block_1, &block_2],
+                Some("empty locator"),
+            ),
+            (
+                Vec::new(),
+                None,
+                false,
+                vec![&block_1],
+                Some("empty locator"),
+            ),
+        ];
+
+        for (case, (known_blocks, stop, hashes, reply, expected_error)) in
+            cases.into_iter().enumerate()
+        {
+            let mut raw = raw_peer_node(&network).await;
+            let reply_headers: Vec<_> = reply.iter().map(|block| block.header.clone()).collect();
+            let request = if hashes {
+                Request::FindBlocks { known_blocks, stop }
+            } else {
+                Request::FindHeaders { known_blocks, stop }
+            };
+
+            let (result, ()) = tokio::join!(call(&mut raw.node.client, request), async {
+                let (_, mut send, _recv) = accept_request(&raw.connection).await;
+                let mut bytes = Vec::new();
+                write_headers_response(&mut bytes, &reply_headers, false).expect("writes to a Vec");
+                let _ = send.write_all(&bytes).await;
+                let _ = send.finish();
+            });
+
+            match expected_error {
+                None => {
+                    let response = result.unwrap_or_else(|error| {
+                        panic!("case {case}: a valid response is accepted: {error}")
+                    });
+                    let expected: Vec<_> = reply.iter().map(|block| block.hash()).collect();
+                    let got: Vec<_> = match response {
+                        Response::BlockHeaders(headers) => headers
+                            .iter()
+                            .map(|counted| counted.header.hash())
+                            .collect(),
+                        Response::BlockHashes(hashes) => hashes,
+                        response => panic!("case {case}: unexpected response {response:?}"),
+                    };
+                    assert_eq!(got, expected, "case {case}");
+                }
+                Some(expected_error) => {
+                    let inner = result
+                        .expect_err("an unselectable response is rejected")
+                        .inner_debug();
+                    assert!(
+                        inner.contains("ProtocolViolation") && inner.contains(expected_error),
+                        "case {case}: expected {expected_error}, got {inner}"
                     );
                 }
             }

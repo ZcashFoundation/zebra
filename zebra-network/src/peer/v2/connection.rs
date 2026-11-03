@@ -28,7 +28,7 @@ use tokio_util::codec::FramedRead;
 use tower::Service;
 use tracing_futures::Instrument;
 
-use zebra_chain::{diagnostic::task::CheckForPanics, transaction::UnminedTxId};
+use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedTxId};
 
 use crate::{
     meta_addr::MetaAddr,
@@ -70,6 +70,10 @@ pub struct ConnectionParams<S> {
 
     /// Where advertised and missing inventory is registered for the peer set.
     pub inv_collector: tokio::sync::broadcast::Sender<InventoryChange>,
+
+    /// The hash of the network's genesis block, which a `get-headers` response
+    /// to a locator the peer does not know starts after (draft, "`get-headers`").
+    pub genesis_hash: block::Hash,
 }
 
 /// Something a stream task needs the connection task to act on.
@@ -487,6 +491,7 @@ where
                     permit,
                     self.connection.clone(),
                     self.transient_addr,
+                    self.params.genesis_hash,
                     self.events_tx.clone(),
                 ));
                 return;
