@@ -177,6 +177,58 @@ fn reads_below_the_snapshot_window_are_unavailable() {
     );
 }
 
+/// The state service starts on a snapshot database whose window has no branch ID transaction:
+/// the legacy-chain check reaches the snapshot base, and the startup format checks accept the
+/// snapshot shape.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn state_service_starts_on_a_snapshot_database_with_a_branchless_window() {
+    use std::time::{Duration, Instant};
+
+    use zebra_chain::chain_tip::ChainTip;
+
+    use crate::{service::StateService, tests::snapshot_db::network};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let cache = tempfile::tempdir().unwrap();
+        let config = config(cache.path().to_path_buf(), Some(RETENTION));
+        let cache_dir = config.cache_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            drop(snapshot_state(
+                cache_dir,
+                TIP,
+                WINDOW_START,
+                Coinbase::Legacy,
+                0,
+            ))
+        })
+        .await
+        .unwrap();
+
+        let (state, reader, tip, _) = StateService::new(config, &network(), Height(TIP), 1).await;
+        assert_eq!(tip.best_tip_height(), Some(Height(TIP)));
+        let mut db = reader.db.clone();
+        tokio::task::spawn_blocking(move || {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while !db.ready_for_pruning() {
+                db.check_for_panics();
+                assert!(
+                    Instant::now() < deadline,
+                    "the startup format checks did not finish"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+        .await
+        .unwrap();
+        tokio::task::spawn_blocking(move || drop(state))
+            .await
+            .unwrap();
+    })
+    .await
+    .unwrap();
+}
+
 #[test]
 fn snapshot_database_requires_pruning() {
     let _init_guard = zebra_test::init();
