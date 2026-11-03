@@ -50,6 +50,21 @@ use chain::PushPhases;
 pub(crate) use chain::{Chain, SpendingTransactionId};
 pub(crate) use created_utxos::CreatedUtxos;
 
+/// A block that passed the checks before its chain update, with what the rest of its commit needs.
+struct CheckedBlock {
+    /// The contextually verified block.
+    contextual: ContextuallyVerifiedBlock,
+
+    /// The Sprout treestates that the block's anchors refer to.
+    sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+
+    /// How long the transparent spend checks took.
+    transparent_spend: Duration,
+
+    /// How long the anchor checks and reads took.
+    anchor_reads: Duration,
+}
+
 /// How long each sub-phase of a block commit took.
 ///
 /// Some phases run on rayon threads, so the commit collects their durations and records them on
@@ -764,74 +779,17 @@ impl NonFinalizedState {
             });
         }
 
-        // Reads from disk
-        //
-        // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
-        let phase_start = Instant::now();
-        let spent_utxos = check::utxo::transparent_spend(
-            &prepared,
-            &new_chain.created_utxos,
-            &new_chain.spent_utxos,
-            finalized_state,
-        )?;
-        let transparent_spend = phase_start.elapsed();
-
-        // Reads from disk
-        let phase_start = Instant::now();
-        check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
-            finalized_state,
-            &new_chain,
-            &prepared,
-        )?;
-
-        // Reads from disk
-        let sprout_final_treestates = check::anchors::block_fetch_sprout_final_treestates(
-            finalized_state,
-            &new_chain,
-            &prepared,
-        );
-        let anchor_reads = phase_start.elapsed();
-
-        let (height, block_hash) = (prepared.height, prepared.hash);
-        let transaction_count = prepared.block.transactions.len();
-        let spent_utxo_count = spent_utxos.len();
-        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
-            height,
+        let CheckedBlock {
+            contextual,
+            sprout_final_treestates,
+            transparent_spend,
+            anchor_reads,
+        } = Self::validate_spends_anchors_and_value_balance(
             &self.network,
-            new_chain.chain_value_pools,
-        )
-        .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
-            subsidy_error: subsidy_error.into(),
-            height,
-            block_hash,
-        })?;
-
-        let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            &new_chain,
             prepared,
-            spent_utxos,
-            deferred_pool_balance_change,
-            &self.network,
-            new_chain.chain_value_pools,
-        )
-        .map_err(|value_balance_error| {
-            ValidateContextError::CalculateBlockChainValueChange {
-                value_balance_error,
-                height,
-                block_hash,
-                transaction_count,
-                spent_utxo_count,
-            }
-        })?;
-
-        // The semantic verifier defers parent-dependent payouts to this exact-parent check.
-        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &self.network) {
-            check::nsm_subsidy_is_valid(
-                &contextual,
-                &self.network,
-                new_chain.chain_value_pools,
-                block_fees.expect("reissuance starts no earlier than NU7 fee accounting"),
-            )?;
-        }
+            finalized_state,
+        )?;
 
         let (new_chain, pickup, chain_clone, push_phases) =
             Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)?;
@@ -850,6 +808,89 @@ impl NonFinalizedState {
         }
 
         Ok(new_chain)
+    }
+
+    /// Checks the transparent spends, anchors and value balances of `prepared` against
+    /// `new_chain` and `finalized_state`, and returns the contextually verified block, with the
+    /// Sprout treestates that its anchors refer to.
+    fn validate_spends_anchors_and_value_balance(
+        network: &Network,
+        new_chain: &Arc<Chain>,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<CheckedBlock, ValidateContextError> {
+        // Reads from disk
+        //
+        // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
+        let phase_start = Instant::now();
+        let spent_utxos = check::utxo::transparent_spend(
+            &prepared,
+            &new_chain.created_utxos,
+            &new_chain.spent_utxos,
+            finalized_state,
+        )?;
+        let transparent_spend = phase_start.elapsed();
+
+        // Reads from disk
+        let phase_start = Instant::now();
+        check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
+            finalized_state,
+            new_chain,
+            &prepared,
+        )?;
+
+        // Reads from disk
+        let sprout_final_treestates = check::anchors::block_fetch_sprout_final_treestates(
+            finalized_state,
+            new_chain,
+            &prepared,
+        );
+        let anchor_reads = phase_start.elapsed();
+
+        let (height, block_hash) = (prepared.height, prepared.hash);
+        let transaction_count = prepared.block.transactions.len();
+        let spent_utxo_count = spent_utxos.len();
+        let deferred_pool_balance_change =
+            calculate_deferred_pool_balance_change(height, network, new_chain.chain_value_pools)
+                .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
+                    subsidy_error: subsidy_error.into(),
+                    height,
+                    block_hash,
+                })?;
+
+        let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            prepared,
+            spent_utxos,
+            deferred_pool_balance_change,
+            network,
+            new_chain.chain_value_pools,
+        )
+        .map_err(|value_balance_error| {
+            ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height,
+                block_hash,
+                transaction_count,
+                spent_utxo_count,
+            }
+        })?;
+
+        // The semantic verifier defers parent-dependent payouts to this exact-parent check.
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network) {
+            check::nsm_subsidy_is_valid(
+                &contextual,
+                network,
+                new_chain.chain_value_pools,
+                block_fees.expect("reissuance starts no earlier than NU7 fee accounting"),
+            )?;
+        }
+
+        Ok(CheckedBlock {
+            contextual,
+            sprout_final_treestates,
+            transparent_spend,
+            anchor_reads,
+        })
     }
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.

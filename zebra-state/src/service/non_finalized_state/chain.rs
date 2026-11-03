@@ -1425,6 +1425,58 @@ impl Chain {
         }
     }
 
+    /// Returns the note commitment trees of the tip of this [`Chain`], with the subtrees completed
+    /// at the tip.
+    pub(crate) fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree_for_tip(),
+            sapling: self.sapling_note_commitment_tree_for_tip(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_note_commitment_tree_for_tip(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
+            ironwood: self.ironwood_note_commitment_tree_for_tip(),
+            ironwood_subtree: self.ironwood_subtree_for_tip(),
+        }
+    }
+
+    /// Adds the note commitment trees in `nct` to the tree and anchor indexes at `height`, and
+    /// their completed subtrees to the subtree indexes.
+    fn add_note_commitment_trees(&mut self, height: Height, nct: NoteCommitmentTrees) {
+        self.add_sprout_tree_and_anchor(height, nct.sprout);
+        self.add_sapling_tree_and_anchor(height, nct.sapling);
+        self.add_orchard_tree_and_anchor(height, nct.orchard);
+        self.add_ironwood_tree_and_anchor(height, nct.ironwood);
+
+        if let Some(subtree) = nct.sapling_subtree {
+            self.sapling_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+        if let Some(subtree) = nct.orchard_subtree {
+            self.orchard_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+        if let Some(subtree) = nct.ironwood_subtree {
+            self.ironwood_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+    }
+
+    /// Returns `history_tree` with `block` pushed onto it, committing to the note commitment tree
+    /// `roots` after `block`.
+    pub(crate) fn history_tree_with_block(
+        network: &Network,
+        mut history_tree: Arc<HistoryTree>,
+        block: Arc<block::Block>,
+        roots: BlockCommitmentTreeRoots,
+    ) -> Result<Arc<HistoryTree>, ValidateContextError> {
+        let history_tree_mut = Arc::make_mut(&mut history_tree);
+        history_tree_mut
+            .push(network, block, roots)
+            .map_err(Arc::new)?;
+
+        Ok(history_tree)
+    }
+
     fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
@@ -1744,15 +1796,7 @@ impl Chain {
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
-        let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree_for_tip(),
-            sapling: self.sapling_note_commitment_tree_for_tip(),
-            sapling_subtree: self.sapling_subtree_for_tip(),
-            orchard: self.orchard_note_commitment_tree_for_tip(),
-            orchard_subtree: self.orchard_subtree_for_tip(),
-            ironwood: self.ironwood_note_commitment_tree_for_tip(),
-            ironwood_subtree: self.ironwood_subtree_for_tip(),
-        };
+        let mut nct = self.note_commitment_trees_for_tip();
 
         let mut tree_result = None;
         let mut partial_result = None;
@@ -1779,23 +1823,7 @@ impl Chain {
         partial_result?;
 
         // Update the note commitment trees in the chain.
-        self.add_sprout_tree_and_anchor(height, nct.sprout);
-        self.add_sapling_tree_and_anchor(height, nct.sapling);
-        self.add_orchard_tree_and_anchor(height, nct.orchard);
-        self.add_ironwood_tree_and_anchor(height, nct.ironwood);
-
-        if let Some(subtree) = nct.sapling_subtree {
-            self.sapling_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
-        if let Some(subtree) = nct.orchard_subtree {
-            self.orchard_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
-        if let Some(subtree) = nct.ironwood_subtree {
-            self.ironwood_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
+        self.add_note_commitment_trees(height, nct);
 
         let phase_start = Instant::now();
         let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
@@ -1803,19 +1831,16 @@ impl Chain {
         let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
-        let mut history_tree = self.history_block_commitment_tree();
-        let history_tree_mut = Arc::make_mut(&mut history_tree);
-        history_tree_mut
-            .push(
-                &self.network,
-                contextually_valid.block.clone(),
-                BlockCommitmentTreeRoots {
-                    sapling: &sapling_root,
-                    orchard: &orchard_root,
-                    ironwood: &ironwood_root,
-                },
-            )
-            .map_err(Arc::new)?;
+        let history_tree = Self::history_tree_with_block(
+            &self.network,
+            self.history_block_commitment_tree(),
+            contextually_valid.block.clone(),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard_root,
+                ironwood: &ironwood_root,
+            },
+        )?;
 
         self.add_history_tree(height, history_tree);
 
