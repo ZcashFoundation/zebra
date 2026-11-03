@@ -2057,7 +2057,7 @@ where
 
             Ok(GetBlockResponse::Object(Box::new(BlockObject {
                 hash,
-                confirmations,
+                confirmations: Some(confirmations),
                 height: Some(height),
                 version: Some(version),
                 merkle_root: Some(merkle_root),
@@ -2066,17 +2066,19 @@ where
                 solution: Some(solution),
                 bits: Some(bits),
                 difficulty: Some(difficulty),
-                n_tx: tx.len(),
-                tx,
-                trees,
+                n_tx: Some(tx.len()),
+                tx: Some(tx),
+                trees: Some(trees),
                 chain_supply: get_block::chain_supply(block_info.as_ref()),
                 value_pools: get_block::value_pools(block_info, delta),
                 size,
                 block_commitments: Some(block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(final_sapling_root),
                 final_orchard_root,
                 previous_block_hash: Some(previous_block_hash),
                 next_block_hash,
+                hex: None,
             })))
         } else {
             Err("invalid verbosity value").map_error(server::error::LegacyCode::InvalidParameter)
@@ -4799,16 +4801,17 @@ impl Default for GetBlockResponse {
     fn default() -> Self {
         GetBlockResponse::Object(Box::new(BlockObject {
             hash: block::Hash([0; 32]),
-            confirmations: 0,
+            confirmations: Some(0),
             height: None,
             time: None,
-            n_tx: 0,
-            tx: Vec::new(),
-            trees: GetBlockTrees::default(),
+            n_tx: Some(0),
+            tx: Some(Vec::new()),
+            trees: Some(GetBlockTrees::default()),
             size: None,
             version: None,
             merkle_root: None,
             block_commitments: None,
+            auth_data_root: None,
             final_sapling_root: None,
             final_orchard_root: None,
             nonce: None,
@@ -4819,6 +4822,7 @@ impl Default for GetBlockResponse {
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,
+            hex: None,
         }))
     }
 }
@@ -4834,9 +4838,11 @@ pub struct BlockObject {
 
     /// The number of confirmations of this block in the best chain,
     /// or -1 if it is not in the best chain.
-    confirmations: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    confirmations: Option<i64>,
 
-    /// The block size. TODO: fill it
+    /// The serialized block size in bytes.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     size: Option<i64>,
@@ -4852,28 +4858,34 @@ pub struct BlockObject {
     version: Option<u32>,
 
     /// The merkle root of the requested block.
-    #[serde(with = "opthex", rename = "merkleroot")]
+    #[serde(default, with = "opthex", rename = "merkleroot")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     merkle_root: Option<block::merkle::Root>,
 
     /// The blockcommitments field of the requested block. Its interpretation changes
     /// depending on the network and height.
-    #[serde(with = "opthex", rename = "blockcommitments")]
+    #[serde(default, with = "opthex", rename = "blockcommitments")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     block_commitments: Option<[u8; 32]>,
 
-    // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
-    //
+    /// The ZIP 244 authorizing data root of the requested block, in display order.
+    /// Only returned when a field query requests `authdataroot`.
+    #[serde(default, with = "opthex", rename = "authdataroot")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[new(default)]
+    #[getter(copy)]
+    auth_data_root: Option<block::merkle::AuthDataRoot>,
+
     /// The root of the Sapling commitment tree after applying this block.
-    #[serde(with = "opthex", rename = "finalsaplingroot")]
+    #[serde(default, with = "opthex", rename = "finalsaplingroot")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     final_sapling_root: Option<[u8; 32]>,
 
     /// The root of the Orchard commitment tree after applying this block.
-    #[serde(with = "opthex", rename = "finalorchardroot")]
+    #[serde(default, with = "opthex", rename = "finalorchardroot")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     final_orchard_root: Option<[u8; 32]>,
@@ -4881,12 +4893,14 @@ pub struct BlockObject {
     // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
     //
     /// The number of transactions in this block.
-    #[serde(rename = "nTx")]
-    n_tx: usize,
+    #[serde(default, rename = "nTx", skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    n_tx: Option<usize>,
 
     /// List of transactions in block order, hex-encoded if verbosity=1 or
     /// as objects if verbosity=2.
-    tx: Vec<GetBlockTransaction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tx: Option<Vec<GetBlockTransaction>>,
 
     /// The height of the requested block.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4894,20 +4908,20 @@ pub struct BlockObject {
     time: Option<i64>,
 
     /// The nonce of the requested block header.
-    #[serde(with = "opthex")]
+    #[serde(default, with = "opthex")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     nonce: Option<[u8; 32]>,
 
     /// The Equihash solution in the requested block header.
     /// Note: presence of this field in getblock is not documented in zcashd.
-    #[serde(with = "opthex")]
+    #[serde(default, with = "opthex")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     solution: Option<Solution>,
 
     /// The difficulty threshold of the requested block header displayed in compact form.
-    #[serde(with = "opthex")]
+    #[serde(default, with = "opthex")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     bits: Option<CompactDifficulty>,
@@ -4932,20 +4946,45 @@ pub struct BlockObject {
     value_pools: Option<BlockchainValuePoolBalances>,
 
     /// Information about the note commitment trees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    trees: GetBlockTrees,
+    trees: Option<GetBlockTrees>,
 
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
-    #[serde(with = "opthex")]
+    #[serde(default, with = "opthex")]
     #[getter(copy)]
     previous_block_hash: Option<block::Hash>,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
-    #[serde(with = "opthex")]
+    #[serde(default, with = "opthex")]
     #[getter(copy)]
     next_block_hash: Option<block::Hash>,
+
+    /// The serialized block, hex-encoded, as verbosity 0 returns it.
+    /// Only returned when a field query requests `hex`.
+    #[serde(default, with = "hex_data::option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[new(default)]
+    hex: Option<SerializedBlock>,
+}
+
+impl BlockObject {
+    /// Returns this block object with its `authdataroot` field set to `auth_data_root`.
+    pub fn with_auth_data_root(
+        mut self,
+        auth_data_root: Option<block::merkle::AuthDataRoot>,
+    ) -> Self {
+        self.auth_data_root = auth_data_root;
+        self
+    }
+
+    /// Returns this block object with its `hex` field set to `hex`.
+    pub fn with_hex(mut self, hex: Option<SerializedBlock>) -> Self {
+        self.hex = hex;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -5363,9 +5402,11 @@ impl ValidateAddresses for GetAddressTxIdsRequest {
 /// Information about the sapling and orchard note commitment trees if any.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBlockTrees {
-    #[serde(skip_serializing_if = "SaplingTrees::is_empty")]
+    // `default` so the `{}` that blocks without Sapling or Orchard notes serialize to
+    // deserializes again, as empty trees.
+    #[serde(default, skip_serializing_if = "SaplingTrees::is_empty")]
     sapling: SaplingTrees,
-    #[serde(skip_serializing_if = "OrchardTrees::is_empty")]
+    #[serde(default, skip_serializing_if = "OrchardTrees::is_empty")]
     orchard: OrchardTrees,
     // `default` so responses and fixtures from before Ironwood (which have no `ironwood` field)
     // still deserialize, as the empty tree.
@@ -5410,7 +5451,7 @@ impl GetBlockTrees {
 }
 
 /// Sapling note commitment tree information.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct SaplingTrees {
     size: u64,
 }
@@ -5422,7 +5463,7 @@ impl SaplingTrees {
 }
 
 /// Orchard note commitment tree information.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct OrchardTrees {
     size: u64,
 }

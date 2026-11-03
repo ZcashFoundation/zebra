@@ -262,6 +262,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let tx = block
         .tx()
         .iter()
+        .flatten()
         .map(|tx| {
             let GetBlockTransaction::Hash(h) = tx else {
                 panic!("Expected GetBlockTransaction::Hash")
@@ -287,7 +288,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         )
     });
     let value_pools = block.value_pools().clone();
-    let trees = block.trees();
+    let trees = block.trees().expect("the fixture has trees");
     let trees_sapling = trees.sapling();
     let trees_orchard = trees.orchard();
     let trees_ironwood = trees.ironwood();
@@ -295,35 +296,50 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     // bother unpacking it here
     let previous_block_hash = block.previous_block_hash();
     let next_block_hash = block.next_block_hash();
+    // Fields only returned by field queries.
+    let auth_data_root = block.auth_data_root();
+    let hex = block.hex().clone();
+    assert_eq!(auth_data_root, None);
+    assert_eq!(hex, None);
 
-    let new_obj = GetBlockResponse::Object(Box::new(BlockObject::new(
-        zebra_chain::block::Hash(hash),
-        confirmations,
-        size,
-        height,
-        version,
-        merkle_root.map(zebra_chain::block::merkle::Root),
-        block_commitments,
-        final_sapling_root,
-        final_orchard_root,
-        n_tx,
-        tx.iter()
-            .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
-            .collect(),
-        time,
-        nonce,
-        solution,
-        bits.map(|d| {
-            zebra_chain::work::difficulty::CompactDifficulty::from_bytes_in_display_order(&d)
-                .expect("must work since it was just read")
-        }),
-        difficulty,
-        chain_supply,
-        value_pools,
-        GetBlockTrees::new(trees_sapling, trees_orchard, trees_ironwood),
-        previous_block_hash,
-        next_block_hash,
-    )));
+    let new_obj = GetBlockResponse::Object(Box::new(
+        BlockObject::new(
+            zebra_chain::block::Hash(hash),
+            confirmations,
+            size,
+            height,
+            version,
+            merkle_root.map(zebra_chain::block::merkle::Root),
+            block_commitments,
+            final_sapling_root,
+            final_orchard_root,
+            n_tx,
+            Some(
+                tx.iter()
+                    .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
+                    .collect(),
+            ),
+            time,
+            nonce,
+            solution,
+            bits.map(|d| {
+                zebra_chain::work::difficulty::CompactDifficulty::from_bytes_in_display_order(&d)
+                    .expect("must work since it was just read")
+            }),
+            difficulty,
+            chain_supply,
+            value_pools,
+            Some(GetBlockTrees::new(
+                trees_sapling,
+                trees_orchard,
+                trees_ironwood,
+            )),
+            previous_block_hash,
+            next_block_hash,
+        )
+        .with_auth_data_root(auth_data_root)
+        .with_hex(hex),
+    ));
 
     assert_eq!(obj, new_obj);
 
@@ -355,6 +371,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let tx = block
         .tx()
         .iter()
+        .flatten()
         .cloned()
         .map(|tx| {
             let GetBlockTransaction::Object(tx) = tx else {
@@ -373,35 +390,101 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let trees = block.trees();
     let previous_block_hash = block.previous_block_hash();
     let next_block_hash = block.next_block_hash();
+    let auth_data_root = block.auth_data_root();
+    let hex = block.hex().clone();
+    assert!(auth_data_root.is_some(), "the fixture has an authdataroot");
 
-    let new_obj = GetBlockResponse::Object(Box::new(BlockObject::new(
-        hash,
-        confirmations,
-        size,
-        height,
-        version,
-        merkle_root,
-        block_commitments,
-        final_sapling_root,
-        final_orchard_root,
-        n_tx,
-        tx.iter()
-            .cloned()
-            .map(GetBlockTransaction::Object)
-            .collect(),
-        time,
-        nonce,
-        solution,
-        bits,
-        difficulty,
-        chain_supply,
-        value_pools,
-        trees,
-        previous_block_hash,
-        next_block_hash,
-    )));
+    let new_obj = GetBlockResponse::Object(Box::new(
+        BlockObject::new(
+            hash,
+            confirmations,
+            size,
+            height,
+            version,
+            merkle_root,
+            block_commitments,
+            final_sapling_root,
+            final_orchard_root,
+            n_tx,
+            Some(
+                tx.iter()
+                    .cloned()
+                    .map(GetBlockTransaction::Object)
+                    .collect(),
+            ),
+            time,
+            nonce,
+            solution,
+            bits,
+            difficulty,
+            chain_supply,
+            value_pools,
+            trees,
+            previous_block_hash,
+            next_block_hash,
+        )
+        .with_auth_data_root(auth_data_root)
+        .with_hex(hex),
+    ));
 
     assert_eq!(obj, new_obj);
+
+    Ok(())
+}
+
+/// Objects with only some keys, as `getblock` field queries return them, deserialize with the
+/// other keys absent, and serialize back to the same JSON.
+#[test]
+fn test_get_block_sparse_objects() -> Result<(), Box<dyn std::error::Error>> {
+    use hex::ToHex;
+
+    let hash = "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08";
+    let txid = "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609";
+    let auth_data_root = "0e2f0c9c2b1d6f3f5a2a4c8a26a7c3ea3a0a39e8d2f8bc3e6ad0ef0a1fa2bf53";
+    let raw_block = "0400000000000000";
+
+    for json in [
+        format!(r#"{{"hash":"{hash}","tx":["{txid}"],"trees":{{}}}}"#),
+        format!(r#"{{"hash":"{hash}","height":1000,"hex":"{raw_block}"}}"#),
+        format!(r#"{{"hash":"{hash}","authdataroot":"{auth_data_root}","nTx":1}}"#),
+    ] {
+        let obj: GetBlockResponse = serde_json::from_str(&json)?;
+        let GetBlockResponse::Object(block) = &obj else {
+            panic!("Expected GetBlockResponse::Object for {json}");
+        };
+        assert_eq!(block.hash().to_string(), hash);
+        assert_eq!(serde_json::to_string(&obj)?, json);
+    }
+
+    let obj: GetBlockResponse = serde_json::from_str(&format!(
+        r#"{{"hash":"{hash}","authdataroot":"{auth_data_root}","nTx":1}}"#
+    ))?;
+    let GetBlockResponse::Object(block) = &obj else {
+        panic!("Expected GetBlockResponse::Object");
+    };
+    assert_eq!(
+        block
+            .auth_data_root()
+            .map(|root| root.encode_hex::<String>()),
+        Some(auth_data_root.to_owned()),
+    );
+    assert_eq!(block.n_tx(), Some(1));
+    assert_eq!(block.confirmations(), None);
+    assert_eq!(block.tx(), &None);
+    assert_eq!(block.trees(), None);
+    assert_eq!(block.merkle_root(), None);
+    assert_eq!(block.hex(), &None);
+
+    let obj: GetBlockResponse = serde_json::from_str(&format!(
+        r#"{{"hash":"{hash}","height":1000,"hex":"{raw_block}"}}"#
+    ))?;
+    let GetBlockResponse::Object(block) = &obj else {
+        panic!("Expected GetBlockResponse::Object");
+    };
+    assert_eq!(
+        block.hex().as_ref().map(|hex| hex.as_ref().to_vec()),
+        Some(hex::decode(raw_block)?),
+    );
 
     Ok(())
 }

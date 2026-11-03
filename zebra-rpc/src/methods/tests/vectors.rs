@@ -464,14 +464,16 @@ async fn rpc_getblock_rejects_incomplete_stored_bodies() {
         let GetBlockResponse::Object(historical_block) = &retained.0 else {
             panic!("verbosity one returns a block object");
         };
-        assert_eq!(historical_block.n_tx, block.transactions.len());
+        assert_eq!(historical_block.n_tx, Some(block.transactions.len()));
         assert_eq!(
             historical_block.tx,
-            block
-                .transactions
-                .iter()
-                .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                .collect::<Vec<_>>()
+            Some(
+                block
+                    .transactions
+                    .iter()
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                    .collect::<Vec<_>>()
+            )
         );
         assert_eq!(retained.2.len(), 2);
         assert!(retained.3.balance() > 0);
@@ -802,8 +804,12 @@ async fn rpc_getblock_spent_outputs_distinguishes_pruned_history() {
                 let GetBlockResponse::Object(body) = response.unwrap() else {
                     panic!("verbosity three returns a block object");
                 };
-                assert_eq!(body.tx.len(), block.transactions.len());
-                for (tx, source) in body.tx.iter().zip(&block.transactions) {
+                let body_tx = body
+                    .tx
+                    .as_ref()
+                    .expect("verbosity three returns transactions");
+                assert_eq!(body_tx.len(), block.transactions.len());
+                for (tx, source) in body_tx.iter().zip(&block.transactions) {
                     let GetBlockTransaction::Object(tx) = tx else {
                         panic!("verbosity three returns transaction objects");
                     };
@@ -1012,20 +1018,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -1045,6 +1054,7 @@ async fn rpc_getblock() {
                 value_pools: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -1070,20 +1080,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -1102,6 +1115,7 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -1137,6 +1151,7 @@ async fn rpc_getblock() {
                 version,
                 merkle_root,
                 block_commitments,
+                auth_data_root,
                 final_sapling_root,
                 final_orchard_root,
                 nonce,
@@ -1147,12 +1162,15 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                hex,
             } = &**obj;
             assert_eq!(hash, &block.hash());
-            assert_eq!(confirmations, &((blocks.len() - i) as i64));
+            assert_eq!(confirmations, &Some((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
-            assert_eq!(*n_tx, block.transactions.len());
+            assert_eq!(*n_tx, Some(block.transactions.len()));
+            assert_eq!(auth_data_root, &None);
+            assert_eq!(hex, &None);
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -1185,6 +1203,7 @@ async fn rpc_getblock() {
                 block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
             );
 
+            let tx = tx.as_ref().expect("verbosity 2 returns transactions");
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
                     let TransactionObject {
@@ -1237,6 +1256,7 @@ async fn rpc_getblock() {
                 version,
                 merkle_root,
                 block_commitments,
+                auth_data_root,
                 final_sapling_root,
                 final_orchard_root,
                 nonce,
@@ -1247,12 +1267,15 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                hex,
             } = &**obj;
             assert_eq!(hash, &block.hash());
-            assert_eq!(confirmations, &((blocks.len() - i) as i64));
+            assert_eq!(confirmations, &Some((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
-            assert_eq!(*n_tx, block.transactions.len());
+            assert_eq!(*n_tx, Some(block.transactions.len()));
+            assert_eq!(auth_data_root, &None);
+            assert_eq!(hex, &None);
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -1285,6 +1308,7 @@ async fn rpc_getblock() {
                 block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
             );
 
+            let tx = tx.as_ref().expect("verbosity 2 returns transactions");
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
                     let TransactionObject {
@@ -1319,7 +1343,7 @@ async fn rpc_getblock() {
             panic!("Expected GetBlock::Object");
         };
 
-        for actual_tx in obj.tx.iter() {
+        for actual_tx in obj.tx.iter().flatten() {
             let GetBlockTransaction::Object(tx_object) = actual_tx else {
                 panic!("verbosity 3 must return transaction objects");
             };
@@ -1356,20 +1380,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -1388,6 +1415,7 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -1413,20 +1441,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -1445,6 +1476,7 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -1670,13 +1702,14 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     };
 
     assert_eq!(
-        obj.confirmations, -1,
+        obj.confirmations,
+        Some(-1),
         "side-chain confirmations should be -1"
     );
 
     // Each transaction object must be labeled as side-chain (height=-1,
     // confirmations=0) rather than panicking on the u32 cast.
-    for actual_tx in &obj.tx {
+    for actual_tx in obj.tx.iter().flatten() {
         let GetBlockTransaction::Object(tx_obj) = actual_tx else {
             panic!("verbosity-2 returns transaction objects");
         };
