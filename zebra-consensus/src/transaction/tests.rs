@@ -1512,7 +1512,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
 #[tokio::test(flavor = "multi_thread")]
 async fn block_verification_does_not_use_mempool_verified_state() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let read_state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut read_state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
     let network = Network::Mainnet;
@@ -1525,6 +1525,13 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         None,
     );
     let startup_reads = async {
+        read_state
+            .expect_request(zebra_state::ReadRequest::HistoryCapabilities)
+            .await
+            .expect("initialization reads the state's history capabilities")
+            .respond(zebra_state::ReadResponse::HistoryCapabilities(
+                Default::default(),
+            ));
         for _ in 0..2 {
             let responder = state
                 .expect_request_that(|request| {
