@@ -102,6 +102,11 @@ pub enum SnapshotError {
     #[error("opening the state failed: {0}")]
     StateOpen(#[from] StateInitError),
 
+    /// A component's export stopped because another component failed, whose
+    /// error is reported instead.
+    #[error("the export was cancelled because another component failed")]
+    Cancelled,
+
     /// Reading the state failed.
     #[error("reading the state failed: {0}")]
     StateRead(#[from] rocksdb::Error),

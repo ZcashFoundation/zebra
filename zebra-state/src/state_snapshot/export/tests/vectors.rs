@@ -4,7 +4,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use bincode::Options;
@@ -29,7 +29,9 @@ use crate::{
         DiskWriteBatch, FinalizedState, HistoryTreeParts, IntoDisk, RawBytes, ReadDisk, WriteDisk,
     },
     state_snapshot::{
-        export::{export_state_snapshot, export_with_window, ComponentWriter},
+        export::{
+            export_state_snapshot, export_with_window, inconsistent, ComponentWriter, Exporter,
+        },
         format::{
             canonical_value, ComponentId, FormatError, Manifest, PieceReader, PieceRecord,
             INDEX_MODE_DEFAULT, MAX_PIECE_BYTES,
@@ -859,6 +861,49 @@ fn regtest_exports_carry_the_parameters_hash() {
     // Without the parameters hash, a Mainnet manifest has a different layout.
     let bytes = std::fs::read(store.object_path(commitment.manifest)).expect("stored");
     assert!(Manifest::decode(&bytes, &Network::Mainnet).is_err());
+}
+
+/// A failed component stops the other components' scans, so a refusal known
+/// in seconds does not wait for hours of reads, and the failure, not the
+/// cancellation, is what the export reports.
+#[test]
+fn a_failed_component_stops_the_other_scans() {
+    let _init_guard = zebra_test::init();
+
+    let dir = tempfile::tempdir().expect("creates a temporary directory");
+    let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &test_chain());
+    let store = ArtifactStore::at(dir.path().join("store"));
+    let state = open_state(&config, &Network::Mainnet);
+    let exporter = Exporter {
+        db: &state.db,
+        store: &store,
+        height: TIP,
+        window_start: WINDOW_START,
+        cancelled: AtomicBool::new(false),
+    };
+
+    // A scan whose row fails returns the failure, and stops the others before they read a row.
+    let mut rows = 0;
+    assert_err!(
+        exporter.scan("hash_by_height", None, None, |_key, _value| {
+            rows += 1;
+            Err(inconsistent(ComponentId::HashByHeight, "a test failure"))
+        }),
+        SnapshotError::Inconsistent {
+            component: ComponentId::HashByHeight,
+            ..
+        },
+    );
+    assert_eq!(rows, 1);
+    assert_err!(
+        exporter.scan("block_info", None, None, |_key, _value| {
+            panic!("a cancelled scan reads no rows")
+        }),
+        SnapshotError::Cancelled,
+    );
+
+    // An export whose components fail concurrently reports a failure, not a cancellation: see
+    // `export_refuses_missing_and_contradictory_rows`.
 }
 
 /// The exporter writes the network's parameters hash into the manifest, and the
