@@ -102,6 +102,10 @@ operation and accommodate the network's block production intervals.
 | `zebra.net.in.errors` | Counter, `error` label | Incoming message decoding errors. Investigate sustained increases by error category. |
 | `sync.verified.block.count` | Counter | Successfully verified blocks in the sync download pipeline. Use its rate to track sync throughput. |
 | `state.checkpoint.error.block.count` | Counter | Failed checkpoint-block commits. Investigate increases with the node logs. |
+| `sync.state_snapshot.stages.total` | Counter, `stage` label | Reported state-snapshot bootstrap, import, and post-import stages. The bounded label values are the stage texts listed in the [snapshot guide](state-snapshot-sync.md#what-happens-at-startup). Use the sequence and stage logs to diagnose an incomplete bootstrap. |
+| `zebra.net.in.objects.bytes` | Counter | Bytes sent to peers in response to incoming `get-object` requests for state-snapshot artifacts. |
+| `zebra.net.in.objects.busy` | Counter | Incoming object requests refused because the per-peer or global object-stream limit was full. Alert on sustained increases when snapshot downloads are failing or retrying. |
+| `zebra.net.in.objects.unreadable` | Counter | Indexed object files that could not be opened or read. Investigate store corruption or disk failures with the serving node's debug logs. |
 | `rpc.requests.total` | Counter, `method` and `status` labels | Completed RPC requests, separated into `success` and `error`. |
 | `rpc.errors.total` | Counter, `method` and `error_code` labels | RPC errors; compare their rate with the request rate for the same method. |
 | `rpc.request.duration_seconds` | Summary, `method` label | RPC latency in seconds. Alert on sustained latency for methods whose response-time budget is known. |

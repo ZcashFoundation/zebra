@@ -7,7 +7,7 @@ use zebra_chain::{
 
 use crate::config::ZebradConfig;
 
-use super::commitment_toml;
+use super::{commitment_toml, ExportStateSnapshotCmd};
 
 /// The printed commitment is a config table that configures the node to
 /// bootstrap from the snapshot, with the lines the bootstrap tests match.
@@ -48,4 +48,35 @@ fn printed_commitment_configures_the_sync_section() {
     let config: ZebradConfig = toml::from_str(&config).expect("valid config");
     assert!(config.sync.state_snapshot_sync);
     assert_eq!(config.sync.state_snapshot, Some(commitment));
+}
+
+/// The dedicated commitment output is a complete TOML document, with no log lines to scrape out.
+#[test]
+fn commitment_output_file_is_machine_readable_toml() {
+    let _init_guard = zebra_test::init();
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("commitment.toml");
+    let command = ExportStateSnapshotCmd {
+        commitment_out: Some(path.clone()),
+        ..ExportStateSnapshotCmd::default()
+    };
+    let commitment = StateSnapshotCommitment {
+        height: block::Height(42),
+        block_hash: block::Hash([0xCD; 32]),
+        manifest: ObjectHash([0xEF; 32]),
+    };
+
+    command.output_commitment(&commitment).unwrap();
+
+    let output = std::fs::read_to_string(&path).unwrap();
+    assert!(output.starts_with("# Add this table"), "{output}");
+    assert!(output.contains("[sync.state_snapshot]"), "{output}");
+    let config: ZebradConfig = toml::from_str(&output).expect("the whole file is valid TOML");
+    assert_eq!(config.sync.state_snapshot, Some(commitment));
+
+    let error = command
+        .output_commitment(&commitment)
+        .and_then(|()| super::write_commitment(dir.path(), "not a file"))
+        .expect_err("writing over a directory fails");
+    assert!(error.to_string().contains("could not write"), "{error}");
 }

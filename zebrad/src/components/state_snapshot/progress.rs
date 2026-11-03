@@ -87,6 +87,9 @@ impl fmt::Display for Stage {
             Stage::LastCheckpointReached => "last checkpoint reached",
             Stage::TargetReached => "sync target reached",
         };
+        // Every production use of a stage's display text reports that stage. Keeping the counter
+        // here covers the bootstrap, start, and runtime paths without duplicating the metric name.
+        metrics::counter!("sync.state_snapshot.stages.total", "stage" => name).increment(1);
         write!(f, "{} {name}", Self::LOG_PREFIX)
     }
 }
@@ -161,9 +164,70 @@ pub async fn log_runtime_stages(mut stages: RuntimeStages, mut chain_tip_change:
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
+
     use zebra_chain::block::Height;
 
     use super::{RuntimeStages, Stage};
+
+    #[derive(Default)]
+    struct StageRecorder {
+        value: Arc<AtomicU64>,
+    }
+
+    impl metrics::Recorder for StageRecorder {
+        fn describe_counter(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+
+        fn describe_gauge(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+
+        fn describe_histogram(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+
+        fn register_counter(
+            &self,
+            key: &metrics::Key,
+            _: &metrics::Metadata<'_>,
+        ) -> metrics::Counter {
+            assert_eq!(key.name(), "sync.state_snapshot.stages.total");
+            let labels: Vec<&metrics::Label> = key.labels().collect();
+            assert_eq!(labels.len(), 1);
+            assert_eq!(labels[0].key(), "stage");
+            assert_eq!(labels[0].value(), "bootstrap started");
+            metrics::Counter::from_arc(self.value.clone())
+        }
+
+        fn register_gauge(&self, _: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
+            metrics::Gauge::noop()
+        }
+
+        fn register_histogram(
+            &self,
+            _: &metrics::Key,
+            _: &metrics::Metadata<'_>,
+        ) -> metrics::Histogram {
+            metrics::Histogram::noop()
+        }
+    }
 
     /// Each runtime stage is reported once, when the tip first reaches its
     /// height, in stage order, even when one tip change passes several.
@@ -229,5 +293,20 @@ mod tests {
             Stage::BootstrapStarted.to_string(),
             "state snapshot stage: bootstrap started"
         );
+    }
+
+    #[test]
+    fn stage_reporting_records_its_metric() {
+        let _init_guard = zebra_test::init();
+        let recorder = StageRecorder::default();
+
+        metrics::with_local_recorder(&recorder, || {
+            assert_eq!(
+                Stage::BootstrapStarted.to_string(),
+                "state snapshot stage: bootstrap started"
+            );
+        });
+
+        assert_eq!(recorder.value.load(Ordering::Relaxed), 1);
     }
 }

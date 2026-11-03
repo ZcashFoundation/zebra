@@ -17,7 +17,7 @@ implements format 29.0.0:
 | Constant | Current value | Change requiring a bump |
 | --- | --- | --- |
 | `DATABASE_FORMAT_VERSION` | `30` | An incompatible encoding change or column family removal |
-| `DATABASE_FORMAT_MINOR_VERSION` | `0` | A significant compatible change, including a new column family |
+| `DATABASE_FORMAT_MINOR_VERSION` | `1` | A significant compatible change, including a new column family |
 | `DATABASE_FORMAT_PATCH_VERSION` | `0` | A significant format compatibility fix |
 
 A change that would otherwise be incompatible can use a minor bump only when

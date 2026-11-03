@@ -193,6 +193,32 @@ impl StartCmd {
     const ZCASHD_COMPAT_SHUTDOWN_TIMEOUT_MARGIN: std::time::Duration =
         std::time::Duration::from_secs(30);
 
+    /// Applies the configured fallback to a snapshot rejected by an earlier process.
+    fn handle_rejected_snapshot(config: &ZebradConfig, decision: &Decision) -> Result<(), Report> {
+        if !matches!(decision, Decision::Skip(decision::SkipReason::Rejected)) {
+            return Ok(());
+        }
+
+        match config.sync.state_snapshot_fallback {
+            StateSnapshotFallback::Error => Err(eyre!(
+                "the state snapshot was rejected by an earlier bootstrap, and \
+                 sync.state_snapshot_fallback is \"error\", so Zebra exits without opening the \
+                 state or syncing from genesis. Use a different trusted commitment, or investigate \
+                 the rejection and remove its marker before retrying it. Set \
+                 sync.state_snapshot_fallback = \"genesis\" to sync from genesis without retrying \
+                 the rejected snapshot"
+            )),
+            StateSnapshotFallback::Genesis => {
+                warn!(
+                    "the state snapshot was rejected by an earlier bootstrap, and \
+                     sync.state_snapshot_fallback is \"genesis\": syncing from genesis without \
+                     retrying the rejected snapshot"
+                );
+                Ok(())
+            }
+        }
+    }
+
     /// Returns the Zebra P2P address supervised zcashd should `-connect` to.
     ///
     /// Uses `zcashd_compat.p2p_connect_addr` when set, otherwise Zebra's bound
@@ -502,9 +528,9 @@ impl StartCmd {
             &config.network.network,
         );
         let mut bootstrapped_height = None;
-        if let Decision::Bootstrap { commitment, peers } =
-            decision::should_bootstrap(&config, &snapshot_store)
-        {
+        let snapshot_decision = decision::should_bootstrap(&config, &snapshot_store);
+        Self::handle_rejected_snapshot(&config, &snapshot_decision)?;
+        if let Decision::Bootstrap { commitment, peers } = snapshot_decision {
             info!(
                 height = commitment.height.0,
                 hash = %commitment.block_hash,
@@ -519,11 +545,13 @@ impl StartCmd {
                     StateSnapshotFallback::Error => {
                         return Err(Report::new(error).wrap_err(
                             "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
-                             is \"error\", so Zebra exits without a state directory and the next \
-                             start retries. Check sync.state_snapshot_peers and the commitment; \
-                             set sync.state_snapshot_fallback = \"genesis\" to sync from genesis \
-                             when a bootstrap fails, or sync.state_snapshot_sync = false to turn \
-                             snapshot sync off",
+                             is \"error\", so Zebra exits instead of continuing with normal sync. \
+                             Check sync.state_snapshot_peers and the commitment. An aborted \
+                             download is retried on the next start; a rejected snapshot needs a \
+                             different trusted commitment, or investigation and removal of its \
+                             rejection marker before it is retried. Set \
+                             sync.state_snapshot_fallback = \"genesis\" to sync from genesis, or \
+                             sync.state_snapshot_sync = false to turn snapshot sync off",
                         ));
                     }
                     StateSnapshotFallback::Genesis => {
@@ -1547,8 +1575,38 @@ mod tests {
     use color_eyre::eyre::eyre;
 
     use super::StartCmd;
-    use crate::components::zcashd_compat;
+    use crate::components::{
+        state_snapshot::decision::{Decision, SkipReason},
+        sync::StateSnapshotFallback,
+        zcashd_compat,
+    };
     use crate::config::ZebradConfig;
+
+    /// A rejection marker left by an earlier process still honors the configured fallback.
+    #[test]
+    fn rejected_snapshot_restart_honors_fallback() {
+        let _init_guard = zebra_test::init();
+        let rejected = Decision::Skip(SkipReason::Rejected);
+        let mut config = ZebradConfig::default();
+
+        config.sync.state_snapshot_fallback = StateSnapshotFallback::Error;
+        let error = StartCmd::handle_rejected_snapshot(&config, &rejected)
+            .expect_err("fallback=error must keep rejecting startup");
+        let error = error.to_string();
+        assert!(
+            error.contains("rejected by an earlier bootstrap"),
+            "{error}"
+        );
+        assert!(error.contains("different trusted commitment"), "{error}");
+
+        config.sync.state_snapshot_fallback = StateSnapshotFallback::Genesis;
+        StartCmd::handle_rejected_snapshot(&config, &rejected)
+            .expect("fallback=genesis continues without the rejected snapshot");
+
+        config.sync.state_snapshot_fallback = StateSnapshotFallback::Error;
+        StartCmd::handle_rejected_snapshot(&config, &Decision::Skip(SkipReason::NoPeers))
+            .expect("other decision-rule skips keep their existing behavior");
+    }
 
     #[test]
     fn zcashd_compat_flag_enables_mode() {

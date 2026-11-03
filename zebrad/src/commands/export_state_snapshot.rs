@@ -11,11 +11,14 @@
 //! migration is exported in place, in the current encodings; the tests export
 //! current-format states, and the Mainnet benchmark covers that path.
 
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use abscissa_core::{Application, Command, Runnable, Shutdown};
 use clap::Parser;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, WrapErr};
 
 use zebra_chain::{block, state_snapshot::StateSnapshotCommitment};
 use zebra_state::state_snapshot::{export::export_state_snapshot, store::ArtifactStore};
@@ -50,19 +53,23 @@ pub struct ExportStateSnapshotCmd {
                 which `serve_state_snapshots` serves from)"
     )]
     out: Option<PathBuf>,
+
+    /// Write only the commitment's TOML to this file, for machine consumption.
+    #[clap(long, value_name = "PATH")]
+    commitment_out: Option<PathBuf>,
 }
 
 impl Runnable for ExportStateSnapshotCmd {
     /// `export-state-snapshot` sub-command entrypoint.
-    #[allow(clippy::print_stdout)]
+    #[allow(clippy::print_stdout, clippy::print_stderr)]
     fn run(&self) {
-        match self.export() {
-            Ok(commitment) => print!("{}", commitment_toml(&commitment)),
-            Err(error) => {
-                // Snapshot errors include their sources in their messages.
-                tracing::error!("state snapshot export failed: {error}");
-                APPLICATION.shutdown(Shutdown::Forced);
-            }
+        let result = self
+            .export()
+            .and_then(|commitment| self.output_commitment(&commitment));
+        if let Err(error) = result {
+            // Snapshot errors include their sources in their messages.
+            eprintln!("state snapshot export failed: {error}");
+            APPLICATION.shutdown(Shutdown::Forced);
         }
     }
 }
@@ -91,6 +98,24 @@ impl ExportStateSnapshotCmd {
             &store,
         )?)
     }
+
+    /// Prints the commitment, or writes a log-free TOML file when requested.
+    #[allow(clippy::print_stdout)]
+    fn output_commitment(&self, commitment: &StateSnapshotCommitment) -> Result<()> {
+        let toml = commitment_toml(commitment);
+        if let Some(path) = &self.commitment_out {
+            write_commitment(path, &toml)
+        } else {
+            print!("{toml}");
+            Ok(())
+        }
+    }
+}
+
+/// Writes a complete commitment TOML document to `path`.
+fn write_commitment(path: &Path, toml: &str) -> Result<()> {
+    fs::write(path, toml)
+        .wrap_err_with(|| format!("could not write the commitment to {}", path.display()))
 }
 
 /// Returns `commitment` as the `[sync.state_snapshot]` table of a `zebrad.toml`
