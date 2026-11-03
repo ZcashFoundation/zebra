@@ -200,22 +200,24 @@ where
                 .compact
                 .last_received
                 .is_none_or(|last| last.elapsed() >= RETENTION)
-            && matches!(
+        {
+            // Rejected headers and downloads consume the same cooldown as accepted announcements.
+            self.compact.last_received = Some(Instant::now());
+            if matches!(
                 self.compact_query(Request::CheckCompactHeader(block.clone()))
                     .await,
                 Some(Response::Nil)
-            )
-        {
-            if let Ok(permit) = SLOTS.clone().try_acquire_owned() {
-                if matches!(
-                    self.compact_query(Request::AdvertiseCompactBlock(hash, advertiser))
-                        .await,
-                    Some(Response::Nil)
-                ) {
-                    self.compact.last_received = Some(Instant::now());
-                    self.compact.received = Some((block, Instant::now() + RETENTION, permit));
+            ) {
+                if let Ok(permit) = SLOTS.clone().try_acquire_owned() {
+                    if matches!(
+                        self.compact_query(Request::AdvertiseCompactBlock(hash, advertiser))
+                            .await,
+                        Some(Response::Nil)
+                    ) {
+                        self.compact.received = Some((block, Instant::now() + RETENTION, permit));
+                    }
+                    return;
                 }
-                return;
             }
         }
         // Reconstruction starts only after the downloader applies its global/per-IP admission.
