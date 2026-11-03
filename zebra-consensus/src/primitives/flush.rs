@@ -12,6 +12,9 @@ use super::{ed25519, halo2, sapling};
 #[cfg(test)]
 pub(crate) mod tests;
 
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
+
 type Pending = Arc<Mutex<Progress>>;
 
 #[cfg(not(all(test, zebra_loom)))]
