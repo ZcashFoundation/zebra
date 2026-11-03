@@ -242,6 +242,22 @@ where
         return Ok(None);
     };
 
+    spent_outputs_for(&block, chain, db)
+}
+
+/// Returns the transparent outputs spent by the non-coinbase inputs of `block`, keyed by the
+/// [`OutPoint`](transparent::OutPoint) that spends them, reading them from the non-finalized
+/// `chain` or finalized `db` that `block` was read from.
+///
+/// See [`spent_outputs_for_block`] for the errors, correctness and performance notes.
+pub(crate) fn spent_outputs_for<C>(
+    block: &Block,
+    chain: Option<&C>,
+    db: &ZebraDb,
+) -> Result<Option<HashMap<transparent::OutPoint, Utxo>>, BlockReadError>
+where
+    C: AsRef<Chain>,
+{
     // The finalized tip can only advance between these reads, which can only turn a UTXO hit
     // into a parent read, never the reverse.
     let is_finalized = match (block.coinbase_height(), db.finalized_tip_height()) {
