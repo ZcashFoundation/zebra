@@ -463,7 +463,7 @@
         "summary": "An OpenRPC document.",
         "description": "An OpenRPC document.",
         "schema": {
-          "$ref": "#/components/schemas/OpenRPC%20Schema"
+          "$ref": "#/components/schemas/OpenRpcDocument"
         }
       },
       "tags": [
@@ -3197,8 +3197,9 @@
         "minimum": 0,
         "type": "integer"
       },
-      "OpenRPC Schema": {
-        "$ref": "https://raw.githubusercontent.com/open-rpc/meta-schema/master/schema.json"
+      "OpenRpcDocument": {
+        "description": "An OpenRPC document, as defined by https://spec.open-rpc.org/.",
+        "type": "object"
       },
       "Orchard": {
         "description": "Object with Orchard-specific information.",

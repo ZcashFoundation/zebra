@@ -3493,9 +3493,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openrpsee"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e571c5fc94c20f8ebdd43e0f0878cef2ec8d18e8f542d4bca19d57649f6b485"
+checksum = "a799f74f3fbfeb30ef447d33a409fc874caaf34107df593dd2989c453c316501"
 dependencies = [
  "documented",
  "jsonrpsee",
