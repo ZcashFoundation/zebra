@@ -1,12 +1,12 @@
-//! The semantic verifier computes each block's memory charge once and carries it to the state.
+//! The semantic verifier reuses or computes each block's memory charge once and carries it to the state.
 
 use zebra_chain::transaction::UnminedTxId;
 use zebra_test::mock_service::MockService;
 
 use super::*;
 
-/// Committed and proposed blocks reach the state with the charge of their block, so the state's
-/// block writer never serializes them to charge them.
+/// Committed and proposed blocks reach the state with their retained or newly computed charge, so
+/// the state's block writer never serializes them to charge them.
 #[tokio::test]
 async fn verified_blocks_reach_the_state_with_their_charge() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
@@ -15,8 +15,15 @@ async fn verified_blocks_reach_the_state_with_their_charge() -> Result<(), Repor
         .zcash_deserialize_into::<Block>()?
         .into();
     let hash = block.hash();
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    let computed_charge = zs::block_retained_charge(&block, &transaction_hashes);
 
-    for is_proposal in [false, true] {
+    for (is_proposal, with_retention) in [(false, false), (true, false), (false, true)] {
+        let expected_charge = if with_retention {
+            computed_charge + 1_000_000
+        } else {
+            computed_charge
+        };
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut transaction_verifier: MockService<_, _, _, BoxError> =
             MockService::build().for_unit_tests();
@@ -25,10 +32,14 @@ async fn verified_blocks_reach_the_state_with_their_charge() -> Result<(), Repor
             state.clone(),
             transaction_verifier.clone(),
         );
-        let request = if is_proposal {
-            Request::CheckProposal(block.clone())
-        } else {
-            Request::Commit(block.clone())
+        let request = match (is_proposal, with_retention) {
+            (true, false) => Request::CheckProposal(block.clone()),
+            (false, false) => Request::Commit(block.clone()),
+            (false, true) => Request::CommitWithRetention(
+                block.clone(),
+                zs::BlockRetentionToken::new(()).with_retained_charge(expected_charge),
+            ),
+            (true, true) => unreachable!("the test cases do not combine proposals and retention"),
         };
         let verify = tokio::spawn(verifier.oneshot(request));
 
@@ -67,11 +78,8 @@ async fn verified_blocks_reach_the_state_with_their_charge() -> Result<(), Repor
         };
         assert_eq!(
             prepared.retained_charge,
-            Some(zs::block_retained_charge(
-                &prepared.block,
-                &prepared.transaction_hashes
-            )),
-            "proposal: {is_proposal}",
+            Some(expected_charge),
+            "proposal: {is_proposal}, retention: {with_retention}",
         );
 
         if is_proposal {

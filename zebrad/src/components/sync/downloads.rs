@@ -487,7 +487,7 @@ where
         let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
         let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
 
-        // Dropped when the task ends, releasing the block's charge.
+        // Dropped when the task ends, releasing only the caller's retention token.
         let mut tracked_download = self
             .admission
             .as_mut()
@@ -689,8 +689,8 @@ where
                     });
                 }
 
-                // Charge the block to the pipeline's byte bound until this task ends, after its
-                // verification (design §4.2 step 1). Without a bound, skip the serialization pass.
+                // Charge the block jointly with its verifier and state commit owners. Without a
+                // bound, skip the serialization pass and the new request variant.
                 if let Some(tracked_download) = tracked_download.as_mut() {
                     let Some(bytes) = compute_downloaded_block_charge(block.clone()).await else {
                         return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash });
@@ -717,12 +717,25 @@ where
                 let verify_start = std::time::Instant::now();
                 let verifier = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?;
+                let retention = tracked_download
+                    .as_ref()
+                    .and_then(|download| download.retention());
                 let verification = async move {
                     loop {
-                        let request = if early_relay {
-                            zebra_consensus::Request::CommitEarlyRelay(block.clone())
-                        } else {
-                            zebra_consensus::Request::Commit(block.clone())
+                        let request = match (early_relay, retention.clone()) {
+                            (false, Some(retention)) => {
+                                zebra_consensus::Request::CommitWithRetention(block.clone(), retention)
+                            }
+                            (true, Some(retention)) => {
+                                zebra_consensus::Request::CommitEarlyRelayWithRetention(
+                                    block.clone(),
+                                    retention,
+                                )
+                            }
+                            (false, None) => zebra_consensus::Request::Commit(block.clone()),
+                            (true, None) => {
+                                zebra_consensus::Request::CommitEarlyRelay(block.clone())
+                            }
                         };
                         let result = verifier
                             .call(request)

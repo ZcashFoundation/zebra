@@ -1,5 +1,7 @@
 //! Tests for the sync pipeline's byte bound (design §4.2, §6.1 "Pipeline (B)").
 
+mod ownership;
+
 use std::{
     collections::BTreeMap,
     mem::{size_of, size_of_val},
@@ -11,15 +13,21 @@ use chrono::DateTime;
 use futures::stream::StreamExt;
 use indexmap::IndexSet;
 use tokio::time::Instant;
+use tower::{builder::ServiceBuilder, Service, ServiceExt};
 
 use zebra_chain::{
     amount::Amount,
-    block::{self, Block, Height, MAX_BLOCK_BYTES},
+    block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES},
     chain_tip::mock::MockChainTip,
-    parameters::{checkpoint::list::CheckpointList, NetworkUpgrade},
+    parameters::{
+        checkpoint::list::CheckpointList,
+        testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, ParametersBuilder},
+        Network, NetworkUpgrade,
+    },
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, LockTime, Transaction},
     transparent,
+    work::{difficulty::U256, equihash},
 };
 use zebra_network::{self as zn, InventoryResponse::Available};
 use zebra_state as zs;
@@ -123,6 +131,8 @@ async fn deliver(
     block: &Arc<Block>,
 ) -> ResponseSender<zebra_consensus::Request, block::Hash, zn::BoxError> {
     let hash = block.hash();
+    let expected_charge = usize::try_from(downloaded_block_charge(block))
+        .expect("the block charge was converted from usize");
     downloads
         .download_and_verify(hash)
         .await
@@ -136,7 +146,13 @@ async fn deliver(
         .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
 
     verifier
-        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                zebra_consensus::Request::CommitWithRetention(body, retention)
+                    if body == block && retention.retained_charge() == Some(expected_charge)
+            )
+        })
         .await
 }
 
@@ -650,8 +666,8 @@ async fn stuck_peer_cannot_block_the_oldest_range() {
         .await;
 }
 
-/// Every outcome of a download releases its charge and forgets it: a commit, a rejection, a
-/// failed download, and a cancellation.
+/// Commit, rejection, and failed download release their charges. Caller cancellation preserves an
+/// accepted verifier owner's charge until that owner is evicted.
 #[tokio::test(start_paused = true)]
 async fn every_outcome_releases_the_charge_and_forgets_the_download() {
     let _init_guard = zebra_test::init();
@@ -698,16 +714,22 @@ async fn every_outcome_releases_the_charge_and_forgets_the_download() {
         .expect("the pipeline is bounded")
         .is_empty());
 
-    let _verification = deliver(&mut downloads, &mut network, &mut verifier, &blocks[3]).await;
+    let verification = deliver(&mut downloads, &mut network, &mut verifier, &blocks[3]).await;
     assert_eq!(budget.charged_bytes(), downloaded_block_charge(&blocks[3]));
     downloads.cancel_all();
+    assert_eq!(
+        budget.charged_bytes(),
+        downloaded_block_charge(&blocks[3]),
+        "the accepted verifier owner retains its charge after caller cancellation"
+    );
+    drop(verification);
     tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, async {
         while budget.charged_bytes() != 0 {
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("a cancelled download releases its charge");
+    .expect("evicting the accepted request releases its charge");
     assert!(downloads
         .admission()
         .expect("the pipeline is bounded")

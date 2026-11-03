@@ -872,7 +872,9 @@ async fn gossiped_block_over_the_pipeline_bound_is_dropped_unattributed() {
 
         if room {
             let verification = verifier
-                .expect_request(zebra_consensus::Request::Commit(block.clone()))
+                .expect_request_that(|request| {
+                    matches!(request, zebra_consensus::Request::CommitWithRetention(body, _) if body == &block)
+                })
                 .await;
             assert_eq!(budget.charged_bytes(), charge);
             verification.respond(hash);

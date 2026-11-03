@@ -144,6 +144,7 @@ fn test_block_db_round_trip_with(
                 transaction_hashes,
                 received_time: None,
                 retained_charge: None,
+                retention: None,
             })
         };
 

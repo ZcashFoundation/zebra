@@ -108,6 +108,7 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             received_time,
             retained_charge,
+            retention,
         } = block.into();
         let new_outputs = Arc::new(new_outputs);
         let retained_charge = retained_charge
@@ -126,6 +127,7 @@ impl ContextuallyVerifiedBlock {
             chain_value_pool_change: ValueBalance::zero(),
             received_time,
             retained_charge,
+            retention,
         }
     }
 }

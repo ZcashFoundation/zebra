@@ -584,10 +584,10 @@ where
                 ));
             }
 
-            // Charge the block to the sync pipeline's byte bound until its verification ends, or
-            // drop it if it doesn't fit, so gossip never waits for the bound: the syncer downloads
-            // the block later (design §4.2 step 5). Without a bound, skip the serialization pass.
-            let _pipeline_charge = if pipeline_budget.is_bounded() {
+            // Charge the block jointly with its verifier and state commit owners, or drop it if
+            // it doesn't fit, so gossip never waits for the bound: the syncer downloads the block
+            // later (design §4.2 step 5). Without a bound, skip the serialization pass.
+            let pipeline_retention = if pipeline_budget.is_bounded() {
                 let bytes = compute_downloaded_block_charge(block.clone())
                     .await
                     .ok_or_else(|| (BoxError::from("canceled"), None))?;
@@ -616,14 +616,25 @@ where
                             None,
                         )
                     })?
+                    .map(|charge| {
+                        zs::BlockRetentionToken::new(charge).with_retained_charge(
+                            usize::try_from(bytes)
+                                .expect("the block charge was converted from usize"),
+                        )
+                    })
             } else {
                 None
             };
 
-            let request = if early_relay {
-                zebra_consensus::Request::CommitEarlyRelay(block)
-            } else {
-                zebra_consensus::Request::Commit(block)
+            let request = match (early_relay, pipeline_retention) {
+                (false, Some(retention)) => {
+                    zebra_consensus::Request::CommitWithRetention(block, retention)
+                }
+                (true, Some(retention)) => {
+                    zebra_consensus::Request::CommitEarlyRelayWithRetention(block, retention)
+                }
+                (false, None) => zebra_consensus::Request::Commit(block),
+                (true, None) => zebra_consensus::Request::CommitEarlyRelay(block),
             };
             verifier
                 .oneshot(request)

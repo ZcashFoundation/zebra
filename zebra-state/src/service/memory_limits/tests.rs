@@ -129,6 +129,28 @@ fn block_constructors_leave_the_memory_charge_unset() {
     }
 }
 
+/// Retention tokens carry their producer's charge into checkpoint and semantic records, so
+/// downstream memory accounting does not serialize the block again.
+#[test]
+fn retention_tokens_carry_their_block_charge() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vectors are valid");
+    let charge = block_retained_charge(&block, &[]) + 1_000_000;
+    let token = crate::BlockRetentionToken::new(()).with_retained_charge(charge);
+
+    assert_eq!(crate::BlockRetentionToken::new(()).retained_charge(), None);
+    assert_eq!(token.retained_charge(), Some(charge));
+
+    let checkpoint = CheckpointVerifiedBlock::from(block.clone()).with_retention(token.clone());
+    let semantic = SemanticallyVerifiedBlock::from(block).with_retention(token);
+
+    assert_eq!(checkpoint.retained_charge, Some(charge));
+    assert_eq!(semantic.retained_charge, Some(charge));
+}
+
 /// A contextually verified block keeps the charge its semantically verified block carried,
 /// computes it once when none was carried, reuses it for its retained bytes, and carries it to
 /// every semantically verified block built from it.
