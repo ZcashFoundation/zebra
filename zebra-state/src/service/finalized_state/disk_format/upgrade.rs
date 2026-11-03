@@ -691,62 +691,65 @@ impl DbFormatChange {
     }
 
     /// Run quick checks that the current database format is valid.
-    #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_quick(db: &ZebraDb) -> Result<(), String> {
+        Self::format_validity_checks_quick_typed(db).map_err(|error| error.to_string())
+    }
+
+    /// Run quick checks, preserving local history-read failures for snapshot import callers.
+    #[allow(clippy::vec_init_then_push)]
+    fn format_validity_checks_quick_typed(db: &ZebraDb) -> Result<(), FormatCheckError> {
         let timer = CodeTimer::start();
         let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
-        results.push(db.check_max_on_disk_tip_height());
+        results.push(db.check_max_on_disk_tip_height().map_err(Into::into));
 
         // This check can be run before the upgrade, but the upgrade code is finished, so we don't
         // run it early any more. (If future code changes accidentally make it depend on the
         // upgrade, they would accidentally break compatibility with older Zebra cached states.)
-        results.push(add_subtrees::subtree_format_calculation_pre_checks(db));
+        results.push(add_subtrees::subtree_format_calculation_pre_checks_typed(
+            db,
+        ));
 
-        results.push(cache_genesis_roots::quick_check(db));
-        results.push(fix_tree_key_type::quick_check(db));
+        results.push(cache_genesis_roots::quick_check(db).map_err(Into::into));
+        results.push(fix_tree_key_type::quick_check(db).map_err(Into::into));
 
         // The work is done in the functions we just called.
         timer.finish_desc("format_validity_checks_quick()");
-
-        if results.iter().any(Result::is_err) {
-            let err = Err(format!("invalid quick check: {results:?}"));
-            error!(?err);
-            return err;
-        }
-
-        Ok(())
+        check_results(results, "quick")
     }
 
     /// Run detailed checks that the current database format is valid.
-    #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_detailed(
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
-        let timer = CodeTimer::start();
-        let mut results = Vec::new();
+        Self::format_validity_checks_detailed_typed(db, cancel_receiver)
+            .map(|result| result.map_err(|error| error.to_string()))
+    }
 
-        // Check the entire format before returning any errors.
-        //
-        // Do the quick checks first, so we don't have to do this in every detailed check.
-        results.push(Self::format_validity_checks_quick(db));
+    /// Run detailed checks, preserving local history-read failures for snapshot import callers.
+    pub(crate) fn format_validity_checks_detailed_typed(
+        db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), FormatCheckError>, CancelFormatChange> {
+        let timer = CodeTimer::start();
+
+        // Do the quick checks first, so we don't have to do this in every detailed check. Later
+        // checks assume history is readable, so a local read failure must stop here.
+        let quick = Self::format_validity_checks_quick_typed(db);
+        if matches!(quick, Err(FormatCheckError::HistoryRead(_))) {
+            return Ok(quick);
+        }
+        let mut results = vec![quick];
 
         for upgrade in format_upgrades(None) {
-            results.push(upgrade.validate(db, cancel_receiver)?);
+            results.push(upgrade.validate(db, cancel_receiver)?.map_err(Into::into));
         }
 
         // The work is done in the functions we just called.
         timer.finish_desc("format_validity_checks_detailed()");
-
-        if results.iter().any(Result::is_err) {
-            let err = Err(format!("invalid detailed check: {results:?}"));
-            error!(?err);
-            return Ok(err);
-        }
-
-        Ok(Ok(()))
+        Ok(check_results(results, "detailed"))
     }
 
     /// Mark a newly created database with the current format version.
@@ -899,6 +902,57 @@ impl DbFormatChange {
             "marked database format as downgraded"
         );
     }
+}
+
+/// A format validation failure, distinguishing local history reads from invalid database contents.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FormatCheckError {
+    /// The database does not satisfy its format invariants.
+    #[error("{0}")]
+    Invalid(String),
+
+    /// Historical body availability could not be read from the local database.
+    #[error("{0}")]
+    HistoryRead(#[from] crate::StateInitError),
+}
+
+impl From<String> for FormatCheckError {
+    fn from(error: String) -> Self {
+        Self::Invalid(error)
+    }
+}
+
+impl From<&str> for FormatCheckError {
+    fn from(error: &str) -> Self {
+        Self::Invalid(error.to_string())
+    }
+}
+
+/// Aggregates invalid format checks, but preserves a local history-read failure as its own type.
+fn check_results(
+    mut results: Vec<Result<(), FormatCheckError>>,
+    kind: &str,
+) -> Result<(), FormatCheckError> {
+    if results.iter().all(Result::is_ok) {
+        return Ok(());
+    }
+    if let Some(local) = results
+        .iter()
+        .position(|result| matches!(result, Err(FormatCheckError::HistoryRead(_))))
+    {
+        let error = results.swap_remove(local);
+        error!(
+            ?error,
+            "local database history read failed during format checks"
+        );
+        return error;
+    }
+
+    let error = Err(FormatCheckError::Invalid(format!(
+        "invalid {kind} check: {results:?}"
+    )));
+    error!(?error);
+    error
 }
 
 impl DbFormatChangeThreadHandle {

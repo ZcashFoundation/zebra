@@ -176,3 +176,43 @@ fn existing_database_is_marked_with_the_snapshot_base_format() {
         Some(running_version)
     );
 }
+
+/// A local history-read failure stays typed and stops detailed checks before later validators
+/// assume that historical availability is readable.
+#[test]
+fn detailed_format_checks_preserve_local_history_read_errors() {
+    use std::sync::Arc;
+
+    use crate::{CheckpointVerifiedBlock, DiskWriteBatch, TransactionLocation, WriteDisk};
+    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+
+    let _guard = zebra_test::init();
+    let (_cache, mut state) = state();
+    for (_, bytes) in zebra_test::vectors::MAINNET_BLOCKS.range(0..=3) {
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(
+                    bytes.zcash_deserialize_into::<Arc<Block>>().unwrap(),
+                )
+                .into(),
+                None,
+                "format history read error test",
+            )
+            .unwrap();
+    }
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &state.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(Height(4)),
+    );
+    state.db.write_batch(batch).unwrap();
+    assert!(state.db.history_capabilities().is_err());
+
+    let (_sender, receiver) = bounded(1);
+    let result = DbFormatChange::format_validity_checks_detailed_typed(&state.db, &receiver);
+    let Ok(Err(FormatCheckError::HistoryRead(error))) = result else {
+        panic!("expected a typed local history read error, got {result:?}");
+    };
+    assert!(!crate::state_snapshot::SnapshotError::HistoryRead(error).rejects_snapshot());
+}

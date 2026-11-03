@@ -8,16 +8,17 @@ use bincode::Options;
 use zebra_chain::{
     amount::Amount,
     block::Height,
-    sapling,
+    orchard, sapling,
     serialization::ZcashSerialize,
+    sprout,
     state_snapshot::{ObjectHash, StateSnapshotCommitment},
     transaction::Transaction,
     transparent,
 };
 
 use crate::{
-    constants::STATE_DATABASE_KIND,
-    service::finalized_state::{FinalizedState, TransactionLocation},
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    service::finalized_state::{FinalizedState, FormatCheckError, TransactionLocation, ZebraDb},
     state_database_format_version_in_code,
     state_snapshot::{
         format::{ComponentId, PieceManifest, PieceWriter},
@@ -40,6 +41,50 @@ fn refused_by(result: &Result<SnapshotBase, SnapshotError>) -> ImportCheck {
         Err(SnapshotError::Refused { check, .. }) => *check,
         other => panic!("expected a refused import, got {other:?}"),
     }
+}
+
+/// Local format-check read failures do not permanently reject the snapshot, but invalid contents do.
+#[test]
+fn database_format_error_attribution_preserves_local_failures() {
+    let local = crate::StateInitError::HistoryRead {
+        path: PathBuf::from("snapshot-import-test"),
+        source: "injected local read failure".into(),
+    };
+    let error = super::super::checks::database_format_error(FormatCheckError::HistoryRead(local));
+    assert!(matches!(error, SnapshotError::HistoryRead(_)));
+    assert!(!error.rejects_snapshot());
+
+    let error = super::super::checks::database_format_error(FormatCheckError::Invalid(
+        "invalid snapshot subtree".to_string(),
+    ));
+    assert_eq!(refused_by(&Err(error)), ImportCheck::DatabaseFormat);
+}
+
+/// An unreadable local database version is a retryable import failure, not a snapshot rejection.
+#[test]
+fn unreadable_database_version_does_not_reject_the_snapshot() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let records = fixture::select(&chain.state);
+    let import = fixture::import(&chain, &records, &chain.network, 0);
+    let base = import.result.unwrap();
+    let db = ZebraDb::open_without_format_change(&import.config, &chain.network).unwrap();
+    let version_path = import
+        .config
+        .db_path(
+            STATE_DATABASE_KIND,
+            state_database_format_version_in_code().major,
+            &chain.network,
+        )
+        .join(DATABASE_FORMAT_VERSION_FILE_NAME);
+    std::fs::write(version_path, b"not a database format version").unwrap();
+
+    let result = super::super::checks::check_open_database(&db, &base);
+    assert!(
+        matches!(&result, Err(SnapshotError::FormatVersion { .. })),
+        "{result:?}"
+    );
+    assert!(!result.unwrap_err().rejects_snapshot());
 }
 
 /// A snapshot of a populated database imports into a database with the same
@@ -854,6 +899,116 @@ fn tip_root_without_an_anchor_is_refused() {
             .get_mut(&ComponentId::SaplingAnchors)
             .unwrap()
             .retain(|(anchor, _)| *anchor != tip_root);
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+}
+
+/// Populated Orchard and Sprout snapshots pass their matching-root checks, and refuse a wrong
+/// Orchard frontier or a missing tip or empty anchor.
+#[test]
+fn non_sapling_tip_roots_and_anchors_are_checked() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain_with(fixture::inject_orchard_and_sprout_trees);
+    assert!(chain.state.db.orchard_tree_for_tip().count() > 0);
+    assert!(chain.state.db.sprout_tree_for_tip().count() > 0);
+    let records = fixture::select(&chain.state);
+    fixture::import(&chain, &records, &chain.network, 0)
+        .result
+        .unwrap();
+
+    let result = import_tampered(&chain, |records| {
+        let tree = fixture::orchard_tree(&[9]);
+        let root = <[u8; 32]>::from(tree.root()).to_vec();
+        records
+            .get_mut(&ComponentId::OrchardAnchors)
+            .unwrap()
+            .push((root, Vec::new()));
+        records
+            .get_mut(&ComponentId::OrchardTree)
+            .unwrap()
+            .push((HEIGHT.as_bytes().to_vec(), tree.as_bytes()));
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+
+    let orchard_tip = <[u8; 32]>::from(chain.state.db.orchard_tree_for_tip().root()).to_vec();
+    let result = import_tampered(&chain, |records| {
+        records
+            .get_mut(&ComponentId::OrchardAnchors)
+            .unwrap()
+            .retain(|(anchor, _)| *anchor != orchard_tip);
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+
+    let sprout_tip = <[u8; 32]>::from(chain.state.db.sprout_tree_for_tip().root()).to_vec();
+    let result = import_tampered(&chain, |records| {
+        records
+            .get_mut(&ComponentId::SproutAnchors)
+            .unwrap()
+            .retain(|(anchor, _)| *anchor != sprout_tip);
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+
+    let empty_sprout =
+        <[u8; 32]>::from(sprout::tree::NoteCommitmentTree::default().recalculate_root()).to_vec();
+    let empty_orchard =
+        <[u8; 32]>::from(orchard::tree::NoteCommitmentTree::default().recalculate_root()).to_vec();
+    for (component, empty_root) in [
+        (ComponentId::SproutAnchors, empty_sprout),
+        (ComponentId::OrchardAnchors, empty_orchard),
+    ] {
+        let result = import_tampered(&chain, |records| {
+            records
+                .get_mut(&component)
+                .unwrap()
+                .retain(|(anchor, _)| *anchor != empty_root);
+        });
+        assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+    }
+}
+
+/// A populated post-NU6.3 Ironwood snapshot passes its matching-root check, and refuses a wrong
+/// frontier or a missing tip or empty anchor.
+#[test]
+fn active_ironwood_tip_root_and_anchors_are_checked() {
+    let _init_guard = zebra_test::init();
+    let chain =
+        fixture::chain_with_network(fixture::ironwood_network(), fixture::inject_ironwood_tree);
+    assert!(chain.state.db.ironwood_tree_for_tip().count() > 0);
+    let records = fixture::select(&chain.state);
+    fixture::import(&chain, &records, &chain.network, 0)
+        .result
+        .unwrap();
+
+    let result = import_tampered(&chain, |records| {
+        let tree = fixture::orchard_tree(&[10]);
+        let root = <[u8; 32]>::from(tree.root()).to_vec();
+        records
+            .get_mut(&ComponentId::IronwoodAnchors)
+            .unwrap()
+            .push((root, Vec::new()));
+        records
+            .get_mut(&ComponentId::IronwoodTree)
+            .unwrap()
+            .push((HEIGHT.as_bytes().to_vec(), tree.as_bytes()));
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+
+    let ironwood_tip = <[u8; 32]>::from(chain.state.db.ironwood_tree_for_tip().root()).to_vec();
+    let result = import_tampered(&chain, |records| {
+        records
+            .get_mut(&ComponentId::IronwoodAnchors)
+            .unwrap()
+            .retain(|(anchor, _)| *anchor != ironwood_tip);
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
+
+    let empty =
+        <[u8; 32]>::from(orchard::tree::NoteCommitmentTree::default().recalculate_root()).to_vec();
+    let result = import_tampered(&chain, |records| {
+        records
+            .get_mut(&ComponentId::IronwoodAnchors)
+            .unwrap()
+            .retain(|(anchor, _)| *anchor != empty);
     });
     assert_eq!(refused_by(&result), ImportCheck::TreeRoots);
 }
