@@ -1661,7 +1661,8 @@ pub enum ReadRequest {
     /// An unknown parent or outpoint is omitted from the map, so callers must treat a missing
     /// outpoint as "prevout unknown", not an error. Known unavailable parents are never omitted.
     ///
-    /// Used by the `getblock` RPC at verbosity 3.
+    /// Kept for external callers: the `getblock` RPC reads spent outputs with
+    /// [`ReadRequest::BlockQuery`].
     ///
     /// Returns [`crate::BlockReadError`] if the block or a known parent is pruned or corrupt.
     /// Returns `None` for torn secondary views, unless a known body is below the retained floor.

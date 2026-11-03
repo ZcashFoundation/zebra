@@ -49,7 +49,8 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// below the actual retained-body floor are unavailable; missing retained data is corruption.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BlockReadError {
-    /// Transaction bytes are missing from a known block below the retained-body floor.
+    /// Transaction bytes are missing from a known block below the retained-body floor, or the
+    /// block is below a snapshot-born node's known history.
     #[error("block body unavailable at height {height:?}: pruned data")]
     BlockBodyUnavailable {
         /// The height of the known block.

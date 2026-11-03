@@ -1940,12 +1940,13 @@ impl Service<ReadRequest> for ReadStateService {
                 hash_or_height,
             )?)),
 
-            // Used by the get_block (raw) RPC and the StateService.
+            // Used by the StateService and kept for external callers. The `getblock` RPC uses
+            // `BlockQuery`.
             ReadRequest::BlockAndSize(hash_or_height) => Ok(ReadResponse::BlockAndSize(
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height)?,
             )),
 
-            // Used by the get_block (verbosity 3) RPC.
+            // Kept for external callers. The `getblock` RPC uses `BlockQuery`.
             ReadRequest::SpentOutputs(hash_or_height) => {
                 Ok(ReadResponse::SpentOutputs(read::spent_outputs_for_block(
                     state.latest_best_chain(),
@@ -1954,7 +1955,8 @@ impl Service<ReadRequest> for ReadStateService {
                 )?))
             }
 
-            // Used by the get_block (verbose) RPC and the StateService.
+            // Used by the z_gettreestate RPC, the syncer and the StateService, and kept for
+            // external callers. The `getblock` and `getblockheader` RPCs use `BlockQuery`.
             ReadRequest::BlockHeader(hash_or_height) => {
                 let best_chain = state.latest_best_chain();
 
@@ -2023,7 +2025,7 @@ impl Service<ReadRequest> for ReadStateService {
                 )?))
             }
 
-            // Used by the getblock (verbose) RPC.
+            // Kept for external callers. The `getblock` RPC uses `BlockQuery`.
             ReadRequest::TransactionIdsForBlock(hash_or_height) => Ok(
                 ReadResponse::TransactionIdsForBlock(read::transaction_hashes_for_block(
                     state.latest_best_chain(),

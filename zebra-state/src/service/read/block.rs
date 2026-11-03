@@ -202,8 +202,7 @@ where
 /// `hash_or_height`, keyed by the [`OutPoint`](transparent::OutPoint) that spends them, if the
 /// block exists in the non-finalized `chain` or finalized `db`.
 ///
-/// Used by the `getblock` RPC at verbosity 3 to fill in each input's prevout and the
-/// transaction fee.
+/// Each input's prevout and the transaction fee can be filled in from the spent outputs.
 ///
 /// Returns an error if the block or a known parent transaction is pruned or corrupt.
 /// A torn secondary view returns `None`.
