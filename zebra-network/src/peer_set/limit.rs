@@ -7,6 +7,9 @@ use std::{fmt, sync::Arc};
 
 use crate::loom::sync::mpsc;
 
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
+
 /// A signal sent by a [`Connection`][1] when it opens or closes.
 ///
 /// Used to count the number of open connections.
