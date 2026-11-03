@@ -2087,6 +2087,25 @@ where
                 unreachable!("unmatched response to a BlockInfo request");
             };
 
+            // The parent of the first block in a state snapshot's window has stored block info
+            // but no hash row (DESIGN §7), so a parent lookup by hash that misses is retried by
+            // height. `futs` is drained by now, so this read cannot contend with it for a slot.
+            let prev_block_info = match (prev_block_info, block_info.as_ref(), height.previous()) {
+                (None, Some(_), Ok(parent_height)) => {
+                    let response = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::BlockInfo(parent_height.into()))
+                        .await
+                        .map_misc_error()?;
+                    let zebra_state::ReadResponse::BlockInfo(prev_block_info) = response else {
+                        unreachable!("unmatched response to a BlockInfo request");
+                    };
+                    prev_block_info
+                }
+                (prev_block_info, _, _) => prev_block_info,
+            };
+
             let delta = block_info.as_ref().and_then(|d| {
                 let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
                 let prev_value_pools = prev_block_info

@@ -1682,6 +1682,114 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     }
 }
 
+/// The first block of a state snapshot's window has a parent with stored block info but no hash
+/// row, so its value pool deltas come from the parent's block info read by height.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_value_pool_delta_falls_back_to_the_parent_height() {
+    use zebra_chain::{amount::Amount, value_balance::ValueBalance};
+
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::MAINNET_BLOCKS[&1]
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_hash = block.hash();
+    let height = block.coinbase_height().unwrap();
+    let previous_block_hash = block.header.previous_block_hash;
+    let pool =
+        |zatoshis: i64| ValueBalance::from_transparent_amount(Amount::try_from(zatoshis).unwrap());
+    let block_info = BlockInfo::new(pool(1_250_000_000), 1_000);
+    let parent_info = BlockInfo::new(pool(625_000_000), 900);
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let answer = async {
+        read_state
+            .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+            .await
+            .respond(ReadResponse::BlockHeader(Some(zebra_state::BlockHeader {
+                header: block.header.clone(),
+                hash: block_hash,
+                height,
+                next_block_hash: None,
+            })));
+        read_state
+            .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+            .await
+            .respond(ReadResponse::SaplingTree(Some(Default::default())));
+        read_state
+            .expect_request(ReadRequest::Depth(block_hash))
+            .await
+            .respond(ReadResponse::Depth(Some(0)));
+        read_state
+            .expect_request(ReadRequest::TransactionIdsForBlock(block_hash.into()))
+            .await
+            .respond(ReadResponse::TransactionIdsForBlock(Some(
+                block.transactions.iter().map(|tx| tx.hash()).collect(),
+            )));
+        read_state
+            .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+            .await
+            .respond(ReadResponse::OrchardTree(Some(Default::default())));
+        read_state
+            .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+            .await
+            .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+        // The parent has no hash row ...
+        read_state
+            .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+            .await
+            .respond(ReadResponse::BlockInfo(None));
+        read_state
+            .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+            .await
+            .respond(ReadResponse::BlockInfo(Some(block_info.clone())));
+        // ... but its block info is stored by height.
+        read_state
+            .expect_request(ReadRequest::BlockInfo(height.previous().unwrap().into()))
+            .await
+            .respond(ReadResponse::BlockInfo(Some(parent_info.clone())));
+    };
+    let (response, ()) = tokio::join!(rpc.get_block(block_hash.to_string(), Some(1)), answer);
+
+    let GetBlockResponse::Object(body) = response.unwrap() else {
+        panic!("verbosity one returns a block object");
+    };
+    let pools = body.value_pools.expect("block info gives value pools");
+    let transparent = pools
+        .iter()
+        .find(|pool| pool.id() == "transparent")
+        .expect("the transparent pool is reported");
+    assert_eq!(
+        transparent.chain_value_zat(),
+        block_info.value_pools().transparent_amount()
+    );
+    assert_eq!(
+        transparent.value_delta_zat(),
+        Some(Amount::try_from(625_000_000).unwrap())
+    );
+    read_state.expect_no_requests().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockheader() {
     let _init_guard = zebra_test::init();
