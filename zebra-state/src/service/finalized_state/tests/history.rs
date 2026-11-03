@@ -1227,6 +1227,7 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
             ancestors,
             &network,
             crate::constants::MAX_LEGACY_CHAIN_BLOCKS,
+            None,
         )
         .unwrap(),
         Some(witness_height)

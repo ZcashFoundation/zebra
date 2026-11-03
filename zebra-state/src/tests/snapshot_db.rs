@@ -40,6 +40,8 @@ pub(crate) const COINBASE_VALUE: i64 = 1_000;
 pub(crate) enum Coinbase {
     /// A V5 coinbase, which carries a consensus branch ID.
     Branched,
+    /// A V4 coinbase, which carries no branch ID: a window without any branch ID transaction.
+    Legacy,
 }
 
 /// A Regtest network with NU5 active from height 1 and no funding streams.
@@ -101,6 +103,12 @@ fn coinbase(height: Height, kind: Coinbase) -> Arc<Transaction> {
     match kind {
         Coinbase::Branched => Arc::new(Transaction::test_v5(
             NetworkUpgrade::current(&network(), height),
+            vec![input],
+            vec![output],
+            LockTime::unlocked(),
+            height,
+        )),
+        Coinbase::Legacy => Arc::new(Transaction::test_v4(
             vec![input],
             vec![output],
             LockTime::unlocked(),

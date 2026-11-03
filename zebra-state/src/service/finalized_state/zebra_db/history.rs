@@ -5,7 +5,7 @@ use zebra_chain::{
     parameters::NetworkUpgrade,
 };
 
-use crate::{BoxError, HistoryCapabilities, StateInitError};
+use crate::{BoxError, HistoryCapabilities, SnapshotBase, StateInitError};
 
 use super::ZebraDb;
 use crate::service::finalized_state::{
@@ -23,7 +23,17 @@ pub(crate) struct PruningWitness {
 }
 
 impl PruningWitness {
-    fn update(&mut self, db: &ZebraDb) -> Result<Option<Height>, BoxError> {
+    /// Returns the height whose body the restart legacy-chain check needs, walking only the
+    /// blocks finalized since the last call.
+    ///
+    /// `snapshot_base` is the marker of a database imported from a state snapshot: when the walk
+    /// ends at its window start without finding a branch ID, the window start is the witness,
+    /// exactly as [`legacy_chain`](crate::service::check::legacy_chain) accepts it.
+    pub(crate) fn update(
+        &mut self,
+        db: &ZebraDb,
+        snapshot_base: Option<SnapshotBase>,
+    ) -> Result<Option<Height>, BoxError> {
         let Some(tip) = db.tip() else {
             *self = Self::default();
             return Ok(None);
@@ -48,6 +58,7 @@ impl PruningWitness {
         );
         // A branchless suffix is valid. Bound the initial search, then inspect only new blocks;
         // no witness means keeping the bodies, not rejecting the verified chain.
+        let mut last_height = None;
         for block in ancestors.take(crate::constants::MAX_LEGACY_CHAIN_BLOCKS) {
             let block = block?;
             let height = block
@@ -56,6 +67,7 @@ impl PruningWitness {
             if height < activation || self.tip.is_some_and(|(_, hash)| block.hash() == hash) {
                 break;
             }
+            last_height = Some(height);
             block
                 .check_transaction_network_upgrade_consistency(&network)
                 .map_err(|error| {
@@ -69,6 +81,13 @@ impl PruningWitness {
                 self.height = Some(height);
                 break;
             }
+        }
+        // The walk ran off the bottom of a snapshot-imported database: the snapshot commitment
+        // pins the chain at the window start, so the restart check accepts reaching it (DESIGN §7).
+        if self.height.is_none() {
+            self.height = snapshot_base
+                .map(|base| base.window_start)
+                .filter(|window_start| last_height == Some(*window_start));
         }
         self.tip = Some(tip);
         Ok(self.height)
@@ -123,7 +142,7 @@ impl DiskWriteBatch {
         if tip.is_none_or(|tip| lowest_retained_height > tip) {
             return Err("retained-body floor must not exceed the finalized tip".into());
         }
-        let Some(witness) = witness.update(db)? else {
+        let Some(witness) = witness.update(db, history.snapshot_base)? else {
             return Ok(None);
         };
         let lowest_retained_height = lowest_retained_height

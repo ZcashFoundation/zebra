@@ -546,15 +546,22 @@ impl StateService {
         tracing::info!("starting legacy chain check");
         let timer = CodeTimer::start();
 
-        if let (Some(tip), Some(nu5_activation_height)) = (
-            {
-                let read_state = state.read_service.clone();
-                tokio::task::spawn_blocking(move || read_state.best_tip())
-                    .await
-                    .expect("task should not panic")
-            },
-            NetworkUpgrade::Nu5.activation_height(network),
-        ) {
+        let (tip, snapshot_base) = {
+            let read_state = state.read_service.clone();
+            tokio::task::spawn_blocking(move || {
+                let snapshot_base = read_state
+                    .db
+                    .history_capabilities()
+                    .expect("history capabilities were readable when the database was opened")
+                    .snapshot_base;
+                (read_state.best_tip(), snapshot_base)
+            })
+            .await
+            .expect("task should not panic")
+        };
+        if let (Some(tip), Some(nu5_activation_height)) =
+            (tip, NetworkUpgrade::Nu5.activation_height(network))
+        {
             if let Err(error) = check::legacy_chain(
                 nu5_activation_height,
                 any_ancestor_blocks(
@@ -564,6 +571,7 @@ impl StateService {
                 ),
                 &state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
+                snapshot_base,
             ) {
                 let legacy_db_path = state.read_service.db.path().to_path_buf();
                 panic!(

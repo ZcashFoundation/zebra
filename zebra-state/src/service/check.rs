@@ -20,7 +20,7 @@ use crate::{
         finalized_state::ZebraDb,
         non_finalized_state::NonFinalizedState,
     },
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, SemanticallyVerifiedBlock, SnapshotBase, ValidateContextError,
 };
 
 use zebra_chain::{
@@ -335,18 +335,24 @@ pub(crate) fn difficulty_threshold_and_time_are_valid(
 /// `max_legacy_chain_blocks` should be [`MAX_LEGACY_CHAIN_BLOCKS`](crate::constants::MAX_LEGACY_CHAIN_BLOCKS).
 /// They are only changed from the defaults for testing.
 ///
-/// Returns `None` only after reaching a pre-NU5 block. Missing bodies or an exhausted iterator
-/// cannot establish branch consistency and fail closed.
+/// `snapshot_base` is the marker of a database imported from a state snapshot. Its window start
+/// is the first block the database knows, and the snapshot commitment pins the chain there, so
+/// an iterator that ends exactly at the window start returns the window start as the witness.
+///
+/// Returns `None` only after reaching a pre-NU5 block. Missing bodies or an iterator exhausted
+/// anywhere else cannot establish branch consistency and fail closed.
 pub(crate) fn legacy_chain<I>(
     nu5_activation_height: block::Height,
     ancestors: I,
     network: &Network,
     max_legacy_chain_blocks: usize,
+    snapshot_base: Option<SnapshotBase>,
 ) -> Result<Option<block::Height>, BoxError>
 where
     I: Iterator<Item = Result<Arc<Block>, crate::BlockReadError>>,
 {
     let mut tip_height = None;
+    let mut last_height = None;
 
     for (index, block) in ancestors.enumerate() {
         let block = block.map_err(|error| {
@@ -356,6 +362,7 @@ where
             )
         })?;
         tip_height = tip_height.or_else(|| block.coinbase_height());
+        last_height = block.coinbase_height();
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
         //
@@ -399,6 +406,16 @@ where
         if has_network_upgrade {
             return Ok(block.coinbase_height());
         }
+    }
+
+    // A snapshot-imported database knows no blocks below its window, so the iterator ends at the
+    // window start. The snapshot commitment pins the chain there, which the branch check would
+    // otherwise have to prove (DESIGN §7).
+    if let Some(window_start) = snapshot_base
+        .map(|base| base.window_start)
+        .filter(|window_start| last_height == Some(*window_start))
+    {
+        return Ok(Some(window_start));
     }
 
     Err(
