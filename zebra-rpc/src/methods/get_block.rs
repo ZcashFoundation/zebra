@@ -313,6 +313,12 @@ impl GetBlockPlan {
             tx_shape,
         }
     }
+
+    /// Returns whether this plan reads a block body or spent transaction bodies.
+    pub(crate) fn reads_body(&self) -> bool {
+        self.state_fields
+            .intersects(BlockQueryFields::RAW_BLOCK | TRANSACTIONS_READS)
+    }
 }
 
 /// Returns the state reads `field` needs, before a plan drops the reads other reads subsume.

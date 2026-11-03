@@ -10,6 +10,7 @@
 //! each time the database format (column, serialization, etc) changes.
 
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -19,8 +20,13 @@ use std::{
 
 use crossbeam_channel::bounded;
 use semver::Version;
+use tokio::sync::watch;
 
-use zebra_chain::{block::Height, diagnostic::task::WaitForPanics, parameters::Network};
+use zebra_chain::{
+    block::{merkle::AuthDataRoot, Hash, Height},
+    diagnostic::task::WaitForPanics,
+    parameters::Network,
+};
 
 use crate::{
     config::{
@@ -99,11 +105,17 @@ pub struct ZebraDb {
     /// All history-dependent startup work and initial format checks have completed.
     ready_for_pruning: Arc<AtomicBool>,
 
+    /// A bounded in-memory cache of authorizing-data roots, shared by all database clones.
+    auth_data_roots: watch::Sender<Arc<HashMap<Hash, AuthDataRoot>>>,
+
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
 }
 
 impl ZebraDb {
+    /// The maximum number of authorizing-data roots retained in memory.
+    pub(crate) const MAX_CACHED_AUTH_DATA_ROOTS: usize = 64;
+
     /// Opens or creates the database at a path based on the kind, major version and network,
     /// with the supplied column families, preserving any existing column families,
     /// and returns a shared high-level typed database wrapper.
@@ -230,6 +242,7 @@ impl ZebraDb {
             debug_skip_format_upgrades,
             format_change_handle: None,
             ready_for_pruning: Arc::new(AtomicBool::new(false)),
+            auth_data_roots: watch::channel(Arc::new(HashMap::new())).0,
             db: disk_db,
         };
 
@@ -355,6 +368,33 @@ impl ZebraDb {
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
         self.db.network()
+    }
+
+    /// Returns the cached authorizing-data root for `hash`, if it has been computed.
+    pub(crate) fn cached_auth_data_root(&self, hash: Hash) -> Option<AuthDataRoot> {
+        self.auth_data_roots.borrow().get(&hash).copied()
+    }
+
+    /// Caches `root`, evicting an arbitrary entry when the cache is full.
+    pub(crate) fn cache_auth_data_root(&self, hash: Hash, root: AuthDataRoot) {
+        self.auth_data_roots.send_modify(|roots| {
+            let roots = Arc::make_mut(roots);
+            if roots.len() >= Self::MAX_CACHED_AUTH_DATA_ROOTS && !roots.contains_key(&hash) {
+                let evicted = roots
+                    .keys()
+                    .next()
+                    .copied()
+                    .expect("a full cache contains an entry to evict");
+                roots.remove(&evicted);
+            }
+            roots.insert(hash, root);
+        });
+    }
+
+    /// Returns the number of cached authorizing-data roots.
+    #[cfg(test)]
+    pub(crate) fn cached_auth_data_root_count(&self) -> usize {
+        self.auth_data_roots.borrow().len()
     }
 
     /// Returns the `Path` where the files used by this database are located.

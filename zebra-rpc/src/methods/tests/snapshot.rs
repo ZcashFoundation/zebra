@@ -566,10 +566,18 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         ),
         ("all", all_fields_with_txdetails, Some(block_bytes)),
     ] {
-        let get_block = rpc
-            .get_block(BLOCK_HEIGHT.to_string(), Some(field_query(&names)))
-            .await
-            .expect("the block is in the state");
+        let get_block = loop {
+            // The network snapshots run concurrently and share the process-wide body-query permit.
+            match rpc
+                .get_block(BLOCK_HEIGHT.to_string(), Some(field_query(&names)))
+                .await
+            {
+                Err(error) if error.message() == GETBLOCK_BODY_QUERY_BUSY => {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                response => break response.expect("the block is in the state"),
+            }
+        };
         snapshot_rpc_getblock_fields(variant, get_block, expected_block_data, &settings);
     }
 

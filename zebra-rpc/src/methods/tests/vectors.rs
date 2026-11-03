@@ -9753,6 +9753,126 @@ async fn rpc_getblock_field_queries_read_only_what_they_need() {
     .unwrap();
 }
 
+/// Body-bearing field queries run one at a time without delaying index-only queries or changing
+/// legacy verbosity admission. The combined query keeps its full response shape when admitted.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_bounds_concurrent_body_field_queries() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let query = HashOrHeight::from(block.hash());
+        let names = &["hex", "authdataroot", "txprevouts"][..];
+        let fields = BlockQueryFields::RAW_BLOCK
+            | BlockQueryFields::AUTH_DATA_ROOT
+            | BlockQueryFields::TRANSACTIONS
+            | BlockQueryFields::SPENT_OUTPUTS
+            | BlockQueryFields::DEPTH;
+
+        let first = tokio::spawn({
+            let rpc = rpc.clone();
+            async move {
+                rpc.get_block(query.to_string(), Some(field_query(names)))
+                    .await
+            }
+        });
+        let pending = read_state
+            .expect_request(ReadRequest::BlockQuery {
+                hash_or_height: query,
+                fields,
+            })
+            .await;
+
+        let busy = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            rpc.get_block(query.to_string(), Some(field_query(&["authdataroot"]))),
+        )
+        .await
+        .expect("a second body-bearing field query must be rejected before its state read")
+        .unwrap_err();
+        assert_eq!(busy.code(), -32603);
+        assert_eq!(
+            busy.message(),
+            "getblock field query body reads are busy; retry after the active query finishes"
+        );
+
+        let header_handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields: BlockQueryFields::empty(),
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block,
+                    BlockQueryFields::empty(),
+                    0,
+                ))));
+        };
+        let (header, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(field_query(&["hash"]))),
+            header_handler
+        );
+        header.expect("an index-only field query must bypass the body-query limit");
+
+        let legacy_handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields: VERBOSITY_3_READS,
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block,
+                    VERBOSITY_3_READS,
+                    0,
+                ))));
+        };
+        let (legacy, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(GetBlockQuery::Verbosity(3))),
+            legacy_handler
+        );
+        legacy.expect("legacy verbosity must bypass the field-query limit");
+
+        pending.respond(ReadResponse::BlockQuery(Some(queried_block(
+            &block, fields, 0,
+        ))));
+        let response = first.await.expect("the first RPC task must not panic");
+        let response = serde_json::to_value(response.unwrap()).unwrap();
+        let keys: BTreeSet<&str> = response
+            .as_object()
+            .expect("the combined field query returns an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(keys, BTreeSet::from(["hash", "hex", "authdataroot", "tx"]));
+
+        let retry_handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields,
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block, fields, 0,
+                ))));
+        };
+        let (retry, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(field_query(names))),
+            retry_handler
+        );
+        retry.expect("finishing the active query must release admission for a retry");
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
 /// Field query errors: zcashd's not-found message, internal errors for state failures, and
 /// `missing block info` for a requested key without its `BlockInfo` row.
 #[tokio::test(flavor = "multi_thread")]

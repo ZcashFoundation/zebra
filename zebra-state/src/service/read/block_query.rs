@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::{self, Block, Height, SerializedBlock},
+    block::{self, merkle::AuthDataRoot, Block, Height, SerializedBlock},
     block_info::BlockInfo,
     orchard, sapling,
     serialization::{CompactSizeMessage, ZcashSerialize as _},
@@ -26,6 +26,10 @@ use crate::{
 thread_local! {
     /// The number of [`ZebraDb::history_capabilities`] reads `block_query` made on this thread.
     pub(crate) static HISTORY_CAPABILITIES_READS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+
+    /// The number of authorizing-data roots `block_query` computed on this thread.
+    pub(crate) static AUTH_DATA_ROOT_COMPUTATIONS: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
 }
 
@@ -92,13 +96,11 @@ pub fn block_query(
         _ => None,
     };
 
-    // `auth_data_root()` hashes transactions in parallel on rayon for large blocks, which is
-    // fine here because every read request runs on a blocking thread.
     let auth_data_root = parts
         .block
         .as_ref()
         .filter(|_| fields.contains(BlockQueryFields::AUTH_DATA_ROOT))
-        .map(|block| block.auth_data_root());
+        .map(|block| cached_or_compute_auth_data_root(db, hash, block));
 
     Ok(Some(QueriedBlock {
         hash,
@@ -125,6 +127,30 @@ pub fn block_query(
         spent_outputs,
         auth_data_root,
     }))
+}
+
+/// Returns the root from the bounded cache, or computes and caches it without using Rayon.
+fn cached_or_compute_auth_data_root(
+    db: &ZebraDb,
+    hash: block::Hash,
+    block: &Block,
+) -> AuthDataRoot {
+    if let Some(root) = db.cached_auth_data_root(hash) {
+        return root;
+    }
+
+    let root = serial_auth_data_root(block);
+    db.cache_auth_data_root(hash, root);
+    root
+}
+
+/// Computes an authorizing-data root on the caller's blocking thread, rather than fanning
+/// attacker-triggered RPC work out onto the process-global Rayon pool.
+pub(crate) fn serial_auth_data_root(block: &Block) -> AuthDataRoot {
+    #[cfg(test)]
+    AUTH_DATA_ROOT_COMPUTATIONS.with(|computations| computations.set(computations.get() + 1));
+
+    block.transactions.iter().collect()
 }
 
 /// A best-chain block resolved under the request's chain snapshot.

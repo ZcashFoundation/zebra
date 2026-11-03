@@ -314,6 +314,13 @@ Fields that need the block body read the whole serialized block, up to 2 MB.
 The other fields come from indexes that pruning keeps, so they stay available
 on [pruned nodes](pruning.md).
 
+At most one body-bearing field query runs at a time, which bounds its database,
+hashing, and response-allocation work. A concurrent body-bearing query returns
+the busy error below instead of waiting. Index-only field queries and numeric
+or boolean verbosity levels are not limited this way. Authorizing-data roots
+are computed serially and retained in a bounded 64-entry in-memory cache;
+a cached root never makes a pruned body available.
+
 | Field | Value | Needs the body |
 | --- | --- | --- |
 | `hash` | Block hash; always returned | No |
@@ -357,6 +364,7 @@ field name.
 | A block hash that is not on the best chain | `-5` `"Block not found"` |
 | A height above the best-chain tip | `-8` `"Block not found"` |
 | A field that needs a pruned body, including a spent output's transaction for `txprevouts` | `-32603` `"Block not available (pruned data)"` |
+| Another body-bearing field query is still running | `-32603` `"getblock field query body reads are busy; retry after the active query finishes"` |
 | `size` (unless `hex`, `authdataroot`, `txdetails`, or `txprevouts` is also requested), `chainSupply`, or `valuePools` when the node has no stored block info for the block | `-1` `"missing block info"` |
 | A field that needs a note commitment tree the state does not have for the block | `-1` `"missing Sapling tree"`, `"missing Orchard tree"`, or `"missing Ironwood tree"` |
 | Another state read failure | `-32603` with the error text |

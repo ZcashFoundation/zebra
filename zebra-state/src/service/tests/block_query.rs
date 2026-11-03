@@ -19,9 +19,12 @@ use crate::{
     arbitrary::Prepare,
     service::{
         arbitrary::populated_state_with_debug,
-        finalized_state::FinalizedState,
+        finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
-        read::{self, block_query::HISTORY_CAPABILITIES_READS},
+        read::{
+            self,
+            block_query::{AUTH_DATA_ROOT_COMPUTATIONS, HISTORY_CAPABILITIES_READS},
+        },
         watch_receiver::WatchReceiver,
         ReadStateService,
     },
@@ -254,6 +257,62 @@ async fn expected_from_single_part_requests(
         spent_outputs,
         auth_data_root: Some(block.auth_data_root()),
     }
+}
+
+/// Repeated authorizing-data root queries hash once, and the in-memory cache stays bounded.
+#[test]
+fn block_query_reuses_bounded_auth_data_roots() {
+    let _init_guard = zebra_test::init();
+    let blocks = mainnet_blocks();
+    let state = finalized_state(&blocks);
+    let block = &blocks[1];
+    let height = block.coinbase_height().unwrap();
+    let hash = block.hash();
+    let expected = block.auth_data_root();
+    AUTH_DATA_ROOT_COMPUTATIONS.with(|computations| computations.set(0));
+
+    for hash_or_height in [height.into(), hash.into(), height.into()] {
+        let queried = read::block_query(
+            None,
+            &state.db,
+            hash_or_height,
+            BlockQueryFields::AUTH_DATA_ROOT,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(queried.auth_data_root, Some(expected));
+    }
+    assert_eq!(AUTH_DATA_ROOT_COMPUTATIONS.with(|reads| reads.get()), 1);
+
+    for index in 0..=u8::MAX {
+        state
+            .db
+            .cache_auth_data_root(block::Hash([index; 32]), expected);
+        assert!(
+            state.db.cached_auth_data_root_count() <= ZebraDb::MAX_CACHED_AUTH_DATA_ROOTS,
+            "the cache must evict an entry before exceeding its bound"
+        );
+    }
+    assert_eq!(
+        state.db.cached_auth_data_root_count(),
+        ZebraDb::MAX_CACHED_AUTH_DATA_ROOTS
+    );
+}
+
+/// The state read uses serial hashing instead of initializing or dispatching to global Rayon.
+#[test]
+fn block_query_auth_data_root_does_not_use_global_rayon() {
+    let _init_guard = zebra_test::init();
+    let mut block = Block::clone(&mainnet_blocks()[1]);
+    let transaction = block.transactions[0].clone();
+    block.transactions.resize(16, transaction);
+
+    let root = read::block_query::serial_auth_data_root(&block);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build_global()
+        .expect("serial authorizing-data hashing must not initialize the global Rayon pool");
+    assert_eq!(root, block.auth_data_root());
 }
 
 /// Every part of a finalized block equals the answer of the request that reads only that part,

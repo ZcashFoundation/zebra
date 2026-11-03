@@ -5,6 +5,8 @@ body: >-
   those fields plus `hash`. The names include the new `authdataroot` field, which no verbosity level
   returns, and `hex`, the serialized block that verbosity 0 returns, as an object key. `getblock`
   also accepts `true` and `false` as verbosity 1 and 0, like zcashd. The array form is a Zebra
-  extension that zcashd rejects.
+  extension that zcashd rejects. Body-bearing field queries run one at a time; concurrent calls
+  return an internal busy error rather than queuing unbounded database, hashing, and allocation
+  work. Authorizing-data roots use serial hashing and a bounded in-memory cache.
   ([#8390](https://github.com/ZcashFoundation/zebra/issues/8390))
 time: 2026-11-03T04:17:40.647339262-05:00

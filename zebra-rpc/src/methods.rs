@@ -52,7 +52,7 @@ use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use schemars::JsonSchema;
 use tokio::{
-    sync::{broadcast, mpsc, watch},
+    sync::{broadcast, mpsc, watch, Semaphore},
     task::JoinHandle,
 };
 use tower::ServiceExt;
@@ -137,6 +137,14 @@ use types::{
     validate_address::ValidateAddressResponse,
     z_validate_address::ZValidateAddressResponse,
 };
+
+/// Bounds database, hashing, and allocation work from the new body-bearing field queries.
+/// Legacy verbosity levels keep their existing admission behavior.
+static GETBLOCK_BODY_FIELD_QUERIES: Semaphore = Semaphore::const_new(1);
+
+/// The transient error returned when a body-bearing field query is already running.
+pub(crate) const GETBLOCK_BODY_QUERY_BUSY: &str =
+    "getblock field query body reads are busy; retry after the active query finishes";
 
 include!(concat!(env!("OUT_DIR"), "/rpc_openrpc.rs"));
 
@@ -1890,6 +1898,17 @@ where
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         let plan = GetBlockPlan::try_from(&query)?;
+        let _body_query_permit = (field_query && plan.reads_body())
+            .then(|| {
+                GETBLOCK_BODY_FIELD_QUERIES.try_acquire().map_err(|_| {
+                    ErrorObject::owned(
+                        ErrorCode::InternalError.code(),
+                        GETBLOCK_BODY_QUERY_BUSY,
+                        None::<()>,
+                    )
+                })
+            })
+            .transpose()?;
         let request = zebra_state::ReadRequest::BlockQuery {
             hash_or_height,
             fields: plan.state_fields,
