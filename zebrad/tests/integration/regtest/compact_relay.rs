@@ -121,7 +121,7 @@ async fn at_height(client: &RpcRequestClient, height: u32) -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn opted_in_nodes_use_compact_blocks_and_ordinary_peers_receive_full_blocks() -> Result<()> {
+async fn default_nodes_use_compact_blocks_and_disabled_peers_receive_full_blocks() -> Result<()> {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(300), async {
         let network = Network::new_regtest(RegtestParameters {
@@ -134,7 +134,6 @@ async fn opted_in_nodes_use_compact_blocks_and_ordinary_peers_receive_full_block
             ..Default::default()
         });
         let mut config = os_assigned_rpc_port_config(false, &network)?;
-        config.network.experimental_early_block_relay = true;
         config.network.max_connections_per_ip = 4;
         config.network.crawl_new_peer_interval = Duration::from_secs(3600);
         config.mempool.debug_enable_at_height = Some(0);
@@ -178,7 +177,7 @@ async fn opted_in_nodes_use_compact_blocks_and_ordinary_peers_receive_full_block
 
         let (link_c, wire_c, proxy_c) = observe(p2p_a).await?;
         config.network.initial_testnet_peers = [link_c.to_string()].into();
-        config.network.experimental_early_block_relay = false;
+        config.network.compact_block_relay = false;
         let mut node_c = testdir()?
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
