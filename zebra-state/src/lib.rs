@@ -31,6 +31,7 @@ mod error;
 mod request;
 mod response;
 mod service;
+pub mod state_snapshot;
 
 #[cfg(test)]
 mod tests;
