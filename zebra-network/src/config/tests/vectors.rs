@@ -197,6 +197,22 @@ fn total_connection_limit_includes_v2_share_only_when_enabled() {
             + v2.v2_inbound_connection_limit(),
     );
 
+    assert_eq!(legacy.peerset_initial_target_size, 25);
+    assert_eq!(legacy.peerset_outbound_connection_limit(), 75);
+    assert_eq!(legacy.peerset_inbound_connection_limit(), 125);
+    assert_eq!(
+        legacy.peer_addr_response_limit(),
+        crate::constants::PEER_ADDR_RESPONSE_LIMIT
+    );
+    assert_eq!(crate::constants::PEER_ADDR_RESPONSE_LIMIT, 37);
+
+    let reduced_config = Config {
+        peerset_initial_target_size: 1,
+        ..legacy
+    };
+    assert_eq!(reduced_config.peerset_outbound_connection_limit(), 3);
+    assert_eq!(reduced_config.peer_addr_response_limit(), 1);
+
     // A configured endpoint gets at least one connection of each kind, even with tiny limits.
     let tiny = Config {
         peerset_initial_target_size: 0,
