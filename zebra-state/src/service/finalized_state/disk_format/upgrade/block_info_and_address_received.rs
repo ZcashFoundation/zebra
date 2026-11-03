@@ -229,10 +229,10 @@ impl DiskFormatUpgrade for Upgrade {
 
         // Capture availability first, so finalization cannot move pruning past an older tip's
         // window before we record the floor.
-        let retained_floor = db
+        let history = db
             .history_capabilities()
-            .expect("historical availability must be readable during format checks")
-            .lowest_retained_height;
+            .expect("historical availability must be readable during format checks");
+        let retained_floor = history.lowest_retained_height;
         let Some(tip_height) = db.finalized_tip_height() else {
             return Ok(Ok(()));
         };
@@ -244,7 +244,11 @@ impl DiskFormatUpgrade for Upgrade {
             }
         });
 
-        let start_height = (tip_height - 1_000).unwrap_or(Height::MIN);
+        // A database imported from a state snapshot has block info and bodies from its window
+        // start, so the window checked here cannot start below it (DESIGN §7).
+        let start_height = (tip_height - 1_000)
+            .unwrap_or(Height::MIN)
+            .max(history.lowest_known_height);
         if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }

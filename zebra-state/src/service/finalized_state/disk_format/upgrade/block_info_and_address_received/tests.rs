@@ -79,6 +79,24 @@ fn prune_next_window(db: &ZebraDb) {
 }
 
 #[test]
+fn recent_checks_start_at_the_snapshot_window() {
+    use crate::tests::snapshot_db::{snapshot_state, Coinbase};
+
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, base) = snapshot_state(cache.path().to_path_buf(), 60, 21, Coinbase::Branched, 0);
+    let db = &state.db;
+    assert!(db.block_info_cf().zs_get(&Height(1)).is_none());
+    assert!(db
+        .block_info_cf()
+        .zs_get(&base.window_start.previous().unwrap())
+        .is_some());
+
+    let (_sender, receiver) = crossbeam_channel::bounded(1);
+    assert_eq!(Upgrade.validate(db, &receiver).unwrap(), Ok(()));
+}
+
+#[test]
 fn recent_address_checks_use_one_pass_during_concurrent_pruning() {
     let _guard = zebra_test::init();
     let state = state_with_recent_window();
