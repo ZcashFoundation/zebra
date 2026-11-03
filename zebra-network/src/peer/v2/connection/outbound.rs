@@ -11,10 +11,7 @@
 use std::sync::Arc;
 
 use quinn::{Connection, RecvStream, SendStream};
-use tokio::{
-    io::BufReader,
-    sync::{mpsc, OwnedSemaphorePermit},
-};
+use tokio::{io::BufReader, sync::OwnedSemaphorePermit};
 
 use zebra_chain::{
     block::{self, Block, CountedHeader},
@@ -46,7 +43,7 @@ use crate::{
     PeerSocketAddr,
 };
 
-use super::{announcements::send_event, close_error, Event};
+use super::{close_error, Event, Events};
 
 /// The longest `addrv2` record: time, a 9-byte services CompactSize, the
 /// network ID, a 3-byte length, the 512-byte address maximum, and the port.
@@ -110,8 +107,9 @@ pub(super) struct RequestContext {
     /// The misbehavior scores of every version 2 peer.
     pub misbehavior: MisbehaviorScores,
 
-    /// Where to send what the connection task must act on.
-    pub events: mpsc::Sender<Event>,
+    /// Where to send what the connection task must act on: a close through
+    /// its connection-closing queue, addresses best effort.
+    pub events: Events,
 }
 
 /// Drives one client request to completion and answers the client, holding
@@ -189,7 +187,7 @@ pub(super) async fn drive(
                         Handler::update_addr_cache(&mut addrs, None, PEER_ADDR_RESPONSE_LIMIT);
                     guard.send(Ok(Response::Peers(sample)));
                     if !addrs.is_empty() {
-                        send_event(&events, Event::Addresses(addrs)).await;
+                        events.addresses(addrs);
                     }
                 }
                 response => guard.send(Ok(response)),
@@ -217,17 +215,13 @@ pub(super) async fn drive(
 
             guard.send(Err(failure.into()));
             if let Some((reason, code)) = violation {
-                send_event(&events, Event::Violation { reason, code }).await;
+                events.close(Event::Violation { reason, code });
             }
             if let Some(reason) = ban {
-                send_event(
-                    &events,
-                    Event::Violation {
-                        reason,
-                        code: ErrorCode::Misbehavior,
-                    },
-                )
-                .await;
+                events.close(Event::Violation {
+                    reason,
+                    code: ErrorCode::Misbehavior,
+                });
             }
         }
     }

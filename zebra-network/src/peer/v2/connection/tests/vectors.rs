@@ -22,12 +22,12 @@ use crate::{
     peer::{
         v2::{
             connection::{
-                announcements::{send_event, AnnouncementWriter},
+                announcements::AnnouncementWriter,
                 inbound::{
                     INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
                     RESPONSE_BYTES_LIMIT,
                 },
-                outbound::{RequestSend, MAX_OUTBOUND_REQUEST_STREAMS},
+                outbound::{drive, RequestContext, RequestSend, MAX_OUTBOUND_REQUEST_STREAMS},
                 spawn_connection, ConnectionParams, Event, Events, EVENT_QUEUE,
                 MAX_UNKNOWN_HANDSHAKE_RECORDS,
             },
@@ -36,7 +36,7 @@ use crate::{
             nonces::NonceRegistry,
             tests::{connected_pair, connected_pair_with, identity, run_handshake},
         },
-        Client,
+        Client, MustUseClientResponseSender,
     },
     peer_set::{ActiveConnectionCounter, InventoryChange},
     protocol::{
@@ -2823,8 +2823,7 @@ async fn violations_close_the_connection_behind_address_and_handshake_floods() {
 
 /// A stream task's connection-closing event reaches the connection task
 /// however many best-effort events are waiting, and handing over either
-/// kind never waits: address events beyond the queue are dropped, from the
-/// stream tasks and from the request tasks alike.
+/// kind never waits: address events beyond the queue are dropped.
 #[tokio::test]
 async fn connection_closing_events_are_never_crowded_out() {
     let _init_guard = zebra_test::init();
@@ -2834,7 +2833,6 @@ async fn connection_closing_events_are_never_crowded_out() {
     tokio::time::timeout(SHORT_WAIT, async {
         for _ in 0..2 * EVENT_QUEUE {
             events.addresses(addrs.clone());
-            send_event(&events.others, Event::Addresses(addrs.clone())).await;
         }
     })
     .await
@@ -2864,4 +2862,131 @@ async fn connection_closing_events_are_never_crowded_out() {
         queued, EVENT_QUEUE,
         "address events beyond the queue are dropped"
     );
+}
+
+/// A violation this node detects in a response, including the close that
+/// bans the peer at the ban threshold, reaches the connection task through
+/// the connection-closing queue however many best-effort events are waiting,
+/// and handing it over never waits: a peer flooding address announcements
+/// cannot hold back its own ban.
+#[tokio::test]
+async fn response_violations_are_never_crowded_out() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let genesis = fixture.blocks[0].hash();
+        let block_1 = fixture.blocks[1].clone();
+        let block_2 = fixture.blocks[2].clone();
+        let mut non_contiguous = Vec::new();
+        write_headers_response(
+            &mut non_contiguous,
+            &[block_2.header.clone(), block_1.header.clone()],
+            false,
+        )
+        .expect("writes to a Vec");
+
+        // The request, the raw peer's reply, and the code the violation closes with.
+        for (request, reply, code) in [
+            (
+                Request::BlockDownload {
+                    hash: block_1.hash(),
+                    advertiser: None,
+                },
+                found(&block_2),
+                ErrorCode::ProtocolError,
+            ),
+            (
+                Request::FindHeaders {
+                    known_blocks: vec![genesis],
+                    stop: None,
+                },
+                non_contiguous,
+                ErrorCode::Misbehavior,
+            ),
+        ] {
+            let (node_connection, raw_connection, _e1, _e2) = connected_pair(&network).await;
+            let raw_addr: PeerSocketAddr = node_connection.remote_address().into();
+            let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(8);
+            let misbehavior = MisbehaviorScores::spawn(misbehavior_tx, 8);
+            if code == ErrorCode::Misbehavior {
+                // One misbehaving response short of the ban threshold.
+                let penalties_to_ban = crate::constants::MAX_PEER_MISBEHAVIOR_SCORE
+                    .div_ceil(crate::protocol::v2::constants::RESPONSE_MISBEHAVIOR_PENALTY);
+                for _ in 1..penalties_to_ban {
+                    let banned = misbehavior
+                        .penalize(
+                            raw_addr,
+                            crate::protocol::v2::constants::RESPONSE_MISBEHAVIOR_PENALTY,
+                            "earlier",
+                        )
+                        .await;
+                    assert!(!banned, "the score stays below the threshold");
+                }
+            }
+
+            // The best-effort queue is full of the peer's addresses, and nothing reads it.
+            let (events, mut fatal_rx, mut events_rx) = Events::channel();
+            for _ in 0..EVENT_QUEUE {
+                events.addresses(fixture.addrs.clone());
+            }
+
+            let (tx, rx) = futures::channel::oneshot::channel();
+            let tx = MustUseClientResponseSender::new(tx, &request, None, None);
+            let permits = Arc::new(tokio::sync::Semaphore::new(1));
+            let permit = permits.clone().try_acquire_owned().expect("a free permit");
+            let context = RequestContext {
+                connection: node_connection.clone(),
+                transient_addr: Some(raw_addr),
+                genesis_hash: network.genesis_hash(),
+                misbehavior,
+                events,
+            };
+            let (driven, ()) = tokio::join!(
+                tokio::time::timeout(SHORT_WAIT * 4, drive(request, tx, permit, context)),
+                async {
+                    let (_, mut send, _recv) = accept_request(&raw_connection).await;
+                    let _ = send.write_all(&reply).await;
+                    let _ = send.finish();
+                }
+            );
+            driven.unwrap_or_else(|_elapsed| {
+                panic!("{code:?}: handing over the violation never waits")
+            });
+
+            let error = rx
+                .await
+                .expect("the client is answered")
+                .expect_err("a violation fails the request");
+            assert!(
+                error.inner_debug().contains("ProtocolViolation"),
+                "{code:?}: got {}",
+                error.inner_debug()
+            );
+            assert!(
+                matches!(
+                    fatal_rx.try_recv(),
+                    Ok(Event::Violation { code: queued, .. }) if queued == code
+                ),
+                "{code:?}: the violation is queued for the connection task"
+            );
+            assert_eq!(
+                misbehavior_rx.try_recv().is_ok(),
+                code == ErrorCode::Misbehavior,
+                "{code:?}: the peer is reported for banning at the threshold, and only then"
+            );
+            let mut queued = 0;
+            while let Ok(event) = events_rx.try_recv() {
+                assert!(matches!(event, Event::Addresses(_)));
+                queued += 1;
+            }
+            assert_eq!(
+                queued, EVENT_QUEUE,
+                "{code:?}: the address events are untouched"
+            );
+        }
+    })
+    .await
+    .expect("the test completes well within the timeout");
 }

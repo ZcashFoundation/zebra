@@ -45,27 +45,6 @@ const STREAM_TYPE_TIMEOUT: Duration = Duration::from_secs(10);
 /// The most transaction announcements folded into one inbound service call.
 const MAX_ANNOUNCEMENT_BATCH: usize = 1000;
 
-/// Sends `event` from a request task to the connection task. Addresses are
-/// best effort, and dropped if the connection task is behind; other events
-/// wait for room.
-///
-/// The wait is bounded: the connection task reads these events before the
-/// peer's traffic, ahead of later address events, which never wait, and
-/// aborts the request tasks when it ends.
-pub(super) async fn send_event(events: &mpsc::Sender<Event>, event: Event) {
-    match event {
-        Event::Addresses(_) => {
-            if let Err(mpsc::error::TrySendError::Full(_)) = events.try_send(event) {
-                metrics::counter!("zebra.net.in.addresses.dropped").increment(1);
-            }
-        }
-        event => {
-            // The connection task holds the receiver while its request tasks run.
-            let _ = events.send(event).await;
-        }
-    }
-}
-
 /// This node's announcement stream of one type to the peer, written by its
 /// own task; batches are queued without waiting and dropped when the queue
 /// is full (draft: best effort).

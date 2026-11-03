@@ -140,21 +140,23 @@ const MAX_UNKNOWN_HANDSHAKE_RECORDS: u32 = 16;
 /// The interval [`MAX_UNKNOWN_HANDSHAKE_RECORDS`] applies to.
 const UNKNOWN_HANDSHAKE_RECORD_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Where the stream tasks this module spawns for the peer's streams send
-/// their events.
+/// Where the stream tasks this module spawns, for the peer's streams and for
+/// this node's requests, send their events.
 ///
 /// # Security
 ///
 /// Events that close the connection have their own queue, which the
 /// connection task reads before anything else, so the peer cannot delay or
 /// crowd them out with best-effort events, such as the addresses it
-/// announces, or with its own traffic.
+/// announces, or with its own traffic. That holds for the violations this
+/// node detects in the peer's responses, including the close that bans the
+/// peer, as much as for those it detects in the peer's streams.
 #[derive(Clone)]
 struct Events {
     /// Connection-closing events. One is enough: the connection task closes
     /// the connection on the first.
     fatal: mpsc::Sender<Event>,
-    /// Best-effort events, shared with this node's request tasks.
+    /// Best-effort events: the addresses the peer sent.
     others: mpsc::Sender<Event>,
 }
 
@@ -446,10 +448,11 @@ struct ConnectionTask<S> {
     outbound_permits: Arc<Semaphore>,
     tasks: JoinSet<()>,
     events: Events,
-    /// Connection-closing events from the stream tasks.
+    /// Connection-closing events from the stream tasks and this node's
+    /// request tasks.
     fatal_rx: mpsc::Receiver<Event>,
-    /// Best-effort events from the stream tasks, and every event from this
-    /// node's request tasks.
+    /// Best-effort events from the stream tasks and this node's request
+    /// tasks.
     events_rx: mpsc::Receiver<Event>,
     /// Handshake-stream records of unknown kinds since
     /// `unknown_handshake_records_since`.
@@ -775,7 +778,7 @@ where
                         transient_addr: self.transient_addr,
                         genesis_hash: self.params.genesis_hash,
                         misbehavior: self.params.misbehavior.clone(),
-                        events: self.events.others.clone(),
+                        events: self.events.clone(),
                     },
                 ));
                 return;
