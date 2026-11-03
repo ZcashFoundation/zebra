@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::Instant,
@@ -17,13 +17,17 @@ use tokio::sync::{
 };
 
 use tracing::Span;
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check,
         finalized_state::{FinalizedState, SpentnessHintsReceiver, SpentnessWriter, ZebraDb},
+        memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT,
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
@@ -148,7 +152,7 @@ pub enum WriteMessage {
 ///
 /// A block below a fork point is one allocation shared by several chains, so it is charged once.
 /// Invalidated blocks, which `invalidateblock` keeps for `reconsiderblock`, are not charged.
-fn non_finalized_resident_bytes(non_finalized_state: &NonFinalizedState) -> u64 {
+pub(crate) fn non_finalized_resident_bytes(non_finalized_state: &NonFinalizedState) -> u64 {
     // Bounded by the fork limit (10 chains, or 100 on test networks) times the blocks in each
     // chain above the finalized tip (the 1,000-block reorg window).
     let mut charged = HashSet::new();
@@ -161,12 +165,35 @@ fn non_finalized_resident_bytes(non_finalized_state: &NonFinalizedState) -> u64 
         .fold(0, u64::saturating_add)
 }
 
+/// Returns whether the writer finalizes a root after the next successful commit.
+///
+/// The usual reorg limit always applies. A resident target also finalizes above the target, but
+/// never below the minimum rollback window. Body eviction remains independent of this check.
+fn should_finalize(non_finalized_state: &NonFinalizedState, resident_target: u64) -> bool {
+    let Some(best_chain_len) = non_finalized_state.best_chain_len() else {
+        return false;
+    };
+
+    if best_chain_len > MAX_BLOCK_REORG_HEIGHT {
+        return true;
+    }
+    if resident_target == NO_NON_FINALIZED_RESIDENT_LIMIT
+        || best_chain_len <= MIN_TRANSPARENT_COINBASE_MATURITY
+    {
+        return false;
+    }
+
+    non_finalized_resident_bytes(non_finalized_state) > resident_target
+}
+
 /// A worker task that reads, validates, and writes blocks to the
 /// `finalized_state` or `non_finalized_state`.
 struct WriteBlockWorkerTask {
     block_write_receiver: UnboundedReceiver<WriteMessage>,
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
+    /// The current non-finalized resident target, or `u64::MAX` for no target.
+    non_finalized_resident_target: Arc<AtomicU64>,
     /// Signals the [`crate::service::StateService`] that a finalized block commit failed,
     /// carrying the durable finalized tip height and hash to reset to.
     invalid_block_reset_sender: UnboundedSender<(Option<block::Height>, block::Hash)>,
@@ -316,6 +343,7 @@ impl BlockWriteSender {
         early_relay: Arc<super::early_relay::EarlyRelayState>,
         spentness_hints: Option<(SpentnessHintsReceiver, Height)>,
         pruning_wake: Option<crossbeam_channel::Sender<()>>,
+        non_finalized_resident_target: Arc<AtomicU64>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -341,6 +369,7 @@ impl BlockWriteSender {
                     block_write_receiver,
                     finalized_state,
                     non_finalized_state,
+                    non_finalized_resident_target,
                     invalid_block_reset_sender,
                     non_finalized_rejected_sender,
                     handoff_complete: worker_handoff_complete,
@@ -387,6 +416,7 @@ impl WriteBlockWorkerTask {
             block_write_receiver,
             finalized_state,
             non_finalized_state,
+            non_finalized_resident_target,
             invalid_block_reset_sender,
             non_finalized_rejected_sender,
             handoff_complete,
@@ -719,13 +749,12 @@ impl WriteBlockWorkerTask {
 
             // Finish retention before receiving another block; finalization errors remain fatal.
             let phase_start = Instant::now();
-            while non_finalized_state
-                .best_chain_len()
-                .expect("just successfully inserted a non-finalized block above")
-                > MAX_BLOCK_REORG_HEIGHT
-            {
+            while should_finalize(
+                non_finalized_state,
+                non_finalized_resident_target.load(Ordering::Relaxed),
+            ) {
                 let _context_update = early_relay.updating_context();
-                tracing::trace!("finalizing block past the reorg limit");
+                tracing::trace!("finalizing a non-finalized root at its count or byte limit");
                 let contextually_verified_with_trees = non_finalized_state.finalize();
                 // Hints never apply here: hinted blocks are at most the max checkpoint height.
                 // The writer is still passed, so an incomplete hinted sync fails instead of

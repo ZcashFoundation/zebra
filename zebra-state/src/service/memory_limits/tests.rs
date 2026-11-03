@@ -14,8 +14,8 @@ use crate::{
     SemanticallyVerifiedBlock, READ_PATH_COLUMN_FAMILIES,
 };
 
-/// The default limits open RocksDB with today's options, never evict non-finalized bodies, and
-/// keep the 320 MiB orphan queue.
+/// The default limits open RocksDB with today's options, keep the usual reorg finalization rule,
+/// and keep the 320 MiB orphan queue.
 #[test]
 fn default_memory_limits_are_todays_behaviour() {
     let _init_guard = zebra_test::init();

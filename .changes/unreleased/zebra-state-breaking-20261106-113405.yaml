@@ -8,6 +8,11 @@ body: >-
   `ContextuallyVerifiedBlock::into_mined_request`. Added `MemoryLimits` and `init_with_limits`, which open the state
   with the RocksDB bounds in `MemoryLimits::rocksdb` and drop the highest blocks waiting for their
   parent above `MemoryLimits::queued_blocks_bytes`; `init` uses `MemoryLimits::default()`, which
-  keeps today's limits. Added the `state.memory.resident_bytes` gauge, the charge of the distinct
-  blocks in the non-finalized chains.
+  keeps today's limits. `MemoryLimits::non_finalized_resident_bytes` finalizes above its target,
+  down to the minimum 100-block rollback window, and
+  `ReadStateService::set_non_finalized_resident_bytes` updates the target on later commits;
+  `ReadStateService::set_queued_blocks_bytes` likewise updates the orphan queue bound. Added
+  the `state.memory.resident_bytes` gauge and
+  `ReadStateService::non_finalized_resident_bytes`, plus the `memory_sample` and
+  `spawn_apply_memory_limits` database accessors.
 time: 2026-11-06T11:34:05Z

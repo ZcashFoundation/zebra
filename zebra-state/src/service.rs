@@ -18,7 +18,10 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -57,7 +60,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
-        queued_blocks::QueuedBlocks,
+        queued_blocks::{QueuedBlocks, MAX_QUEUED_BYTES},
         read::find,
         watch_receiver::WatchReceiver,
     },
@@ -256,6 +259,13 @@ pub struct ReadStateService {
     /// This state is only updated between requests,
     /// so it might include some block data that is also on `disk`.
     non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+
+    /// The writer's current non-finalized resident target, or `u64::MAX` for no target.
+    non_finalized_resident_target: Arc<AtomicU64>,
+
+    /// The current bound on the retained charges of blocks waiting for their parent, shared with
+    /// the [`StateService`]'s queue.
+    queued_blocks_limit: Arc<AtomicUsize>,
 
     /// At most one early mining parent, separate from committed state.
     mining_candidate: watch::Sender<Option<MiningCandidate>>,
@@ -469,11 +479,16 @@ impl StateService {
                  blocks above its finalized tip"
             );
         }
+        let non_finalized_resident_target = Arc::new(AtomicU64::new(
+            limits
+                .non_finalized_resident_bytes
+                .unwrap_or(memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT),
+        ));
         if let Some(resident_target_bytes) = limits.non_finalized_resident_bytes {
             tracing::debug!(
                 resident_target_bytes,
-                "the state.memory.resident_bytes gauge reports the non-finalized block charge \
-                 against its resident target, which is not enforced",
+                "the writer finalizes above the non-finalized resident target, down to the \
+                 minimum rollback window",
             );
         }
         let skip_backup_task = config.debug_skip_non_finalized_state_backup_task;
@@ -524,12 +539,14 @@ impl StateService {
             early_relay.clone(),
             spentness.map(|hints| (hints, max_checkpoint_height)),
             pruning_wake,
+            non_finalized_resident_target.clone(),
         );
 
         let mut read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
+            non_finalized_resident_target,
         );
         read_service.early_relay = early_relay;
 
@@ -540,6 +557,7 @@ impl StateService {
             full_verifier_utxo_lookahead.unwrap_or(block::Height::MIN);
         let non_finalized_state_queued_blocks =
             QueuedBlocks::with_byte_limit(limits.queued_blocks_bytes);
+        read_service.queued_blocks_limit = non_finalized_state_queued_blocks.byte_limit();
         let pending_utxos = PendingUtxos::default();
 
         let finalized_block_write_last_sent_hash =
@@ -1331,11 +1349,14 @@ impl ReadStateService {
         finalized_state: &FinalizedState,
         block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
         non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+        non_finalized_resident_target: Arc<AtomicU64>,
     ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
             non_finalized_state_receiver,
+            non_finalized_resident_target,
+            queued_blocks_limit: Arc::new(AtomicUsize::new(MAX_QUEUED_BYTES)),
             block_write_task,
             pruning_task: None,
             mining_candidate: watch::Sender::new(None),
@@ -1381,6 +1402,30 @@ impl ReadStateService {
     /// Logs rocksdb metrics using the read only state service.
     pub fn log_db_metrics(&self) {
         self.db.print_db_metrics();
+    }
+
+    /// Changes the non-finalized resident target used by the writer for subsequent commits.
+    pub fn set_non_finalized_resident_bytes(&self, target: Option<u64>) {
+        self.non_finalized_resident_target.store(
+            target.unwrap_or(memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Changes the bound on the retained charges of blocks waiting for their parent block. The
+    /// state applies it the next time it queues such a block, dropping the highest queued blocks
+    /// above it.
+    pub fn set_queued_blocks_bytes(&self, max_queued_bytes: usize) {
+        self.queued_blocks_limit
+            .store(max_queued_bytes, Ordering::Relaxed);
+    }
+
+    /// Returns the retained charge of the distinct blocks in the latest non-finalized state, in
+    /// bytes: the value of the `state.memory.resident_bytes` gauge for that state.
+    ///
+    /// It walks every non-finalized chain, so call it from a blocking task.
+    pub fn non_finalized_resident_bytes(&self) -> u64 {
+        write::non_finalized_resident_bytes(&self.latest_non_finalized_state())
     }
 }
 
@@ -2718,6 +2763,9 @@ pub fn init_read_only(
             &finalized_state,
             None,
             WatchReceiver::new(non_finalized_state_receiver),
+            Arc::new(AtomicU64::new(
+                memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT,
+            )),
         ),
         finalized_state.db.clone(),
         non_finalized_state_sender,
