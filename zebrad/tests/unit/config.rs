@@ -1094,6 +1094,30 @@ fn config_zebra_state_cache_dir_env() {
     assert_eq!(config.state.cache_dir, PathBuf::from("/test/cache"));
 }
 
+/// The memory budget can be set from the environment, which is how the Docker memory tests set
+/// it (design §2.1, §6.4); a number without a unit is still rejected.
+#[test]
+fn config_zebra_resources_memory_budget_env() {
+    use zebrad::components::resources::MemoryBudget;
+
+    let env = EnvGuard::new();
+
+    env.set_var("ZEBRA_RESOURCES__MEMORY_BUDGET", "2 GiB");
+    let config = ZebradConfig::load(None).expect("load config with a memory budget");
+    assert_eq!(
+        config.resources.memory_budget,
+        Some(MemoryBudget::Bytes(2 * 1024 * 1024 * 1024))
+    );
+
+    env.set_var("ZEBRA_RESOURCES__MEMORY_BUDGET", "auto");
+    let config = ZebradConfig::load(None).expect("load config with an auto budget");
+    assert_eq!(config.resources.memory_budget, Some(MemoryBudget::Auto));
+
+    env.set_var("ZEBRA_RESOURCES__MEMORY_BUDGET", "2048");
+    let error = ZebradConfig::load(None).expect_err("a budget needs a unit");
+    assert!(error.to_string().contains("add a unit"), "{error}");
+}
+
 #[test]
 fn config_zebra_metrics_endpoint_addr_env() {
     let env = EnvGuard::new();
