@@ -670,3 +670,183 @@ fn new_with_debug_and_limits_bounds_read_write_and_read_only_states() {
         assert_eq!(block_cache_capacity(db, "tx_by_loc"), 48 * MIB);
     }
 }
+
+/// A profile change resizes the write buffer manager, the block cache and the memtable shape
+/// of an open database, and leaves the open-time limits and the options that are fixed at open
+/// alone (design §2.3 step 3, §4.1).
+#[test]
+fn apply_memory_limits_resizes_the_manager_cache_and_memtables() {
+    let _init_guard = zebra_test::init();
+
+    let opened_with = RocksDbMemoryLimits {
+        write_buffer_total: Some(64 * MIB),
+        block_cache_bytes: Some(32 * MIB),
+        charge_index_and_filter_cfs: &["tx_by_loc"],
+        ..RocksDbMemoryLimits::default()
+    };
+    let column_families = ["tx_by_loc", "hash_by_height"];
+    let db = open_disk_db(&opened_with, &column_families);
+
+    let resized_to = RocksDbMemoryLimits {
+        write_buffer_total: Some(128 * MIB),
+        block_cache_bytes: Some(64 * MIB),
+        // Charging and the thread count cannot change live, so these requests are only logged.
+        max_background_jobs: Some(3),
+        charge_index_and_filter_cfs: &[],
+        ..RocksDbMemoryLimits::default()
+    };
+    db.apply_memory_limits(&resized_to)
+        .expect("a read-write database accepts live option changes");
+
+    let manager = db
+        .database_options
+        .write_buffer_manager
+        .as_ref()
+        .expect("the database was opened with a manager");
+    assert_eq!(
+        u64::try_from(manager.get_buffer_size()).expect("a buffer size fits in a u64"),
+        128 * MIB
+    );
+    for cf_name in column_families {
+        assert_eq!(block_cache_capacity(&db, cf_name), 64 * MIB, "{cf_name}");
+    }
+
+    // RocksDB writes a new OPTIONS file after every live option change.
+    let options = parse_latest_options_file(db.path());
+    // The thread count derived at open (4 under a 64 MiB total) stays.
+    assert_section(&options, "DBOptions", &[("max_background_jobs", "4")]);
+    for cf_name in column_families {
+        let section = format!("CFOptions \"{cf_name}\"");
+        assert_section(
+            &options,
+            &section,
+            &[
+                // 128 MiB / 8 = 16 MiB, so a 64 MiB compaction input needs 4 files.
+                ("write_buffer_size", "16777216"),
+                ("max_write_buffer_number", "4"),
+                ("level0_file_num_compaction_trigger", "4"),
+                // Immutable: still the value the database was opened with.
+                ("min_write_buffer_number_to_merge", "1"),
+            ],
+        );
+        assert_section(&options, &section, UNCHANGED_LAYOUT_CF_OPTIONS);
+    }
+    let charged = |cf_name: &str| {
+        options
+            .get(&format!("TableOptions/BlockBasedTable \"{cf_name}\""))
+            .and_then(|table| table.get("cache_index_and_filter_blocks"))
+            .cloned()
+    };
+    assert_eq!(charged("tx_by_loc").as_deref(), Some("true"));
+    assert_eq!(charged("hash_by_height").as_deref(), Some("false"));
+
+    assert_eq!(db.limits(), &opened_with);
+}
+
+/// A database opened with today's options has no manager or cache of its own to resize, and
+/// keeps today's memtable shape, because its merge count cannot change live; a read-only
+/// secondary only resizes its own manager and cache, because RocksDB rejects option changes on
+/// secondaries.
+#[test]
+fn apply_memory_limits_skips_what_cannot_change_live() {
+    let _init_guard = zebra_test::init();
+
+    let db = open_disk_db(&RocksDbMemoryLimits::default(), &["tx_by_loc"]);
+    let limits = RocksDbMemoryLimits {
+        write_buffer_total: Some(64 * MIB),
+        block_cache_bytes: Some(64 * MIB),
+        ..RocksDbMemoryLimits::default()
+    };
+    db.apply_memory_limits(&limits)
+        .expect("limits the database cannot apply are skipped, not errors");
+
+    assert!(db.database_options.write_buffer_manager.is_none());
+    assert_eq!(
+        block_cache_capacity(&db, "tx_by_loc"),
+        DEFAULT_BLOCK_CACHE_BYTES
+    );
+    // Smaller memtables with today's merge count of 2 would delay writes one memtable after a
+    // flush can start, so the memtable shape is not changed either.
+    let options = parse_latest_options_file(db.path());
+    assert_section(&options, "CFOptions \"tx_by_loc\"", TODAYS_CF_OPTIONS);
+    // RocksDB's default thread count from the open stays: the binding has no `SetDBOptions`.
+    assert_section(&options, "DBOptions", &[("max_background_jobs", "2")]);
+
+    let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let open = |read_only| {
+        DiskDb::new_with_limits(
+            &config,
+            "memory-limits-secondary-test",
+            &Version::new(1, 0, 0),
+            &Network::Mainnet,
+            ["tx_by_loc".to_owned()],
+            read_only,
+            &limits,
+        )
+        .expect("the persistent database configuration is valid")
+    };
+    let _primary = open(false);
+    let secondary = open(true);
+    secondary
+        .apply_memory_limits(&RocksDbMemoryLimits {
+            write_buffer_total: Some(128 * MIB),
+            block_cache_bytes: Some(128 * MIB),
+            ..RocksDbMemoryLimits::default()
+        })
+        .expect("a secondary skips the option changes RocksDB rejects");
+    let manager = secondary
+        .database_options
+        .write_buffer_manager
+        .as_ref()
+        .expect("the secondary was opened with a manager");
+    assert_eq!(
+        u64::try_from(manager.get_buffer_size()).expect("a buffer size fits in a u64"),
+        128 * MIB
+    );
+    assert_eq!(block_cache_capacity(&secondary, "tx_by_loc"), 128 * MIB);
+}
+
+/// The async entry point applies new limits on a blocking thread (design §4.1 "Live resizing":
+/// zebrad's resize task calls it when the memory profile changes).
+#[tokio::test]
+async fn spawn_apply_memory_limits_resizes_an_open_state() {
+    let _init_guard = zebra_test::init();
+
+    let state = open_state(&RocksDbMemoryLimits {
+        write_buffer_total: Some(64 * MIB),
+        block_cache_bytes: Some(32 * MIB),
+        ..RocksDbMemoryLimits::default()
+    });
+
+    state
+        .db
+        .spawn_apply_memory_limits(RocksDbMemoryLimits {
+            write_buffer_total: Some(128 * MIB),
+            block_cache_bytes: Some(64 * MIB),
+            ..RocksDbMemoryLimits::default()
+        })
+        .await
+        .expect("a read-write database accepts live option changes");
+
+    let db = state.db.db();
+    let manager = db
+        .database_options
+        .write_buffer_manager
+        .as_ref()
+        .expect("the database was opened with a manager");
+    assert_eq!(
+        u64::try_from(manager.get_buffer_size()).expect("a buffer size fits in a u64"),
+        128 * MIB
+    );
+    assert_eq!(block_cache_capacity(db, "tx_by_loc"), 64 * MIB);
+    let options = parse_latest_options_file(db.path());
+    assert_section(
+        &options,
+        "CFOptions \"tx_by_loc\"",
+        &[("write_buffer_size", "16777216")],
+    );
+}
