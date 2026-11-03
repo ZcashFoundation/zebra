@@ -23,7 +23,7 @@ use zebra_chain::{parameters::Network, state_snapshot::ObjectHash};
 use zebra_network::{ObjectEntry, ObjectIndex, ObjectSource};
 use zebra_state::state_snapshot::{
     format::{Manifest, MAX_MANIFEST_BYTES},
-    store::ArtifactStore,
+    store::{ArtifactStore, MAX_OBJECT_BYTES},
 };
 
 #[cfg(test)]
@@ -45,8 +45,8 @@ pub struct ScanSummary {
     /// The verified manifests with at least one piece missing.
     pub incomplete_manifests: usize,
 
-    /// The files left out: objects that do not hash to their names, rejected
-    /// manifests, and objects no verified manifest lists.
+    /// The entries left out: non-regular or oversized files, objects that do not hash to their
+    /// names, rejected manifests, and objects no verified manifest lists.
     pub excluded: usize,
 }
 
@@ -169,7 +169,7 @@ pub(crate) fn scan_store(store: &ArtifactStore, network: &Network) -> (ObjectInd
                     %error,
                     %hash,
                     path = %path.display(),
-                    "not serving a state snapshot object that does not hash to its file name"
+                    "not serving an invalid state snapshot object"
                 );
                 summary.excluded += 1;
             }
@@ -252,6 +252,14 @@ enum VerifyError {
     #[error("could not read the object: {0}")]
     Io(#[from] io::Error),
 
+    /// The directory entry is not a regular file.
+    #[error("the object is not a regular file")]
+    NotRegularFile,
+
+    /// The file is larger than any object the store can hold.
+    #[error("the object is over the store limit of {MAX_OBJECT_BYTES} bytes")]
+    TooLarge,
+
     /// The file's contents hash to `actual`, not to its name.
     #[error("the object hashes to {actual}, not to its file name")]
     HashMismatch {
@@ -260,10 +268,24 @@ enum VerifyError {
     },
 }
 
-/// Re-hashes the object at `path` in chunks and returns its size if it hashes
-/// to `expected`.
+/// Re-hashes the regular file at `path` in chunks and returns its size if it is
+/// within the store's limit and hashes to `expected`.
 fn verify_object(path: &Path, expected: ObjectHash) -> Result<u64, VerifyError> {
-    let mut file = File::open(path)?;
+    // MAX_OBJECT_BYTES is 16 MiB, which fits in a u64.
+    let max_len = MAX_OBJECT_BYTES as u64;
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(VerifyError::NotRegularFile);
+    }
+    if metadata.len() > max_len {
+        return Err(VerifyError::TooLarge);
+    }
+
+    let file = File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(VerifyError::NotRegularFile);
+    }
+    let mut file = file.take(max_len + 1);
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; HASH_CHUNK_BYTES];
     let mut size: u64 = 0;
@@ -276,6 +298,9 @@ fn verify_object(path: &Path, expected: ObjectHash) -> Result<u64, VerifyError> 
         hasher.update(&buffer[..read]);
         // A usize always fits in a u64 on the targets Zebra supports.
         size = size.saturating_add(read as u64);
+    }
+    if size > max_len {
+        return Err(VerifyError::TooLarge);
     }
 
     let actual = ObjectHash(hasher.finalize().into());

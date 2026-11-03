@@ -210,9 +210,11 @@ bootstrap (a single peer's hash mismatch closes its connection with `MISBEHAVIOR
 backoff). The manifest must arrive within 60 s of the first handshake; the piece phase is aborted
 if no piece verifies for 5 min or every peer is excluded. On an abort, or on a rejected snapshot (a
 verified manifest whose contents fail the checks), the rejection is recorded when it is the
-snapshot's fault, the temp directory is deleted, and `[sync] state_snapshot_fallback` applies:
-`"error"` exits with an actionable message and leaves no state directory, so the next start
-retries; `"genesis"` continues with a normal sync from genesis. `BootstrapError::Rejected` marks
+snapshot's fault, the temp directory is deleted, and `[sync] state_snapshot_fallback` applies.
+`"error"` exits with an actionable message: an aborted download leaves no state directory and is
+retried on the next start, while a rejected manifest remains fatal on later starts until its marker
+is removed after investigation or a different commitment is configured. `"genesis"` continues with
+a normal sync from genesis without retrying a rejected snapshot. `BootstrapError::Rejected` marks
 the manifest; `BootstrapError::Aborted` marks nothing.
 
 **Scheduler** (`Scheduler<S>`, generic over
@@ -259,23 +261,30 @@ penalty. `SchedulerConfig` carries these values.
   holds; refuses unless the tip is `H`, the database is not pruned below `L`, and there is no
   indexer; exports each column family on its own blocking thread with raw iterators and readahead,
   canonicalizing where the contents section says; uses a merge join for the transaction-index
-  subset below `L` and targeted gets for the tree rows.
+  subset below `L` and targeted gets for the tree rows. The command prints the complete
+  `[sync.state_snapshot]` table, or writes it without interleaved logs to `--commitment-out PATH`;
+  export failures go to standard error.
 
 ## Serving
 
 `[sync] serve_state_snapshots = true` adds the artifact store's objects to the node's
 `ObjectIndex` (`components/state_snapshot/serving.rs`), which also holds the spentness-hint
-artifact when the node serves one. Each object is re-hashed against its file name in the
-background before it is published; rejected manifests and the pieces of unverified manifests are
-excluded. `StartCmd::network_services` adds `NODE_SYNC_ARTIFACTS` when serving is on and the index
-holds a complete manifest.
+artifact when the node serves one. Each regular file of at most `MAX_OBJECT_BYTES` (16 MiB)
+is re-hashed against its file name in the background before it is published; rejected manifests and
+the pieces of unverified manifests are excluded. Startup does not wait for the scan, and the index
+gains the store's objects when it finishes. The service bit does not depend on the scan:
+`Config::v2_advertised_services` adds `NODE_SYNC_ARTIFACTS` for every node with an object source,
+which every version 2 node has, and objects outside the index are answered as not found. Reporting a `Stage` also increments
+`sync.state_snapshot.stages.total` with the stage text as its bounded `stage` label.
 
 ## Configuration
 
 The `[sync]` keys `state_snapshot_sync`, `state_snapshot`, `unsafe_trust_state_snapshot`,
 `state_snapshot_peers`, `state_snapshot_fallback`, and `serve_state_snapshots` are documented in
-the [configuration reference](../user/config.md#sync) and stored in
-`zebrad/tests/common/configs/v7.1.0.toml`.
+the [configuration reference](../user/config.md#sync). The five keys with non-optional defaults are
+stored in `zebrad/tests/common/configs/v7.1.0.toml`. The optional `state_snapshot` commitment is
+absent there because its default is `None`, which TOML has no value for. The export command tests
+cover its `[sync.state_snapshot]` table; the configuration reference shows the inline-table form.
 
 ## Tests and benchmark
 

@@ -4,7 +4,7 @@ A [pruned node](pruning.md) with an empty state can download a **state snapshot*
 [version 2 protocol](p2p-v2.md) peers instead of syncing the chain from genesis. The snapshot is
 Zebra's finalized state at a height `H`: the UTXO set, the nullifier and anchor sets, the note
 commitment trees, the value pools, the address indexes, and the 2,304 most recent blocks. The node
-checks the snapshot against a *commitment*, installs it as its state, and then syncs only the
+checks the snapshot against a _commitment_, installs it as its state, and then syncs only the
 blocks above `H`. On Mainnet that replaces about 278 GB of block history with a few GB.
 
 This is not the same as the [published state archives](snapshots.md). Those are tar archives of a
@@ -19,7 +19,7 @@ yet, so on those networks it needs a setting that accepts a commitment of your o
 ## What is verified, and what is trusted
 
 A snapshot is named by a commitment with three fields: the snapshot height `H`, the hash of block
-`H`, and the hash of the snapshot *manifest*, which lists the hash of every piece of the snapshot.
+`H`, and the hash of the snapshot _manifest_, which lists the hash of every piece of the snapshot.
 Everything the node downloads is checked against these hashes, so a peer cannot alter a snapshot or
 serve a different one. But a hash only proves that you received the snapshot the commitment names.
 It does not prove that the snapshot is the real chain state. **Whoever produced the commitment is
@@ -110,8 +110,8 @@ state_snapshot_sync = true
 state_snapshot = { height = <height>, hash = "<block hash>", manifest = "<manifest hash>" }
 # Version 2 peers that serve snapshots, as host:port. The port is the peer's QUIC (UDP) port.
 state_snapshot_peers = ["203.0.113.10:8233"]
-# What to do if the snapshot cannot be downloaded or is rejected: "error" (the default) exits
-# and leaves no state, so the next start retries; "genesis" syncs from genesis instead.
+# What to do if the snapshot cannot be downloaded or is rejected: "error" (the default) exits;
+# "genesis" syncs from genesis instead. An aborted download is retried on the next start.
 state_snapshot_fallback = "error"
 ```
 
@@ -154,11 +154,14 @@ been excluded. A peer that serves bytes with the wrong hash is disconnected and 
 rest of the bootstrap; a peer that does not have an object is retried later.
 
 If the snapshot's contents fail a check, the snapshot is **rejected**: Zebra records the manifest
-hash under `<cache_dir>/state-snapshots/<network>/rejected/` and never tries that snapshot again
+hash under `<cache_dir>/state-snapshots/<network>/rejected/` and does not try that snapshot again
 in this `cache_dir`. A download that cannot complete is **aborted** and records nothing. In both
 cases the import directory is deleted, and `[sync] state_snapshot_fallback` decides what happens
-next: `"error"` exits with a message that says what failed, and leaves no state directory, so the
-next start retries; `"genesis"` continues with a normal sync from genesis.
+next. With `"error"`, Zebra exits with an actionable message. An aborted download leaves no state,
+so the next start retries it; a rejected snapshot still exits on later starts until you configure a
+different trusted commitment, or investigate the failure and remove its rejection marker. With
+`"genesis"`, Zebra continues with a normal sync from genesis and does not retry a rejected
+snapshot.
 
 ## After the bootstrap
 
@@ -204,19 +207,27 @@ needs about the snapshot's size in free disk space under `cache_dir`.
    was never built with the `indexer` feature:
 
    ```sh
-   zebrad --config /path/to/zebrad.toml export-state-snapshot --height <height>
+   zebrad --config /path/to/zebrad.toml export-state-snapshot \
+     --height <height> --commitment-out /path/to/commitment.toml
    ```
 
    The command opens the state read-only. It refuses a state whose tip is not `H`, one pruned
    below `L`, one built with the `indexer` feature, and one that needs a database migration. On
    success it writes the manifest and pieces to `<cache_dir>/state-snapshots/<network>/objects/`,
-   each under its SHA-256 hash, and prints the commitment:
+   each under its SHA-256 hash. `--commitment-out` writes only this complete TOML document, so a
+   script can parse it without filtering export logs:
 
    ```toml
+   # Add this table to zebrad.toml, after the keys of its [sync] section:
+   [sync.state_snapshot]
    height = <height>
    hash = "<block hash>"
    manifest = "<manifest hash>"
    ```
+
+   Without `--commitment-out`, the same table is printed to stdout, which can also contain export
+   logs. Failures are printed to the terminal's standard error stream and return a nonzero exit
+   status.
 
 4. Serve the store. Remove `debug_stop_at_height`, open a version 2 endpoint, and turn serving on:
 
@@ -228,15 +239,19 @@ needs about the snapshot's size in free disk space under `cache_dir`.
    serve_state_snapshots = true
    ```
 
-   At startup the node re-hashes every object in the store before offering it, and leaves out
-   rejected manifests and the pieces of manifests it cannot verify. Once the store holds a
-   complete snapshot, the node advertises `NODE_SYNC_ARTIFACTS` to version 2 peers. It serves at
-   most two concurrent transfers per peer and eight in total; peers asked to wait retry with a
-   backoff. A bootstrapping node connects with a short-lived connection that advertises no
-   services, in addition to its normal connections. Zebra limits the connection attempts it
-   accepts from one IP address within about two minutes, so a serving node behind the same IP
-   address as its clients needs `[network] max_connections_per_ip` of at least 4: the bootstrap,
-   version 2, and legacy connections, with room for one restart.
+   At startup the node re-hashes every object in the store before offering it. Only regular files
+   of at most 16 MiB are considered; rejected manifests and pieces of manifests it cannot verify
+   are left out. The scan runs in the background: the node starts without waiting for it, and
+   serves the store's objects once it finishes. Like every node with `v2_listen_addr` set, the
+   node advertises `NODE_SYNC_ARTIFACTS` to version 2 peers whether or not its store holds a
+   snapshot, and answers requests for objects it does not hold as not found.
+
+   The node serves at most two concurrent transfers per peer and eight in total; peers asked to
+   wait retry with a backoff. A bootstrapping node connects with a short-lived connection that
+   advertises no services, in addition to its normal connections. Zebra limits the connection
+   attempts it accepts from one IP address within about two minutes, so a serving node behind the
+   same IP address as its clients needs `[network] max_connections_per_ip` of at least 4: the
+   bootstrap, version 2, and legacy connections, with room for one restart.
 
 5. Publish the commitment through a channel your users trust, because the commitment is what they
    trust (see [What is verified, and what is trusted](#what-is-verified-and-what-is-trusted)).

@@ -43,8 +43,9 @@ symlinks outside it are skipped. Reuse considers only the immediately
 preceding major version, not format 27 or older. Do not rename a database
 directory manually to claim compatibility.
 
-Builds with [block-body pruning](pruning.md) use database format **30.1.0**,
-with finalized state under `<cache_dir>/state/v30/<network>/`. When no v30
+Current builds use database format **30.1.0**, with finalized state under
+`<cache_dir>/state/v30/<network>/`. [Block-body pruning](pruning.md) is configured separately.
+When no v30
 database exists, startup moves a v29 archive there. This happens even with
 pruning disabled and leaves no v29 backup for an older binary. A never-pruned
 archive can be moved back for Zebra 7.0.0; read

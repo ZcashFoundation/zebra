@@ -18,10 +18,12 @@ use zebra_chain::{
 };
 use zebra_state::state_snapshot::{
     format::{ComponentId, ComponentManifest, Manifest, PieceManifest},
-    store::ArtifactStore,
+    store::{ArtifactStore, MAX_OBJECT_BYTES},
 };
 
-use crate::components::state_snapshot::serving::{object_index, scan_store, ScanSummary};
+use crate::components::state_snapshot::serving::{
+    object_index, scan_store, verify_object, ScanSummary,
+};
 
 /// Writes `bytes` to the store's objects directory under `name`.
 fn write_object(store: &ArtifactStore, name: &str, bytes: &[u8]) -> PathBuf {
@@ -206,4 +208,45 @@ async fn object_index_publishes_after_the_first_scan() {
 
     let published: HashSet<ObjectHash> = serving.source.borrow().keys().copied().collect();
     assert_eq!(published, expected);
+}
+
+/// Objects can be exactly the store's size limit, but no larger.
+#[test]
+fn object_verification_enforces_the_size_limit() {
+    let _init_guard = zebra_test::init();
+    let dir = TempDir::new().unwrap();
+    let store = ArtifactStore::at(dir.path().join("store"));
+
+    let bytes = vec![0x5a; MAX_OBJECT_BYTES];
+    let hash = ObjectHash::of(&bytes);
+    let path = write_object(&store, &hash.to_string(), &bytes);
+    assert_eq!(
+        verify_object(&path, hash).expect("the exact size limit is accepted"),
+        u64::try_from(MAX_OBJECT_BYTES).expect("the object limit fits in u64")
+    );
+
+    let oversized = vec![0x5a; MAX_OBJECT_BYTES + 1];
+    let hash = ObjectHash::of(&oversized);
+    let path = write_object(&store, &hash.to_string(), &oversized);
+    let error = verify_object(&path, hash).expect_err("an oversized object must be rejected");
+    assert!(error.to_string().contains("limit"), "{error}");
+}
+
+/// A hash-named symbolic link is not a regular object file, even when its
+/// target has the right contents.
+#[cfg(unix)]
+#[test]
+fn object_verification_rejects_symbolic_links() {
+    let _init_guard = zebra_test::init();
+    let dir = TempDir::new().unwrap();
+    let store = ArtifactStore::at(dir.path().join("store"));
+
+    let bytes = b"piece";
+    let hash = ObjectHash::of(bytes);
+    let target = write_object(&store, "target", bytes);
+    let path = store.objects_dir().join(hash.to_string());
+    std::os::unix::fs::symlink(target, &path).unwrap();
+
+    let error = verify_object(&path, hash).expect_err("a symbolic link is not an object file");
+    assert!(error.to_string().contains("regular file"), "{error}");
 }

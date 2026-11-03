@@ -1,4 +1,9 @@
 project: zebrad
 kind: Added
-body: Added the `zebrad export-state-snapshot --height H [--out DIR]` command, which exports a stopped node's finalized state at its tip `H` as a state snapshot for other nodes to bootstrap from, and prints the `[sync.state_snapshot]` commitment that names it.
+body: >-
+  Added the `zebrad export-state-snapshot --height H [--cache-dir DIR] [--out DIR]
+  [--commitment-out PATH]` command, which exports a stopped node's finalized state at its tip `H`
+  as a state snapshot for other nodes to bootstrap from, and prints the `[sync.state_snapshot]`
+  commitment that names it. `--commitment-out` writes a log-free TOML document for scripts, and
+  failures are printed to standard error.
 time: 2026-11-03T04:01:07.143888747-05:00
