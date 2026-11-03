@@ -4,9 +4,10 @@
 //! here reads the stream type, waits for one of the connection's request
 //! permits, then reads the request up to the bound its type allows, answers
 //! it through the inbound service, and writes the response in the stream
-//! type's format. Every wait is bounded by the request deadline: the type
-//! byte, the permit, and the request body; and each write of the response
-//! by [`REQUEST_TIMEOUT`].
+//! type's format. The whole exchange, from accepting the stream to the last
+//! response byte, is bounded by one request deadline, [`REQUEST_TIMEOUT`]
+//! after the stream was accepted: the type byte, the permit, the request
+//! body, the inbound service calls, and every write of the response.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -98,15 +99,27 @@ pub(super) async fn serve<S>(
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    match serve_inner(
-        &mut send,
-        &mut recv,
-        inbound_service,
-        permits,
-        &get_addr_allowed,
+    // # Security
+    //
+    // One deadline for the whole exchange: a peer that reads its responses slowly, or asks for
+    // many entries, cannot hold a request permit and the request's objects for longer than a
+    // requester waits for a response. Dropping the exchange at the deadline releases both.
+    let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+    let served = tokio::time::timeout_at(
+        deadline,
+        serve_inner(
+            &mut send,
+            &mut recv,
+            inbound_service,
+            permits,
+            &get_addr_allowed,
+            deadline,
+        ),
     )
     .await
-    {
+    // The response did not complete in time: cancel the stream (draft, "Request Streams").
+    .unwrap_or(Err(Outcome::Refuse(ErrorCode::Cancelled)));
+    match served {
         // The peer went away or cancelled the stream: nothing to do.
         Ok(()) | Err(Outcome::Transport) => {}
         Err(Outcome::Violation { reason, code }) => {
@@ -141,20 +154,21 @@ impl From<WireError> for Outcome {
     }
 }
 
-/// Reads the request, answers it, and writes the response.
+/// Reads the request, answers it, and writes the response. The caller
+/// bounds the whole exchange by `deadline`; the waits before the request is
+/// decoded also end at it, to choose their refusal codes.
 async fn serve_inner<S>(
     send: &mut SendStream,
     recv: &mut RecvStream,
     inbound_service: S,
     permits: Arc<Semaphore>,
     get_addr_allowed: &AtomicBool,
+    deadline: tokio::time::Instant,
 ) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
-    let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
-
     // The stream type comes first, and decides how much request may follow.
     let mut type_byte = [0u8; 1];
     match tokio::time::timeout_at(deadline, recv.read_exact(&mut type_byte)).await {
@@ -267,14 +281,12 @@ where
     })
 }
 
-/// Writes `bytes` to the response stream, bounded by [`REQUEST_TIMEOUT`]: a
-/// peer that opens requests and never reads the answers would otherwise pin
-/// the response objects for the life of the connection.
+/// Writes `bytes` to the response stream. A peer that stops reading is
+/// bounded by the request deadline in [`serve`], not here, so a slow reader
+/// cannot extend the exchange one write at a time.
 async fn write(send: &mut SendStream, bytes: &[u8]) -> Result<(), Outcome> {
-    tokio::time::timeout(REQUEST_TIMEOUT, send.write_all(bytes))
+    send.write_all(bytes)
         .await
-        // The peer stopped reading: abandon the response and keep the connection.
-        .map_err(|_elapsed| Outcome::Refuse(ErrorCode::Cancelled))?
         .map_err(|_error| Outcome::Transport)
 }
 

@@ -1954,9 +1954,11 @@ async fn cancelled_request_stops_its_stream() {
 
 /// Requests end at `REQUEST_TIMEOUT` and the connection stays open: a
 /// request to a peer that never answers fails with
-/// `ConnectionReceiveTimeout` and cancels its stream with `CANCELLED`, and
-/// a request from the peer that waits for one of the node's busy request
-/// permits is refused with `REFUSED`.
+/// `ConnectionReceiveTimeout` and cancels its stream with `CANCELLED`;
+/// requests from the peer that hold the node's request permits while the
+/// inbound service never answers are cancelled with `CANCELLED`, and one
+/// that waits for a busy permit is refused with `REFUSED` (or cancelled, if
+/// it got a freed permit just before its own deadline).
 ///
 /// This takes `REQUEST_TIMEOUT` of real time: pausing tokio's clock is
 /// unsafe with real sockets.
@@ -2007,18 +2009,33 @@ async fn stalled_requests_end_at_the_request_timeout() {
             }
             let reads = recvs
                 .iter_mut()
-                .map(|recv| Box::pin(recv.read_to_end(1024)))
+                .map(|recv| recv.read_to_end(1024))
                 .collect::<Vec<_>>();
-            // The requests holding the permits wait on the inbound service; the extra one is
-            // refused at its deadline.
-            let (first, _index, rest) = futures::future::select_all(reads).await;
-            assert_reset(first, ErrorCode::Refused);
+            // The requests holding the permits wait on the inbound service until their deadline,
+            // which cancels them; the extra one waits for a permit until its deadline, which
+            // refuses it, unless the cancelled requests free their permits first, a moment
+            // before its own deadline cancels it too.
+            let mut codes = Vec::new();
+            for read in futures::future::join_all(reads).await {
+                let error = read.expect_err("the stream is reset");
+                let quinn::ReadToEndError::Read(quinn::ReadError::Reset(code)) = error else {
+                    panic!("expected a reset, got {error:?}");
+                };
+                codes.push(code.into_inner());
+            }
             assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
+            let cancelled = codes
+                .iter()
+                .filter(|code| **code == ErrorCode::Cancelled.code())
+                .count();
+            let refused = codes
+                .iter()
+                .filter(|code| **code == ErrorCode::Refused.code())
+                .count();
             assert!(
-                tokio::time::timeout(SHORT_WAIT, futures::future::select_all(rest))
-                    .await
-                    .is_err(),
-                "the requests holding permits are still waiting"
+                cancelled >= INBOUND_REQUEST_CONCURRENCY && cancelled + refused == codes.len(),
+                "requests holding permits are cancelled, the waiting one refused or cancelled: \
+                 {codes:?}"
             );
         };
 
@@ -2276,6 +2293,139 @@ async fn abandoned_request_write_resets_the_stream() {
 
         let (_send, mut recv) = responder.accept_bi().await.expect("accepts");
         assert_reset(recv.read_to_end(1024).await, ErrorCode::Cancelled);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An inbound service whose `get-mempool` snapshots are distinct witnessed
+/// transaction IDs, the largest `get-mempool` records: `counts[n]` of them
+/// in its `n`th snapshot, and the last count after that.
+fn witnessed_mempool_service(counts: Vec<usize>) -> TestService {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    BoxCloneService::new(service_fn(move |request: Request| {
+        let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let count = counts.get(call).or(counts.last()).copied().unwrap_or(0);
+        async move {
+            Ok::<Response, BoxError>(match request {
+                Request::MempoolTransactionIds => Response::TransactionIds(
+                    (0..count)
+                        .map(|index| {
+                            let mut hash = [0; 32];
+                            // The index fits in the hash's first 8 bytes.
+                            hash[..8].copy_from_slice(&(index as u64).to_le_bytes());
+                            UnminedTxId::Witnessed(transaction::WtxId {
+                                id: transaction::Hash(hash),
+                                auth_digest: transaction::AuthDigest([0x5A; 32]),
+                            })
+                        })
+                        .collect(),
+                ),
+                _ => Response::Nil,
+            })
+        }
+    }))
+}
+
+/// A response is bounded by one deadline from when its stream is accepted,
+/// however the peer paces its reads: a peer that reads just fast enough to
+/// keep every write moving still has the stream reset with `CANCELLED` at
+/// `REQUEST_TIMEOUT`, and the connection stays open.
+///
+/// The raw peer leaves its first responses unread, so they use up almost
+/// all of the 8 MiB the node may send before the peer reads anything. Then
+/// it requests one more snapshot and trickles reads from the first
+/// response, which releases flow-control credit a megabyte at a time: often
+/// enough that no single write waits for `REQUEST_TIMEOUT`, too slowly for
+/// the snapshot to finish within it.
+///
+/// This takes `REQUEST_TIMEOUT` of real time: pausing tokio's clock is
+/// unsafe with real sockets.
+#[tokio::test]
+async fn slowly_read_responses_end_at_the_request_deadline() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let max_ids: usize = MAX_TX_INV_IN_SENT_MESSAGE.try_into().expect("fits");
+        // Each record is a 4-byte length and a 65-byte witnessed reference.
+        let record_len = 69;
+        // About 8.0 MB of unread snapshots, leaving about 0.4 MB of the node's credit: the last
+        // snapshot, about 1.7 MB, needs two releases of credit.
+        let counts = vec![max_ids, max_ids, max_ids, max_ids, 16_000, max_ids];
+        let fill_len: usize = counts[..5].iter().sum::<usize>() * record_len;
+        let raw = raw_peer_node_with(&network, Some(witnessed_mempool_service(counts))).await;
+
+        let mut fill = Vec::new();
+        for _ in 0..5 {
+            fill.push(raw_request(&raw.connection, &WireRequest::Mempool).await);
+        }
+        // Wait until the unread snapshots have all arrived.
+        while usize::try_from(raw.connection.stats().udp_rx.bytes).expect("fits") < fill_len {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        tokio::time::sleep(SHORT_WAIT).await;
+
+        let started = Instant::now();
+        let mut slow = raw_request(&raw.connection, &WireRequest::Mempool).await;
+
+        // About 64 kB a second: one megabyte of credit every 16 seconds.
+        let trickle = async {
+            let mut buffer = [0u8; 6400];
+            for recv in &mut fill {
+                while let Ok(Some(_)) = recv.read(&mut buffer).await {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            futures::future::pending::<()>().await
+        };
+        let deadline = started + REQUEST_TIMEOUT + Duration::from_secs(2);
+        tokio::select! {
+            () = trickle => unreachable!("the trickle never ends"),
+            () = tokio::time::sleep_until(deadline) => {}
+        }
+
+        assert_reset(
+            tokio::time::timeout(SHORT_WAIT * 10, slow.read_to_end(usize::MAX))
+                .await
+                .expect("the stream was reset at its deadline")
+                .map(|response| response.len()),
+            ErrorCode::Cancelled,
+        );
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the connection stays open"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An inbound service call is bounded by the request deadline too: a
+/// request the inbound service never answers has its stream reset with
+/// `CANCELLED` at `REQUEST_TIMEOUT`, and the connection stays open.
+///
+/// This takes `REQUEST_TIMEOUT` of real time.
+#[tokio::test]
+async fn unanswered_lookups_end_at_the_request_deadline() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hanging = service_fn(|_request: Request| futures::future::pending());
+        let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(hanging))).await;
+        let started = Instant::now();
+
+        let request = WireRequest::Tx(GetTx {
+            txrefs: vec![TxRef::Txid(transaction::Hash([0xCD; 32]))],
+        });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        assert_reset(recv.read_to_end(1024).await, ErrorCode::Cancelled);
+        assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the connection stays open"
+        );
     })
     .await
     .expect("the test completes well within the timeout");
