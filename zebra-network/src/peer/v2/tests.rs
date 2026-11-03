@@ -26,8 +26,20 @@ pub(super) const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(10);
 pub(super) async fn connected_pair(
     network: &Network,
 ) -> (Connection, Connection, Endpoint, Endpoint) {
+    connected_pair_with(network, None).await
+}
+
+/// A connected pair of loopback QUIC connections on `network`, with the
+/// endpoints kept alive; the dialling side uses `client_config` if given.
+pub(super) async fn connected_pair_with(
+    network: &Network,
+    client_config: Option<quinn::ClientConfig>,
+) -> (Connection, Connection, Endpoint, Endpoint) {
     let server = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
-    let client = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let mut client = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    if let Some(client_config) = client_config {
+        client.set_default_client_config(client_config);
+    }
     let server_addr = server.local_addr().expect("bound");
 
     let (outbound, inbound) = tokio::join!(quic::connect(&client, server_addr), async {

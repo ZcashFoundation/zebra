@@ -173,6 +173,25 @@ fn client_config(alpn: &'static [u8]) -> Result<ClientConfig, EndpointError> {
     Ok(config)
 }
 
+/// A client configuration for `network`, like the one [`bind`] sets, but
+/// granting peers only `stream_window` and `connection_window` bytes of
+/// receive window, for tests of peers that read slowly.
+#[cfg(test)]
+pub(crate) fn client_config_with_receive_windows(
+    network: &Network,
+    stream_window: u32,
+    connection_window: u32,
+) -> ClientConfig {
+    let alpn = alpn_protocol_id(network).expect("the test network has an ALPN identifier");
+    let mut config = client_config(alpn).expect("the client configuration builds");
+    let mut transport = transport_config();
+    transport
+        .stream_receive_window(VarInt::from_u32(stream_window))
+        .receive_window(VarInt::from_u32(connection_window));
+    config.transport_config(Arc::new(transport));
+    config
+}
+
 /// Binds an endpoint for `network` on `addr`; must be called inside a Tokio
 /// runtime, which drives the socket. The server identity is generated here
 /// and lives as long as the endpoint.

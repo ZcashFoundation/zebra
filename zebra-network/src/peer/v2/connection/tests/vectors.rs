@@ -34,7 +34,7 @@ use crate::{
             handshake::{CompletedHandshake, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
-            tests::{connected_pair, identity, run_handshake},
+            tests::{connected_pair, connected_pair_with, identity, run_handshake},
         },
         Client,
     },
@@ -285,7 +285,20 @@ async fn raw_peer_node_relaying(
     inbound_service: Option<TestService>,
     relay: bool,
 ) -> RawPeer {
-    let (connection, inbound, client_ep, server_ep) = connected_pair(network).await;
+    raw_peer_node_configured(network, inbound_service, relay, None).await
+}
+
+/// Connects a raw peer, which uses `client_config` if given, to a node and
+/// completes the handshake by hand, with `relay` in the raw peer's `init`
+/// record. The node serves `inbound_service`, or the fixture if `None`.
+async fn raw_peer_node_configured(
+    network: &Network,
+    inbound_service: Option<TestService>,
+    relay: bool,
+    client_config: Option<quinn::ClientConfig>,
+) -> RawPeer {
+    let (connection, inbound, client_ep, server_ep) =
+        connected_pair_with(network, client_config).await;
     let raw_init = InitRecord {
         version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
         services: PeerServices::NODE_NETWORK,
@@ -2329,12 +2342,10 @@ fn witnessed_mempool_service(counts: Vec<usize>) -> TestService {
 /// keep every write moving still has the stream reset with `REFUSED` at
 /// `REQUEST_TIMEOUT`, and the connection stays open.
 ///
-/// The raw peer leaves its first responses unread, so they use up almost
-/// all of the 8 MiB the node may send before the peer reads anything. Then
-/// it requests one more snapshot and trickles reads from the first
-/// response, which releases flow-control credit a megabyte at a time: often
-/// enough that no single write waits for `REQUEST_TIMEOUT`, too slowly for
-/// the snapshot to finish within it.
+/// The raw peer grants the node a small receive window and reads one
+/// `get-mempool` snapshot, about 1.7 MB, at about 32 kB a second, so it
+/// releases flow-control credit many times a second, and no write waits
+/// long, but the snapshot would take almost a minute.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time: pausing tokio's clock is
 /// unsafe with real sockets.
@@ -2345,50 +2356,45 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let max_ids: usize = MAX_TX_INV_IN_SENT_MESSAGE.try_into().expect("fits");
-        // Each record is a 4-byte length and a 65-byte witnessed reference.
-        let record_len = 69;
-        // About 8.0 MB of unread snapshots, leaving about 0.4 MB of the node's credit: the last
-        // snapshot, about 1.7 MB, needs two releases of credit.
-        let counts = vec![max_ids, max_ids, max_ids, max_ids, 16_000, max_ids];
-        let fill_len: usize = counts[..5].iter().sum::<usize>() * record_len;
-        let raw = raw_peer_node_with(&network, Some(witnessed_mempool_service(counts))).await;
-
-        let mut fill = Vec::new();
-        for _ in 0..5 {
-            fill.push(raw_request(&raw.connection, &WireRequest::Mempool).await);
-        }
-        // Wait until the unread snapshots have all arrived.
-        while usize::try_from(raw.connection.stats().udp_rx.bytes).expect("fits") < fill_len {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        tokio::time::sleep(SHORT_WAIT).await;
+        let window = 64 * 1024;
+        let client_config =
+            crate::quic::client_config_with_receive_windows(&network, window, 2 * window);
+        let raw = raw_peer_node_configured(
+            &network,
+            Some(witnessed_mempool_service(vec![max_ids])),
+            true,
+            Some(client_config),
+        )
+        .await;
 
         let started = Instant::now();
         let mut slow = raw_request(&raw.connection, &WireRequest::Mempool).await;
-
-        // About 64 kB a second: one megabyte of credit every 16 seconds.
-        let trickle = async {
-            let mut buffer = [0u8; 6400];
-            for recv in &mut fill {
-                while let Ok(Some(_)) = recv.read(&mut buffer).await {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
+        let mut buffer = [0u8; 3200];
+        let mut received = 0;
+        let read = loop {
+            match slow.read(&mut buffer).await {
+                Ok(Some(len)) => received += len,
+                other => break other,
             }
-            futures::future::pending::<()>().await
+            tokio::time::sleep(Duration::from_millis(100)).await;
         };
-        let deadline = started + REQUEST_TIMEOUT + Duration::from_secs(2);
-        tokio::select! {
-            () = trickle => unreachable!("the trickle never ends"),
-            () = tokio::time::sleep_until(deadline) => {}
-        }
 
-        assert_reset(
-            tokio::time::timeout(SHORT_WAIT * 10, slow.read_to_end(usize::MAX))
-                .await
-                .expect("the stream was reset at its deadline")
-                .map(|response| response.len()),
-            ErrorCode::Refused,
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= REQUEST_TIMEOUT - Duration::from_secs(1)
+                && elapsed <= REQUEST_TIMEOUT + Duration::from_secs(5),
+            "the stream ends at its deadline, after {elapsed:?}"
         );
+        assert!(
+            received > 4 * usize::try_from(window).expect("fits"),
+            "the response kept moving until its deadline: {received} bytes"
+        );
+        match read {
+            Err(quinn::ReadError::Reset(code)) => {
+                assert_eq!(code, app_error_code(ErrorCode::Refused))
+            }
+            other => panic!("expected a reset, got {other:?}"),
+        }
         assert!(
             raw.connection.close_reason().is_none(),
             "the connection stays open"
