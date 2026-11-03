@@ -4089,7 +4089,7 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         mempool,
         MockService::build().for_unit_tests(),
         read_state,
-        MockService::build().for_unit_tests(),
+        accept_proposals(),
         sync,
         tip,
         MockAddressBookPeers::default(),
@@ -4210,6 +4210,8 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
 }
 
 /// Creates a configured RPC without starting background template work.
+///
+/// Its verifier accepts every proposal, so transaction-bearing fallback templates are served.
 fn template_regression_rpc<Mempool, ReadState>(
     network: Network,
     mempool: Mempool,
@@ -4229,6 +4231,46 @@ where
     Mempool: MempoolService,
     ReadState: zebra_state::ReadState,
 {
+    template_regression_rpc_with_verifier(
+        network,
+        mempool,
+        read_state,
+        tip,
+        sync,
+        accept_proposals(),
+    )
+}
+
+/// A verifier that accepts every proposal, for tests that serve transaction-bearing templates
+/// without checking what validation sees.
+fn accept_proposals() -> impl BlockVerifierService {
+    tower::service_fn(|request: zebra_consensus::Request| async move {
+        Ok::<_, BoxError>(request.block().hash())
+    })
+}
+
+/// Creates a configured RPC with `verifier`, without starting background template work.
+fn template_regression_rpc_with_verifier<Mempool, ReadState, Verifier>(
+    network: Network,
+    mempool: Mempool,
+    read_state: ReadState,
+    tip: MockChainTip,
+    sync: MockSyncStatus,
+    verifier: Verifier,
+) -> RpcImpl<
+    Mempool,
+    impl StateService,
+    ReadState,
+    MockChainTip,
+    MockAddressBookPeers,
+    Verifier,
+    MockSyncStatus,
+>
+where
+    Mempool: MempoolService,
+    ReadState: zebra_state::ReadState,
+    Verifier: BlockVerifierService,
+{
     let (_logs, logs) = watch::channel(None);
     let (rpc, queue) = RpcImpl::new(
         network.clone(),
@@ -4245,7 +4287,7 @@ where
         mempool,
         MockService::build().for_unit_tests(),
         read_state,
-        MockService::build().for_unit_tests(),
+        verifier,
         sync,
         tip,
         MockAddressBookPeers::default(),
@@ -4750,6 +4792,140 @@ async fn getblocktemplate_refreshes_after_fallback_publication_or_updater_exit()
         assert_eq!(long.submit_old, Some(true));
         assert_eq!(short.submit_old, None);
     }
+}
+
+/// Without a live updater, a transaction-bearing fallback template is validated before it is
+/// served, and a rejected template is an error rather than unvalidated work.
+#[tokio::test]
+async fn getblocktemplate_fallback_serves_transaction_bearing_work_only_after_validation() {
+    use crate::methods::types::get_block_template::{
+        proposal::proposal_block_from_template, BlockTemplateTimeSource,
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+        let hash = Hash([1; 32]);
+        let now = DateTime32::now();
+        let context = GetBlockTemplateChainInfo {
+            tip_height: height,
+            tip_hash: hash,
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            cur_time: now,
+            min_time: now,
+            max_time: now.saturating_add(Duration32::from_minutes(90)),
+            chain_history_root: fake_history_tree(&network).hash(),
+            chain_value_pools: Default::default(),
+        };
+        let read_state = tower::service_fn(move |request| {
+            std::future::ready(Ok::<_, BoxError>(match request {
+                ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                ReadRequest::MiningCandidateChanges => {
+                    ReadResponse::MiningCandidateChanges(Default::default())
+                }
+                other => panic!("unexpected state request: {other:?}"),
+            }))
+        });
+        let transaction = VerifiedUnminedTx::new(
+            Arc::new(Transaction::test_v1(
+                vec![],
+                vec![],
+                transaction::LockTime::Height(Height(1)),
+            ))
+            .into(),
+            10_000.try_into().unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+        )
+        .unwrap();
+        let transaction_hash = transaction.transaction.id.mined_id();
+        let mempool = tower::service_fn(move |request| {
+            std::future::ready(Ok::<_, BoxError>(match request {
+                mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                    transactions: vec![transaction.clone()],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: hash,
+                },
+                mempool::Request::TransactionIds => mempool::Response::TransactionIds(
+                    [transaction.transaction.id].into_iter().collect(),
+                ),
+                other => panic!("unexpected mempool request: {other:?}"),
+            }))
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(height);
+        tip_sender.send_best_tip_hash(hash);
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let mut verifier: MockService<zebra_consensus::Request, Hash, _, BoxError> =
+            MockService::build()
+                .with_max_request_delay(Duration::from_secs(10))
+                .for_unit_tests();
+        let rpc = template_regression_rpc_with_verifier(
+            network.clone(),
+            mempool,
+            read_state,
+            tip,
+            sync,
+            verifier.clone(),
+        );
+
+        // A rejected template is an error, never served work.
+        let rejected = rpc.get_block_template(None);
+        tokio::pin!(rejected);
+        let request = tokio::select! {
+            biased;
+            request = verifier.expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposal(_))
+            }) => request,
+            result = &mut rejected => {
+                panic!("transaction-bearing work must not be served before validation: {result:?}")
+            }
+        };
+        let proposal = request.request().block();
+        assert_eq!(proposal.transactions.len(), 2);
+        assert_eq!(proposal.transactions[1].hash(), transaction_hash);
+        request.respond_error("rejected".into());
+        let error = rejected
+            .await
+            .expect_err("a rejected fallback template must not be served");
+        assert!(error.message().contains("failed validation"), "{error:?}");
+
+        // An accepted template is served, and matches the validated proposal.
+        let accepted = rpc.get_block_template(None);
+        tokio::pin!(accepted);
+        let request = tokio::select! {
+            biased;
+            request = verifier.expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposal(_))
+            }) => request,
+            result = &mut accepted => {
+                panic!("transaction-bearing work must not be served before validation: {result:?}")
+            }
+        };
+        let proposal = request.request().block();
+        request.respond(proposal.hash());
+        let template = accepted
+            .await
+            .expect("a validated fallback template is served")
+            .try_into_template()
+            .expect("a template response");
+        assert_eq!(template.transactions.len(), 1);
+        assert_eq!(template.transactions[0].hash, transaction_hash);
+        assert_eq!(
+            proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+                .expect("the served template converts to a block"),
+            *proposal,
+            "the served template is the validated proposal"
+        );
+    })
+    .await
+    .expect("fallback validation must complete without waiting for a backstop");
 }
 
 /// A cached failure must not leave a caller stuck on its authoritative tip recheck.
