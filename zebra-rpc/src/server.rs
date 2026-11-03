@@ -123,6 +123,35 @@ impl RpcServer {
         BlockVerifierRouter: BlockVerifierService,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     {
+        Self::start_with_addr(rpc, conf).await
+    }
+
+    /// Starts the RPC server, like [`RpcServer::start`].
+    ///
+    /// # Panics
+    ///
+    /// - If [`Config::listen_addr`](config::rpc::Config::listen_addr) is `None`.
+    pub(crate) async fn start_with_addr<
+        Mempool,
+        State,
+        ReadState,
+        Tip,
+        BlockVerifierRouter,
+        SyncStatus,
+        AddressBook,
+    >(
+        rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+        conf: config::rpc::Config,
+    ) -> Result<ServerTask, tower::BoxError>
+    where
+        Mempool: MempoolService,
+        State: StateService,
+        ReadState: ReadStateService,
+        Tip: ChainTip + Clone + Send + Sync + 'static,
+        AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+        BlockVerifierRouter: BlockVerifierService,
+        SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    {
         let listen_addr = conf
             .listen_addr
             .expect("caller should make sure listen_addr is set");
