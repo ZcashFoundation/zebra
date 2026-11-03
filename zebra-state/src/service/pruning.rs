@@ -1,6 +1,7 @@
 //! Bounded background deletion of finalized transaction bodies.
 
 use std::{
+    ops::Range,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -9,7 +10,7 @@ use std::{
 use crossbeam_channel::{bounded, Receiver, Sender};
 use zebra_chain::{block::Height, diagnostic::task::WaitForPanics};
 
-use super::finalized_state::{DiskWriteBatch, PruningWitness, ZebraDb};
+use super::finalized_state::{DiskWriteBatch, PruningWitness, ZebraDb, MAX_PRUNING_BATCH_HEIGHTS};
 use crate::BoxError;
 
 #[cfg(test)]
@@ -58,7 +59,7 @@ impl PruningTask {
         }
     }
 
-    /// Cancels between batches and waits for any in-flight batch to finish.
+    /// Cancels before each batch or compaction and waits for any in-flight work to finish.
     pub(super) fn stop(&self) {
         let _ = self.cancel.try_send(());
         let task = self
@@ -87,31 +88,37 @@ fn retention_floor(tip: Height, retention: u32) -> Height {
     Height(end.saturating_sub(retention).max(1))
 }
 
-/// Commits at most one bounded batch, returning whether another batch might be needed.
+/// Commits at most one bounded batch, returning the deleted height range.
 fn prune_batch(
     db: &ZebraDb,
     retention: u32,
     witness: &mut PruningWitness,
-) -> Result<bool, BoxError> {
+) -> Result<Option<Range<Height>>, BoxError> {
     let history = db.history_capabilities()?;
     metrics::gauge!("state.pruning.retained.height")
         .set(f64::from(history.lowest_retained_height.0));
     if !db.ready_for_pruning() {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(tip) = db.finalized_tip_height() else {
-        return Ok(false);
+        return Ok(None);
     };
     let target = retention_floor(tip, retention);
     let previous = history.lowest_retained_height.max(Height(1));
     if target <= previous {
-        return Ok(false);
+        #[cfg(test)]
+        tests::CANCEL_DURING_IDLE_BATCH.with(|cancel| {
+            if let Some(cancel) = cancel.borrow_mut().take() {
+                cancel.send(()).unwrap();
+            }
+        });
+        return Ok(None);
     }
 
     let started = Instant::now();
     let mut batch = DiskWriteBatch::new();
     let Some(end) = batch.prepare_history_pruning(db, target, witness)? else {
-        return Ok(false);
+        return Ok(None);
     };
     db.write_batch(batch)?;
     metrics::gauge!("state.pruning.retained.height").set(f64::from(end.0));
@@ -119,7 +126,23 @@ fn prune_batch(
         .increment(u64::from(end.0 - previous.0));
     metrics::histogram!("state.pruning.batch.duration_seconds")
         .record(started.elapsed().as_secs_f64());
-    Ok(true)
+    Ok(Some(previous..end))
+}
+
+/// Reclaims tombstoned bodies after catch-up, not after each steady-state batch.
+/// More than one batch's worth of deletion distinguishes a backlog from normal finalization.
+/// Earlier pruning also triggers one startup compaction, in case shutdown interrupted reclamation.
+fn compact_catch_up(db: &ZebraDb, deleted: Range<Height>, previously_pruned: bool) {
+    if !previously_pruned && deleted.end.0 - deleted.start.0 <= MAX_PRUNING_BATCH_HEIGHTS {
+        return;
+    }
+    let started = Instant::now();
+    tracing::info!(?deleted, "compacting pruned block bodies after catch-up");
+    db.compact_pruned_bodies(deleted.end);
+    tracing::info!(
+        elapsed_seconds = started.elapsed().as_secs_f64(),
+        "finished compacting pruned block bodies"
+    );
 }
 
 fn run(
@@ -129,14 +152,30 @@ fn run(
     cancelled: Receiver<()>,
 ) -> Result<(), BoxError> {
     let mut witness = PruningWitness::default();
+    let retained_floor = db.history_capabilities()?.lowest_retained_height;
+    let mut previously_pruned = retained_floor > Height(1);
+    let mut deleted = previously_pruned.then_some(retained_floor..retained_floor);
     loop {
         if cancelled.try_recv().is_ok() {
             return Ok(());
         }
         let ready = db.ready_for_pruning();
-        if prune_batch(&db, retention, &mut witness)? {
+        if let Some(batch) = prune_batch(&db, retention, &mut witness)? {
+            match &mut deleted {
+                Some(deleted) => deleted.end = batch.end,
+                None => deleted = Some(batch),
+            }
             thread::yield_now();
             continue;
+        }
+        if ready {
+            if let Some(deleted) = deleted.take() {
+                if cancelled.try_recv().is_ok() {
+                    return Ok(());
+                }
+                compact_catch_up(&db, deleted, previously_pruned);
+                previously_pruned = false;
+            }
         }
 
         // Readiness can change without another block, but idle ready workers need no timer.

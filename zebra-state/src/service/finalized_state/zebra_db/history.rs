@@ -84,6 +84,11 @@ impl ZebraDb {
     pub fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
         self.db.history_capabilities()
     }
+
+    /// Reclaims deleted transaction bodies below `below` on the pruning worker.
+    pub(crate) fn compact_pruned_bodies(&self, below: Height) {
+        self.db.compact_pruned_bodies(below);
+    }
 }
 
 impl DiskWriteBatch {
