@@ -93,7 +93,8 @@ struct RequestBlock {
 struct RetainedBlockPermit(Arc<AtomicUsize>);
 
 impl RetainedBlockPermit {
-    // Admission is serialized through &mut self; commit owners can only decrease the count.
+    /// Admission is serialized through the caller's `&mut self`; permit owners can only
+    /// decrease the count, so a concurrent drop only makes the check conservative.
     fn try_admit(
         count: Arc<AtomicUsize>,
         limit: usize,
