@@ -85,6 +85,10 @@ struct Behavior {
     /// Never answers.
     hang: bool,
 
+    /// Fails every request after its latency, as the network layer does
+    /// when its request deadline passes before the peer answered.
+    time_out: bool,
+
     /// Refuses every request.
     refuse: bool,
 
@@ -288,6 +292,10 @@ impl FakePeer {
         }
         if behavior.hang {
             futures::future::pending::<()>().await;
+        }
+        if behavior.time_out {
+            guard.answered(None);
+            return Err(zn::SharedPeerError::from(zn::PeerError::ConnectionReceiveTimeout).into());
         }
         let call_start = guard.call.start;
         if behavior.refuse
@@ -1444,6 +1452,39 @@ async fn a_peer_that_never_answers_is_stalled_then_excluded() {
     ]
     .map(|(start, end)| (secs(start), secs(end)));
     assert_eq!(times, expected);
+}
+
+/// A request the network layer times out, because the peer sent nothing
+/// before its deadline, is a short answer of no bytes, not a refusal: the
+/// peer is stalled after three, and excluded after its third stall.
+#[tokio::test(start_paused = true)]
+async fn a_network_timeout_is_a_short_answer() {
+    let _init_guard = zebra_test::init();
+
+    let timing_out = Behavior {
+        latency: secs(10),
+        time_out: true,
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[2 * MIB]), vec![timing_out])
+        .run()
+        .await;
+
+    assert!(
+        matches!(outcome.result, Err(SchedulerError::NoPeers)),
+        "{:?}",
+        outcome.result
+    );
+    assert!(outcome.blamed.is_empty());
+    // Two timeouts at 10 s and a third at 20 s stall the peer, which rests for 60 s, three times.
+    let starts: Vec<Duration> = outcome.calls.iter().map(|call| call.start).collect();
+    assert_eq!(
+        starts,
+        [0, 0, 10, 10, 80, 80, 90, 90, 160, 160, 170, 170].map(secs),
+        "{:?}",
+        outcome.calls
+    );
+    assert_eq!(outcome.elapsed, secs(180));
 }
 
 /// A peer whose rate stays below the floor for 30 seconds of downloading is

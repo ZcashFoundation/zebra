@@ -160,9 +160,10 @@ impl SchedulerConfig {
     /// floor needs to deliver them, and at least twice the duration sub-ranges
     /// are sized for.
     ///
-    /// With the defaults, a first 1 MiB sub-range gets 16 seconds, inside the
-    /// network layer's own 20-second request timeout, so a peer that never
-    /// answers is caught here rather than surfacing as a failed request.
+    /// With the defaults, a lone first 1 MiB sub-range gets 16 seconds, inside
+    /// the network layer's own 20-second request timeout. The sub-range behind
+    /// it gets 32, so the network layer's timeout comes first, which counts as
+    /// this deadline does.
     fn sub_range_deadline(&self, bytes: u64) -> Duration {
         let at_floor_micros = bytes.saturating_mul(1_000_000) / self.min_rate_bytes_per_sec.max(1);
         Duration::from_micros(at_floor_micros).max(self.range_duration.saturating_mul(2))
@@ -582,15 +583,27 @@ enum Answer {
     Unready(BoxError),
 
     /// The request failed. The network layer reports a peer's `REFUSED`
-    /// stream reset like any other failed request stream, so every failure is
-    /// handled as a refusal (design, §6.1).
+    /// stream reset like any other failed request stream, so every failure but
+    /// a timeout is handled as a refusal (design, §6.1).
     Failed(BoxError),
 
-    /// The request took longer than its deadline.
+    /// The request took longer than its deadline, or than the network
+    /// layer's: either way, the peer delivered nothing in time.
     TimedOut,
 
     /// The download was dropped, which cancelled the request.
     Cancelled,
+}
+
+/// Returns whether `error` is the network layer's request timeout: the peer
+/// sent no answer before the connection's request deadline. That is a short
+/// answer of no bytes, not a refusal (design, §5 "Requester", §6.1 "Stalls").
+fn is_receive_timeout(error: &BoxError) -> bool {
+    // A `SharedPeerError` hides its `PeerError`, but formats it as the error's own `Debug`, which
+    // is how the peer set tells its errors apart too.
+    error
+        .downcast_ref::<zn::SharedPeerError>()
+        .is_some_and(|error| error.inner_debug() == "ConnectionReceiveTimeout")
 }
 
 /// Returns `instant` plus `duration`, or a year after `instant` if that
@@ -662,6 +675,7 @@ where
                 Err(error) => Answer::Unready(error),
                 Ok(service) => match service.call(request).await {
                     Ok(response) => Answer::Response(response),
+                    Err(error) if is_receive_timeout(&error) => Answer::TimedOut,
                     Err(error) => Answer::Failed(error),
                 },
             }
