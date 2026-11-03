@@ -991,7 +991,7 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
     info.early_block_relay = early_block_relay;
     info.remote
         .services
-        .set(PeerServices::NODE_EARLY_BLOCK_RELAY, early_block_relay);
+        .set(PeerServices::NODE_COMPACT_BLOCKS, early_block_relay);
     let (client_tx, client_rx) = mpsc::channel(1);
     client.server_tx = client_tx;
     let (advert_tx, advert_rx) = tokio::sync::mpsc::channel(4);
@@ -1043,7 +1043,7 @@ async fn early_block_advert_restricts_delivery_to_negotiated_peers() {
         legacy_info
             .remote
             .services
-            .insert(PeerServices::NODE_EARLY_BLOCK_RELAY);
+            .insert(PeerServices::NODE_COMPACT_BLOCKS);
         let discover = stream::iter([
             Ok::<_, BoxError>(Change::Insert(early_addr, early.into())),
             Ok(Change::Insert(legacy_addr, legacy.into())),

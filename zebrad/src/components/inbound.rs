@@ -765,8 +765,16 @@ async fn compact_request(
         | zn::Request::CompactBlockTransactions(compact) => {
             let checked = compact.clone();
             let worker_permit = permit.clone();
+            let screening_state = read_state.clone();
             let height = tokio::task::spawn_blocking(move || {
                 let _permit = worker_permit;
+                // Discard stale parents before spending CPU on proof-of-work verification.
+                if screening_state
+                    .best_tip()
+                    .is_none_or(|(_, tip)| tip != checked.header.previous_block_hash)
+                {
+                    return Err("compact header does not extend the committed best tip".into());
+                }
                 screen_compact_header(&checked, &network)
             })
             .await??;
